@@ -2,7 +2,7 @@ version: '3.8'
 
 networks:
   stock-network:
-    driver: bridge
+    external: true
 
 services:
   api-gateway:
