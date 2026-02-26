@@ -16,7 +16,7 @@ services:
       - stock-network
 
   core-api-server:
-    build: ./backend/core-api-server
+    build: ../backend/core-api-server
     container_name: core-api-server
     environment:
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/stock_db
@@ -32,7 +32,7 @@ services:
       - stock-network
 
   matcher-server:
-    build: ./backend/matcher-server
+    build: ../backend/matcher-server
     container_name: matcher-server
     environment:
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
@@ -42,7 +42,7 @@ services:
       - stock-network
 
   market-server:
-    build: ./backend/market-server
+    build: ../backend/market-server
     container_name: market-server
     environment:
       - REDIS_HOST=redis:6379
