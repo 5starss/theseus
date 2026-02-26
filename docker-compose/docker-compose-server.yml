@@ -1,0 +1,54 @@
+version: '3.8'
+
+networks:
+  stock-network:
+    driver: bridge
+
+services:
+  api-gateway:
+    build: ./backend/api-gateway
+    container_name: api-gateway
+    ports:
+      - "8000:8000" # 외부와 통신하는 유일한 대문 포트
+    depends_on:
+      - redis
+    networks:
+      - stock-network
+
+  core-api-server:
+    build: ./backend/core-api-server
+    container_name: core-api-server
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/stock_db
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=root
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+    networks:
+      - stock-network
+
+  matcher-server:
+    build: ./backend/matcher-server
+    container_name: matcher-server
+    environment:
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - kafka
+    networks:
+      - stock-network
+
+  market-server:
+    build: ./backend/market-server
+    container_name: market-server
+    environment:
+      - REDIS_HOST=redis:6379
+      - KAFKA_BROKER=kafka:9092
+    depends_on:
+      - redis
+      - kafka
+    networks:
+      - stock-network
