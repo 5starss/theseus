@@ -1,4 +1,4 @@
-# 1단계: 빌드 환경 (Go 1.26.0 최신 버전 적용)
+# 1단계: 빌드 환경 (Go 1.26.0)
 FROM golang:1.26.0-alpine AS builder
 WORKDIR /app
 
@@ -6,9 +6,11 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
-# 소스코드 복사 및 정적 바이너리 빌드 (CGO_ENABLED=0 필수)
-COPY main.go ./
-RUN CGO_ENABLED=0 GOOS=linux go build -o market-server main.go
+# cmd/api/main.go 등 프로젝트의 모든 코드를 복사해옵니다.
+COPY . .
+
+# 빌드 타겟 경로를 cmd/api/main.go 로 지정합니다.
+RUN CGO_ENABLED=0 GOOS=linux go build -o market-server ./cmd/api/main.go
 
 # 2단계: 실행 환경 (초경량 Alpine Linux)
 FROM alpine:latest
