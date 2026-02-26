@@ -6,7 +6,7 @@ networks:
 
 services:
   api-gateway:
-    build: ./backend/api-gateway
+    build: ../backend/api-gateway
     container_name: api-gateway
     ports:
       - "8000:8000" # 외부와 통신하는 유일한 대문 포트
