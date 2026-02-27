@@ -14,3 +14,10 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET_KEY} # 서버 환경변수에서 주입
+
+springdoc:
+  # 운영 환경(prod) 보안을 위해 Swagger UI 및 API 문서 비활성화
+  swagger-ui:
+    enabled: false
+  api-docs:
+    enabled: false
