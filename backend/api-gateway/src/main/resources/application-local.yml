@@ -7,7 +7,7 @@ spring:
           predicates:
             - Path=/api/v1/core/**
         - id: market-route
-          uri: http://localhost:8083 # market 서버 주소
+          uri: http://localhost:8085 # market 서버 주소
           predicates:
             - Path=/api/v1/market/**
         - id: core-api-docs
