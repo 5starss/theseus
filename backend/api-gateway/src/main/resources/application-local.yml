@@ -1,0 +1,14 @@
+spring:
+  cloud:
+    gateway:
+      routes:
+        - id: core-api-route
+          uri: http://localhost:8081 # core 서버 주소
+          predicates:
+            - Path=/api/v1/core/**
+        - id: market-route
+          uri: http://localhost:8083 # market 서버 주소
+          predicates:
+            - Path=/api/v1/market/**
+jwt:
+  secret: ${JWT_SECRET_KEY}

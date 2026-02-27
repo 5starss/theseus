@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:mysql://mysql:3306/stock_db
+    username: root
+    password: root
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+
+  kafka:
+    bootstrap-servers: kafka:29092 # 도커 내부망 포트
+
+jwt:
+  secret: ${JWT_SECRET_KEY} # 서버 환경변수에서 주입

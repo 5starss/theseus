@@ -1,5 +1,6 @@
 spring:
   profiles:
     active: local
+
   application:
-    name: matcher-server
+    name: market-server
