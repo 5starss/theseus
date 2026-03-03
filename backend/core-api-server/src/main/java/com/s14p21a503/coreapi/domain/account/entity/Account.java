@@ -1,0 +1,52 @@
+package com.s14p21a503.coreapi.domain.account.entity;
+
+import com.s14p21a503.coreapi.common.entity.BaseEntity;
+import jakarta.persistence.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+import com.s14p21a503.coreapi.common.exception.BaseException;
+import com.s14p21a503.coreapi.common.exception.ErrorCode;
+
+@Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@Table(name = "accounts")
+public class Account extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "account_id")
+    private Long id;
+
+    @Column(name = "user_id", nullable = false, unique = true)
+    private Long userId;
+
+    @Column(name = "dnca_tot_amt", precision = 18, scale = 0, nullable = false)
+    private BigDecimal dncaTotAmt;
+
+    @Column(name = "locked_amt", precision = 18, scale = 0, nullable = false)
+    private BigDecimal lockedAmt = BigDecimal.ZERO;
+
+    @Column(name = "available_amt", precision = 18, scale = 0, nullable = false)
+    private BigDecimal availableAmt;
+
+    @Builder
+    public Account(Long userId, BigDecimal dncaTotAmt) {
+        this.userId = userId;
+        this.dncaTotAmt = dncaTotAmt != null ? dncaTotAmt : BigDecimal.ZERO;
+        this.lockedAmt = BigDecimal.ZERO;
+        this.availableAmt = this.dncaTotAmt;
+    }
+
+    public void lockBalance(BigDecimal amount) {
+        if (this.availableAmt.compareTo(amount) < 0) {
+            throw new BaseException(ErrorCode.INSUFFICIENT_BALANCE);
+        }
+        this.lockedAmt = this.lockedAmt.add(amount);
+        this.availableAmt = this.availableAmt.subtract(amount);
+    }
+}
