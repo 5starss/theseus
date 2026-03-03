@@ -10,6 +10,12 @@ spring:
           uri: http://localhost:8085 # market 서버 주소
           predicates:
             - Path=/api/v1/market/**
+        - id: ai-route
+          uri: http://localhost:8086 # ai 서버 주소
+          predicates:
+            - Path=/api/v1/ai/**
+          filters:
+            - RewritePath=/api/v1/ai/(?<segment>.*), /v1/${segment}
         - id: core-api-docs
           uri: http://localhost:8081
           predicates:
