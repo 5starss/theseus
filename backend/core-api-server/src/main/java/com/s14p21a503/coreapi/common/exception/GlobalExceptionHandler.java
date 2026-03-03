@@ -1,6 +1,7 @@
 package com.s14p21a503.coreapi.common.exception;
 
-import com.s14p21a503.coreapi.common.response.RestApiResponse;
+import com.s14p21a503.coreapi.common.response.ApiResponse;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +25,8 @@ public class GlobalExceptionHandler {
     /**
      * 애플리케이션 표준 예외 응답 생성하는 메서드
      */
-    @ExceptionHandler(BaseException.class)
-    public ResponseEntity<RestApiResponse<?>> handleUserException(BaseException e, HttpServletRequest request) {
+    @ExceptionHandler(CustomException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUserException(CustomException e, HttpServletRequest request) {
         HttpStatus httpStatus = e.getHttpStatus();
         setErrorMdc(e.getErrorCode(), httpStatus);
 
@@ -35,10 +36,7 @@ public class GlobalExceptionHandler {
             logWarn(e.getErrorCode(), request, e.getMessage());
         }
 
-        RestApiResponse<?> response = RestApiResponse.fail(e.getErrorCode());
-        return ResponseEntity
-                .status(httpStatus)
-                .body(response);
+        return ApiResponse.onFailure(e.getErrorCode());
     }
 
     /**
@@ -64,40 +62,32 @@ public class GlobalExceptionHandler {
             HttpMessageNotReadableException.class,
             ConstraintViolationException.class
     })
-    public ResponseEntity<RestApiResponse<?>> handleInvalidInput(Exception e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleInvalidInput(Exception e, HttpServletRequest request) {
         String logDetail = summarizeInvalidInput(e);
         setErrorMdc(ErrorCode.INVALID_INPUT_VALUE, HttpStatus.BAD_REQUEST);
         logInfo(request, logDetail);
 
-        RestApiResponse<?> response = RestApiResponse.fail(ErrorCode.INVALID_INPUT_VALUE);
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .body(response);
+        return ApiResponse.onFailure(ErrorCode.INVALID_INPUT_VALUE);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<RestApiResponse<?>> handleAccessDenied(AccessDeniedException e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException e, HttpServletRequest request) {
         setErrorMdc(ErrorCode.ACCESS_DENIED, ErrorCode.ACCESS_DENIED.getHttpStatus());
         logWarn(ErrorCode.ACCESS_DENIED, request, e.getMessage());
 
-        RestApiResponse<?> response = RestApiResponse.fail(ErrorCode.ACCESS_DENIED);
-        return ResponseEntity
-                .status(ErrorCode.ACCESS_DENIED.getHttpStatus())
-                .body(response);
+        return ApiResponse.onFailure(ErrorCode.ACCESS_DENIED);
+
     }
 
     @ExceptionHandler({
             DataIntegrityViolationException.class,
             org.hibernate.exception.ConstraintViolationException.class
     })
-    public ResponseEntity<RestApiResponse<?>> handleDataIntegrityViolation(Exception e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(Exception e, HttpServletRequest request) {
         setErrorMdc(ErrorCode.INTERNAL_SERVER_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
         logError(ErrorCode.INTERNAL_SERVER_ERROR, request, e.getMessage(), e);
 
-        RestApiResponse<?> response = RestApiResponse.fail(ErrorCode.INTERNAL_SERVER_ERROR);
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(response);
+        return ApiResponse.onFailure(ErrorCode.INTERNAL_SERVER_ERROR);
     }
 
     /**
@@ -115,14 +105,11 @@ public class GlobalExceptionHandler {
      * @return 500 응답
      */
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<RestApiResponse<?>> handleException(Exception e, HttpServletRequest request) {
+    public ResponseEntity<ApiResponse<Void>> handleException(Exception e, HttpServletRequest request) {
         setErrorMdc(ErrorCode.INTERNAL_SERVER_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
         logError(ErrorCode.INTERNAL_SERVER_ERROR, request, e.getMessage(), e);
 
-        RestApiResponse<?> response = RestApiResponse.fail(ErrorCode.INTERNAL_SERVER_ERROR);
-        return ResponseEntity
-                .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(response);
+        return ApiResponse.onFailure(ErrorCode.INTERNAL_SERVER_ERROR);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.s14p21a503.coreapi.common.log;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
@@ -18,7 +19,10 @@ import java.util.Map;
 
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class LoggingInterceptor implements HandlerInterceptor {
+
+    private final ObjectMapper objectMapper;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -42,9 +46,8 @@ public class LoggingInterceptor implements HandlerInterceptor {
             String body = new String(wrapper.getRequestBody());
             if (!body.isBlank()) {
                 try {
-                    ObjectMapper mapper = new ObjectMapper();
-                    Object json = mapper.readValue(body, Object.class);
-                    String prettyBody = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(json);
+                    Object json = objectMapper.readValue(body, Object.class);
+                    String prettyBody = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(json);
                     log.info("📦 [{}] {} \nbody : {}", request.getMethod(), request.getRequestURI(), prettyBody);
                 } catch (Exception e) {
                     log.info("📦 [{}] {} \nbody(raw) : {}", request.getMethod(), request.getRequestURI(), body);

@@ -1,4 +1,4 @@
-package com.s14p21a503.coreapi.common.exception;
+package com.s14p21a503.coreapi.common.response.status;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -37,4 +37,7 @@ public enum ErrorCode {
     private final HttpStatus httpStatus;
     private final String code;
     private final String message;
+    public boolean isSuccess() {
+        return false;
+    }
 }

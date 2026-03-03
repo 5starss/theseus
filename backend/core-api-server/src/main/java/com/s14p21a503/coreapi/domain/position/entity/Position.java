@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-import com.s14p21a503.coreapi.common.exception.BaseException;
-import com.s14p21a503.coreapi.common.exception.ErrorCode;
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -63,7 +63,7 @@ public class Position {
 
     public void lockQuantity(Integer amount) {
         if (this.availableQuantity < amount) {
-            throw new BaseException(ErrorCode.INSUFFICIENT_QUANTITY);
+            throw new CustomException(ErrorCode.INSUFFICIENT_QUANTITY);
         }
         this.lockedQuantity += amount;
         this.availableQuantity -= amount;
