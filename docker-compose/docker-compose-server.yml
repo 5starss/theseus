@@ -45,3 +45,12 @@ services:
       - KAFKA_BROKER=${SPRING_KAFKA_BOOTSTRAP_SERVERS} # 변수명 통일
     networks:
       - stock-network
+
+  ai-server:
+    build: ../backend/ai-server
+    container_name: ai-server
+    env_file: .env
+    ports:
+      - "8086:8000"
+    networks:
+      - stock-network
