@@ -4,13 +4,11 @@ import com.s14p21a503.coreapi.domain.order.dto.OrderRequestDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderResponseDto;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
-import com.s14p21a503.coreapi.domain.order.dto.OrderRequestDto;
-import com.s14p21a503.coreapi.domain.order.dto.OrderResponseDto;
 import com.s14p21a503.coreapi.domain.order.entity.Order;
-import com.s14p21a503.coreapi.domain.order.entity.PriceType;
 import com.s14p21a503.coreapi.domain.order.repository.OrderRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
 import com.s14p21a503.coreapi.domain.position.repository.PositionRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +21,11 @@ import com.s14p21a503.coreapi.domain.order.dto.OrderEventDto;
 import com.s14p21a503.coreapi.common.kafka.KafkaTopicConstants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import com.s14p21a503.coreapi.common.exception.BaseException;
-import com.s14p21a503.coreapi.common.exception.ErrorCode;
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 
 @Service
+@RequiredArgsConstructor
 public class OrderService {
 
     private final OrderRepository orderRepository;
@@ -35,19 +34,11 @@ public class OrderService {
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
 
-    public OrderService(OrderRepository orderRepository, PositionRepository positionRepository, AccountRepository accountRepository, OutboxEventRepository outboxEventRepository, ObjectMapper objectMapper) {
-        this.orderRepository = orderRepository;
-        this.positionRepository = positionRepository;
-        this.accountRepository = accountRepository;
-        this.outboxEventRepository = outboxEventRepository;
-        this.objectMapper = objectMapper;
-    }
-
     @Transactional
     public OrderResponseDto createOrder(Long userId, OrderRequestDto requestDto) {
         // 비관적 락으로 계좌 정보를 조회 (트랜잭션 종료 시까지 락 유지)
         Account account = accountRepository.findByUserIdForUpdate(userId)
-                .orElseThrow(() -> new BaseException(ErrorCode.ACCOUNT_NOT_FOUND));
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         // 매수 주문 시 증거금 체크 및 잠금(Lock)
         if (requestDto.getOrderType() == OrderType.BUY) {
@@ -59,7 +50,7 @@ public class OrderService {
         else if (requestDto.getOrderType() == OrderType.SELL) {
             // 비관적 락으로 해당 계좌가 가지는 주식 포지션 갯수 조회
             Position position = positionRepository.findByAccountIdAndTickerForUpdate(account.getId(), requestDto.getTicker())
-                    .orElseThrow(() -> new BaseException(ErrorCode.POSITION_NOT_FOUND));
+                    .orElseThrow(() -> new CustomException(ErrorCode.POSITION_NOT_FOUND));
 
             // 엔티티 내부에서 가용 주식(availableQuantity) 확인 후 잠금 처리 (부족 시 BaseException 발생)
             position.lockQuantity(requestDto.getQuantity());
@@ -93,7 +84,7 @@ public class OrderService {
                     .build();
             outboxEventRepository.save(outboxEvent);
         } catch (Exception e) {
-            throw new BaseException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
         }
 
         // Response DTO로 변환하여 리턴

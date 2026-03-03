@@ -8,8 +8,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
-import com.s14p21a503.coreapi.common.exception.BaseException;
-import com.s14p21a503.coreapi.common.exception.ErrorCode;
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 
 @Entity
 @Getter
@@ -44,7 +44,7 @@ public class Account extends BaseEntity {
 
     public void lockBalance(BigDecimal amount) {
         if (this.availableAmt.compareTo(amount) < 0) {
-            throw new BaseException(ErrorCode.INSUFFICIENT_BALANCE);
+            throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
         }
         this.lockedAmt = this.lockedAmt.add(amount);
         this.availableAmt = this.availableAmt.subtract(amount);
