@@ -1,5 +1,6 @@
 package com.s14p21a503.coreapi.domain.position.entity;
 
+import com.s14p21a503.coreapi.domain.stock.entity.Stock;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -34,6 +35,10 @@ public class Position {
     @Column(name = "ticker", length = 20, nullable = false)
     private String ticker;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ticker", referencedColumnName = "ticker", insertable = false, updatable = false)
+    private Stock stock;
+
     @Column(name = "quantity", nullable = false)
     private Integer quantity;
 
@@ -46,12 +51,15 @@ public class Position {
     @Column(name = "average_price", precision = 18, scale = 2, nullable = false)
     private BigDecimal averagePrice;
 
+    @Column(name = "total_purchase_amount", precision = 18, scale = 0, nullable = false)
+    private BigDecimal totalPurchaseAmount;
+
     @LastModifiedDate
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     @Builder
-    public Position(Long accountId, Long userId, String ticker, Integer quantity, BigDecimal averagePrice) {
+    public Position(Long accountId, Long userId, String ticker, Integer quantity, BigDecimal averagePrice, BigDecimal totalPurchaseAmount) {
         this.accountId = accountId;
         this.userId = userId;
         this.ticker = ticker;
@@ -59,6 +67,7 @@ public class Position {
         this.lockedQuantity = 0;
         this.availableQuantity = quantity != null ? quantity : 0;
         this.averagePrice = averagePrice;
+        this.totalPurchaseAmount =  totalPurchaseAmount;
     }
 
     public void lockQuantity(Integer amount) {
