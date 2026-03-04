@@ -14,7 +14,8 @@ public class OpenApiConfig {
 
     @Bean
     public OpenAPI openAPI() {
-        String key = "bearerAuth";
+        String jwtkey = "bearerAuth";
+        String userIdKey = "X-User-Id";
 
         // Info 설정
         Info info = new Info()
@@ -30,15 +31,24 @@ public class OpenApiConfig {
                         .url(""));
 
         // SecurityRequirement 설정 (전역 적용)
-        SecurityRequirement securityRequirement = new SecurityRequirement().addList(key);
+        SecurityRequirement securityRequirement = new SecurityRequirement()
+                .addList(jwtkey)
+                .addList(userIdKey);
 
-        // SecurityScheme 설정 (JWT 방식 정의)
+        // SecurityScheme 설정
         Components components = new Components()
-                .addSecuritySchemes(key, new SecurityScheme()
-                        .name(key)
+                // 1. JWT 설정
+                .addSecuritySchemes(jwtkey, new SecurityScheme()
+                        .name(jwtkey)
                         .type(SecurityScheme.Type.HTTP)
                         .scheme("bearer")
-                        .bearerFormat("JWT"));
+                        .bearerFormat("JWT"))
+                // 2. X-User-Id 헤더 설정
+                .addSecuritySchemes(userIdKey, new SecurityScheme()
+                        .name(userIdKey)
+                        .type(SecurityScheme.Type.APIKEY) // APIKEY 방식
+                        .in(SecurityScheme.In.HEADER) // HEADER 위치 설정
+                        .description("게이트웨이에서 주입되는 사용자 ID"));
 
         return new OpenAPI()
                 .info(info)
