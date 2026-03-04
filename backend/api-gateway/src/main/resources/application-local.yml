@@ -23,12 +23,18 @@ spring:
           filters:
             - RewritePath=/v3/api-docs/core-api, /v3/api-docs
         - id: market-api-docs
-          uri: http://localhost:8083
+          uri: http://localhost:8085
           predicates:
             - Path=/v3/api-docs/market
           filters:
             - RewritePath=/v3/api-docs/market, /v3/api-docs
-
+        # Gateway Routes에 추가
+        - id: ai-api-docs
+          uri: http://localhost:8086
+          predicates:
+            - Path=/v3/api-docs/ai
+          filters:
+            - RewritePath=/v3/api-docs/ai, /v3/api-docs
 springdoc:
   swagger-ui:
     persist-authorization: true # 로그인 정보 유지용
@@ -37,5 +43,7 @@ springdoc:
         url: /v3/api-docs/core-api
       - name: market
         url: /v3/api-docs/market
+      - name: ai-api
+        url: /v3/api-docs/ai
 jwt:
   secret: ${JWT_SECRET_KEY}
