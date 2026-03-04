@@ -1,14 +1,48 @@
 package main
 
 import (
+	"context"
+	"log"
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+	"market-server/internal/config"
+	"market-server/internal/handler"
+	"market-server/internal/repository"
+	"market-server/internal/service"
+	kisClient "market-server/pkg/kis"
+	redisClient "market-server/pkg/redis"
 )
 
 func main() {
-	// 1. 스프링의 내장 톰캣 및 ApplicationContext 초기화 역할
+	// 1. .env 파일 로드 (없으면 무시 — 운영환경은 OS 환경변수 사용)
+	if err := godotenv.Load(); err != nil {
+		log.Println(".env 파일 없음, OS 환경변수를 사용합니다.")
+	}
+
+	// 2. 환경변수 기반 설정 로드
+	cfg := config.Load()
+
+	// 3. 인프라 클라이언트 초기화
+	rdb, err := redisClient.NewClient(cfg.Redis)
+	if err != nil {
+		log.Fatalf("Redis 연결 실패: %v", err)
+	}
+
+	// 4. 의존성 주입 (Repository → Service → Handler)
+	kisC := kisClient.NewClient(cfg.KIS)
+	stockRepo := repository.NewStockRepository(rdb)
+	stockSvc := service.NewStockService(stockRepo, kisC)
+
+	// 5. 백그라운드 랭킹 스케줄러 시작 (30초 간격, 즉시 1회 실행)
+	ctx := context.Background()
+	stockSvc.StartRankingScheduler(ctx, 30*time.Second)
+
+	// 6. 라우터 설정
 	r := gin.Default()
 
-	// 2. 도커/인프라 배포 테스트용 헬스체크 엔드포인트
+	// 헬스체크
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status": "UP",
@@ -16,6 +50,12 @@ func main() {
 		})
 	})
 
-	// 3. 8085 포트로 서버 실행
-	r.Run(":8085")
+	// 종목 리스트 조회
+	stockHandler := handler.NewStockHandler(stockSvc)
+	r.GET("/api/v1/stocks", stockHandler.GetStockList)
+
+	// 7. 서버 실행
+	if err := r.Run(":" + cfg.Server.Port); err != nil {
+		log.Fatalf("서버 실행 실패: %v", err)
+	}
 }
