@@ -10,6 +10,7 @@ public enum SuccessCode {
 
     OK(HttpStatus.OK, "GLOBAL-200", "요청 응답에 성공했습니다."),
     CREATED(HttpStatus.CREATED, "GLOBAL-201", "생성에 성공했습니다."),
+    ACCEPTED(HttpStatus.ACCEPTED, "GLOBAL-202", "요청이 접수되었습니다."),
     ;
 
     private final HttpStatus httpStatus;

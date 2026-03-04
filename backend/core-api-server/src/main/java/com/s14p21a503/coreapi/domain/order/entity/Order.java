@@ -72,4 +72,12 @@ public class Order extends BaseEntity {
         this.executedQuantity = 0; // 초기 체결 수량은 0
         this.status = OrderStatus.OPEN; // 초기 상태는 OPEN(주문 접수)
     }
+
+    public void cancel() {
+        this.status = OrderStatus.CANCELLED;
+    }
+
+    public void pendingCancel() {
+        this.status = OrderStatus.PENDING_CANCEL;
+    }
 }
