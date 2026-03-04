@@ -9,13 +9,12 @@ import lombok.*;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor
-@Builder
 public class User extends BaseEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "user_id")
-    private Long userId;
+    private Long id;
 
     @Column(name = "email", nullable = false, length = 255, unique = true)
     private String email;
@@ -26,9 +25,30 @@ public class User extends BaseEntity {
     @Column(name = "nickname", nullable = false, length = 50)
     private String nickname;
 
-    @Builder.Default
     @Column(name = "is_email_verified", nullable = false)
     private Boolean isEmailVerified = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "investment_style", nullable = false)
+    private InvestmentStyle investmentStyle;
+
+    @Builder
+    public User(String email,
+                     String password,
+                     String nickname,
+                     InvestmentStyle investmentStyle) {
+
+        this.email = email;
+        this.password = password;
+        this.nickname = nickname;
+        this.investmentStyle = investmentStyle;
+        this.isEmailVerified = false;
+    }
+
+    // 이메일 인증 메서드 (확장 예정)
+    public void verifyEmail() {
+        this.isEmailVerified = true;
+    }
 
     // 닉네임 수정 메서드
     public void updateNickname(String nickname) {

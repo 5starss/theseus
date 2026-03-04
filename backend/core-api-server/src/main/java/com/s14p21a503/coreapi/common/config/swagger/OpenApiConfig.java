@@ -18,7 +18,7 @@ public class OpenApiConfig {
 
         // Info 설정
         Info info = new Info()
-                .title("stock auth/oder/ledger")
+                .title("stock auth/order/ledger")
                 .description("<h3> 실시간 가상 주식 매매 서비스</h3>" +
                         "<ul>" +
                         "<li>실시간 주식 매매</li>" +
