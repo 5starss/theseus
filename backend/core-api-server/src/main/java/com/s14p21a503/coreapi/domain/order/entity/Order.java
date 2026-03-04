@@ -6,13 +6,19 @@ import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import com.s14p21a503.coreapi.domain.stock.entity.Stock;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "orders")
+@Table(name = "orders", indexes = {
+    @Index(name = "idx_orders_user_created", columnList = "user_id, created_at DESC"),
+    @Index(name = "idx_orders_user_ticker_created", columnList = "user_id, ticker, created_at DESC")
+})
 public class Order extends BaseEntity {
 
     @Id
@@ -28,6 +34,10 @@ public class Order extends BaseEntity {
 
     @Column(name = "ticker", length = 20, nullable = false)
     private String ticker;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "ticker", referencedColumnName = "ticker", insertable = false, updatable = false)
+    private Stock stock;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "order_type", length = 10, nullable = false)
