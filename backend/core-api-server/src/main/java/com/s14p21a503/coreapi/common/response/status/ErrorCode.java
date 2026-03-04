@@ -34,7 +34,8 @@ public enum ErrorCode {
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "ORD001", "주문 가능한 잔고가 부족합니다."),
     INSUFFICIENT_QUANTITY(HttpStatus.BAD_REQUEST, "ORD002", "주문 가능한 보유 주식이 부족합니다."),
     ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "ORD003", "해당 주문을 찾을 수 없습니다."),
-    EXECUTION_NOT_FOUND(HttpStatus.NOT_FOUND, "ORD004", "해당 체결 내역을 찾을 수 없습니다.");
+    EXECUTION_NOT_FOUND(HttpStatus.NOT_FOUND, "ORD004", "해당 체결 내역을 찾을 수 없습니다."),
+    INVALID_ORDER_STATUS(HttpStatus.BAD_REQUEST, "ORD005", "취소할 수 없는 상태의 주문입니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

@@ -33,6 +33,14 @@ public class OrderController {
         return ApiResponse.onSuccess(SuccessCode.CREATED, response);
     }
 
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<ApiResponse<Void>> cancelOrder(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long orderId) {
+        orderService.cancelOrder(userId, orderId);
+        return ApiResponse.onSuccess(SuccessCode.ACCEPTED, null);
+    }
+
     @GetMapping
     public ResponseEntity<ApiResponse<OrderHistoryResponseDto>> getOrders(
             @RequestHeader("X-User-Id") Long userId,

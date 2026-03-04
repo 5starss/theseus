@@ -5,6 +5,7 @@ import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
 import com.s14p21a503.coreapi.domain.order.entity.Order;
 import com.s14p21a503.coreapi.domain.order.entity.OrderStatus;
+import com.s14p21a503.coreapi.domain.order.entity.HistoryType;
 import com.s14p21a503.coreapi.domain.order.repository.OrderRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
 import com.s14p21a503.coreapi.domain.position.repository.PositionRepository;
@@ -139,6 +140,40 @@ public class OrderService {
                 .pending(pendingPage)
                 .completed(completedPage)
                 .build();
+    }
+
+    @Transactional
+    public void cancelOrder(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
+
+        if (order.getStatus() != OrderStatus.OPEN && order.getStatus() != OrderStatus.PARTIAL) {
+            throw new CustomException(ErrorCode.INVALID_ORDER_STATUS);
+        }
+
+        // 1. 상태를 취소 대기(PENDING_CANCEL)로만 변경
+        order.pendingCancel();
+
+        // 2. 이벤트 발행
+        try {
+            OrderCancelEventDto eventDto = OrderCancelEventDto.from(order);
+            String payloadJson = objectMapper.writeValueAsString(eventDto);
+
+            OutboxEvent outboxEvent = OutboxEvent.builder()
+                    .aggregateType("ORDER_CANCEL")
+                    .aggregateId(String.valueOf(order.getId()))
+                    .topic(KafkaTopicConstants.ORDER_CANCEL_EVENT_TOPIC)
+                    .messageKey(order.getTicker())
+                    .payload(payloadJson)
+                    .build();
+            outboxEventRepository.save(outboxEvent);
+        } catch (Exception e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, e);
+        }
     }
 
     @Transactional(readOnly = true)

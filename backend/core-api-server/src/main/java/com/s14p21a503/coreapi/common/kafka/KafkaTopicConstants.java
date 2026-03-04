@@ -16,6 +16,13 @@ public final class KafkaTopicConstants {
      */
     public static final String ORDER_EVENT_TOPIC = "order-events";
 
+    /**
+     * 주문 취소 이벤트 토픽
+     * 코어 API 서버가 주문 취소를 접수하면,
+     * 체결 엔진 서버가 이를 구독하여 매칭 대기열에서 제거합니다.
+     */
+    public static final String ORDER_CANCEL_EVENT_TOPIC = "order-cancel-events";
+
     // =========================
     // 2. 체결 엔진 서버 -> 카프카 브로커 -> 코어 API 서버 (구독 토픽)
     // =========================
