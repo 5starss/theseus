@@ -32,7 +32,9 @@ public enum ErrorCode {
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACC001", "해당 유저의 계좌 정보를 찾을 수 없습니다."),
     POSITION_NOT_FOUND(HttpStatus.BAD_REQUEST, "POS001", "해당 종목의 보유 주식이 없습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.BAD_REQUEST, "ORD001", "주문 가능한 잔고가 부족합니다."),
-    INSUFFICIENT_QUANTITY(HttpStatus.BAD_REQUEST, "ORD002", "주문 가능한 보유 주식이 부족합니다.");
+    INSUFFICIENT_QUANTITY(HttpStatus.BAD_REQUEST, "ORD002", "주문 가능한 보유 주식이 부족합니다."),
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "ORD003", "해당 주문을 찾을 수 없습니다."),
+    EXECUTION_NOT_FOUND(HttpStatus.NOT_FOUND, "ORD004", "해당 체결 내역을 찾을 수 없습니다.");
 
     private final HttpStatus httpStatus;
     private final String code;

@@ -1,10 +1,10 @@
 package com.s14p21a503.coreapi.domain.order.service;
 
-import com.s14p21a503.coreapi.domain.order.dto.OrderRequestDto;
-import com.s14p21a503.coreapi.domain.order.dto.OrderResponseDto;
+import com.s14p21a503.coreapi.domain.order.dto.*;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
 import com.s14p21a503.coreapi.domain.order.entity.Order;
+import com.s14p21a503.coreapi.domain.order.entity.OrderStatus;
 import com.s14p21a503.coreapi.domain.order.repository.OrderRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
 import com.s14p21a503.coreapi.domain.position.repository.PositionRepository;
@@ -12,12 +12,24 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.s14p21a503.coreapi.domain.order.repository.OrderHistoryRepository;
+import com.s14p21a503.coreapi.common.response.PageResponseDto;
+import com.s14p21a503.coreapi.domain.order.entity.OrderHistory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.Arrays;
+import java.util.List;
+
 import java.math.BigDecimal;
 import com.s14p21a503.coreapi.domain.order.entity.OrderType;
 
 import com.s14p21a503.coreapi.domain.outbox.entity.OutboxEvent;
 import com.s14p21a503.coreapi.domain.outbox.repository.OutboxEventRepository;
-import com.s14p21a503.coreapi.domain.order.dto.OrderEventDto;
 import com.s14p21a503.coreapi.common.kafka.KafkaTopicConstants;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -29,6 +41,7 @@ import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 public class OrderService {
 
     private final OrderRepository orderRepository;
+    private final OrderHistoryRepository orderHistoryRepository;
     private final PositionRepository positionRepository;
     private final AccountRepository accountRepository;
     private final OutboxEventRepository outboxEventRepository;
@@ -89,5 +102,66 @@ public class OrderService {
 
         // Response DTO로 변환하여 리턴
         return OrderResponseDto.from(savedOrder);
+    }
+
+    /**
+     * 주문 내역(대기/완료)을 조회합니다.
+     * 프론트엔드 기획에 맞춰 대기건(Order 기준)과 완료건(Execution 기준) 테이블을 분리하여 조회하고,
+     * 하나의 응답 DTO(OrderHistoryResponseDto)에 예쁘게 담아서 반환합니다.
+     */
+    @Transactional(readOnly = true)
+    public OrderHistoryResponseDto getOrders(
+            Long userId, String filter, String ticker, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
+
+        // 프론트로 내려갈 두 가지 종류의 페이지 응답 객체입니다. (기본값 null)
+        PageResponseDto<PendingOrderDto> pendingPage = null;
+        PageResponseDto<OrderHistoryDto> completedPage = null;
+
+        // 1. 대기 탭 검색이거나 전체 보기일 때 작동
+        if ("PENDING".equals(filter) || "ALL".equals(filter)) {
+            // 대기 쿼리: Order 테이블 기준으로 OPEN, PARTIAL 만 검색하고 과거순(최신 요청순)으로 뽑아옵니다.
+            List<OrderStatus> statuses = Arrays.asList(OrderStatus.OPEN, OrderStatus.PARTIAL);
+            Page<Order> orderPage = orderRepository.searchOrdersByConditions(
+                    userId, true, statuses, ticker, startDate, endDate, pageable);
+            pendingPage = PageResponseDto.from(orderPage.map(PendingOrderDto::from));
+        }
+
+        // 2. 완료 탭 검색이거나 전체 보기일 때 작동
+        if ("COMPLETED".equals(filter) || "ALL".equals(filter)) {
+            // 완료 쿼리: OrderHistory 테이블(체결/취소 내역) 기준으로 무조건 타임라인 역순(최신순)으로 뽑아옵니다.
+            Page<OrderHistory> historyPage = orderHistoryRepository.searchHistoryByConditions(
+                    userId, ticker, startDate, endDate, pageable);
+            completedPage = PageResponseDto.from(historyPage.map(OrderHistoryDto::from));
+        }
+        
+        // 3. 만들어진 두 가지 목록을 하나의 Wrapper DTO에 넣어서 최종 반환합니다.
+        return OrderHistoryResponseDto.builder()
+                .pending(pendingPage)
+                .completed(completedPage)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public OrderHistoryDetailResponseDto getHistoryDetail(Long userId, Long historyId) {
+        OrderHistory history = orderHistoryRepository.findById(historyId)
+                .orElseThrow(() -> new CustomException(ErrorCode.EXECUTION_NOT_FOUND));
+
+        if (!history.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
+
+        return OrderHistoryDetailResponseDto.from(history);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderDetailResponseDto getOrderDetail(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
+
+        if (!order.getUserId().equals(userId)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
+
+        return OrderDetailResponseDto.from(order);
     }
 }
