@@ -47,8 +47,12 @@ export default function SignupPage() {
             });
             // 회원가입 성공
             navigate("/login");
-        } catch (error: any) {
-            setErrorMessage(error.message || "회원가입 중 오류가 발생했습니다.");
+        } catch (error: unknown) {
+            if (error instanceof Error) {
+                setErrorMessage(error.message);
+            } else {
+                setErrorMessage("회원가입 중 오류가 발생했습니다.");
+            }
         } finally {
             setIsLoading(false);
         }
