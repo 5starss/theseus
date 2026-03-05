@@ -86,7 +86,7 @@ public class OrderService {
 
         // 아웃박스 패턴: 동일한 트랜잭션 내에서 카프카 이벤트를 아웃박스 테이블에 추가
         try {
-            OrderEventDto eventDto = OrderEventDto.from(savedOrder);
+            OrderEventDto eventDto = OrderEventDto.from(savedOrder, "CREATE");
             String payloadJson = objectMapper.writeValueAsString(eventDto);
 
             OutboxEvent outboxEvent = OutboxEvent.builder()
@@ -160,13 +160,13 @@ public class OrderService {
 
         // 2. 이벤트 발행
         try {
-            OrderCancelEventDto eventDto = OrderCancelEventDto.from(order);
+            OrderEventDto eventDto = OrderEventDto.from(order, "CANCEL");
             String payloadJson = objectMapper.writeValueAsString(eventDto);
 
             OutboxEvent outboxEvent = OutboxEvent.builder()
-                    .aggregateType("ORDER_CANCEL")
+                    .aggregateType("ORDER")
                     .aggregateId(String.valueOf(order.getId()))
-                    .topic(KafkaTopicConstants.ORDER_CANCEL_EVENT_TOPIC)
+                    .topic(KafkaTopicConstants.ORDER_EVENT_TOPIC)
                     .messageKey(order.getTicker())
                     .payload(payloadJson)
                     .build();

@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class OrderEventDto {
 
+    private String action;
     private Long orderId;
     private Long accountId;
     private Long userId;
@@ -24,7 +25,8 @@ public class OrderEventDto {
     private Integer requestedQuantity;
 
     @Builder
-    public OrderEventDto(Long orderId, Long accountId, Long userId, String ticker, OrderType orderType, PriceType priceType, BigDecimal price, Integer requestedQuantity) {
+    public OrderEventDto(String action, Long orderId, Long accountId, Long userId, String ticker, OrderType orderType, PriceType priceType, BigDecimal price, Integer requestedQuantity) {
+        this.action = action;
         this.orderId = orderId;
         this.accountId = accountId;
         this.userId = userId;
@@ -35,8 +37,9 @@ public class OrderEventDto {
         this.requestedQuantity = requestedQuantity;
     }
 
-    public static OrderEventDto from(Order order) {
+    public static OrderEventDto from(Order order, String action) {
         return OrderEventDto.builder()
+                .action(action)
                 .orderId(order.getId())
                 .accountId(order.getAccountId())
                 .userId(order.getUserId())
