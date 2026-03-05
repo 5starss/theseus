@@ -57,8 +57,8 @@ func (c *Client) getToken(ctx context.Context) (string, error) {
 
 	body, _ := json.Marshal(map[string]string{
 		"grant_type": "client_credentials",
-		"appkey":     c.cfg.AppKey,
 		"appsecret":  c.cfg.AppSecret,
+		"appkey":     c.cfg.AppKey,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/oauth2/tokenP", bytes.NewReader(body))
