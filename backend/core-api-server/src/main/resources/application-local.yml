@@ -31,7 +31,16 @@ management:
         include: health, metric
 
 jwt:
-  secret: ${JWT_SECRET_KEY}
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:classpath:keys/private_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:keys/public_key.pem}
+  issuer: ${JWT_ISSUER:core-api-server}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+
+auth:
+  refresh-cookie:
+    secure: false
+    same-site: Lax
 
 logging:
   level:

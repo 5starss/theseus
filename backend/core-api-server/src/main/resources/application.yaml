@@ -1,5 +1,26 @@
 spring:
   profiles:
-    active: local # 기본값을 local로 설정
+    active: local
   application:
     name: core-api-server
+
+jwt:
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:classpath:keys/private_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:keys/public_key.pem}
+  issuer: ${JWT_ISSUER:core-api-server}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+
+auth:
+  refresh-cookie:
+    name: ${AUTH_REFRESH_COOKIE_NAME:refresh_token}
+    path: ${AUTH_REFRESH_COOKIE_PATH:/api/v1/auth/refresh}
+    domain: ${AUTH_REFRESH_COOKIE_DOMAIN:}
+    secure: ${AUTH_REFRESH_COOKIE_SECURE:true}
+    same-site: ${AUTH_REFRESH_COOKIE_SAME_SITE:Lax}
+    max-age-millis: ${AUTH_REFRESH_COOKIE_MAX_AGE_MILLIS:${JWT_REFRESH_EXPIRATION:1209600000}}
+  csrf:
+    enforce-origin-check: ${AUTH_CSRF_ENFORCE_ORIGIN_CHECK:false}
+    allowed-origins: ${AUTH_CSRF_ALLOWED_ORIGINS:}
+  cors:
+    allowed-origins: ${AUTH_CORS_ALLOWED_ORIGINS:http://localhost:5173}
