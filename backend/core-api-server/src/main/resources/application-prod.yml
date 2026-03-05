@@ -18,7 +18,7 @@ spring:
       port: 6379
 
   kafka:
-    bootstrap-servers: kafka:29092 # 도커 내부망 포트
+    bootstrap-servers: kafka:29092
 
 management:
   endpoints:
@@ -27,10 +27,18 @@ management:
         include: health, metric
 
 jwt:
-  secret: ${JWT_SECRET_KEY} # 서버 환경변수에서 주입
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:classpath:keys/private_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:keys/public_key.pem}
+  issuer: ${JWT_ISSUER:core-api-server}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:1209600000}
+
+auth:
+  refresh-cookie:
+    secure: true
+    same-site: Lax
 
 springdoc:
-  # 운영 환경(prod) 보안을 위해 Swagger UI 및 API 문서 비활성화
   swagger-ui:
     enabled: false
   api-docs:
