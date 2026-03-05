@@ -5,6 +5,9 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
+venv
+.venv
+
 # [보안 및 환경 설정] - 팀장님 가이드 추가분
 .env
 .env.local
@@ -41,3 +44,17 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime/debug artifacts
+storage/
+next_data.json
+toss_page.html
