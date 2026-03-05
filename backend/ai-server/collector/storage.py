@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 
 def get_storage_dir() -> str:
-    storage_dir = os.getenv("AI_SERVER_STORAGE_DIR", "storage")
+    storage_dir = os.path.abspath(os.getenv("AI_SERVER_STORAGE_DIR", "storage"))
     os.makedirs(storage_dir, exist_ok=True)
     return storage_dir
 
@@ -18,3 +18,25 @@ def save_snapshot(prefix: str, ticker: str, payload: Dict[str, Any]) -> str:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     return file_path
 
+
+def list_storage_files(limit: int = 20) -> Dict[str, Any]:
+    storage_dir = get_storage_dir()
+    names = [name for name in os.listdir(storage_dir) if name.endswith(".json")]
+    names.sort(reverse=True)
+    files = []
+    for name in names[:limit]:
+        path = os.path.join(storage_dir, name)
+        stat = os.stat(path)
+        files.append(
+            {
+                "name": name,
+                "path": path,
+                "size": stat.st_size,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            }
+        )
+    return {
+        "storage_dir": storage_dir,
+        "file_count": len(names),
+        "files": files,
+    }

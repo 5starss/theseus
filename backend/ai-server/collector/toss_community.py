@@ -7,10 +7,12 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from selenium import webdriver
+from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
 logger = logging.getLogger(__name__)
+NOISE_TOKENS = {"주주", "팔로우", "공유하기 버튼", "더 보기"}
 
 
 def _json_ld_blocks(html: str) -> List[Dict[str, Any]]:
@@ -98,9 +100,6 @@ def _comments_from_qapage(qapage: Dict[str, Any], limit: int) -> List[Dict[str, 
             {
                 "nickname": nickname,
                 "body": text,
-                "published_at": item.get("dateCreated"),
-                "url": item.get("url"),
-                "upvote_count": item.get("upvoteCount"),
             }
         )
         if len(comments) >= limit:
@@ -143,6 +142,102 @@ def _init_chrome_driver() -> webdriver.Chrome:
         return webdriver.Chrome(options=options)
 
 
+def _is_noise(line: str) -> bool:
+    s = (line or "").strip()
+    if not s:
+        return True
+    if s in NOISE_TOKENS:
+        return True
+    if re.fullmatch(r"\d+", s):
+        return True
+    if re.search(r"(방금|초|분|시간|일)\s*(전|・)", s) or "팔로워" in s:
+        return True
+    if re.search(r"\d{1,2}\s*월.*\d{1,2}\s*일", s):
+        return True
+    if re.search(r"\d{1,2}:\d{2}", s):
+        return True
+    if ("상위" in s and "%" in s) or ("수익" in s and "%" in s):
+        return True
+    return False
+
+
+def _merge_comments(primary: List[Dict[str, Any]], secondary: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    seen = set()
+    for item in primary + secondary:
+        nickname = (item.get("nickname") or "").strip()
+        body = (item.get("body") or "").strip()
+        if not nickname or not body:
+            continue
+        dedup_key = f"{nickname}:{body}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        merged.append({"nickname": nickname, "body": body})
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _extract_comments_with_selenium(url: str, limit: int) -> List[Dict[str, Any]]:
+    driver: Optional[webdriver.Chrome] = None
+    try:
+        driver = _init_chrome_driver()
+        driver.get(url)
+        time.sleep(2.0)
+
+        comments: List[Dict[str, Any]] = []
+        seen = set()
+        last_height = driver.execute_script("return document.body.scrollHeight")
+
+        for _ in range(8):
+            blocks = driver.find_elements(By.CSS_SELECTOR, "div[data-section-name='커뮤니티__게시글']")
+            for block in blocks:
+                try:
+                    more_btn = block.find_element(By.XPATH, ".//button[contains(text(), '더 보기')]")
+                    driver.execute_script("arguments[0].click();", more_btn)
+                    time.sleep(0.1)
+                except Exception:
+                    pass
+
+                raw_lines = [(line or "").strip() for line in (block.text or "").splitlines()]
+                lines = [line for line in raw_lines if not _is_noise(line)]
+                if len(lines) < 2:
+                    continue
+
+                nickname = lines[0].strip()
+                body = " ".join([line.strip() for line in lines[1:] if not _is_noise(line)]).strip()
+                if not nickname or not body:
+                    continue
+
+                dedup_key = f"{nickname}:{body}"
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                comments.append(
+                    {
+                        "nickname": nickname,
+                        "body": body,
+                    }
+                )
+                if len(comments) >= limit:
+                    return comments
+
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1.0)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+        return comments
+    except Exception as exc:
+        logger.warning("Selenium fallback failed: %s", exc)
+        return []
+    finally:
+        if driver:
+            driver.quit()
+
+
 def fetch_toss_community_comments(ticker: str, limit: int = 15) -> List[Dict[str, Any]]:
     url = f"https://www.tossinvest.com/stocks/A{ticker}/community"
     headers = {
@@ -161,23 +256,16 @@ def fetch_toss_community_comments(ticker: str, limit: int = 15) -> List[Dict[str
     response.raise_for_status()
 
     comments = _extract_comments_from_html(response.text, limit)
-    if comments:
+    if len(comments) >= limit:
         return comments
 
-    logger.warning("Static parse failed; fallback to Selenium rendering: %s", url)
-    driver: Optional[webdriver.Chrome] = None
-    try:
-        driver = _init_chrome_driver()
-        driver.get(url)
-        time.sleep(2.5)
-        comments = _extract_comments_from_html(driver.page_source, limit)
-        if comments:
-            return comments
-        logger.warning("Selenium parse also failed: %s", url)
-        return []
-    except Exception as exc:
-        logger.warning("Selenium fallback failed: %s", exc)
-        return []
-    finally:
-        if driver:
-            driver.quit()
+    logger.warning(
+        "Static parse collected %s/%s; fallback to Selenium scroll crawl: %s",
+        len(comments),
+        limit,
+        url,
+    )
+    selenium_comments = _extract_comments_with_selenium(url=url, limit=limit)
+    if not selenium_comments:
+        return comments
+    return _merge_comments(selenium_comments, comments, limit)
