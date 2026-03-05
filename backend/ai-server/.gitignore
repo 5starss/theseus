@@ -44,3 +44,17 @@ out/
 
 ### VS Code ###
 .vscode/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime/debug artifacts
+storage/
+next_data.json
+toss_page.html
