@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "./components/layout/Layout";
+import ProtectedRoute from "./components/layout/ProtectedRoute";
 import Home from "./pages/Home";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import StockDashboard from "./pages/StockDashboard";
+import Account from "./pages/Account";
 
 function App() {
   return (
@@ -14,6 +16,11 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="stock/:code" element={<StockDashboard />} />
+
+          {/* 로그인 권한이 필요한 라우트 */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="account" element={<Account />} />
+          </Route>
         </Route>
       </Routes>
     </BrowserRouter>
