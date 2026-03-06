@@ -1,21 +1,45 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/useAuthStore";
 import { Button } from "@/components/ui/button";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 
+import { authApi } from "../api/auth";
+
 export default function LoginPage() {
-    const [loginId, setLoginId] = useState("");
+    const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState("");
+
     const login = useAuthStore(state => state.login);
     const navigate = useNavigate();
+    const location = useLocation();
 
-    const handleLogin = (e: React.FormEvent) => {
+    // 로그인 처리
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (loginId && password) {
-            login(loginId);
-            navigate("/");
+        setErrorMessage("");
+
+        if (email && password) {
+            setIsLoading(true);
+            try {
+                const response = await authApi.login({ email, password });
+                login(email, response.accessToken);
+
+                // ProtectedRoute 등에서 넘겨준 이전 페이지 주소가 있다면 그곳으로, 없다면 홈으로 이동
+                const from = location.state?.from?.pathname || "/";
+                navigate(from, { replace: true });
+            } catch (error: unknown) {
+                if (error instanceof Error) {
+                    setErrorMessage(error.message);
+                } else {
+                    setErrorMessage("로그인 중 오류가 발생했습니다.");
+                }
+            } finally {
+                setIsLoading(false);
+            }
         }
     };
 
@@ -42,14 +66,14 @@ export default function LoginPage() {
 
                 <form onSubmit={handleLogin} className="flex flex-col">
 
-                    {/* 아이디 입력 */}
+                    {/* 이메일 입력 */}
                     <div className="flex flex-col gap-[8px] mb-[16px]">
-                        <label className="text-[14px] font-bold text-slate-700">아이디</label>
+                        <label className="text-[14px] font-bold text-slate-700">이메일</label>
                         <input
-                            type="text"
-                            value={loginId}
-                            onChange={e => setLoginId(e.target.value)}
-                            placeholder="아이디를 입력하세요"
+                            type="email"
+                            value={email}
+                            onChange={e => setEmail(e.target.value)}
+                            placeholder="이메일을 입력하세요"
                             className="w-full px-[16px] py-[14px] bg-slate-50 border border-slate-200 rounded-xl text-[16px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium placeholder:text-slate-400"
                             required
                         />
@@ -86,9 +110,20 @@ export default function LoginPage() {
                         </Button>
                     </div>
 
+                    {/* 에러 메시지 표시 */}
+                    {errorMessage && (
+                        <div className="mb-[16px] text-red-500 text-sm font-medium text-center bg-red-50 p-3 rounded-lg border border-red-100">
+                            {errorMessage}
+                        </div>
+                    )}
+
                     {/* 로그인 버튼 */}
-                    <Button type="submit" className="w-full h-[52px] bg-[#155dfc] hover:bg-[#124bc9] text-white font-bold rounded-xl text-[16px] shadow-lg mb-[32px]">
-                        로그인
+                    <Button
+                        type="submit"
+                        disabled={isLoading}
+                        className="w-full h-[52px] bg-[#155dfc] hover:bg-[#124bc9] text-white font-bold rounded-xl text-[16px] shadow-lg mb-[32px] disabled:opacity-70"
+                    >
+                        {isLoading ? "로그인 중..." : "로그인"}
                     </Button>
 
                     {/* 또는 */}

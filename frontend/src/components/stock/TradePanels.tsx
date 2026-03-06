@@ -1,11 +1,17 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useStockStore } from "../../store/useStockStore";
 import { useAccountStore } from "../../store/useAccountStore";
+import { useAuthStore } from "../../store/useAuthStore";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { LoginGuardOverlay } from "./LoginGuardOverlay";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export function OrderPanel() {
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+    const navigate = useNavigate();
+    const location = useLocation();
     const [orderType, setOrderType] = useState<"buy" | "sell">("buy");
     const isBuy = orderType === "buy";
 
@@ -155,14 +161,24 @@ export function OrderPanel() {
             )}
 
             {/* Submit Button */}
-            <Button
-                onClick={() => canTrade && setIsConfirmModalOpen(true)}
-                className={`mt-4 w-full h-12 rounded-lg text-sm font-bold text-white transition-colors 
-                ${!canTrade ? 'bg-slate-300 pointer-events-none' : (isBuy ? 'bg-[#fb2c36] hover:bg-[#e02730]' : 'bg-[#155dfc] hover:bg-[#124bc9]')}`}
-                disabled={!canTrade}
-            >
-                {isBuy ? "구매하기" : "판매하기"}
-            </Button>
+            {!isLoggedIn ? (
+                <Button
+                    onClick={() => navigate('/login', { state: { from: location } })}
+                    className={`mt-4 w-full h-12 rounded-lg text-sm font-bold text-white transition-colors 
+                    ${isBuy ? 'bg-[#fb2c36] hover:bg-[#e02730]' : 'bg-[#155dfc] hover:bg-[#124bc9]'}`}
+                >
+                    {isBuy ? "로그인하고 구매하기" : "로그인하고 판매하기"}
+                </Button>
+            ) : (
+                <Button
+                    onClick={() => canTrade && setIsConfirmModalOpen(true)}
+                    className={`mt-4 w-full h-12 rounded-lg text-sm font-bold text-white transition-colors 
+                    ${!canTrade ? 'bg-slate-300 pointer-events-none' : (isBuy ? 'bg-[#fb2c36] hover:bg-[#e02730]' : 'bg-[#155dfc] hover:bg-[#124bc9]')}`}
+                    disabled={!canTrade}
+                >
+                    {isBuy ? "구매하기" : "판매하기"}
+                </Button>
+            )}
 
             {/* Confirmation Dialog */}
             <Dialog open={isConfirmModalOpen} onOpenChange={setIsConfirmModalOpen}>
@@ -226,6 +242,7 @@ export function OrderPanel() {
 }
 
 export function MyStockInfo() {
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const stockName = useStockStore(state => state.stockName);
     const currentPrice = useStockStore(state => state.currentPrice);
 
@@ -240,39 +257,44 @@ export function MyStockInfo() {
     const isProfit = totalProfit >= 0;
 
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col">
-            <div className="flex justify-between items-end mb-4 pr-1">
-                <h3 className="font-bold text-slate-800">내 주식</h3>
-                <span className="text-xs font-medium text-slate-500">{stockName}</span>
-            </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col relative overflow-hidden">
+            {/* 로그인 필요 시 오버레이 */}
+            {!isLoggedIn && <LoginGuardOverlay />}
 
-            <div className="flex flex-col gap-2.5">
-                <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-md">
-                    <span className="text-xs font-semibold text-slate-500">보유수량</span>
-                    <span className="text-sm font-bold text-slate-800">{ownedShares.toLocaleString()}주</span>
-                </div>
-                <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-md">
-                    <span className="text-xs font-semibold text-slate-500">평가금액</span>
-                    <span className="text-sm font-bold text-slate-800">{totalValue.toLocaleString()}</span>
+            <div className={`flex flex-col h-full ${!isLoggedIn ? 'opacity-30 pointer-events-none blur-[2px]' : ''}`}>
+                <div className="flex justify-between items-end mb-4 pr-1">
+                    <h3 className="font-bold text-slate-800">내 주식</h3>
+                    <span className="text-xs font-medium text-slate-500">{stockName}</span>
                 </div>
 
-                <div className="h-px w-full bg-slate-100 my-1"></div>
+                <div className="flex flex-col gap-2.5">
+                    <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-md">
+                        <span className="text-xs font-semibold text-slate-500">보유수량</span>
+                        <span className="text-sm font-bold text-slate-800">{ownedShares.toLocaleString()}주</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-md">
+                        <span className="text-xs font-semibold text-slate-500">평가금액</span>
+                        <span className="text-sm font-bold text-slate-800">{totalValue.toLocaleString()}</span>
+                    </div>
 
-                <div className="flex justify-between items-center">
-                    <span className="text-[11px] font-medium text-slate-500 pl-1">평가손익</span>
-                    <span className={`text-xs font-bold pr-1 ${isProfit ? 'text-red-500' : 'text-blue-500'}`}>
-                        {isProfit ? '+' : ''}{totalProfit.toLocaleString()}
-                    </span>
-                </div>
-                <div className="flex justify-between items-center">
-                    <span className="text-[11px] font-medium text-slate-500 pl-1">수익률</span>
-                    <span className={`text-xs font-bold pr-1 ${isProfit ? 'text-red-500' : 'text-blue-500'}`}>
-                        {isProfit ? '+' : ''}{profitRate.toFixed(2)}%
-                    </span>
-                </div>
-                <div className="flex justify-between items-center">
-                    <span className="text-[11px] font-medium text-slate-500 pl-1">1주 평균 금액</span>
-                    <span className="text-xs font-semibold text-slate-700 pr-1">{avgPrice.toLocaleString()}</span>
+                    <div className="h-px w-full bg-slate-100 my-1"></div>
+
+                    <div className="flex justify-between items-center">
+                        <span className="text-[11px] font-medium text-slate-500 pl-1">평가손익</span>
+                        <span className={`text-xs font-bold pr-1 ${isProfit ? 'text-red-500' : 'text-blue-500'}`}>
+                            {isProfit ? '+' : ''}{totalProfit.toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-[11px] font-medium text-slate-500 pl-1">수익률</span>
+                        <span className={`text-xs font-bold pr-1 ${isProfit ? 'text-red-500' : 'text-blue-500'}`}>
+                            {isProfit ? '+' : ''}{profitRate.toFixed(2)}%
+                        </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="text-[11px] font-medium text-slate-500 pl-1">1주 평균 금액</span>
+                        <span className="text-xs font-semibold text-slate-700 pr-1">{avgPrice.toLocaleString()}</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -280,6 +302,7 @@ export function MyStockInfo() {
 }
 
 export function MyOrderHistory() {
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const [tab, setTab] = useState<"pending" | "completed">("pending");
 
     // 미체결 (대기) 주문 데이터
@@ -298,54 +321,59 @@ export function MyOrderHistory() {
     const currentOrders = tab === "pending" ? pendingOrders : completedOrders;
 
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col">
-            <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-slate-800">나의 주문내역</h3>
-                <Button variant="ghost" className="h-6 px-2 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors">더보기</Button>
-            </div>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col relative overflow-hidden">
+            {/* 로그인 필요 시 오버레이 */}
+            {!isLoggedIn && <LoginGuardOverlay />}
 
-            <Tabs value={tab} onValueChange={(val) => setTab(val as "pending" | "completed")} className="mb-4">
-                <TabsList className="w-full h-auto flex gap-2 bg-transparent p-0">
-                    <TabsTrigger
-                        value="pending"
-                        className="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-none bg-slate-100 text-slate-500 hover:bg-slate-200 shadow-none border-none"
-                    >
-                        대기
-                    </TabsTrigger>
-                    <TabsTrigger
-                        value="completed"
-                        className="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-none bg-slate-100 text-slate-500 hover:bg-slate-200 shadow-none border-none"
-                    >
-                        완료
-                    </TabsTrigger>
-                </TabsList>
-            </Tabs>
+            <div className={`flex flex-col h-full ${!isLoggedIn ? 'opacity-30 pointer-events-none blur-[2px]' : ''}`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-slate-800">나의 주문내역</h3>
+                    <Button variant="ghost" className="h-6 px-2 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors">더보기</Button>
+                </div>
 
-            <div className="flex-1 overflow-y-auto pr-1">
-                <table className="w-full text-left border-collapse">
-                    <thead>
-                        <tr className="border-b border-slate-200">
-                            <th className="pb-2 text-xs font-semibold text-slate-500 w-[23%] text-center">{tab === "pending" ? "시간" : "일자"}</th>
-                            <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">구분</th>
-                            <th className="pb-2 text-xs font-semibold text-slate-500 w-[29%] text-center">단가</th>
-                            <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">수량</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {currentOrders.length === 0 ? (
-                            <tr><td colSpan={4} className="py-4 text-center text-xs text-slate-400">내역이 없습니다.</td></tr>
-                        ) : (
-                            currentOrders.map((order, idx) => (
-                                <tr key={idx} className="border-b border-slate-50 last:border-none hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-2.5 text-xs font-medium text-slate-600 text-center">{order.date}</td>
-                                    <td className={`py-2.5 text-xs font-bold text-center ${order.type === '매수' ? 'text-red-500' : 'text-blue-500'}`}>{order.type}</td>
-                                    <td className="py-2.5 text-xs font-semibold text-slate-700 text-right pr-2">{order.price.toLocaleString()}</td>
-                                    <td className="py-2.5 text-xs font-medium text-slate-600 text-right">{order.qty}주</td>
-                                </tr>
-                            ))
-                        )}
-                    </tbody>
-                </table>
+                <Tabs value={tab} onValueChange={(val) => setTab(val as "pending" | "completed")} className="mb-4">
+                    <TabsList className="w-full h-auto flex gap-2 bg-transparent p-0">
+                        <TabsTrigger
+                            value="pending"
+                            className="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-none bg-slate-100 text-slate-500 hover:bg-slate-200 shadow-none border-none"
+                        >
+                            대기
+                        </TabsTrigger>
+                        <TabsTrigger
+                            value="completed"
+                            className="flex-1 py-1.5 rounded-md text-xs font-bold transition-colors data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-none bg-slate-100 text-slate-500 hover:bg-slate-200 shadow-none border-none"
+                        >
+                            완료
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
+
+                <div className="flex-1 overflow-y-auto pr-1">
+                    <table className="w-full text-left border-collapse">
+                        <thead>
+                            <tr className="border-b border-slate-200">
+                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[23%] text-center">{tab === "pending" ? "시간" : "일자"}</th>
+                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">구분</th>
+                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[29%] text-center">단가</th>
+                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">수량</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentOrders.length === 0 ? (
+                                <tr><td colSpan={4} className="py-4 text-center text-xs text-slate-400">내역이 없습니다.</td></tr>
+                            ) : (
+                                currentOrders.map((order, idx) => (
+                                    <tr key={idx} className="border-b border-slate-50 last:border-none hover:bg-slate-50/50 transition-colors">
+                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-center">{order.date}</td>
+                                        <td className={`py-2.5 text-xs font-bold text-center ${order.type === '매수' ? 'text-red-500' : 'text-blue-500'}`}>{order.type}</td>
+                                        <td className="py-2.5 text-xs font-semibold text-slate-700 text-right pr-2">{order.price.toLocaleString()}</td>
+                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-right">{order.qty}주</td>
+                                    </tr>
+                                ))
+                            )}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     );
