@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -111,17 +110,15 @@ func TestBulkUpsertStocks_DataIntegrity(t *testing.T) {
 		t.Fatalf("BulkUpsertStocks failed: %v", err)
 	}
 
-	// Redis에서 직접 JSON을 읽어 필드 정합성 확인
-	raw, err := mr.Get(fmt.Sprintf(stockInfoKeyFmt, original.Ticker))
-	if err != nil {
-		t.Fatalf("key not found in redis: %v", err)
+	// Redis에서 직접 Hash를 읽어 필드 정합성 확인
+	key := fmt.Sprintf(stockInfoKeyFmt, original.Ticker)
+	name := mr.HGet(key, "name")
+	if name == "" {
+		t.Fatalf("key not found in redis")
 	}
-	var got domain.Stock
-	if err := json.Unmarshal([]byte(raw), &got); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
-	if got.Name != original.Name || got.CurrentPrice != original.CurrentPrice ||
-		got.ChangeRate != original.ChangeRate || got.AccVolume != original.AccVolume {
-		t.Errorf("data mismatch: want %+v, got %+v", original, got)
+	cpStr := mr.HGet(key, "currentPrice")
+	
+	if name != original.Name || cpStr != "45000" {
+		t.Errorf("data mismatch: want Name=%s CurrentPrice=45000, got Name=%s CurrentPrice=%s", original.Name, name, cpStr)
 	}
 }

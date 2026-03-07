@@ -23,10 +23,10 @@ func NewStockHandler(svc *service.StockService) *StockHandler {
 //   - limit    : 조회 개수 (1~100, 기본값 50)
 //   - rankType : 순위 기준 (VOLUME, 기본값 VOLUME)
 func (h *StockHandler) GetStockList(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "50")
+	limitStr := c.DefaultQuery("limit", "40")
 	limit, err := strconv.ParseInt(limitStr, 10, 64)
-	if err != nil || limit < 1 || limit > 100 {
-		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1~100 사이의 정수여야 합니다."))
+	if err != nil || limit < 1 || limit > 40 {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1~40 사이의 정수여야 합니다."))
 		return
 	}
 

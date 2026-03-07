@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"market-server/internal/domain"
@@ -13,7 +13,7 @@ import (
 
 const (
 	rankVolumeKey   = "stocks:rank:volume" // Sorted Set: score=거래량, member=종목코드
-	stockInfoKeyFmt = "stocks:info:%s"     // String: JSON 직렬화된 Stock
+	stockInfoKeyFmt = "stocks:info:%s"     // Hash: 종목 상세 정보
 )
 
 type StockRepository struct {
@@ -36,11 +36,11 @@ func (r *StockRepository) GetTopByVolume(ctx context.Context, limit int64) ([]*d
 		return []*domain.Stock{}, nil
 	}
 
-	// 2단계: Pipeline으로 종목 상세정보 일괄 조회
+	// 2단계: Pipeline으로 종목 상세정보 일괄 조회 (HGETALL)
 	pipe := r.rdb.Pipeline()
-	cmds := make([]*redis.StringCmd, len(tickers))
+	cmds := make([]*redis.MapStringStringCmd, len(tickers))
 	for i, ticker := range tickers {
-		cmds[i] = pipe.Get(ctx, fmt.Sprintf(stockInfoKeyFmt, ticker))
+		cmds[i] = pipe.HGetAll(ctx, fmt.Sprintf(stockInfoKeyFmt, ticker))
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("pipeline exec failed: %w", err)
@@ -49,31 +49,42 @@ func (r *StockRepository) GetTopByVolume(ctx context.Context, limit int64) ([]*d
 	stocks := make([]*domain.Stock, 0, len(tickers))
 	for _, cmd := range cmds {
 		val, err := cmd.Result()
-		if err != nil {
+		if err != nil || len(val) == 0 {
 			continue // 개별 키 누락은 건너뜀
 		}
-		var s domain.Stock
-		if err := json.Unmarshal([]byte(val), &s); err != nil {
-			continue
-		}
-		stocks = append(stocks, &s)
+		
+		// Map을 파싱하여 Stock 객체로 변환
+		currentPrice, _ := strconv.ParseInt(val["currentPrice"], 10, 64)
+		changeRate, _ := strconv.ParseFloat(val["changeRate"], 64)
+		accVolume, _ := strconv.ParseInt(val["accVolume"], 10, 64)
+
+		stocks = append(stocks, &domain.Stock{
+			Ticker:       val["ticker"],
+			Name:         val["name"],
+			CurrentPrice: currentPrice,
+			ChangeRate:   changeRate,
+			AccVolume:    accVolume,
+		})
 	}
 
 	return stocks, nil
 }
 
 // BulkUpsertStocks Pipeline으로 종목 정보와 거래량 순위를 일괄 저장한다.
-// stocks:info:{ticker} ← JSON, stocks:rank:volume ← ZADD score=거래량
+// stocks:info:{ticker} ← Hash, stocks:rank:volume ← ZADD score=거래량
 func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain.Stock) error {
 	pipe := r.rdb.Pipeline()
 
 	for _, s := range stocks {
-		data, err := json.Marshal(s)
-		if err != nil {
-			return fmt.Errorf("marshal failed for %s: %w", s.Ticker, err)
-		}
 		key := fmt.Sprintf(stockInfoKeyFmt, s.Ticker)
-		pipe.Set(ctx, key, data, 24*time.Hour)
+		pipe.HSet(ctx, key, map[string]interface{}{
+			"ticker":       s.Ticker,
+			"name":         s.Name,
+			"currentPrice": s.CurrentPrice,
+			"changeRate":   s.ChangeRate,
+			"accVolume":    s.AccVolume,
+		})
+		pipe.Expire(ctx, key, 24*time.Hour)
 		pipe.ZAdd(ctx, rankVolumeKey, redis.Z{
 			Score:  float64(s.AccVolume),
 			Member: s.Ticker,
