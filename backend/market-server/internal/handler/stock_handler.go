@@ -79,3 +79,26 @@ func (h *StockHandler) GetCandles(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.OK(candles))
 }
+
+// GetOrderbook GET /api/v1/stocks/:ticker/orderbook
+// 호가창 스냅샷(현재가 포함) 조회 API
+func (h *StockHandler) GetOrderbook(c *gin.Context) {
+	ticker := c.Param("ticker")
+	if ticker == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "종목코드가 필요합니다."))
+		return
+	}
+
+	ob, err := h.svc.GetOrderbook(c.Request.Context(), ticker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("STOCK-500", "호가창 스냅샷 조회 중 오류가 발생했습니다."))
+		return
+	}
+
+	if ob == nil {
+		c.JSON(http.StatusNotFound, response.Fail("STOCK-404", "호가창 스냅샷 데이터가 존재하지 않습니다."))
+		return
+	}
+
+	c.JSON(http.StatusOK, response.OK(ob))
+}

@@ -168,6 +168,44 @@ func TestGetTopStocks_LimitRespected(t *testing.T) {
 	}
 }
 
+// ─── GetOrderbook 테스트 ─────────────────────────────────────────────────────
+
+func TestGetOrderbook_Success(t *testing.T) {
+	svc, _, mr := newTestService(t)
+	defer mr.Close()
+
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+	mr.HSet("stocks:current:005930", "price", "80550")
+	mr.HSet("stocks:current:005930", "change_rate", "1.25")
+
+	ob, err := svc.GetOrderbook(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob == nil {
+		t.Fatal("expected non-nil orderbook")
+	}
+	if ob.Ticker != "005930" || ob.CurrentPrice != 80550 || ob.ChangeRate != 1.25 {
+		t.Errorf("orderbook mismatch: %+v", ob)
+	}
+}
+
+func TestGetOrderbook_NotFound(t *testing.T) {
+	svc, _, mr := newTestService(t)
+	defer mr.Close()
+
+	ob, err := svc.GetOrderbook(context.Background(), "000000")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob != nil {
+		t.Errorf("expected nil for missing ticker, got %+v", ob)
+	}
+}
+
+// ─── GetTopStocks 테스트 (continued) ────────────────────────────────────────
+
 func TestGetTopStocks_EmptyRedis(t *testing.T) {
 	svc, _, mr := newTestService(t)
 	defer mr.Close()

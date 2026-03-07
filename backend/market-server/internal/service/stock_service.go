@@ -102,3 +102,12 @@ func (s *StockService) GetCandles(ctx context.Context, ticker string, interval s
 
 	return candles, nil
 }
+
+// GetOrderbook 호가창 스냅샷 및 현재가 정보를 조회한다.
+func (s *StockService) GetOrderbook(ctx context.Context, ticker string) (*domain.OrderbookResponse, error) {
+	ob, err := s.repo.GetOrderbookSnapshot(ctx, ticker)
+	if err != nil {
+		return nil, fmt.Errorf("repository get orderbook snapshot error: %w", err)
+	}
+	return ob, nil
+}

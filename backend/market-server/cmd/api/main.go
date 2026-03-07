@@ -68,6 +68,7 @@ func main() {
 	stockHandler := handler.NewStockHandler(stockSvc)
 	r.GET("/api/v1/stocks", stockHandler.GetStockList)
 	r.GET("/api/v1/stocks/:ticker/candles", stockHandler.GetCandles)
+	r.GET("/api/v1/stocks/:ticker/orderbook", stockHandler.GetOrderbook)
 
 	// 7. 서버 실행
 	if err := r.Run(":" + cfg.Server.Port); err != nil {

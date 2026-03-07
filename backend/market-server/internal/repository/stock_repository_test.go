@@ -191,6 +191,108 @@ func TestSaveAndGetCandlesFromCache_TickerIsolation(t *testing.T) {
 	}
 }
 
+// ─── GetOrderbookSnapshot Tests ─────────────────────────────────────────────
+
+func TestGetOrderbookSnapshot_Success_WithCurrentKey(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	// 호가 데이터
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+
+	// 실시간 체결가
+	mr.HSet("stocks:current:005930", "price", "80550")
+	mr.HSet("stocks:current:005930", "change_rate", "1.25")
+
+	ob, err := repo.GetOrderbookSnapshot(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob == nil {
+		t.Fatal("expected non-nil orderbook")
+	}
+	if ob.Ticker != "005930" || ob.Name != "삼성전자" {
+		t.Errorf("ticker/name mismatch: %+v", ob)
+	}
+	if ob.CurrentPrice != 80550 {
+		t.Errorf("expected currentPrice=80550, got %v", ob.CurrentPrice)
+	}
+	if ob.ChangeRate != 1.25 {
+		t.Errorf("expected changeRate=1.25, got %v", ob.ChangeRate)
+	}
+	if ob.AskPrice1 != 80600 || ob.AskVolume1 != 15400 {
+		t.Errorf("ask data mismatch: %+v", ob)
+	}
+	if ob.BidPrice1 != 80500 || ob.BidVolume1 != 32000 {
+		t.Errorf("bid data mismatch: %+v", ob)
+	}
+}
+
+func TestGetOrderbookSnapshot_Success_FallbackToInfoKey(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	// 호가 데이터 (currentPrice/changeRate 없음)
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+
+	// stocks:current 없음 → stocks:info 로 fallback
+	mr.HSet("stocks:info:005930", "currentPrice", "79900")
+	mr.HSet("stocks:info:005930", "changeRate", "0.50")
+
+	ob, err := repo.GetOrderbookSnapshot(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob == nil {
+		t.Fatal("expected non-nil orderbook")
+	}
+	if ob.CurrentPrice != 79900 {
+		t.Errorf("expected currentPrice=79900 from info fallback, got %v", ob.CurrentPrice)
+	}
+	if ob.ChangeRate != 0.50 {
+		t.Errorf("expected changeRate=0.50 from info fallback, got %v", ob.ChangeRate)
+	}
+}
+
+func TestGetOrderbookSnapshot_NotFound(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ob, err := repo.GetOrderbookSnapshot(context.Background(), "999999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob != nil {
+		t.Errorf("expected nil when orderbook key missing, got %+v", ob)
+	}
+}
+
+func TestGetOrderbookSnapshot_NoCurrentOrInfoKey(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	// 호가 데이터만 있고 현재가 데이터 전혀 없음
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+
+	ob, err := repo.GetOrderbookSnapshot(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ob == nil {
+		t.Fatal("expected non-nil orderbook")
+	}
+	// 현재가/등락률은 JSON에도 없으니 0 값이어야 함
+	if ob.CurrentPrice != 0 {
+		t.Errorf("expected currentPrice=0, got %v", ob.CurrentPrice)
+	}
+	if ob.AskPrice1 != 80600 {
+		t.Errorf("ask price mismatch: %v", ob.AskPrice1)
+	}
+}
+
 // ─── Stock Data Integrity ────────────────────────────────────────────────────
 
 func TestBulkUpsertStocks_DataIntegrity(t *testing.T) {
