@@ -1,11 +1,12 @@
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
 from app.agent.llm_agent import NewsReporterAgent
+from app.eval.judge import RAGEvaluator
 from app.rag.ingest_pipeline import RAGIngestPipeline
 from app.rag.reranker import SolarReranker
 from app.rag.vector_db import NewsVectorDB
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Server Infrastructure Base")
 TICKER_PATTERN = r"^\d{6}$"
+SOURCE_NEWS = "KIS_NEWS"
+SOURCE_COMMUNITY = "TOSS_COMMUNITY"
 
 
 @app.get("/health")
@@ -94,56 +97,106 @@ def rag_chat(
     news_k: int = Query(15, ge=1, le=50),
     community_k: int = Query(2, ge=0, le=20),
     rerank_top_n: int = Query(5, ge=1, le=20),
+    with_eval: bool = Query(False),
 ) -> Dict[str, Any]:
     try:
-        vdb = NewsVectorDB()
-
-        news_candidates = vdb.hybrid_query(query_text=query, k=news_k, source_filter="KIS_NEWS")
-        if news_candidates:
-            reranker = SolarReranker()
-            news_docs = reranker.rerank(query=query, documents=news_candidates, top_n=rerank_top_n)
-        else:
-            news_docs = []
-
-        community_docs = []
-        if community_k > 0:
-            community_docs = vdb.hybrid_query(query_text=query, k=community_k, source_filter="TOSS_COMMUNITY")
-
-        agent = NewsReporterAgent()
-        answer = agent.generate_response(question=query, news_docs=news_docs, community_docs=community_docs)
-
-        return {
-            "status": "ok",
-            "query": query,
-            "retrieved": {
-                "news_candidates": len(news_candidates),
-                "news_used": len(news_docs),
-                "community_used": len(community_docs),
-            },
-            "answer": answer,
-        }
+        return _run_rag_chat_pipeline(
+            query=query,
+            news_k=news_k,
+            community_k=community_k,
+            rerank_top_n=rerank_top_n,
+            with_eval=with_eval,
+        )
     except Exception as exc:
         logger.exception("Failed to run RAG chat")
         raise HTTPException(status_code=500, detail=f"RAG chat failed: {exc}") from exc
 
 
+def _run_rag_chat_pipeline(
+    query: str,
+    news_k: int,
+    community_k: int,
+    rerank_top_n: int,
+    with_eval: bool,
+) -> Dict[str, Any]:
+    vdb = NewsVectorDB()
+
+    news_candidates = vdb.hybrid_query(query_text=query, k=news_k, source_filter=SOURCE_NEWS)
+    news_docs = _rerank_news_candidates(query=query, candidates=news_candidates, top_n=rerank_top_n)
+
+    community_docs: List[Any] = []
+    if community_k > 0:
+        community_docs = vdb.hybrid_query(query_text=query, k=community_k, source_filter=SOURCE_COMMUNITY)
+
+    agent = NewsReporterAgent()
+    answer = agent.generate_response(question=query, news_docs=news_docs, community_docs=community_docs)
+
+    eval_result = None
+    if with_eval and (news_docs or community_docs):
+        evaluator = RAGEvaluator()
+        eval_result = evaluator.run_full_eval(
+            question=query,
+            response=answer,
+            retrieved_docs=(news_docs + community_docs),
+        )
+
+    result = {
+        "status": "ok",
+        "query": query,
+        "retrieved": {
+            "news_candidates": len(news_candidates),
+            "news_used": len(news_docs),
+            "community_used": len(community_docs),
+        },
+        "answer": answer,
+    }
+    if eval_result is not None:
+        result["eval"] = eval_result
+    return result
+
+
+def _rerank_news_candidates(query: str, candidates: List[Any], top_n: int) -> List[Any]:
+    if not candidates:
+        return []
+    reranker = SolarReranker()
+    return reranker.rerank(query=query, documents=candidates, top_n=top_n)
+
+
+def _build_collect_payload(ticker: str, source_key: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "collected_at": datetime.now().isoformat(),
+        "sources": {source_key: items},
+    }
+
+
+def _build_collect_response(
+    ticker: str,
+    source: str,
+    file_path: str,
+    items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "ticker": ticker,
+        "source": source,
+        "count": len(items),
+        "file_path": file_path,
+        "data": items,
+    }
+
+
 def _collect_news_result(ticker: str) -> Dict[str, Any]:
     try:
         news_list = fetch_kis_news_title(ticker)
-        payload = {
-            "ticker": ticker,
-            "collected_at": datetime.now().isoformat(),
-            "sources": {"news": news_list},
-        }
+        payload = _build_collect_payload(ticker=ticker, source_key="news", items=news_list)
         file_path = save_snapshot("raw", ticker, payload)
         logger.info("Saved KIS news snapshot: ticker=%s count=%s path=%s", ticker, len(news_list), file_path)
-        return {
-            "ticker": ticker,
-            "source": "KIS_NEWS",
-            "count": len(news_list),
-            "file_path": file_path,
-            "data": news_list,
-        }
+        return _build_collect_response(
+            ticker=ticker,
+            source=SOURCE_NEWS,
+            file_path=file_path,
+            items=news_list,
+        )
     except Exception as exc:
         logger.exception("Failed to collect KIS news for %s", ticker)
         raise HTTPException(status_code=500, detail=f"KIS news collection failed: {exc}") from exc
@@ -152,11 +205,7 @@ def _collect_news_result(ticker: str) -> Dict[str, Any]:
 def _collect_community_result(ticker: str, limit: int) -> Dict[str, Any]:
     try:
         comments = fetch_toss_community_comments(ticker=ticker, limit=limit)
-        payload = {
-            "ticker": ticker,
-            "collected_at": datetime.now().isoformat(),
-            "sources": {"community": comments},
-        }
+        payload = _build_collect_payload(ticker=ticker, source_key="community", items=comments)
         file_path = save_snapshot("comm", ticker, payload)
         logger.info(
             "Saved Toss community snapshot: ticker=%s count=%s limit=%s path=%s",
@@ -165,13 +214,12 @@ def _collect_community_result(ticker: str, limit: int) -> Dict[str, Any]:
             limit,
             file_path,
         )
-        return {
-            "ticker": ticker,
-            "source": "TOSS_COMMUNITY",
-            "count": len(comments),
-            "file_path": file_path,
-            "data": comments,
-        }
+        return _build_collect_response(
+            ticker=ticker,
+            source=SOURCE_COMMUNITY,
+            file_path=file_path,
+            items=comments,
+        )
     except Exception as exc:
         logger.exception("Failed to collect Toss community for %s", ticker)
         raise HTTPException(status_code=500, detail=f"Toss community collection failed: {exc}") from exc
