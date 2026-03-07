@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
+from app.rag.ingest_pipeline import RAGIngestPipeline
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import list_storage_files, save_snapshot
 from collector.toss_community import fetch_toss_community_comments
@@ -63,6 +64,25 @@ def storage_status(limit: int = Query(20, ge=1, le=200)) -> Dict[str, Any]:
     except Exception as exc:
         logger.exception("Failed to read storage status")
         raise HTTPException(status_code=500, detail=f"Storage status failed: {exc}") from exc
+
+
+@app.post("/v1/rag/ingest")
+def rag_ingest(
+    ticker: str = Query(..., pattern=TICKER_PATTERN),
+    community_limit: int = Query(15, ge=1, le=100),
+    reset_collection: bool = Query(True),
+) -> Dict[str, Any]:
+    try:
+        pipeline = RAGIngestPipeline()
+        result = pipeline.run(
+            ticker=ticker,
+            community_limit=community_limit,
+            reset_collection=reset_collection,
+        )
+        return {"status": "ok", "result": result.to_dict()}
+    except Exception as exc:
+        logger.exception("Failed to run sequential RAG ingest for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"RAG ingest failed: {exc}") from exc
 
 
 def _collect_news_result(ticker: str) -> Dict[str, Any]:
