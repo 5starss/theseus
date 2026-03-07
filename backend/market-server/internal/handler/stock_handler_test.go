@@ -274,3 +274,99 @@ func TestGetStockList_EmptyRedis(t *testing.T) {
 		t.Error("expected isSuccess=true even when redis is empty")
 	}
 }
+
+// ─── GetOrderbook 핸들러 테스트 ──────────────────────────────────────────────
+
+func TestGetOrderbook_Success(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	// 1. 호가창 데이터 세팅
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+
+	// 2. 체결가(현재가) 데이터 세팅
+	mr.HSet("stocks:current:005930", "price", "80550")
+	mr.HSet("stocks:current:005930", "change_rate", "1.25")
+
+	r := gin.New()
+	r.GET("/api/v1/stocks/:ticker/orderbook", h.GetOrderbook)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/005930/orderbook", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	var obResp domain.OrderbookResponse
+	if err := json.Unmarshal(resp.Result, &obResp); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+
+	if obResp.Ticker != "005930" || obResp.CurrentPrice != 80550 || obResp.ChangeRate != 1.25 || obResp.AskPrice1 != 80600 {
+		t.Errorf("unexpected orderbook response: %+v", obResp)
+	}
+}
+
+func TestGetOrderbook_FallbackToInfoKey(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	// stocks:current 없이 stocks:info 로 currentPrice/changeRate fallback
+	obData := `{"ticker":"005930","name":"삼성전자","askPrice1":80600,"askVolume1":15400,"bidPrice1":80500,"bidVolume1":32000}`
+	mr.Set("stocks:orderbook:005930", obData)
+	mr.HSet("stocks:info:005930", "currentPrice", "79900")
+	mr.HSet("stocks:info:005930", "changeRate", "0.50")
+
+	r := gin.New()
+	r.GET("/api/v1/stocks/:ticker/orderbook", h.GetOrderbook)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/005930/orderbook", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	var obResp domain.OrderbookResponse
+	if err := json.Unmarshal(resp.Result, &obResp); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+
+	if obResp.CurrentPrice != 79900 {
+		t.Errorf("expected currentPrice=79900 from info fallback, got %v", obResp.CurrentPrice)
+	}
+	if obResp.ChangeRate != 0.50 {
+		t.Errorf("expected changeRate=0.50 from info fallback, got %v", obResp.ChangeRate)
+	}
+}
+
+func TestGetOrderbook_NotFound(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := gin.New()
+	r.GET("/api/v1/stocks/:ticker/orderbook", h.GetOrderbook)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/000000/orderbook", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+

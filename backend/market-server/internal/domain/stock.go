@@ -23,3 +23,15 @@ type Candle struct {
 	Close     int64  `json:"close"`     // 종가
 	Volume    int64  `json:"volume"`    // 거래량
 }
+
+// OrderbookResponse 호가창 스냅샷 응답 모델 (현재가 포함)
+type OrderbookResponse struct {
+	Ticker       string  `json:"ticker"`
+	Name         string  `json:"name"`
+	CurrentPrice float64 `json:"currentPrice"`
+	ChangeRate   float64 `json:"changeRate"`
+	AskPrice1    float64 `json:"askPrice1"`
+	AskVolume1   int64   `json:"askVolume1"`
+	BidPrice1    float64 `json:"bidPrice1"`
+	BidVolume1   int64   `json:"bidVolume1"`
+}

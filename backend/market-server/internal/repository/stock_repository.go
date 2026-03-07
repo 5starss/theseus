@@ -166,3 +166,62 @@ func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, i
 
 	return candles, nil
 }
+
+// GetOrderbookSnapshot Redis에서 호가창 스냅샷 및 현재가 정보를 조회하여 반환한다.
+func (r *StockRepository) GetOrderbookSnapshot(ctx context.Context, ticker string) (*domain.OrderbookResponse, error) {
+	// 조회할 키
+	orderbookKey := "stocks:orderbook:" + ticker
+	currentKey := "stocks:current:" + ticker
+
+	// 1. Pipeline을 통한 동시 조회
+	pipe := r.rdb.Pipeline()
+	obCmd := pipe.Get(ctx, orderbookKey)
+	currCmd := pipe.HGetAll(ctx, currentKey)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("pipeline exec failed: %w", err)
+	}
+
+	obJSON, err := obCmd.Result()
+	if err == redis.Nil {
+		return nil, nil // 호가 데이터 없음
+	} else if err != nil {
+		return nil, fmt.Errorf("redis get orderbook failed: %w", err)
+	}
+
+	currHash, err := currCmd.Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("redis hgetall current failed: %w", err)
+	}
+
+	// 2. 파싱 및 병합
+	var resp domain.OrderbookResponse
+	if err := json.Unmarshal([]byte(obJSON), &resp); err != nil {
+		return nil, fmt.Errorf("json unmarshal orderbook failed: %w", err)
+	}
+
+	// current가 존재하면 덮어쓰기 (워커가 저장한 실시간 체결가)
+	if len(currHash) > 0 {
+		if p, err := strconv.ParseFloat(currHash["price"], 64); err == nil {
+			resp.CurrentPrice = p
+		}
+		if cr, err := strconv.ParseFloat(currHash["change_rate"], 64); err == nil {
+			resp.ChangeRate = cr
+		}
+	} else {
+		// Fallback: stocks:info:{ticker} 조회 
+		infoCmd := r.rdb.HGetAll(ctx, fmt.Sprintf(stockInfoKeyFmt, ticker))
+		infoHash, err := infoCmd.Result()
+		if err == nil && len(infoHash) > 0 {
+			if p, err := strconv.ParseFloat(infoHash["currentPrice"], 64); err == nil {
+				resp.CurrentPrice = p
+			}
+			if cr, err := strconv.ParseFloat(infoHash["changeRate"], 64); err == nil {
+				resp.ChangeRate = cr
+			}
+		}
+	}
+
+	return &resp, nil
+}
