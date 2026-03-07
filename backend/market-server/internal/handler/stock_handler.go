@@ -51,3 +51,31 @@ func (h *StockHandler) GetStockList(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.OK(result))
 }
+
+// GetCandles GET /api/v1/stocks/:ticker/candles
+// 쿼리 파라미터:
+//   - interval : 간격 (D, W, M 등, 기본값 D)
+//   - limit    : 캔들 개수 (1~1000, 기본값 50)
+func (h *StockHandler) GetCandles(c *gin.Context) {
+	ticker := c.Param("ticker")
+	if ticker == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "종목코드가 필요합니다."))
+		return
+	}
+
+	interval := c.DefaultQuery("interval", "D")
+	limitStr := c.DefaultQuery("limit", "50")
+	limit, err := strconv.ParseInt(limitStr, 10, 64)
+	if err != nil || limit < 1 {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1 이상의 정수여야 합니다."))
+		return
+	}
+
+	candles, err := h.svc.GetCandles(c.Request.Context(), ticker, interval, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("STOCK-500", "캔들 데이터 조회 중 오류가 발생했습니다."))
+		return
+	}
+
+	c.JSON(http.StatusOK, response.OK(candles))
+}

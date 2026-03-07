@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -12,16 +14,18 @@ import (
 )
 
 const (
-	rankVolumeKey   = "stocks:rank:volume" // Sorted Set: score=거래량, member=종목코드
-	stockInfoKeyFmt = "stocks:info:%s"     // Hash: 종목 상세 정보
+	rankVolumeKey   = "stocks:rank:volume"   // Sorted Set: score=거래량, member=종목코드
+	stockInfoKeyFmt = "stocks:info:%s"       // Hash: 종목 상세 정보
+	candlesKeyFmt   = "stocks:candles:%s:%s" // String (JSON): 캔들 데이터 단기 캐시 (ticker, interval)
 )
 
 type StockRepository struct {
 	rdb *redis.Client
+	db  *sql.DB
 }
 
-func NewStockRepository(rdb *redis.Client) *StockRepository {
-	return &StockRepository{rdb: rdb}
+func NewStockRepository(rdb *redis.Client, db *sql.DB) *StockRepository {
+	return &StockRepository{rdb: rdb, db: db}
 }
 
 // GetTopByVolume Redis Sorted Set에서 거래량 상위 limit개 종목을 조회한다.
@@ -96,4 +100,69 @@ func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain
 	}
 
 	return nil
+}
+
+// GetCandlesFromCache Redis에서 캔들 데이터를 단기 캐시로 조회한다.
+func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string, interval string) ([]domain.Candle, error) {
+	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
+	val, err := r.rdb.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, nil // Cache Miss
+	} else if err != nil {
+		return nil, fmt.Errorf("redis get failed: %w", err)
+	}
+
+	var candles []domain.Candle
+	if err := json.Unmarshal([]byte(val), &candles); err != nil {
+		return nil, fmt.Errorf("json unmarshal failed: %w", err)
+	}
+	return candles, nil
+}
+
+// SaveCandlesToCache Redis에 캔들 데이터를 적재시킨다. (TTL: 1분)
+func (r *StockRepository) SaveCandlesToCache(ctx context.Context, ticker string, interval string, candles []domain.Candle) error {
+	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
+	
+	bytes, err := json.Marshal(candles)
+	if err != nil {
+		return fmt.Errorf("json marshal failed: %w", err)
+	}
+
+	if err := r.rdb.Set(ctx, key, string(bytes), 1*time.Minute).Err(); err != nil {
+		return fmt.Errorf("redis set failed: %w", err)
+	}
+	return nil
+}
+
+// GetCandlesFromDB MySQL에서 캔들 데이터를 조회한다.
+func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, interval string, limit int64) ([]domain.Candle, error) {
+	query := `
+		SELECT timestamp, open, high, low, close, volume
+		FROM candles
+		WHERE ticker = ? AND interval_type = ?
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`
+	rows, err := r.db.QueryContext(ctx, query, ticker, interval, limit)
+	if err != nil {
+		return nil, fmt.Errorf("mysql query failed: %w", err)
+	}
+	defer rows.Close()
+
+	var candles []domain.Candle
+	for rows.Next() {
+		var c domain.Candle
+		var ts string
+		
+		if err := rows.Scan(&ts, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume); err != nil {
+			return nil, fmt.Errorf("rows scan failed: %w", err)
+		}
+		c.Timestamp = ts
+		candles = append(candles, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration failed: %w", err)
+	}
+
+	return candles, nil
 }

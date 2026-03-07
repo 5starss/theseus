@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"market-server/internal/config"
 	"market-server/internal/handler"
@@ -30,9 +33,20 @@ func main() {
 		log.Fatalf("Redis 연결 실패: %v", err)
 	}
 
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", 
+		cfg.MySQL.User, cfg.MySQL.Password, cfg.MySQL.Host, cfg.MySQL.Port, cfg.MySQL.DBName)
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatalf("MySQL 연결 초기화 실패: %v", err)
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		log.Fatalf("MySQL Ping 실패 (DB를 실행 중인지 확인하세요): %v", err)
+	}
+
 	// 4. 의존성 주입 (Repository → Service → Handler)
 	kisC := kisClient.NewClient(cfg.KIS)
-	stockRepo := repository.NewStockRepository(rdb)
+	stockRepo := repository.NewStockRepository(rdb, db)
 	stockSvc := service.NewStockService(stockRepo, kisC)
 
 	// 5. 백그라운드 랭킹 스케줄러 시작 (30초 간격, 즉시 1회 실행)
@@ -53,6 +67,7 @@ func main() {
 	// 종목 리스트 조회
 	stockHandler := handler.NewStockHandler(stockSvc)
 	r.GET("/api/v1/stocks", stockHandler.GetStockList)
+	r.GET("/api/v1/stocks/:ticker/candles", stockHandler.GetCandles)
 
 	// 7. 서버 실행
 	if err := r.Run(":" + cfg.Server.Port); err != nil {
