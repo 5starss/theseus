@@ -23,11 +23,23 @@ class NewsReporterAgent:
             [
                 (
                     "system",
-                    """당신은 대한민국 금융 시장의 주식 전망 분석가입니다.
-제공된 참고 데이터(뉴스/커뮤니티)를 근거로 핵심 이슈, 상승 요인, 하락 요인, 종합 전망을 제시하세요.
-근거 번호([1], [2], [A] 등)를 답변에 명시하고, 마지막에 투자 판단 책임 고지를 포함하세요.
+                    """당신은 대한민국 금융 시장의 '주식 전망 예측 전문가'입니다.
+제공된 '참고 데이터 목록(뉴스 및 커뮤니티)'을 정밀 분석하여 해당 종목의 향후 전망을 예측하십시오.
 
-[참고 데이터]
+핵심 지침:
+1. 모든 분석 내용에는 반드시 참고한 데이터의 번호(예: [1], [2])를 붙여 근거를 제시하십시오.
+2. 분석 시 다음 단계를 준수하십시오:
+- 현재 상황 분석: 핵심 이슈 요약 및 관련 근거 제시.
+- 긍정적(Bullish) 요인: 상승 모멘텀 추출 (사실 기반 우선, 투자자 심리 참고).
+- 부정적(Bearish) 요인: 하락 리스크 추출 (사실 기반 우선, 투자자 심리 참고).
+- 종합 전망 예측: 위 요소들을 결합한 향후 향방 예측.
+3. 데이터 출처별 신뢰도 가중치를 엄격히 적용하십시오.
+- 뉴스(KIS_NEWS): 신뢰도 1.0 (핵심 근거로 활용, 객관적 사실 판단 기준)
+- 커뮤니티(TOSS_COMMUNITY): 신뢰도 0.2 (시장 분위기/투자자 심리 참고용)
+4. 커뮤니티 정보는 단독으로 결론을 내리는 근거로 사용하지 마십시오.
+5. 투자 판단의 책임은 본인에게 있음을 명시하십시오.
+
+[참고 데이터 목록]
 {context}
 """,
                 ),
@@ -51,16 +63,16 @@ class NewsReporterAgent:
                 f"[{i+1}] (발행: {doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
                 for i, doc in enumerate(news_docs)
             ]
-            context_parts.append("[뉴스 데이터 - 신뢰도 1.0]\n" + "\n".join(news_lines))
+            context_parts.append("📰 [뉴스 데이터 - 신뢰도 1.0, 핵심 분석 근거]\n" + "\n".join(news_lines))
 
         if community_docs:
             comm_lines = [f"[{chr(65+i)}] {doc.page_content}" for i, doc in enumerate(community_docs)]
-            context_parts.append("[커뮤니티 여론 - 신뢰도 0.2]\n" + "\n".join(comm_lines))
+            context_parts.append("💬 [커뮤니티 여론 - 신뢰도 0.2, 투자자 심리 참고용]\n" + "\n".join(comm_lines))
 
         context = "\n\n".join(context_parts)
         response = self.chain.invoke({"context": context, "question": question})
 
-        footer = "\n\n[참조 출처]\n"
+        footer = "\n\n[참조 출처 리스트]\n"
         for i, doc in enumerate(news_docs or []):
             footer += f"[{i+1}] [뉴스] {doc.metadata.get('title', '')} ({doc.metadata.get('published_at', '시간 미상')})\n"
         for i, doc in enumerate(community_docs or []):
