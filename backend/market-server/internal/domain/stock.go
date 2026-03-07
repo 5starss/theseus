@@ -13,3 +13,13 @@ type Stock struct {
 	ChangeRate   float64 `json:"changeRate"`   // 전일 대비 등락률(%)
 	AccVolume    int64   `json:"accVolume"`    // 누적 거래량
 }
+
+// Candle 캔들(차트) 도메인 모델
+type Candle struct {
+	Timestamp string `json:"timestamp"` // 시간
+	Open      int64  `json:"open"`      // 시가
+	High      int64  `json:"high"`      // 고가
+	Low       int64  `json:"low"`       // 저가
+	Close     int64  `json:"close"`     // 종가
+	Volume    int64  `json:"volume"`    // 거래량
+}

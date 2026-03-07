@@ -17,6 +17,15 @@ type KISConfig struct {
 	WSURL     string
 }
 
+// MySQLConfig MySQL 연결 설정
+type MySQLConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	DBName   string
+}
+
 // ServerConfig HTTP 서버 설정
 type ServerConfig struct {
 	Port string
@@ -30,6 +39,7 @@ type KafkaConfig struct {
 }
 
 type Config struct {
+	MySQL  MySQLConfig
 	Redis  RedisConfig
 	KIS    KISConfig
 	Server ServerConfig
@@ -39,6 +49,13 @@ type Config struct {
 // Load 환경변수에서 설정을 읽어 Config를 반환한다. 값이 없으면 기본값을 사용한다.
 func Load() *Config {
 	return &Config{
+		MySQL: MySQLConfig{
+			Host:     getEnvOrDefault("DB_HOST", "localhost"),
+			Port:     getEnvOrDefault("DB_PORT", "3306"),
+			User:     getEnvOrDefault("DB_USER", "root"),
+			Password: os.Getenv("DB_PASSWORD"),
+			DBName:   getEnvOrDefault("DB_NAME", "stock_db"),
+		},
 		Redis: RedisConfig{
 			Host:     getEnvOrDefault("REDIS_HOST", "localhost"),
 			Port:     getEnvOrDefault("REDIS_PORT", "6379"),

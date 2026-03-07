@@ -18,7 +18,7 @@ func newTestRepo(t *testing.T) (*StockRepository, *miniredis.Miniredis) {
 		t.Fatalf("miniredis start failed: %v", err)
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	return NewStockRepository(rdb), mr
+	return NewStockRepository(rdb, nil), mr
 }
 
 func TestBulkUpsertStocks_And_GetTopByVolume(t *testing.T) {
@@ -92,6 +92,106 @@ func TestGetTopByVolume_SkipsMissingInfoKey(t *testing.T) {
 		}
 	}
 }
+
+// ─── Candle Cache Tests ────────────────────────────────────────────────────
+
+func TestGetCandlesFromCache_Miss(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	candles, err := repo.GetCandlesFromCache(context.Background(), "005930", "D")
+	if err != nil {
+		t.Fatalf("unexpected error on cache miss: %v", err)
+	}
+	if candles != nil {
+		t.Errorf("expected nil on cache miss, got %v", candles)
+	}
+}
+
+func TestSaveAndGetCandlesFromCache(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	original := []domain.Candle{
+		{Timestamp: "20240101", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
+		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
+	}
+
+	if err := repo.SaveCandlesToCache(ctx, "005930", "D", original); err != nil {
+		t.Fatalf("SaveCandlesToCache failed: %v", err)
+	}
+
+	result, err := repo.GetCandlesFromCache(ctx, "005930", "D")
+	if err != nil {
+		t.Fatalf("GetCandlesFromCache failed: %v", err)
+	}
+	if len(result) != len(original) {
+		t.Fatalf("expected %d candles, got %d", len(original), len(result))
+	}
+	if result[0].Timestamp != "20240101" || result[0].Close != 70500 || result[0].Volume != 1000000 {
+		t.Errorf("candle data mismatch: %+v", result[0])
+	}
+	if result[1].Timestamp != "20240102" || result[1].High != 72000 {
+		t.Errorf("candle data mismatch: %+v", result[1])
+	}
+}
+
+func TestSaveAndGetCandlesFromCache_IntervalIsolation(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	daily := []domain.Candle{{Timestamp: "20240101", Volume: 1000000}}
+	weekly := []domain.Candle{{Timestamp: "20240101", Volume: 5000000}}
+
+	if err := repo.SaveCandlesToCache(ctx, "005930", "D", daily); err != nil {
+		t.Fatalf("save daily failed: %v", err)
+	}
+	if err := repo.SaveCandlesToCache(ctx, "005930", "W", weekly); err != nil {
+		t.Fatalf("save weekly failed: %v", err)
+	}
+
+	gotD, err := repo.GetCandlesFromCache(ctx, "005930", "D")
+	if err != nil {
+		t.Fatalf("get daily failed: %v", err)
+	}
+	gotW, err := repo.GetCandlesFromCache(ctx, "005930", "W")
+	if err != nil {
+		t.Fatalf("get weekly failed: %v", err)
+	}
+
+	if gotD[0].Volume != 1000000 {
+		t.Errorf("expected daily volume 1000000, got %d", gotD[0].Volume)
+	}
+	if gotW[0].Volume != 5000000 {
+		t.Errorf("expected weekly volume 5000000, got %d", gotW[0].Volume)
+	}
+}
+
+func TestSaveAndGetCandlesFromCache_TickerIsolation(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	samsung := []domain.Candle{{Timestamp: "20240101", Close: 70500}}
+	skhynix := []domain.Candle{{Timestamp: "20240101", Close: 181000}}
+
+	_ = repo.SaveCandlesToCache(ctx, "005930", "D", samsung)
+	_ = repo.SaveCandlesToCache(ctx, "000660", "D", skhynix)
+
+	gotS, _ := repo.GetCandlesFromCache(ctx, "005930", "D")
+	gotH, _ := repo.GetCandlesFromCache(ctx, "000660", "D")
+
+	if gotS[0].Close != 70500 {
+		t.Errorf("expected samsung close 70500, got %d", gotS[0].Close)
+	}
+	if gotH[0].Close != 181000 {
+		t.Errorf("expected skhynix close 181000, got %d", gotH[0].Close)
+	}
+}
+
+// ─── Stock Data Integrity ────────────────────────────────────────────────────
 
 func TestBulkUpsertStocks_DataIntegrity(t *testing.T) {
 	repo, mr := newTestRepo(t)
