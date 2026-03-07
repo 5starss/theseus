@@ -5,7 +5,10 @@ from typing import Any, Dict, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
+from app.agent.llm_agent import NewsReporterAgent
 from app.rag.ingest_pipeline import RAGIngestPipeline
+from app.rag.reranker import SolarReranker
+from app.rag.vector_db import NewsVectorDB
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import list_storage_files, save_snapshot
 from collector.toss_community import fetch_toss_community_comments
@@ -83,6 +86,45 @@ def rag_ingest(
     except Exception as exc:
         logger.exception("Failed to run sequential RAG ingest for %s", ticker)
         raise HTTPException(status_code=500, detail=f"RAG ingest failed: {exc}") from exc
+
+
+@app.post("/v1/rag/chat")
+def rag_chat(
+    query: str = Query(..., min_length=1),
+    news_k: int = Query(15, ge=1, le=50),
+    community_k: int = Query(2, ge=0, le=20),
+    rerank_top_n: int = Query(5, ge=1, le=20),
+) -> Dict[str, Any]:
+    try:
+        vdb = NewsVectorDB()
+
+        news_candidates = vdb.hybrid_query(query_text=query, k=news_k, source_filter="KIS_NEWS")
+        if news_candidates:
+            reranker = SolarReranker()
+            news_docs = reranker.rerank(query=query, documents=news_candidates, top_n=rerank_top_n)
+        else:
+            news_docs = []
+
+        community_docs = []
+        if community_k > 0:
+            community_docs = vdb.hybrid_query(query_text=query, k=community_k, source_filter="TOSS_COMMUNITY")
+
+        agent = NewsReporterAgent()
+        answer = agent.generate_response(question=query, news_docs=news_docs, community_docs=community_docs)
+
+        return {
+            "status": "ok",
+            "query": query,
+            "retrieved": {
+                "news_candidates": len(news_candidates),
+                "news_used": len(news_docs),
+                "community_used": len(community_docs),
+            },
+            "answer": answer,
+        }
+    except Exception as exc:
+        logger.exception("Failed to run RAG chat")
+        raise HTTPException(status_code=500, detail=f"RAG chat failed: {exc}") from exc
 
 
 def _collect_news_result(ticker: str) -> Dict[str, Any]:
