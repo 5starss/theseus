@@ -11,3 +11,4 @@ chromadb
 pandas
 openpyxl
 rank_bm25
+numpy
