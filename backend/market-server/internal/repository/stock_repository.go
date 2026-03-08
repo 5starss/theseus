@@ -94,6 +94,8 @@ func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain
 			Member: s.Ticker,
 		})
 	}
+	// 랭킹 키 자체도 TTL 설정: 서비스 중단 시 stale 데이터가 영구 잔존하는 것을 방지
+	pipe.Expire(ctx, rankVolumeKey, 24*time.Hour)
 
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("bulk upsert pipeline exec failed: %w", err)
