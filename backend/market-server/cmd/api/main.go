@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -49,12 +53,20 @@ func main() {
 	stockRepo := repository.NewStockRepository(rdb, db)
 	stockSvc := service.NewStockService(stockRepo, kisC)
 
-	// 5. 백그라운드 랭킹 스케줄러 시작 (30초 간격, 즉시 1회 실행)
-	ctx := context.Background()
+	// 5. 취소 가능한 컨텍스트 생성 (모든 백그라운드 고루틴이 공유)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 백그라운드 랭킹 스케줄러 시작 (30초 간격, 즉시 1회 실행)
 	stockSvc.StartRankingScheduler(ctx, 30*time.Second)
 
 	// 6. 라우터 설정
 	r := gin.Default()
+
+	// WebSocket Hub 초기화 및 실행
+	wsHub := service.NewWSHub(stockSvc)
+	go wsHub.Run(ctx)
+	wsHandler := handler.NewWSHandler(wsHub)
 
 	// 헬스체크
 	r.GET("/ping", func(c *gin.Context) {
@@ -70,8 +82,33 @@ func main() {
 	r.GET("/api/v1/stocks/:ticker/candles", stockHandler.GetCandles)
 	r.GET("/api/v1/stocks/:ticker/orderbook", stockHandler.GetOrderbook)
 
-	// 7. 서버 실행
-	if err := r.Run(":" + cfg.Server.Port); err != nil {
+	// WebSocket (Direct Connection)
+	r.GET("/v1/stocks/ws", wsHandler.ServeWS)
+
+	// 7. HTTP 서버 설정 및 Graceful Shutdown
+	srv := &http.Server{
+		Addr:    ":" + cfg.Server.Port,
+		Handler: r,
+	}
+
+	// OS 종료 신호(SIGINT, SIGTERM) 수신 시 백그라운드 고루틴과 서버를 순차적으로 종료
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-quit
+		log.Println("종료 신호 수신, 서버를 graceful하게 종료합니다...")
+		cancel() // 랭킹 스케줄러, WSHub 브로드캐스터 취소
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("서버 강제 종료: %v", err)
+		}
+	}()
+
+	log.Printf("서버 시작: :%s", cfg.Server.Port)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("서버 실행 실패: %v", err)
 	}
+	log.Println("서버 종료 완료")
 }

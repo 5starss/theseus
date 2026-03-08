@@ -1,3 +1,5 @@
 /.idea/
 /CLAUDE.md
 text.md
+/backend/market-server/tmp/api-server
+/backend/market-server/api
