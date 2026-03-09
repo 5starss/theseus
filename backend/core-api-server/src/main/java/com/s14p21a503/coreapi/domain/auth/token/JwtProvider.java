@@ -2,7 +2,6 @@ package com.s14p21a503.coreapi.domain.auth.token;
 
 import com.s14p21a503.coreapi.common.exception.CustomException;
 import com.s14p21a503.coreapi.common.response.status.ErrorCode;
-import com.s14p21a503.coreapi.domain.auth.security.PrincipalDetailsService;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -36,7 +35,6 @@ import java.util.Date;
 @Component
 public class JwtProvider {
 
-    private final PrincipalDetailsService principalDetailsService;
     private final ResourceLoader resourceLoader;
 
     @Value("${jwt.private-key-path}")
@@ -57,8 +55,7 @@ public class JwtProvider {
     private RSAPrivateKey privateKey;
     private RSAPublicKey publicKey;
 
-    public JwtProvider(PrincipalDetailsService principalDetailsService, ResourceLoader resourceLoader) {
-        this.principalDetailsService = principalDetailsService;
+    public JwtProvider(ResourceLoader resourceLoader) {
         this.resourceLoader = resourceLoader;
     }
 
@@ -100,12 +97,6 @@ public class JwtProvider {
         } catch (RuntimeException e) {
             throw new CustomException(ErrorCode.INVALID_TOKEN);
         }
-    }
-
-    public Authentication getAuthentication(String token) {
-        Long userId = getUserIdFromToken(token);
-        UserDetails userDetails = principalDetailsService.loadUserById(userId);
-        return new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
     }
 
     public long getAccessExpiration() {

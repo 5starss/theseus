@@ -10,7 +10,7 @@ services:
     container_name: api-gateway
     env_file: .env # 동일 폴더의 .env 파일을 읽어옵니다.
     ports:
-      - "8000:8000"
+      - "8080:8080"
     networks:
       - stock-network
 
@@ -51,6 +51,6 @@ services:
     container_name: ai-server
     env_file: .env
     ports:
-      - "8086:8000"
+      - "8086:8086"
     networks:
       - stock-network

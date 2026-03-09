@@ -43,8 +43,11 @@ func (h *WSHandler) ServeWS(c *gin.Context) {
 		return
 	}
 
+	// API Gateway에서 JWT 검증 후 주입한 헤더 읽기
+	userId := c.GetHeader("X-USER-ID")
+
 	client := &service.WsClient{
-		ID:   c.ClientIP(), // 추후 Phase 5에서 JWT 파싱 정보로 대체
+		ID:   userId, // 비회원일 경우 "", 회원이면 JWT에서 추출한 userId
 		Conn: conn,
 		Send: make(chan []byte, 256),
 		Hub:  h.hub,
