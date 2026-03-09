@@ -3,6 +3,7 @@ package com.s14p21a503.matcher.journal;
 import com.s14p21a503.matcher.dto.*;
 import com.s14p21a503.matcher.engine.PendingOrderManager;
 import com.s14p21a503.matcher.engine.PendingOrderManagerHolder;
+import com.s14p21a503.matcher.engine.MarketStateManager;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import com.s14p21a503.matcher.util.KafkaIdempotencyManager;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class UnifiedRecoveryManager {
     private final KafkaIdempotencyManager kafkaIdempotencyManager;
     private final JournalService journalService;
     private final SnapshotService snapshotService;
+    private final MarketStateManager marketStateManager;
 
     @Value("${matcher.journal.dir:./logs}")
     private String logDir;
@@ -65,7 +67,7 @@ public class UnifiedRecoveryManager {
      * @param ticker 복구할 종목 코드
      * @param logPath 해당 종목의 저널 로그 파일 경로
      */
-    private void recoverTicker(String ticker, Path logPath) {
+    void recoverTicker(String ticker, Path logPath) {
         log.info("[{}] 저널 복구 시작 (경로: {})", ticker, logPath);
         
         PendingOrderManager orderManager = orderManagerHolder.getManager(ticker);
@@ -165,6 +167,12 @@ public class UnifiedRecoveryManager {
 
         if (replayCount > 0) {
             log.info("[{}] {}개의 명령(CMD) 재주행 완료 (결과 기반 복구 포함).", ticker, replayCount);
+        }
+
+        // 복구 완료 시점에 현재 시장 상태가 CLOSE라면 미체결 주문 일괄 취소 (장 종료 보장)
+        if (!marketStateManager.isMarketOpen()) {
+            log.info("[{}] 복구 시점 시장 상태가 CLOSE이므로 모든 미체결 주문 일괄 취소를 시작합니다.", ticker);
+            orderManager.cancelAllOrders(startSeqNo + cmdMap.size()); // 마지막 시퀀스 번호 기반으로 수행
         }
     }
 

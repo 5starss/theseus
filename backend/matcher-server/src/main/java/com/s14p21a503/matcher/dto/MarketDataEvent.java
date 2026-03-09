@@ -22,8 +22,25 @@ import java.math.BigDecimal;
 @ToString
 public class MarketDataEvent implements Serializable {
     private static final long serialVersionUID = 1L;
-    private String ticker;
-    private BigDecimal bestBid; // 최우선 매수 호가
-    private BigDecimal bestAsk; // 최우선 매도 호가
-    private long timestamp;
+    private String topic;
+    private Data data;
+    private long timestamp; // 리스너 주입용
+
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    @ToString
+    public static class Data implements Serializable {
+        private String ticker;
+        private String name;
+        private BigDecimal askPrice1;
+        private Long askVolume1;
+        private BigDecimal bidPrice1;
+        private Long bidVolume1;
+    }
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
 }

@@ -79,8 +79,8 @@ public class PendingOrderManager {
     public void updateMarketData(MarketDataEvent event) {
         lock.lock();
         try {
-            this.currentBestBid = event.getBestBid();
-            this.currentBestAsk = event.getBestAsk();
+            this.currentBestBid = event.getData().getBidPrice1();
+            this.currentBestAsk = event.getData().getAskPrice1();
         } finally {
             lock.unlock();
         }
@@ -94,8 +94,8 @@ public class PendingOrderManager {
         try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 사용할 수 있는 시장 유동성 계산: tick.qty * participationRate
-            long usableLiquidity = new BigDecimal(tick.getQty())
+            // 사용할 수 있는 시장 유동성 계산: tick.volume * participationRate
+            long usableLiquidity = new BigDecimal(tick.getVolume())
                     .multiply(participationRate)
                     .setScale(0, java.math.RoundingMode.DOWN)
                     .longValue();
@@ -301,6 +301,32 @@ public class PendingOrderManager {
             this.currentBestAsk = state.getCurrentBestAsk();
             log.info("[{}] 오더북 상태 복원 완료 - 매수: {}, 매도: {}, 캐시: {}", 
                     ticker, pendingBids.size(), pendingAsks.size(), orderCache.size());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * 모든 미체결 주문 일괄 취소 처리
+     */
+    public List<ExecutionResult> cancelAllOrders(long currentSeqNo) {
+        lock.lock();
+        try {
+            List<ExecutionResult> cancelResults = new ArrayList<>();
+            int fillIndex = 0;
+
+            // orderCache에 있는 모든 주문을 순회하며 취소 결과 생성
+            for (OrderRequest order : orderCache.values()) {
+                cancelResults.add(createExecutionResult(order, EventType.CANCELLED, null, 0L, currentSeqNo, fillIndex++));
+            }
+
+            // 모든 자료구조 초기화
+            orderCache.clear();
+            pendingBids.clear();
+            pendingAsks.clear();
+
+            log.info("[{}] 정규장 마감으로 인한 모든 미체결 주문 일괄 취소 처리 완료 (취소 건수: {})", ticker, cancelResults.size());
+            return cancelResults;
         } finally {
             lock.unlock();
         }
