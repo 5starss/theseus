@@ -5,6 +5,7 @@ import com.s14p21a503.matcher.journal.*;
 import com.s14p21a503.matcher.engine.MessageQueueManager;
 import com.s14p21a503.matcher.engine.PendingOrderManagerHolder;
 import com.s14p21a503.matcher.engine.MatcherConsumer;
+import com.s14p21a503.matcher.engine.MarketStateManager;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import com.s14p21a503.matcher.util.KafkaIdempotencyManager;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,22 @@ public class MatcherKafkaListener {
     private final OrderIdDeduplicator deduplicator;
     private final KafkaIdempotencyManager idempotencyManager;
     private final JournalService journalService;
+    private final MarketStateManager marketStateManager;
+
+    /**
+     * 시장 상태 및 이벤트 타임스탬프를 기준으로 이벤트를 무시해야 하는지 판단합니다.
+     */
+    private boolean shouldIgnoreEvent(String type, String ticker, long timestamp) {
+        boolean isMarketOpen = marketStateManager.isMarketOpen();
+        boolean isValidTime = marketStateManager.isTimeInMarketHours(timestamp);
+
+        if (!isMarketOpen || !isValidTime) {
+            log.warn("[{}] 장외 데이터 무시 처리 - Ticker: {}, MarketOpen: {}, ValidTime: {}", 
+                    type, ticker, isMarketOpen, isValidTime);
+            return true;
+        }
+        return false;
+    }
 
     /**
      * 신규 주문 및 주문 취소 요청 수신 리스너.
@@ -38,7 +55,7 @@ public class MatcherKafkaListener {
      * @param orderRequest 주문 요청 데이터
      * @param ack Kafka 수동 승인 객체
      */
-    @KafkaListener(topics = "order-events", groupId = "matcher-group", concurrency = "3")
+    @KafkaListener(topics = KafkaTopicConstants.ORDER_EVENT_TOPIC, groupId = "matcher-group", concurrency = "3")
     public void consumeOrderRequest(OrderRequest orderRequest, 
                                     @Header(KafkaHeaders.OFFSET) long offset,
                                     @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
@@ -46,6 +63,13 @@ public class MatcherKafkaListener {
         
         // 0. Exactly-Once 체크 (저널 복구와의 중복 방지)
         if (idempotencyManager.isDuplicate(orderRequest.getTicker(), partition, offset)) {
+            ack.acknowledge();
+            return;
+        }
+
+        // 시장 상태 및 타임스탬프 필터링 (모든 Action에 대해 적용)
+        if (shouldIgnoreEvent("ORDER", orderRequest.getTicker(), orderRequest.getTimestamp())) {
+            idempotencyManager.updateLastOffset(orderRequest.getTicker(), partition, offset);
             ack.acknowledge();
             return;
         }
@@ -95,13 +119,25 @@ public class MatcherKafkaListener {
      * [TODO] : 시세서버 구현 후 수정
      * 시세 데이터(호가창) 수신 리스너
      */
-    @KafkaListener(topics = "market-data-events", groupId = "matcher-group", concurrency = "3")
+    @KafkaListener(topics = KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, groupId = "matcher-group", concurrency = "3")
     public void consumeMarketData(MarketDataEvent event, 
                                   @Header(KafkaHeaders.OFFSET) long offset,
                                   @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
+                                  @Header(KafkaHeaders.RECEIVED_TIMESTAMP) long timestamp,
                                   Acknowledgment ack) {
         
-        if (idempotencyManager.isDuplicate(event.getTicker(), partition, offset)) {
+        // 0. 타임스탬프 주입 (메시지 페이로드에 없는 경우 대비)
+        event.setTimestamp(timestamp);
+        String ticker = event.getData().getTicker();
+
+        if (idempotencyManager.isDuplicate(ticker, partition, offset)) {
+            ack.acknowledge();
+            return;
+        }
+
+        // 시장 상태 필터링 (주입된 타임스탬프 사용)
+        if (shouldIgnoreEvent("MARKET_DATA", ticker, timestamp)) {
+            idempotencyManager.updateLastOffset(ticker, partition, offset);
             ack.acknowledge();
             return;
         }
@@ -109,7 +145,6 @@ public class MatcherKafkaListener {
         log.debug("Kafka 시세 데이터 수신: {} (Partition: {}, Offset: {})", event, partition, offset);
 
         try {
-            String ticker = event.getTicker();
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);
 
             UnifiedJournaler.JournalOutcome outcome = journalService.getJournaler(ticker)
@@ -133,13 +168,25 @@ public class MatcherKafkaListener {
      * [TODO] : 시세서버 구현 후 수정
      * 실제 시장 체결(Tick) 데이터 수신 리스너
      */
-    @KafkaListener(topics = "market-trade-events", groupId = "matcher-group", concurrency = "3")
+    @KafkaListener(topics = KafkaTopicConstants.TRADE_DATA_EVENT_TOPIC, groupId = "matcher-group", concurrency = "3")
     public void consumeTradeData(TickDataEvent tickDataEvent, 
                                  @Header(KafkaHeaders.OFFSET) long offset,
                                  @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
+                                 @Header(KafkaHeaders.RECEIVED_TIMESTAMP) long timestamp,
                                  Acknowledgment ack) {
         
-        if (idempotencyManager.isDuplicate(tickDataEvent.getTicker(), partition, offset)) {
+        // 0. 타임스탬프 주입
+        tickDataEvent.setTimestamp(timestamp);
+        String ticker = tickDataEvent.getTicker();
+
+        if (idempotencyManager.isDuplicate(ticker, partition, offset)) {
+            ack.acknowledge();
+            return;
+        }
+
+        // 시장 상태 필터링
+        if (shouldIgnoreEvent("TICK", ticker, timestamp)) {
+            idempotencyManager.updateLastOffset(ticker, partition, offset);
             ack.acknowledge();
             return;
         }
@@ -164,6 +211,32 @@ public class MatcherKafkaListener {
             }, tickerExecutor);
         } catch (Exception e) {
             log.error("틱 수신 처리 실패 - Ticker: {}", tickDataEvent.getTicker(), e);
+        }
+    }
+
+    /**
+     * 전역 시장 제어 이벤트 수신 리스너 (Core Server -> Matcher)
+     * 장 개시, 종료, 강제 종료 등을 수신하여 엔진 상태를 전역적으로 제어합니다.
+     */
+    @KafkaListener(topics = KafkaTopicConstants.MARKET_CONTROL_EVENT_TOPIC, groupId = "matcher-control-group")
+    public void consumeControlEvent(MarketControlEvent event, Acknowledgment ack) {
+        log.info("시장 제어 이벤트 수신: {}", event);
+        
+        try {
+            if (event.getTicker() == null) {
+                // 전 종목 제어: PendingOrderManagerHolder를 통해 관리되는 모든 종목에 신호를 보냄
+                for (String ticker : orderManagerHolder.getTickers()) {
+                    queueManager.enqueue(ticker, -1, event); // 제어 이벤트는 특수 시퀀스(-1) 사용
+                    matcherConsumer.ensureConsumerStarted(ticker);
+                }
+            } else {
+                // 특정 종목 제어
+                queueManager.enqueue(event.getTicker(), -1, event);
+                matcherConsumer.ensureConsumerStarted(event.getTicker());
+            }
+            ack.acknowledge();
+        } catch (Exception e) {
+            log.error("시장 제어 이벤트 처리 실패", e);
         }
     }
 }

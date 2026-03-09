@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -22,6 +23,10 @@ public class PendingOrderManagerHolder {
     public PendingOrderManager getManager(String ticker) {
         return managers.computeIfAbsent(ticker,
                 key -> new PendingOrderManager(key, executionIdGenerator, BigDecimal.valueOf(participationRate)));
+    }
+
+    public Set<String> getTickers() {
+        return managers.keySet();
     }
 
     public void clear() {

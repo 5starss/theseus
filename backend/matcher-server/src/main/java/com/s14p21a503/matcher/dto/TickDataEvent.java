@@ -20,8 +20,13 @@ import java.math.BigDecimal;
 @ToString
 public class TickDataEvent implements Serializable {
     private static final long serialVersionUID = 1L;
+    private String topic;
     private String ticker;
     private BigDecimal price; // 체결가
-    private Long qty; // 체결수량
-    private long timestamp;
+    private Long volume; // 체결수량
+    private long timestamp; // 리스너 수신 시점 또는 Kafka 헤더 타임스탬프 주입용
+
+    public void setTimestamp(long timestamp) {
+        this.timestamp = timestamp;
+    }
 }

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,6 +22,8 @@ public class MatcherConsumer {
     private final MessageQueueManager queueManager;
     private final PendingOrderManagerHolder orderManagerHolder;
     private final MatcherKafkaPublisher kafkaPublisher;
+    private final MarketStateManager marketStateManager;
+    private final HolidayManager holidayManager;
 
     private final ConcurrentHashMap<String, Thread> consumerThreads = new ConcurrentHashMap<>();
 
@@ -105,6 +108,42 @@ public class MatcherConsumer {
                     // [Case D: 호가 업데이트] 엔진 내부의 최우선 호가 정보(Best Bid/Ask)를 갱신합니다.
                     MarketDataEvent mkt = (MarketDataEvent) event;
                     orderManager.updateMarketData(mkt);
+                    journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
+                } else if (event instanceof MarketControlEvent) {
+                    // [Case E: 관리용 제어 이벤트] 장 개시/종료/강제제어 명령을 처리합니다.
+                    MarketControlEvent control = (MarketControlEvent) event;
+                    log.info("[{}] 시장 제어 이벤트 처리 시작: {}", ticker, control.getType());
+
+                    switch (control.getType()) {
+                        case MARKET_OPEN:
+                        case MARKET_RESUME:
+                            // 개장 신호와 함께 전달된 휴장일 리스트가 있다면 동기화 수행
+                            if (control.getHolidayDates() != null) {
+                                holidayManager.updateHolidays(new HashSet<>(control.getHolidayDates()));
+                            }
+                            marketStateManager.setStatus(MarketStatus.OPEN);
+                            break;
+                        case MARKET_HALT:
+                            marketStateManager.setStatus(MarketStatus.HALT);
+                            break;
+                        case MARKET_CLOSE:
+                            marketStateManager.setStatus(MarketStatus.CLOSE);
+                            // 모든 미체결 주문 일괄 취소 (정규 종료 시에만 수행)
+                            List<ExecutionResult> results = orderManager.cancelAllOrders(cmdSeqNo);
+                            for (ExecutionResult res : results) {
+                                processExecutionResult(ticker, journaler, cmdSeqNo, res);
+                            }
+                            break;
+                        case SET_HOLIDAYS:
+                            log.info("[{}] 수동 휴장일 업데이트 이벤트 수신: {}건", ticker, 
+                                    control.getHolidayDates() != null ? control.getHolidayDates().size() : 0);
+                            if (control.getHolidayDates() != null) {
+                                holidayManager.updateHolidays(new java.util.HashSet<>(control.getHolidayDates()));
+                            }
+                            break;
+                    }
+                    
+                    // 제어 이벤트 처리가 완료되었음을 저널에 기록
                     journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
                 }
 
