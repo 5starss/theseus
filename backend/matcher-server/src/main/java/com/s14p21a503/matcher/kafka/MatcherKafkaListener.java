@@ -128,6 +128,11 @@ public class MatcherKafkaListener {
         
         // 0. 타임스탬프 주입 (메시지 페이로드에 없는 경우 대비)
         event.setTimestamp(timestamp);
+        if (event.getData() == null) {
+            log.warn("유효하지 않은 시세 데이터 수신 (data 객체 누락): {}", event);
+            ack.acknowledge();
+            return;
+        }
         String ticker = event.getData().getTicker();
 
         if (idempotencyManager.isDuplicate(ticker, partition, offset)) {
@@ -160,7 +165,7 @@ public class MatcherKafkaListener {
                 ack.acknowledge();
             }, tickerExecutor);
         } catch (Exception e) {
-            log.error("시세 수신 처리 실패 - Ticker: {}", event.getTicker(), e);
+            log.error("시세 수신 처리 실패 - Ticker: {}", ticker, e);
         }
     }
 
@@ -194,7 +199,6 @@ public class MatcherKafkaListener {
         log.debug("카프카 체결 데이터(Tick) 수신: {} (Partition: {}, Offset: {})", tickDataEvent, partition, offset);
 
         try {
-            String ticker = tickDataEvent.getTicker();
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);
 
             UnifiedJournaler.JournalOutcome outcome = journalService.getJournaler(ticker)
