@@ -90,6 +90,11 @@ func main() {
 	go wsHub.Run(ctx)
 	wsHandler := handler.NewWSHandler(wsHub)
 
+	// Streamer 구동 (Kafka -> WSHub 단건 브로드캐스트 전송)
+	kafkaConsumer := kafka.NewConsumer(cfg.Kafka, "market-streamer-group")
+	streamer := worker.NewMarketDataStreamer(kafkaConsumer, wsHub, cfg.Kafka.TickTopic, cfg.Kafka.OrderbookTopic)
+	streamer.Start(ctx)
+
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "UP", "server": "market-server (Go)"})
 	})
@@ -125,6 +130,12 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 		close(wsClient.MessageChan)
 		dataWorker.Wait()
+
+		// Streamer 컨슈머 종료 대기
+		streamer.Wait()
+		if err := kafkaConsumer.Close(); err != nil {
+			log.Printf("Kafka Consumer 종료 오류: %v", err)
+		}
 
 		// Kafka 종료
 		if err := kafkaProducer.Close(); err != nil {
