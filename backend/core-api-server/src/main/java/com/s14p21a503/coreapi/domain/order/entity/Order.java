@@ -1,6 +1,8 @@
 package com.s14p21a503.coreapi.domain.order.entity;
 
 import com.s14p21a503.coreapi.common.entity.BaseEntity;
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -71,6 +73,22 @@ public class Order extends BaseEntity {
         this.requestedQuantity = requestedQuantity;
         this.executedQuantity = 0; // 초기 체결 수량은 0
         this.status = OrderStatus.OPEN; // 초기 상태는 OPEN(주문 접수)
+    }
+
+    public void execute(int quantity) {
+        if (this.status == OrderStatus.FILLED || this.status == OrderStatus.CANCELLED) {
+            throw new CustomException(ErrorCode.ORDER_ALREADY_COMPLETED);
+        }
+
+        int remaining = this.requestedQuantity - this.executedQuantity;
+        if (quantity > remaining) {
+            throw new CustomException(ErrorCode.INVALID_EXECUTION_QUANTITY);
+        }
+
+        this.executedQuantity += quantity;
+        this.status = (this.executedQuantity >= this.requestedQuantity)
+                ? OrderStatus.FILLED
+                : OrderStatus.PARTIAL;
     }
 
     public void cancel() {

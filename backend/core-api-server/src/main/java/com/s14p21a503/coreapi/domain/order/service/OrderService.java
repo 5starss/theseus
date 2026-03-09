@@ -120,8 +120,8 @@ public class OrderService {
 
         // 1. 대기 탭 검색이거나 전체 보기일 때 작동
         if ("PENDING".equals(filter) || "ALL".equals(filter)) {
-            // 대기 쿼리: Order 테이블 기준으로 OPEN, PARTIAL 만 검색하고 과거순(최신 요청순)으로 뽑아옵니다.
-            List<OrderStatus> statuses = Arrays.asList(OrderStatus.OPEN, OrderStatus.PARTIAL);
+            // 대기 쿼리: Order 테이블 기준으로 OPEN, PARTIAL, PENDING_CANCEL 만 검색하고 과거순(최신 요청순)으로 뽑아옵니다.
+            List<OrderStatus> statuses = Arrays.asList(OrderStatus.OPEN, OrderStatus.PARTIAL, OrderStatus.PENDING_CANCEL);
             Page<Order> orderPage = orderRepository.searchOrdersByConditions(
                     userId, true, statuses, ticker, startDate, endDate, pageable);
             pendingPage = PageResponseDto.from(orderPage.map(PendingOrderDto::from));
@@ -144,7 +144,7 @@ public class OrderService {
 
     @Transactional
     public void cancelOrder(Long userId, Long orderId) {
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
 
         if (!order.getUserId().equals(userId)) {
@@ -158,7 +158,7 @@ public class OrderService {
         // 1. 상태를 취소 대기(PENDING_CANCEL)로만 변경
         order.pendingCancel();
 
-        // 2. 이벤트 발행
+        // 2. Outbox 이벤트 발행
         try {
             OrderEventDto eventDto = OrderEventDto.from(order, "CANCEL");
             String payloadJson = objectMapper.writeValueAsString(eventDto);

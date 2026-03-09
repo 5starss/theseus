@@ -1,6 +1,7 @@
 package com.s14p21a503.coreapi.domain.order.dto;
 
 import com.s14p21a503.coreapi.domain.order.entity.Order;
+import com.s14p21a503.coreapi.domain.order.entity.OrderStatus;
 import com.s14p21a503.coreapi.domain.order.entity.OrderType;
 import com.s14p21a503.coreapi.domain.order.entity.PriceType;
 import lombok.Builder;
@@ -16,6 +17,7 @@ public class OrderDetailResponseDto {
     private String companyName;
     private String ticker;
     private OrderType orderType;
+    private OrderStatus status;
     private PriceType priceType;
     private BigDecimal pricePerShare;
     private Integer orderQuantity;
@@ -31,6 +33,7 @@ public class OrderDetailResponseDto {
                 .companyName(companyName)
                 .ticker(order.getTicker())
                 .orderType(order.getOrderType())
+                .status(order.getStatus())
                 .priceType(order.getPriceType())
                 .pricePerShare(order.getPrice())
                 .orderQuantity(order.getRequestedQuantity())

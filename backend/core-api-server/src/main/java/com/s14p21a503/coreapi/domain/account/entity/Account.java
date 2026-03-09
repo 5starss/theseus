@@ -1,16 +1,18 @@
 package com.s14p21a503.coreapi.domain.account.entity;
 
 import com.s14p21a503.coreapi.common.entity.BaseEntity;
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
-import com.s14p21a503.coreapi.common.exception.CustomException;
-import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 
+@Slf4j
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -48,5 +50,31 @@ public class Account extends BaseEntity {
         }
         this.lockedAmt = this.lockedAmt.add(amount);
         this.availableAmt = this.availableAmt.subtract(amount);
+    }
+
+    public void unlockBalance(BigDecimal amount) {
+        if (this.lockedAmt.compareTo(amount) < 0) {
+            log.error("lockedAmt 불일치 감지 - lockedAmt: {}, unlockAmount: {}", this.lockedAmt, amount);
+        }
+        this.lockedAmt = this.lockedAmt.subtract(amount);
+        this.availableAmt = this.availableAmt.add(amount);
+    }
+
+    public void settleBuy(BigDecimal executionPrice, int quantity, BigDecimal orderedPrice) {
+        BigDecimal actualCost  = executionPrice.multiply(BigDecimal.valueOf(quantity));
+        BigDecimal orderedCost = orderedPrice.multiply(BigDecimal.valueOf(quantity));
+        BigDecimal refund      = orderedCost.subtract(actualCost); // 지정가 > 체결가일 때 환급
+
+        this.dncaTotAmt   = this.dncaTotAmt.subtract(actualCost);
+        this.lockedAmt    = this.lockedAmt.subtract(orderedCost);
+        this.availableAmt = this.availableAmt.add(refund);
+    }
+
+    public void settleSell(BigDecimal executionPrice, int quantity) {
+        BigDecimal proceeds = executionPrice.multiply(BigDecimal.valueOf(quantity));
+
+        this.dncaTotAmt   = this.dncaTotAmt.add(proceeds);
+        this.availableAmt = this.availableAmt.add(proceeds);
+        // lockedAmt 변동 없음 - 매도는 주식 수량만 잠금, 금액 잠금 없음
     }
 }
