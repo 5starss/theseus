@@ -23,7 +23,7 @@ func newTestService(t *testing.T) (*StockService, *repository.StockRepository, *
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	repo := repository.NewStockRepository(rdb, nil)
-	return NewStockService(repo, nil), repo, mr
+	return NewStockService(repo), repo, mr
 }
 
 func seedCandleCache(t *testing.T, mr *miniredis.Miniredis, ticker, interval string, candles []domain.Candle) {

@@ -32,7 +32,8 @@ type WSClient struct {
 	MessageChan chan []byte
 
 	connected    bool
-	noReconnect  bool               // "ALREADY IN USE" 등 재연결 불가 에러 수신 시 true
+	noReconnect  bool                // "ALREADY IN USE" 등 재연결 불가 에러 수신 시 true
+	reconnecting bool                // autoReconnect 중복 실행 방지
 	subscribers  map[string]struct{} // reconnect 시 재구독용 저장소
 	subMu        sync.RWMutex
 }
@@ -90,7 +91,8 @@ func (w *WSClient) GetApprovalKey(ctx context.Context) error {
 	return nil
 }
 
-// Connect WebSocket 서버에 연결하고 수신 루프를 시작한다.
+// Connect WebSocket 서버에 단일 연결하고 수신 루프를 시작한다.
+// 체결가(H0STCNT0)와 호가(H0STASP0)를 하나의 커넥션에서 모두 처리한다.
 func (w *WSClient) Connect(ctx context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -99,16 +101,13 @@ func (w *WSClient) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	dialer := websocket.DefaultDialer
-	conn, _, err := dialer.DialContext(ctx, w.cfg.WSURL, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, w.cfg.WSURL, nil)
 	if err != nil {
 		return fmt.Errorf("websocket dial: %w", err)
 	}
-
 	w.conn = conn
 	w.connected = true
 
-	// 수신 루프 실행 (Backpressure 처리된 채널로 데이터 푸시)
 	go w.readPump(ctx)
 
 	log.Printf("Connected to KIS WebSocket: %s", w.cfg.WSURL)
@@ -117,22 +116,30 @@ func (w *WSClient) Connect(ctx context.Context) error {
 
 // readPump KIS로부터 들어오는 메시지를 지속적으로 읽어 MessageChan으로 전달한다.
 func (w *WSClient) readPump(ctx context.Context) {
+	var rawCount int64
+	defer func() {
+		log.Printf("readPump exiting. total raw messages received: %d", rawCount)
+	}()
 	defer func() {
 		w.mu.Lock()
 		w.connected = false
 		if w.conn != nil {
 			w.conn.Close()
+			w.conn = nil
 		}
 		noReconnect := w.noReconnect
+		// 중복 autoReconnect 방지
+		if !w.reconnecting && !noReconnect {
+			w.reconnecting = true
+		} else {
+			noReconnect = true // 이미 재연결 중이거나 불가 상태면 스킵
+		}
 		w.mu.Unlock()
 
-		// "ALREADY IN USE" 등 복구 불가 에러 시 재연결 금지
 		if noReconnect {
-			log.Println("KIS WS: 재연결 중단 (복구 불가 에러)")
+			log.Printf("KIS WS: 재연결 중단 (복구 불가 에러 또는 이미 재연결 중)")
 			return
 		}
-
-		// 연결이 끊어지면 자동 재연결 시도
 		go w.autoReconnect(ctx)
 	}()
 
@@ -141,10 +148,14 @@ func (w *WSClient) readPump(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			if !w.connected || w.conn == nil {
+			w.mu.Lock()
+			conn := w.conn
+			w.mu.Unlock()
+			if conn == nil {
 				return
 			}
-			_, msg, err := w.conn.ReadMessage()
+
+			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				log.Printf("KIS WS Read Error: %v", err)
 				return // defer 블록 실행 -> 재연결 시도
@@ -153,7 +164,7 @@ func (w *WSClient) readPump(ctx context.Context) {
 			// KIS Ping 메시지 ("PINGPONG") 처리 — Pong 응답 전송
 			if string(msg) == "PINGPONG" {
 				w.mu.Lock()
-				w.conn.WriteMessage(websocket.TextMessage, []byte("PINGPONG"))
+				conn.WriteMessage(websocket.TextMessage, []byte("PINGPONG"))
 				w.mu.Unlock()
 				continue
 			}
@@ -162,9 +173,9 @@ func (w *WSClient) readPump(ctx context.Context) {
 			if len(msg) > 0 && msg[0] == '{' {
 				var ctrl struct {
 					Body struct {
-						RtCd string `json:"rt_cd"`
+						RtCd  string `json:"rt_cd"`
 						MsgCd string `json:"msg_cd"`
-						Msg1 string `json:"msg1"`
+						Msg1  string `json:"msg1"`
 					} `json:"body"`
 				}
 				if err := json.Unmarshal(msg, &ctrl); err == nil {
@@ -181,7 +192,12 @@ func (w *WSClient) readPump(ctx context.Context) {
 			}
 
 			// 수신된 Raw 데이터를 파서(Worker)가 처리할 수 있도록 버퍼드 채널로 비동기 전송
-			// 채널이 꽉 찼을 경우에만 여기서 대기(Blocking)가 발생하여 배압이 걸림 (5000 넉넉하게 잡음)
+			rawCount++
+			preview := msg
+			if len(preview) > 200 {
+				preview = preview[:200]
+			}
+			log.Printf("[KIS RAW #%d] %d bytes (chan=%d) | %s", rawCount, len(msg), len(w.MessageChan), preview)
 			select {
 			case <-ctx.Done():
 				return
@@ -193,6 +209,12 @@ func (w *WSClient) readPump(ctx context.Context) {
 
 // autoReconnect 지수 백오프 기반의 자동 재연결 및 기존 구독 복구 로직
 func (w *WSClient) autoReconnect(ctx context.Context) {
+	defer func() {
+		w.mu.Lock()
+		w.reconnecting = false
+		w.mu.Unlock()
+	}()
+
 	backoff := 500 * time.Millisecond
 	maxBackoff := 30 * time.Second
 
@@ -203,41 +225,46 @@ func (w *WSClient) autoReconnect(ctx context.Context) {
 		case <-time.After(backoff):
 			log.Printf("Attempting KIS WS Reconnection...")
 
-			// 1. AppKey/Secret을 이용한 ApprovalKey가 만료되었을 수 있으므로 재발급
+			// 1. ApprovalKey 재발급 (만료 가능성 있음)
 			if err := w.GetApprovalKey(ctx); err != nil {
 				log.Printf("Reconnect Approval Key Re-Fetch Error: %v", err)
-			} else {
-				// 2. 소켓 연결 시도
-				if err := w.Connect(ctx); err == nil {
-					log.Println("KIS WS Reconnected successfully.")
-
-					// 3. 기존에 구독 중이던 종목들 다시 Subscribe 요청
-					// RLock 해제 후 Subscribe 호출 — Subscribe 내부에서 subMu.Lock() 을 획득하므로
-					// RLock 보유 중 호출 시 데드락 발생
-					w.subMu.RLock()
-					tickers := make([]string, 0, len(w.subscribers))
-					for ticker := range w.subscribers {
-						tickers = append(tickers, ticker)
-					}
-					w.subMu.RUnlock()
-
-					for _, ticker := range tickers {
-						w.Subscribe(ctx, ticker)
-					}
-					return
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
 				}
+				continue
 			}
 
-			// 지수 백오프 적용
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+			// 2. 소켓 연결 시도
+			if err := w.Connect(ctx); err != nil {
+				log.Printf("Reconnect Connect Error: %v", err)
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				continue
 			}
+
+			log.Println("KIS WS Reconnected successfully.")
+
+			// 3. 기존에 구독 중이던 종목들 다시 Subscribe 요청
+			w.subMu.RLock()
+			tickers := make([]string, 0, len(w.subscribers))
+			for ticker := range w.subscribers {
+				tickers = append(tickers, ticker)
+			}
+			w.subMu.RUnlock()
+
+			for _, ticker := range tickers {
+				w.Subscribe(ctx, ticker)
+			}
+			return
 		}
 	}
 }
 
 // Subscribe 종목(ticker)에 대한 체결가/호가 실시간 수신을 KIS 서버에 요청한다.
+// 단일 연결에 H0STCNT0, H0STASP0 모두 구독한다.
 func (w *WSClient) Subscribe(ctx context.Context, ticker string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -246,11 +273,7 @@ func (w *WSClient) Subscribe(ctx context.Context, ticker string) error {
 		return fmt.Errorf("websocket is not connected")
 	}
 
-	// KIS WS 메시지 포맷 (tr_id: H0STCNT0 = 체결가, H0STASP0 = 호가)
-	// 본 프로젝트는 호가와 체결가 두 가지 모두가 필요함
-	trIds := []string{"H0STCNT0", "H0STASP0"}
-
-	for _, trId := range trIds {
+	for _, trId := range []string{"H0STCNT0", "H0STASP0"} {
 		subMsg := map[string]interface{}{
 			"header": map[string]string{
 				"approval_key": w.approvalKey,
@@ -261,11 +284,10 @@ func (w *WSClient) Subscribe(ctx context.Context, ticker string) error {
 			"body": map[string]interface{}{
 				"input": map[string]string{
 					"tr_id":  trId,
-					"tr_key": ticker, // 종목코드
+					"tr_key": ticker,
 				},
 			},
 		}
-
 		if err := w.conn.WriteJSON(subMsg); err != nil {
 			return fmt.Errorf("write subscribe err for %s (%s): %w", ticker, trId, err)
 		}
@@ -275,7 +297,7 @@ func (w *WSClient) Subscribe(ctx context.Context, ticker string) error {
 	w.subscribers[ticker] = struct{}{}
 	w.subMu.Unlock()
 
-	log.Printf("Subscribed to KIS WS for Ticker: %s", ticker)
+	log.Printf("Subscribed to KIS WS (Tick & Orderbook) for Ticker: %s", ticker)
 	return nil
 }
 
@@ -287,5 +309,6 @@ func (w *WSClient) Close() {
 	if w.conn != nil {
 		w.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		w.conn.Close()
+		w.conn = nil
 	}
 }

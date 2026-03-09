@@ -4,10 +4,11 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
 	"market-server/internal/domain"
 	"market-server/internal/service"
 	"market-server/pkg/response"
+
+	"github.com/gin-gonic/gin"
 )
 
 type StockHandler struct {
@@ -20,7 +21,7 @@ func NewStockHandler(svc *service.StockService) *StockHandler {
 
 // GetStockList GET /api/v1/stocks
 // 쿼리 파라미터:
-//   - limit    : 조회 개수 (1~100, 기본값 50)
+//   - limit    : 조회 개수 (1~100, 기본값 40)
 //   - rankType : 순위 기준 (VOLUME, 기본값 VOLUME)
 func (h *StockHandler) GetStockList(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "40")
