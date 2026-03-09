@@ -2,12 +2,12 @@ import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
 
 export interface StockRowProps {
-    code: string;
+    ticker: string;
     rank: number;
     name: string;
-    price: number;
+    currentPrice: number;
     changeRate: number;
-    volume: number; // 단위: 억
+    accVolume: number;
     buyRatio: number;
     sellRatio: number;
 }
@@ -24,13 +24,26 @@ const getStockIcon = (name: string) => {
     return colors[name.length % colors.length];
 };
 
+const formatTradeAmount = (value: number) => {
+    if (value >= 1000000000000) {
+        return `${(value / 1000000000000).toFixed(1).replace('.0', '')}조`;
+    }
+    if (value >= 100000000) {
+        return `${Math.floor(value / 100000000).toLocaleString()}억`;
+    }
+    if (value >= 10000) {
+        return `${Math.floor(value / 10000).toLocaleString()}만`;
+    }
+    return `${value.toLocaleString()}`;
+};
+
 const StockRow: React.FC<StockRowProps> = ({
-    code,
+    ticker,
     rank,
     name,
-    price,
+    currentPrice,
     changeRate,
-    volume,
+    accVolume,
     buyRatio,
     sellRatio,
 }) => {
@@ -39,42 +52,50 @@ const StockRow: React.FC<StockRowProps> = ({
     const changeSign = isPositive ? '+' : '';
 
     return (
-        <Link to={`/stock/${code}`} className="bg-transparent flex h-[55px] items-center justify-between px-[18px] w-full shrink-0 block">
+        <Link to={`/stock/${ticker}`} className="bg-transparent flex h-[55px] items-center px-[18px] w-full min-w-[776px]">
             {/* Rank */}
             <div className="w-[60px] shrink-0">
                 <span className="text-[16px] text-black font-normal">{rank}</span>
             </div>
 
             {/* Name and Icon */}
-            <div className="flex items-center gap-[10px] w-[311px] shrink-0">
+            <div className="flex items-center gap-[10px] w-[220px] shrink-0">
                 <div className={`rounded-full size-[26px] shrink-0 ${getStockIcon(name)}`}></div>
-                <span className="text-[16px] text-black font-normal">{name}</span>
+                <span className="text-[16px] text-black font-normal truncate">{name}</span>
             </div>
 
+            {/* Flexible shrinking spacer */}
+            <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+
             {/* Price */}
-            <div className="w-[120px] shrink-0 text-right">
+            <div className="w-[110px] shrink-0 text-right">
                 <span className="text-[16px] text-black font-normal">
-                    {price.toLocaleString()}원
+                    {currentPrice.toLocaleString()}원
                 </span>
             </div>
 
+            {/* Flexible shrinking spacer */}
+            <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+
             {/* Change Rate */}
-            <div className="w-[120px] shrink-0 text-right">
+            <div className="w-[110px] shrink-0 text-right">
                 <span className={`text-[16px] font-normal ${changeColor}`}>
                     {changeSign}{changeRate.toFixed(2)}%
                 </span>
             </div>
 
-            {/* Space for layout matching Figma */}
-            <div className="w-[60px] shrink-0"></div>
+            {/* Flexible shrinking spacer */}
+            <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
 
             {/* Volume */}
-            <div className="w-[194px] shrink-0">
-                <span className="text-[16px] text-black font-normal">{volume.toLocaleString()}억</span>
+            <div className="w-[130px] shrink-0 text-right">
+                <span className="text-[16px] text-black font-normal">
+                    {formatTradeAmount(accVolume * currentPrice)}원
+                </span>
             </div>
 
-            {/* Space for layout matching Figma */}
-            <div className="flex-1 shrink-0"></div>
+            {/* Flexible Spacer to push Buy/Sell Ratio to the right */}
+            <div className="flex-1 min-w-[20px]"></div>
 
             {/* Buy/Sell Ratio */}
             <div className="w-[116px] shrink-0 flex flex-col items-start justify-center gap-[4px]">
@@ -100,10 +121,10 @@ const StockRow: React.FC<StockRowProps> = ({
 export default memo(StockRow, (prev, next) => {
     // 가격, 등락률, 순위, 거래량, 매수/매도 비율이 모두 동일하면 리렌더링 방지
     return (
-        prev.price === next.price &&
+        prev.currentPrice === next.currentPrice &&
         prev.changeRate === next.changeRate &&
         prev.rank === next.rank &&
-        prev.volume === next.volume &&
+        prev.accVolume === next.accVolume &&
         prev.buyRatio === next.buyRatio &&
         prev.sellRatio === next.sellRatio
     );

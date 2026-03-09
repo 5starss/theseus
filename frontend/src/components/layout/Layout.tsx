@@ -8,7 +8,7 @@ export default function Layout() {
             <Header />
 
             {/* 메인 컨텐츠(너비 최대로) */}
-            <main className="flex-1 w-full flex overflow-hidden">
+            <main className="flex-1 w-full flex flex-col overflow-hidden min-h-0">
                 <Outlet />
             </main>
         </div>
