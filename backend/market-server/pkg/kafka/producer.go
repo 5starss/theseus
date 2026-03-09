@@ -28,7 +28,7 @@ func NewProducer(cfg config.KafkaConfig) *Producer {
 		writers[topic] = &kafka.Writer{
 			Addr:                   kafka.TCP(cfg.Brokers...),
 			Topic:                  topic,
-			Balancer:               &kafka.LeastBytes{},
+			Balancer:               &kafka.Hash{}, // Key(Ticker) 해시 기반 파티셔닝으로 순서 보장
 			AllowAutoTopicCreation: true,
 			Async:                  true, // 비동기 전송 처리
 		}
@@ -43,17 +43,17 @@ func NewProducer(cfg config.KafkaConfig) *Producer {
 }
 
 // PublishTick 체결가(Tick) 데이터를 Kafka에 발행한다.
-func (p *Producer) PublishTick(ctx context.Context, payload interface{}) error {
-	return p.publish(ctx, p.cfg.TickTopic, payload)
+func (p *Producer) PublishTick(ctx context.Context, payload interface{}, ticker string) error {
+	return p.publish(ctx, p.cfg.TickTopic, payload, ticker)
 }
 
 // PublishOrderbook 호가(Orderbook) 데이터를 Kafka에 발행한다.
-func (p *Producer) PublishOrderbook(ctx context.Context, payload interface{}) error {
-	return p.publish(ctx, p.cfg.OrderbookTopic, payload)
+func (p *Producer) PublishOrderbook(ctx context.Context, payload interface{}, ticker string) error {
+	return p.publish(ctx, p.cfg.OrderbookTopic, payload, ticker)
 }
 
 // publish 내부 공통 발행 로직
-func (p *Producer) publish(ctx context.Context, topic string, payload interface{}) error {
+func (p *Producer) publish(ctx context.Context, topic string, payload interface{}, key string) error {
 	writer, exists := p.writers[topic]
 	if !exists {
 		return fmt.Errorf("kafka writer for topic %s not found", topic)
@@ -65,6 +65,7 @@ func (p *Producer) publish(ctx context.Context, topic string, payload interface{
 	}
 
 	msg := kafka.Message{
+		Key:   []byte(key), // 파티션 분배 및 시간 순서 보장을 위한 핵심 키
 		Value: data,
 	}
 

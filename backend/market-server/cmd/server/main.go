@@ -58,6 +58,12 @@ func main() {
 	dataWorker := worker.NewMarketDataWorker(wsClient, kafkaProducer, redisClient)
 	dataWorker.Start(ctx, 5)
 
+	// Streamer 구동 (Kafka -> WSHub 단건 브로드캐스트 전송)
+	// cmd/server/main.go 에는 WSHub가 없으므로 nil을 넘기거나, 테스트용 모의 WSHub를 넣어야 함.
+	// 실제 스트리밍 서빙은 API 게이트웨이(WSHub가 있는 곳)에서 이루어지기 때문에
+	// 여기서는 단순히 Pipeline 테스트용 Consumer만 돌려보거나 생략할 수 있음.
+	// (API 명세서의 목적대로 cmd/api 에만 집중하기 위해 cmd/server 에서는 Streamer 제외)
+
 	// 7. 실시간 데이터 구독 (Top 40 종목 동적 할당)
 	tickers := worker.GetTop40Tickers()
 	for _, t := range tickers {

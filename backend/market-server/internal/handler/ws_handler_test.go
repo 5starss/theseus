@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -20,8 +21,14 @@ import (
 // dialWS는 테스트 서버에 WebSocket 클라이언트를 연결한다.
 func dialWS(t *testing.T, ts *httptest.Server) *websocket.Conn {
 	t.Helper()
+	return dialWSWithHeader(t, ts, nil)
+}
+
+// dialWSWithHeader는 커스텀 헤더로 WebSocket 클라이언트를 연결한다.
+func dialWSWithHeader(t *testing.T, ts *httptest.Server, header http.Header) *websocket.Conn {
+	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/stocks/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		t.Fatalf("WebSocket 연결 실패: %v", err)
 	}
@@ -160,12 +167,11 @@ func TestWSSubscribe_HOME_40_EmptyRedis(t *testing.T) {
 	}
 }
 
-// TestWSSubscribe_ORDERBOOK ORDERBOOK 토픽 구독 시 즉시 스냅샷을 받지는 않지만 구독 처리가 오류 없이 되어야 한다.
-// (Phase 4: ORDERBOOK 실시간 push는 KIS WS 연동 시 동작, 현재는 구독 등록만 테스트)
-func TestWSSubscribe_ORDERBOOK(t *testing.T) {
+// TestWSSubscribe_ORDERBOOK_Unauthorized 비로그인 클라이언트가 ORDERBOOK 구독 시 ERROR 메시지를 수신해야 한다.
+func TestWSSubscribe_ORDERBOOK_Unauthorized(t *testing.T) {
 	ts, _, _, _ := newFullWSEnv(t)
 
-	conn := dialWS(t, ts)
+	conn := dialWS(t, ts) // X-USER-ID 헤더 없음 → client.ID = ""
 
 	subMsg, _ := json.Marshal(map[string]string{
 		"action": "SUBSCRIBE",
@@ -176,15 +182,56 @@ func TestWSSubscribe_ORDERBOOK(t *testing.T) {
 		t.Fatalf("ORDERBOOK SUBSCRIBE 전송 실패: %v", err)
 	}
 
-	// ORDERBOOK은 push 브로드캐스터가 없으므로 즉시 데이터는 없다
-	// 연결이 끊기지 않고 살아있는지만 확인
+	// 비인가 클라이언트는 즉시 ERROR 메시지를 받아야 한다
 	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-	_, _, err := conn.ReadMessage()
+	_, data, err := conn.ReadMessage()
 	if err != nil {
-		// deadline 초과(timeout)은 정상 — 연결은 유지되고 있다는 뜻
-		if !strings.Contains(err.Error(), "timeout") && !strings.Contains(err.Error(), "deadline") {
-			t.Errorf("예상치 못한 오류: %v", err)
-		}
+		t.Fatalf("ERROR 메시지 수신 실패 (인증 거절 응답이 없음): %v", err)
+	}
+
+	var msg map[string]interface{}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		t.Fatalf("메시지 파싱 실패: %v", err)
+	}
+	if msg["topic"] != "ERROR" {
+		t.Errorf("ERROR 메시지를 기대했지만 topic=%v 수신", msg["topic"])
+	}
+	if _, ok := msg["data"]; !ok {
+		t.Error("ERROR 메시지에 data 필드 없음")
+	}
+}
+
+// TestWSSubscribe_ORDERBOOK_Authorized 로그인 클라이언트가 ORDERBOOK 구독 후 Broadcast 메시지를 수신해야 한다.
+func TestWSSubscribe_ORDERBOOK_Authorized(t *testing.T) {
+	ts, hub, _, _ := newFullWSEnv(t)
+
+	// X-USER-ID 헤더로 인증된 클라이언트 연결
+	header := http.Header{}
+	header.Set("X-USER-ID", "user-123")
+	conn := dialWSWithHeader(t, ts, header)
+
+	subMsg, _ := json.Marshal(map[string]string{
+		"action": "SUBSCRIBE",
+		"topic":  "ORDERBOOK",
+		"ticker": "005930",
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, subMsg); err != nil {
+		t.Fatalf("ORDERBOOK SUBSCRIBE 전송 실패: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond) // 구독 등록 대기
+
+	// 직접 브로드캐스트로 메시지 전달 검증
+	testPayload := []byte(`{"topic":"ORDERBOOK","data":{"ticker":"005930"}}`)
+	hub.Broadcast("ORDERBOOK:005930", testPayload)
+
+	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("인증된 클라이언트 ORDERBOOK 수신 실패: %v", err)
+	}
+	if !strings.Contains(string(data), "ORDERBOOK") {
+		t.Errorf("예상치 못한 메시지: %s", data)
 	}
 }
 
@@ -307,6 +354,42 @@ func TestWSBatchInterval(t *testing.T) {
 	if interval < 300*time.Millisecond || interval > 700*time.Millisecond {
 		t.Errorf("배치 간격이 비정상: %v (기대: 300ms~700ms)", interval)
 	}
+}
+
+// ─── Broadcast 단위 테스트 ────────────────────────────────────────────────────
+
+// TestWSHub_Broadcast_SendsToSubscriber Broadcast가 구독 중인 클라이언트에게 페이로드를 정확히 전달하는지 확인한다.
+func TestWSHub_Broadcast_SendsToSubscriber(t *testing.T) {
+	ts, hub, _, _ := newFullWSEnv(t)
+
+	conn := dialWS(t, ts)
+
+	subMsg, _ := json.Marshal(map[string]string{
+		"action": "SUBSCRIBE",
+		"topic":  "TICK",
+		"ticker": "005930",
+	})
+	conn.WriteMessage(websocket.TextMessage, subMsg)
+	time.Sleep(50 * time.Millisecond) // 구독 등록 대기
+
+	testPayload := []byte(`{"topic":"TICK","data":{"ticker":"005930","price":80000}}`)
+	hub.Broadcast("TICK:005930", testPayload)
+
+	conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("Broadcast 메시지 수신 실패: %v", err)
+	}
+	if string(data) != string(testPayload) {
+		t.Errorf("페이로드 불일치:\n  got:  %s\n  want: %s", data, testPayload)
+	}
+}
+
+// TestWSHub_Broadcast_NoSubscribers_NoPanic 구독자 없는 토픽에 Broadcast해도 패닉이 없어야 한다.
+func TestWSHub_Broadcast_NoSubscribers_NoPanic(t *testing.T) {
+	_, hub, _, _ := newFullWSEnv(t)
+	// 패닉 없이 조용히 종료해야 함
+	hub.Broadcast("TICK:NONEXISTENT", []byte(`{"topic":"TICK"}`))
 }
 
 // ─── 다중 클라이언트 테스트 ────────────────────────────────────────────────────

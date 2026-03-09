@@ -7,8 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"market-server/internal/domain"
+
+	"github.com/gorilla/websocket"
 )
 
 type WsAction string
@@ -88,7 +89,7 @@ func (h *WSHub) Run(ctx context.Context) {
 			count := len(h.clients)
 			h.mu.Unlock()
 			log.Printf("[WSHub] 클라이언트 연결 해제됨. 총 클라이언트 수: %d", count)
-			
+
 		case <-ctx.Done():
 			log.Println("[WSHub] Hub 종료됨")
 			return
@@ -119,13 +120,13 @@ func (h *WSHub) HandleMessage(client *WsClient, msgData []byte) {
 			"topic": "ERROR",
 			"data":  "호가창은 로그인이 필요한 서비스입니다.",
 		})
-		
+
 		// 비동기 채널 전송
 		select {
 		case client.Send <- errMsg:
 		default:
 		}
-		
+
 		return // 구독 무시
 	}
 
@@ -151,7 +152,28 @@ func (h *WSHub) HandleMessage(client *WsClient, msgData []byte) {
 	}
 }
 
+// Broadcast 특정 토픽을 구독하는 모든 클라이언트에게 단건 메시지를 전송한다.
+func (h *WSHub) Broadcast(topicKey string, data []byte) {
+	h.mu.RLock()
+	clients, ok := h.subClients[topicKey]
+	h.mu.RUnlock()
 
+	if !ok || len(clients) == 0 {
+		return // 구독자가 없으면 전송 취소
+	}
+
+	// 구독 중인 클라이언트들에게 비동기로 전송
+	h.mu.RLock()
+	for client := range clients {
+		select {
+		case client.Send <- append([]byte(nil), data...):
+		default:
+			// 버퍼 꽉 참 (클라이언트가 너무 느린 경우 메시지 드롭)
+			log.Printf("[WSHub] %s 브로드캐스트 전송 실패 (버퍼 꽉참) - Client %p", topicKey, client)
+		}
+	}
+	h.mu.RUnlock()
+}
 
 func (h *WSHub) broadcaster_HOME_40(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond) // 0.5초 배치

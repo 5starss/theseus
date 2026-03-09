@@ -69,8 +69,8 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 			tick := parsedData.(Tick)
 			log.Printf("[KIS TICK #%d] Worker=%d ticker=%s name=%s price=%.0f rate=%.2f%% vol=%d",
 				msgCount, id, tick.Ticker, tick.Name, tick.CurrentPrice, tick.ChangeRate, tick.AccVolume)
-			// Kafka 푸시
-			w.kafka.PublishTick(context.Background(), tick) // worker graceful shutdown 독립 실행 위해 Background
+			// Kafka 푸시 (Ticker를 파티션 Key로 사용)
+			w.kafka.PublishTick(context.Background(), tick, tick.Ticker) // worker graceful shutdown 독립 실행 위해 Background
 			// Redis 반영
 			w.updateTickToRedis(context.Background(), tick)
 
@@ -78,7 +78,7 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 			ob := parsedData.(Orderbook)
 			log.Printf("[KIS ORDERBOOK #%d] Worker=%d ticker=%s name=%s ask=%.0f bid=%.0f",
 				msgCount, id, ob.Ticker, ob.Name, ob.AskPrice1, ob.BidPrice1)
-			w.kafka.PublishOrderbook(context.Background(), ob)
+			w.kafka.PublishOrderbook(context.Background(), ob, ob.Ticker)
 			w.updateOrderbookToRedis(context.Background(), ob)
 		}
 	}
