@@ -41,6 +41,8 @@ func (w *MarketDataWorker) Start(ctx context.Context, workerCount int) {
 func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 	defer w.wg.Done()
 
+	var msgCount int64
+
 	// 백그라운드 반복 루프
 	// context가 취소되더라도(chan <-ctx.Done), 채널에 남아있는(Drain) 메시지를 전부 처리하고 종료해야 한다.
 	// 따라서 for range 채널 방식을 사용하여 채널이 close 될 때까지 계속 읽도록 한다.
@@ -50,18 +52,23 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 		// 1. 파싱
 		parsedData, dataType, err := parseKISMessage(rawStr)
 		if err != nil {
-			log.Printf("Worker %d parse error: %v", id, err)
+			log.Printf("[Worker %d] parse error: %v | raw: %.100s", id, err, rawStr)
 			continue
 		}
 
 		if parsedData == nil {
-			continue // pingpong 등 무시 가능한 데이터
+			log.Printf("[Worker %d] ignored message (ping/control): %.100s", id, rawStr)
+			continue
 		}
+
+		msgCount++
 
 		// 2. Kafka 및 Redis 반영
 		switch dataType {
 		case "tick":
 			tick := parsedData.(Tick)
+			log.Printf("[KIS TICK #%d] Worker=%d ticker=%s name=%s price=%.0f rate=%.2f%% vol=%d",
+				msgCount, id, tick.Ticker, tick.Name, tick.CurrentPrice, tick.ChangeRate, tick.AccVolume)
 			// Kafka 푸시
 			w.kafka.PublishTick(context.Background(), tick) // worker graceful shutdown 독립 실행 위해 Background
 			// Redis 반영
@@ -69,11 +76,13 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 
 		case "orderbook":
 			ob := parsedData.(Orderbook)
+			log.Printf("[KIS ORDERBOOK #%d] Worker=%d ticker=%s name=%s ask=%.0f bid=%.0f",
+				msgCount, id, ob.Ticker, ob.Name, ob.AskPrice1, ob.BidPrice1)
 			w.kafka.PublishOrderbook(context.Background(), ob)
 			w.updateOrderbookToRedis(context.Background(), ob)
 		}
 	}
-	log.Printf("Worker %d stopped cleanly (channel drained)", id)
+	log.Printf("Worker %d stopped cleanly (channel drained), total processed: %d", id, msgCount)
 }
 
 // updateTickToRedis 체결가 데이터를 레디스에 저장하고 랭킹을 업데이트한다 (Redis Pipeline).

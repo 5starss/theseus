@@ -41,7 +41,7 @@ func newFullWSEnv(t *testing.T) (*httptest.Server, *service.WSHub, *miniredis.Mi
 
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	repo := repository.NewStockRepository(rdb, nil)
-	svc := service.NewStockService(repo, nil)
+	svc := service.NewStockService(repo)
 
 	hub := service.NewWSHub(svc)
 	ctx, cancel := context.WithCancel(context.Background())

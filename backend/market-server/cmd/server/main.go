@@ -37,9 +37,7 @@ func main() {
 
 	kafkaProducer := kafka.NewProducer(cfg.Kafka)
 
-	// 3. KIS 클라이언트 (REST 및 WS) 초기화
-	// kisClient := kis.NewClient(cfg.KIS) // REST 필요시 사용 (현재 토큰 처리용)
-
+	// 3. KIS WS 클라이언트 초기화
 	wsClient := kis.NewWSClient(cfg.KIS)
 
 	// 서버 구동 시그널 수신용 컨텍스트 (Graceful Shutdown)

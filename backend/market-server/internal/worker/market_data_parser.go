@@ -76,8 +76,8 @@ func parseKISMessage(rawText string) (interface{}, string, error) {
 		ticker := bodyParts[0]
 		askP1, _ := strconv.ParseFloat(bodyParts[3], 64)
 		askV1, _ := strconv.ParseInt(bodyParts[23], 10, 64)
-		bidP1, _ := strconv.ParseFloat(bodyParts[4], 64)
-		bidV1, _ := strconv.ParseInt(bodyParts[24], 10, 64)
+		bidP1, _ := strconv.ParseFloat(bodyParts[13], 64)   // 매수호가1
+		bidV1, _ := strconv.ParseInt(bodyParts[33], 10, 64) // 매수호량1
 
 		return Orderbook{
 			Ticker:     ticker,

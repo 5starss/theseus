@@ -14,7 +14,7 @@ type KISConfig struct {
 	AppKey    string
 	AppSecret string
 	BaseURL   string
-	WSURL     string
+	WSURL     string // 체결가/호가 모두 단일 연결로 처리
 }
 
 // MySQLConfig MySQL 연결 설정
@@ -65,7 +65,7 @@ func Load() *Config {
 			AppKey:    os.Getenv("KIS_APP_KEY"),
 			AppSecret: os.Getenv("KIS_APP_SECRET"),
 			BaseURL:   getEnvOrDefault("KIS_BASE_URL", "https://openapivts.koreainvestment.com:29443"),
-			WSURL:     getEnvOrDefault("KIS_WS_URL", "ws://ops.koreainvestment.com:31000"),
+			WSURL:     getEnvOrDefault("KIS_WS_URL", "ws://ops.koreainvestment.com:31000/tryitout/H0STCNT0"),
 		},
 		Server: ServerConfig{
 			Port: getEnvOrDefault("SERVER_PORT", "8085"),

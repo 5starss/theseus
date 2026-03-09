@@ -35,7 +35,7 @@ func newTestComponents(t *testing.T) (*StockHandler, *repository.StockRepository
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	repo := repository.NewStockRepository(rdb, nil)
-	svc := service.NewStockService(repo, nil)
+	svc := service.NewStockService(repo)
 	return NewStockHandler(svc), repo, mr
 }
 
