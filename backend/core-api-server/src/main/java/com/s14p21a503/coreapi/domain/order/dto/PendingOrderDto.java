@@ -1,6 +1,7 @@
 package com.s14p21a503.coreapi.domain.order.dto;
 
 import com.s14p21a503.coreapi.domain.order.entity.Order;
+import com.s14p21a503.coreapi.domain.order.entity.OrderStatus;
 import com.s14p21a503.coreapi.domain.order.entity.OrderType;
 import lombok.Builder;
 import lombok.Getter;
@@ -15,6 +16,7 @@ public class PendingOrderDto {
     private String ticker;
     private String companyName;
     private OrderType orderType;
+    private OrderStatus status;
     private BigDecimal totalPrice;
     private Integer unexecutedQuantity;
     private LocalDateTime createdAt;
@@ -28,6 +30,7 @@ public class PendingOrderDto {
                 .ticker(order.getTicker())
                 .companyName(companyName)
                 .orderType(order.getOrderType())
+                .status(order.getStatus())
                 .totalPrice(totalPrice)
                 .unexecutedQuantity(unexecutedQuantity)
                 .createdAt(order.getCreatedAt())
