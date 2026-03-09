@@ -16,7 +16,6 @@ import java.time.LocalDateTime;
 public class Execution {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "execution_id")
     private Long id;
 
@@ -34,7 +33,9 @@ public class Execution {
     private LocalDateTime executedAt;
 
     @Builder
-    public Execution(Order order, BigDecimal executionPrice, Integer executionQuantity, LocalDateTime executedAt) {
+    public Execution(Long id, Order order, BigDecimal executionPrice, Integer executionQuantity,
+            LocalDateTime executedAt) {
+        this.id = id;
         this.order = order;
         this.executionPrice = executionPrice;
         this.executionQuantity = executionQuantity;

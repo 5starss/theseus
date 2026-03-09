@@ -15,3 +15,7 @@ logging:
   level:
     root: info
     com.s14p21a503.matcher: debug
+
+matcher:
+  journal:
+    dir: c:\MATERCHER-DATA

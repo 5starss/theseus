@@ -36,3 +36,17 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+task monitor(type: JavaExec) {
+    group = 'verification'
+    description = 'Monitors the journal log for a specific ticker'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.s14p21a503.matcher.tools.JournalMonitor'
+    standardInput = System.in
+    
+    // gradle monitor -Pticker=005930 -PlogDir=c:/MATERCHER-DATA 등으로 실행 가능
+    args = [
+        project.findProperty('ticker') ?: '005930',
+        project.findProperty('logDir') ?: 'c:/MATERCHER-DATA'
+    ]
+}
