@@ -3,3 +3,6 @@
 text.md
 /backend/market-server/tmp/api-server
 /backend/market-server/api
+/backend/api-gateway/docs/AGENT_PLAN.md
+/backend/api-gateway/src/main/resources/public_key.pem
+/backend/market-server/market-server

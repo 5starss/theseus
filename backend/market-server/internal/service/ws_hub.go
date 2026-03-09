@@ -111,6 +111,24 @@ func (h *WSHub) HandleMessage(client *WsClient, msgData []byte) {
 		topicKey = msg.Topic + ":" + msg.Ticker
 	}
 
+	// 🔒 토픽별 권한 체크 (인가 검증)
+	if msg.Topic == TopicOrderbook && client.ID == "" {
+		log.Printf("[WSHub] 비인가 클라이언트의 호가창 구독 시도 차단 (Client %p)", client)
+		// 클라이언트에게 에러 메시지 전송
+		errMsg, _ := json.Marshal(map[string]interface{}{
+			"topic": "ERROR",
+			"data":  "호가창은 로그인이 필요한 서비스입니다.",
+		})
+		
+		// 비동기 채널 전송
+		select {
+		case client.Send <- errMsg:
+		default:
+		}
+		
+		return // 구독 무시
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

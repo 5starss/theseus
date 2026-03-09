@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 포트 개방
-EXPOSE 8000
+EXPOSE 8086
 
 # 서버 실행 (uvicorn 사용)
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8086"]

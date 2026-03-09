@@ -1,3 +1,6 @@
+server:
+  port: 8081
+
 spring:
   config:
     import: optional:file:.env[.properties] # .env 파일을 읽어옴

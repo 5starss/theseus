@@ -46,12 +46,12 @@ jwt:
 
 service:
   core:
-    url: http://localhost:8081
-    api-docs-url: http://localhost:8081
+    url: http://core-api-server:8081
+    api-docs-url: http://core-api-server:8081
   market:
-    url: http://localhost:8085
-    ws-url: ws://localhost:8085
-    api-docs-url: http://localhost:8085
+    url: http://market-server:8085
+    ws-url: ws://market-server:8085
+    api-docs-url: http://market-server:8085
   ai:
-    url: http://localhost:8086
-    api-docs-url: http://localhost:8086
+    url: http://ai-server:8086 
+    api-docs-url: http://ai-server:8086

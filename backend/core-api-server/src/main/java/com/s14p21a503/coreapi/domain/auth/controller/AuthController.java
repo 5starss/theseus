@@ -8,7 +8,6 @@ import com.s14p21a503.coreapi.domain.auth.dto.request.LoginRequestDto;
 import com.s14p21a503.coreapi.domain.auth.dto.request.SignupRequestDto;
 import com.s14p21a503.coreapi.domain.auth.dto.response.SignupResponseDto;
 import com.s14p21a503.coreapi.domain.auth.dto.response.TokenResponseDto;
-import com.s14p21a503.coreapi.domain.auth.security.PrincipalDetails;
 import com.s14p21a503.coreapi.domain.auth.service.AuthService;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,7 +17,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -80,15 +78,11 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(@AuthenticationPrincipal PrincipalDetails principal,
+    public ResponseEntity<ApiResponse<Void>> logout(@RequestHeader("X-USER-ID") Long userId,
                                                     HttpServletRequest request,
                                                     HttpServletResponse response) {
         validateCsrfOrigin(request);
-
-        if (principal == null) {
-            throw new CustomException(ErrorCode.INVALID_TOKEN);
-        }
-        authService.logout(principal.getUserId());
+        authService.logout(userId);
         clearRefreshTokenCookie(response);
         return ApiResponse.onSuccess(SuccessCode.OK);
     }
