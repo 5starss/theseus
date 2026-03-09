@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -16,9 +17,12 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 @ToString
-public class ExecutionResult {
+public class ExecutionResult implements Serializable {
+    private static final long serialVersionUID = 1L;
     private Long executionId;     // DB 인덱싱 성능을 위한 순차적인 Long 형태의 고유 체결 번호
     private Long orderId;         // 대상 주문 ID
+    private Long accountId;       // 계좌 ID
+    private Long userId;          // 사용자 ID
     private OrderType orderType;  // BUY, SELL
     private EventType eventType;  // MATCHED, CANCELLED
     private String ticker;

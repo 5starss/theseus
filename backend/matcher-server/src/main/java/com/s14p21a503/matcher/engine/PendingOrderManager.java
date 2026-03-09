@@ -1,11 +1,7 @@
 package com.s14p21a503.matcher.engine;
 
-import com.s14p21a503.matcher.dto.MarketDataEvent;
-import com.s14p21a503.matcher.dto.OrderRequest;
-import com.s14p21a503.matcher.dto.OrderType;
-import com.s14p21a503.matcher.dto.ExecutionResult;
-import com.s14p21a503.matcher.dto.EventType;
-import com.s14p21a503.matcher.dto.OrderType;
+import com.s14p21a503.matcher.dto.*;
+import com.s14p21a503.matcher.journal.SnapshotState;
 import com.s14p21a503.matcher.util.ExecutionIdGenerator;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +16,7 @@ public class PendingOrderManager {
 
     @Getter
     private final String ticker;
+    private final ExecutionIdGenerator executionIdGenerator;
 
     // 가격 우선(TreeMap) 및 시간 우선(Queue) 보장을 위한 자료구조
     // 매수(Bid): 높은 가격이 우선이므로 내림차순 정렬
@@ -36,96 +33,154 @@ public class PendingOrderManager {
 
     private final ReentrantLock lock = new ReentrantLock();
 
-    public PendingOrderManager(String ticker) {
+    // 서비스 참여율 (시장 거래량의 몇 %를 우리 서비스 유동성으로 가져올지 정의)
+    private final BigDecimal participationRate;
+
+    public PendingOrderManager(String ticker, ExecutionIdGenerator executionIdGenerator, BigDecimal participationRate) {
         this.ticker = ticker;
+        this.executionIdGenerator = executionIdGenerator;
+        this.participationRate = participationRate;
     }
 
     /**
-     * 주문 추가 (수신 즉시 체결 가능한지 확인 후, 안되면 대기열에 추가)
+     * 주문 추가 (대기열에 추가)
+     * 이제 즉시 체결 로직은 matchWithTick에서 담당하므로 여기서는 큐에 넣기만 함
      */
     public List<ExecutionResult> addOrder(OrderRequest order) {
         lock.lock();
         try {
-            List<ExecutionResult> trades = new ArrayList<>();
-            if (order.getOrderType() == OrderType.BUY) {
-                // 매수 주문: 내 지정가가 시장 매도 1호가(bestAsk)보다 크거나 같으면 즉시 체결
-                if (currentBestAsk != null && order.getPrice().compareTo(currentBestAsk) >= 0) {
-                    trades.add(createExecutionResult(order, EventType.MATCHED, currentBestAsk));
-                } else {
-                    pendingBids.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
-                    orderCache.put(order.getOrderId(), order);
-                }
-            } else if (order.getOrderType() == OrderType.SELL) {
-                // 매도 주문: 내 지정가가 시장 매수 1호가(bestBid)보다 작거나 같으면 즉시 체결
-                if (currentBestBid != null && order.getPrice().compareTo(currentBestBid) <= 0) {
-                    trades.add(createExecutionResult(order, EventType.MATCHED, currentBestBid));
-                } else {
-                    pendingAsks.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
-                    orderCache.put(order.getOrderId(), order);
-                }
+            // 멱등성 보장: 이미 존재하는 주문이면 무시 (복구 리플레이 또는 카프카 재전송 대비)
+            if (orderCache.containsKey(order.getOrderId())) {
+                log.debug("[{}] 이미 대기열에 존재하는 주문입니다 (OrderID: {})", ticker, order.getOrderId());
+                return new ArrayList<>();
             }
-            return trades;
+
+            // 새로 들어온 주문이면 remainingQuantity 초기화
+            if (order.getRemainingQuantity() == null) {
+                order.setRemainingQuantity(order.getRequestedQuantity());
+            }
+
+            if (order.getOrderType() == OrderType.BUY) {
+                pendingBids.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
+            } else if (order.getOrderType() == OrderType.SELL) {
+                pendingAsks.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
+            }
+            orderCache.put(order.getOrderId(), order);
+
+            return new ArrayList<>(); // 즉시 체결은 틱이 올 때 수행됨
         } finally {
             lock.unlock();
         }
     }
 
     /**
-     * 시세 업데이트 수신 시, 대기 중인 주문들을 훑어서 조건에 맞으면 체결시킴
+     * 시세 업데이트 수신 시, 최우선 호가 정보만 갱신
      */
-    public List<ExecutionResult> updateMarketDataAndMatch(MarketDataEvent event) {
+    public void updateMarketData(MarketDataEvent event) {
         lock.lock();
         try {
             this.currentBestBid = event.getBestBid();
             this.currentBestAsk = event.getBestAsk();
-            
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * 시장 체결(Tick) 데이터 수신 시, 대기 주문들과 매칭 수행
+     */
+    public List<ExecutionResult> matchWithTick(TickDataEvent tick, long currentSeqNo) {
+        lock.lock();
+        try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 1. 대기 매수 주문 검사: 제일 비싸게 부른 사람부터 시장 매도 1호가(bestAsk) 이하로 살 수 있는지 검사
+            // 사용할 수 있는 시장 유동성 계산: tick.qty * participationRate
+            long usableLiquidity = new BigDecimal(tick.getQty())
+                    .multiply(participationRate)
+                    .setScale(0, java.math.RoundingMode.DOWN)
+                    .longValue();
+
+            if (usableLiquidity <= 0) {
+                return trades;
+            }
+
+            // 1. 대기 매수 주문 검사 (매수 주문 vs 시장 매도 틱)
+            // 매수 조건: bestAsk <= limitPrice
             if (this.currentBestAsk != null) {
                 Iterator<Map.Entry<BigDecimal, Queue<OrderRequest>>> bidIterator = pendingBids.entrySet().iterator();
-                while (bidIterator.hasNext()) {
+                int fillIndex = 0;
+                while (bidIterator.hasNext() && usableLiquidity > 0) {
                     Map.Entry<BigDecimal, Queue<OrderRequest>> entry = bidIterator.next();
-                    BigDecimal price = entry.getKey();
+                    BigDecimal limitPrice = entry.getKey();
                     Queue<OrderRequest> queue = entry.getValue();
 
-                    // 시장가보다 싸게 사려고 하면, 그 뒤의 더 싼 주문들은 볼 필요도 없음 (탐색 중단!)
-                    if (price.compareTo(this.currentBestAsk) < 0) {
+                    // 조건: 최우선 매도호가(bestAsk)가 내 지정가(limitPrice)보다 높으면 살 수 없음
+                    if (this.currentBestAsk.compareTo(limitPrice) > 0) {
                         break;
                     }
 
-                    // 조건 만족 시 큐 안에서 시간 순서대로(먼저 온 사람부터) 전부 체결
-                    while (!queue.isEmpty()) {
-                        OrderRequest bid = queue.poll();
-                        trades.add(createExecutionResult(bid, EventType.MATCHED, this.currentBestAsk));
-                        orderCache.remove(bid.getOrderId());
+                    Iterator<OrderRequest> queueIterator = queue.iterator();
+                    while (queueIterator.hasNext() && usableLiquidity > 0) {
+                        OrderRequest bid = queueIterator.next();
+
+                        long fillQty = Math.min(bid.getRemainingQuantity(), usableLiquidity);
+                        if (fillQty > 0) {
+                            bid.setRemainingQuantity(bid.getRemainingQuantity() - fillQty);
+                            usableLiquidity -= fillQty;
+
+                            trades.add(createExecutionResult(bid, fillQty, this.currentBestAsk, currentSeqNo, fillIndex++));
+
+                            if (bid.getRemainingQuantity() == 0) {
+                                orderCache.remove(bid.getOrderId());
+                                queueIterator.remove();
+                            }
+                        }
                     }
-                    // 큐가 비었으면 맵에서 가격대 엔트리 삭제
-                    bidIterator.remove();
+                    if (queue.isEmpty()) {
+                        bidIterator.remove();
+                    }
                 }
             }
 
-            // 2. 대기 매도 주문 검사: 제일 싸게 판다는 사람부터 시장 매수 1호가(bestBid) 이상으로 팔 수 있는지 검사
+            // 유동성이 남았다면 매도 주문도 검사
+            if (usableLiquidity <= 0)
+                return trades;
+
+            // 2. 대기 매도 주문 검사 (매도 주문 vs 시장 매수 틱)
+            // 매도 조건: bestBid >= limitPrice
             if (this.currentBestBid != null) {
                 Iterator<Map.Entry<BigDecimal, Queue<OrderRequest>>> askIterator = pendingAsks.entrySet().iterator();
-                while (askIterator.hasNext()) {
+                int fillIndex = 0;
+                while (askIterator.hasNext() && usableLiquidity > 0) {
                     Map.Entry<BigDecimal, Queue<OrderRequest>> entry = askIterator.next();
-                    BigDecimal price = entry.getKey();
+                    BigDecimal limitPrice = entry.getKey();
                     Queue<OrderRequest> queue = entry.getValue();
 
-                    // 시장가보다 비싸게 팔려고 하면, 그 뒤의 더 비싼 주문들은 볼 필요도 없음 (탐색 중단!)
-                    if (price.compareTo(this.currentBestBid) > 0) {
+                    // 조건: 최우선 매수호가(bestBid)가 내 지정가(limitPrice)보다 낮으면 팔 수 없음
+                    if (this.currentBestBid.compareTo(limitPrice) < 0) {
                         break;
                     }
 
-                    // 조건 만족 시 큐 안에서 시간 순서대로 전부 체결
-                    while (!queue.isEmpty()) {
-                        OrderRequest ask = queue.poll();
-                        trades.add(createExecutionResult(ask, EventType.MATCHED, this.currentBestBid));
-                        orderCache.remove(ask.getOrderId());
+                    Iterator<OrderRequest> queueIterator = queue.iterator();
+                    while (queueIterator.hasNext() && usableLiquidity > 0) {
+                        OrderRequest ask = queueIterator.next();
+
+                        long fillQty = Math.min(ask.getRemainingQuantity(), usableLiquidity);
+                        if (fillQty > 0) {
+                            ask.setRemainingQuantity(ask.getRemainingQuantity() - fillQty);
+                            usableLiquidity -= fillQty;
+
+                            trades.add(createExecutionResult(ask, fillQty, this.currentBestBid, currentSeqNo, fillIndex++));
+
+                            if (ask.getRemainingQuantity() == 0) {
+                                orderCache.remove(ask.getOrderId());
+                                queueIterator.remove();
+                            }
+                        }
                     }
-                    // 큐가 비었으면 맵에서 가격대 엔트리 삭제
-                    askIterator.remove();
+                    if (queue.isEmpty()) {
+                        askIterator.remove();
+                    }
                 }
             }
 
@@ -136,14 +191,14 @@ public class PendingOrderManager {
     }
 
     /**
-     * 주문 취소 처리 (orderCache를 이용한 O(1) 탐색 최적화)
+     * 주문 취소 처리
      */
-    public ExecutionResult cancelOrder(Long orderId) {
+    public ExecutionResult cancelOrder(Long orderId, long currentSeqNo) {
         lock.lock();
         try {
             OrderRequest orderToCancel = orderCache.remove(orderId);
             if (orderToCancel == null) {
-                return null; // 해당 주문이 존재하지 않거나 이미 체결됨
+                return null;
             }
 
             BigDecimal price = orderToCancel.getPrice();
@@ -154,8 +209,7 @@ public class PendingOrderManager {
                     if (queue.isEmpty()) {
                         pendingBids.remove(price);
                     }
-                    log.debug("[검증 로그] 매수 주문 완전 삭제 (Cache/Queue) - 남은 총 대기 주문 수: {}", orderCache.size());
-                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null);
+                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null, 0L, currentSeqNo, 0);
                 }
             } else {
                 Queue<OrderRequest> queue = pendingAsks.get(price);
@@ -164,8 +218,7 @@ public class PendingOrderManager {
                     if (queue.isEmpty()) {
                         pendingAsks.remove(price);
                     }
-                    log.debug("[검증 로그] 매도 주문 완전 삭제 (Cache/Queue) - 남은 총 대기 주문 수: {}", orderCache.size());
-                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null);
+                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null, 0L, currentSeqNo, 0);
                 }
             }
             return null;
@@ -174,15 +227,101 @@ public class PendingOrderManager {
         }
     }
 
-    private ExecutionResult createExecutionResult(OrderRequest order, EventType eventType, BigDecimal matchPrice) {
+    /**
+     * 과거 체결 결과(RES)를 강제로 상태에 반영 (복귀 시 사용).
+     * 엔진의 매칭 로직을 타지 않고, 기록된 결과대로 오더북 잔량을 차감합니다.
+     */
+    public void applyExecutionResult(ExecutionResult res) {
+        lock.lock();
+        try {
+            OrderRequest order = orderCache.get(res.getOrderId());
+            if (order == null) {
+                log.warn("[{}] 복구 중 결과를 적용할 주문을 찾지 못함 (OrderID: {})", ticker, res.getOrderId());
+                return;
+            }
+
+            // 잔량 차감
+            long currentQty = order.getRemainingQuantity();
+            long executedQty = res.getMatchQuantity();
+            order.setRemainingQuantity(Math.max(0, currentQty - executedQty));
+
+            // 잔량이 0이면 오더북에서 제거
+            if (order.getRemainingQuantity() == 0) {
+                orderCache.remove(order.getOrderId());
+                BigDecimal price = order.getPrice();
+                if (order.getOrderType() == OrderType.BUY) {
+                    Queue<OrderRequest> queue = pendingBids.get(price);
+                    if (queue != null) {
+                        queue.remove(order);
+                        if (queue.isEmpty()) pendingBids.remove(price);
+                    }
+                } else {
+                    Queue<OrderRequest> queue = pendingAsks.get(price);
+                    if (queue != null) {
+                        queue.remove(order);
+                        if (queue.isEmpty()) pendingAsks.remove(price);
+                    }
+                }
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * 현재 오더북 상태 캡처 (스냅샷용).
+     */
+    public SnapshotState.SnapshotStateBuilder fillSnapshotBuilder(SnapshotState.SnapshotStateBuilder builder) {
+        lock.lock();
+        try {
+            return builder
+                    .pendingBids(new TreeMap<>(pendingBids))
+                    .pendingAsks(new TreeMap<>(pendingAsks))
+                    .orderCache(new HashMap<>(orderCache))
+                    .currentBestBid(currentBestBid)
+                    .currentBestAsk(currentBestAsk);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * 스냅샷 상태로부터 오더북 복원.
+     */
+    public void restoreState(SnapshotState state) {
+        lock.lock();
+        try {
+            this.pendingBids.clear();
+            this.pendingBids.putAll(state.getPendingBids());
+            this.pendingAsks.clear();
+            this.pendingAsks.putAll(state.getPendingAsks());
+            this.orderCache.clear();
+            this.orderCache.putAll(state.getOrderCache());
+            this.currentBestBid = state.getCurrentBestBid();
+            this.currentBestAsk = state.getCurrentBestAsk();
+            log.info("[{}] 오더북 상태 복원 완료 - 매수: {}, 매도: {}, 캐시: {}", 
+                    ticker, pendingBids.size(), pendingAsks.size(), orderCache.size());
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private ExecutionResult createExecutionResult(OrderRequest order, long fillQty, BigDecimal matchPrice, long seqNo, int fillIndex) {
+        return createExecutionResult(order, EventType.MATCHED, matchPrice, fillQty, seqNo, fillIndex);
+    }
+
+    private ExecutionResult createExecutionResult(OrderRequest order, EventType eventType, BigDecimal matchPrice,
+            long fillQty, long seqNo, int fillIndex) {
         return ExecutionResult.builder()
-                .executionId(ExecutionIdGenerator.generate())
+                .executionId(executionIdGenerator.generate(seqNo, fillIndex))
                 .orderId(order.getOrderId())
+                .accountId(order.getAccountId())
+                .userId(order.getUserId())
                 .orderType(order.getOrderType())
                 .eventType(eventType)
                 .ticker(ticker)
                 .matchPrice(matchPrice)
-                .matchQuantity(order.getRequestedQuantity()) // 부분 체결 미지원으로 전부 취소/체결
+                .matchQuantity(fillQty)
                 .executedAt(LocalDateTime.now())
                 .build();
     }

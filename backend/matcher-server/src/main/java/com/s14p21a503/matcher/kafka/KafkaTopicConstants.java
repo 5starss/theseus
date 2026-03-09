@@ -23,6 +23,13 @@ public final class KafkaTopicConstants {
 
     /**
      * 호가창/시세 데이터 토픽 (체결 엔진 전용)
+     * TODO: 시세 서버(Market Server) 사양에 따라 토픽명이 변경될 수 있음
      */
     public static final String MARKET_DATA_EVENT_TOPIC = "market-data-event";
+
+    /**
+     * 체결 데이터 토픽 (체결 엔진 전용)
+     * TODO: 시세 서버(Market Server) 사양에 따라 토픽명이 변경될 수 있음
+     */
+    public static final String TRADE_DATA_EVENT_TOPIC = "trade-data-event";
 }

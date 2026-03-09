@@ -18,10 +18,14 @@ public class OutboxPollingScheduler {
 
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaProducerService kafkaProducerService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
-    public OutboxPollingScheduler(OutboxEventRepository outboxEventRepository, KafkaProducerService kafkaProducerService) {
+    public OutboxPollingScheduler(OutboxEventRepository outboxEventRepository, 
+                                  KafkaProducerService kafkaProducerService,
+                                  com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.outboxEventRepository = outboxEventRepository;
         this.kafkaProducerService = kafkaProducerService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -41,14 +45,16 @@ public class OutboxPollingScheduler {
 
         for (OutboxEvent event : events) {
             try {
-                // 2. 카프카 발송 (여기서의 payload는 JSON 문자열입니다)
-                kafkaProducerService.sendMessageWithKey(event.getTopic(), event.getMessageKey(), event.getPayload());
+                // 이중 직렬화 방지
+                Object payloadObj = objectMapper.readValue(event.getPayload(), Object.class);
+
+                // 2. 카프카 발송
+                kafkaProducerService.sendMessageWithKey(event.getTopic(), event.getMessageKey(), payloadObj);
                 
                 // 3. 상태 업데이트 (성공)
                 event.markAsPublished();
             } catch (Exception e) {
                 log.error("아웃박스 카프카 이벤트 전송 실패 [Event ID: {}]: {}", event.getId(), e.getMessage());
-                // 발송에 실패하면 향후 다시 폴링되거나, 횟수가 초과될 시 markAsFailed()로 처리하는 등의 강화 로직 추가 가능
             }
         }
     }
