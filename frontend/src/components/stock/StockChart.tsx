@@ -9,6 +9,7 @@ import {
     type Time,
 } from "lightweight-charts";
 import { useStockStore } from "../../store/useStockStore";
+import { stockApi } from "../../api/stock";
 
 import type { TimeframeType } from '../../pages/StockDashboard';
 
@@ -16,22 +17,14 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+    const stockCode = useStockStore(state => state.stockCode);
+    const lastCandleRef = useRef<CandlestickData<Time> | null>(null);
 
+    // 1. 차트 초기화 및 백엔드 과거 캔들 데이터 주입
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        const getCandlePeriod = (tf: TimeframeType) => {
-            switch (tf) {
-                case '1m': return 60;
-                case '1h': return 3600;
-                case '1d': return 86400;
-                case '1w': return 604800; // 7 days
-                default: return 60;
-            }
-        };
-        const candlePeriod = getCandlePeriod(timeframe);
-
-        // 1. 차트 인스턴스 생성 (디자인 시스템 적용)
+        // 차트 인스턴스 생성 (디자인 시스템 적용)
         const chart = createChart(chartContainerRef.current, {
             layout: {
                 background: { type: ColorType.Solid, color: "transparent" }, // 부모 bg-white 상속
@@ -52,11 +45,11 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
             timeScale: {
                 borderColor: "#f3f4f6",
                 timeVisible: true,
-                secondsVisible: true,
+                secondsVisible: false,
             },
         });
 
-        // 2. 캔들스틱 시리즈 추가 (디자인 시스템 - Red: 상승, Blue: 하락)
+        // 캔들스틱 시리즈 추가 (디자인 시스템 - Red: 상승, Blue: 하락)
         const candlestickSeries = chart.addSeries(CandlestickSeries, {
             upColor: "#fb2c36",     // Red / 상승
             downColor: "#2b7fff",   // Blue / 하락
@@ -64,41 +57,6 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
             wickUpColor: "#fb2c36",
             wickDownColor: "#2b7fff",
         });
-
-        // 3. 현재 시간 기준으로 60개의 과거 더미 데이터 생성
-        const generateInitialData = () => {
-            const data: CandlestickData<Time>[] = [];
-            const now = Math.floor(Date.now() / 1000); // 현재 시간을 초 단위 변환
-
-            // 현재 시간을 속한 캔들 주기의 시작점(00분 등)으로 내림하여 정렬
-            const alignedNow = Math.floor(now / candlePeriod) * candlePeriod;
-
-            const actualCurrentPrice = useStockStore.getState().currentPrice;
-            let price = actualCurrentPrice - 6000; // 과거 가격 임의 시작점
-
-            for (let i = 60; i >= 0; i--) {
-                const time = (alignedNow - i * candlePeriod) as Time;
-
-                if (i === 0) {
-                    price = actualCurrentPrice;
-                } else {
-                    price = price + (Math.random() - 0.5) * 500;
-                    price = Math.round(price / 100) * 100;
-                }
-
-                data.push({
-                    time,
-                    open: price,
-                    high: price + 200,
-                    low: price - 200,
-                    close: i === 0 ? actualCurrentPrice : price + (Math.random() > 0.5 ? 100 : -100),
-                });
-            }
-            return data;
-        };
-
-        const initialData = generateInitialData();
-        candlestickSeries.setData(initialData);
 
         chartRef.current = chart;
         seriesRef.current = candlestickSeries;
@@ -112,46 +70,103 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
         const resizeObserver = new ResizeObserver(handleResize);
         resizeObserver.observe(chartContainerRef.current);
 
-        // 4. 시간이 흐르며 봉이 추가되는 라이브 업데이트 로직 (frontend 참고)
-        let lastCandle = { ...initialData[initialData.length - 1] };
+        let isMounted = true;
 
-        const intervalId = setInterval(() => {
-            const currentTime = Math.floor(Date.now() / 1000);
-
-            const currentBucketTime = (Math.floor(currentTime / candlePeriod) * candlePeriod) as Time;
-
-            // 🌟 전역 스토어에서 현재가 동기화 (호가창과 일치)
-            const currentPrice = useStockStore.getState().currentPrice;
-
-            // 이전 캔들과 시간이 다르다면 -> "새로운 봉 생성"
-            if (currentBucketTime > lastCandle.time) {
-                lastCandle = {
-                    time: currentBucketTime,
-                    open: lastCandle.close,
-                    high: Math.max(lastCandle.close, currentPrice),
-                    low: Math.min(lastCandle.close, currentPrice),
-                    close: currentPrice,
-                };
-            }
-            // 이전 캔들과 시간이 같다면 -> "현재 봉 위아래로 움직이기"
-            else {
-                lastCandle.high = Math.max(lastCandle.high, currentPrice);
-                lastCandle.low = Math.min(lastCandle.low, currentPrice);
-                lastCandle.close = currentPrice;
+        // 백엔드 명세 기반 캔들 데이터 로딩
+        const fetchInitialData = async () => {
+            let tfStr = 'D';
+            switch (timeframe) {
+                case '1m': tfStr = 'm'; break;
+                case '1h': tfStr = 'h'; break;
+                case '1d': tfStr = 'D'; break;
+                case '1w': tfStr = 'W'; break;
             }
 
-            candlestickSeries.update(lastCandle);
-        }, 200); // 0.2초마다 틱 데이터 주입
+            const history = await stockApi.getCandles(stockCode, tfStr, 50);
+            if (!isMounted) return;
 
-        // 차트 정리(Cleanup)
+            const chartData: CandlestickData<Time>[] = history.map(d => ({
+                time: (new Date(d.timestamp).getTime() / 1000) as Time,
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+            }));
+
+            // TradingView 데이터 구조 특성상 오름차순 보장이 필요
+            chartData.sort((a, b) => (a.time as number) - (b.time as number));
+
+            candlestickSeries.setData(chartData);
+
+            if (chartData.length > 0) {
+                lastCandleRef.current = { ...chartData[chartData.length - 1] };
+            }
+
+            // 화면 우측으로 피팅
+            chart.timeScale().fitContent();
+        };
+
+        fetchInitialData();
+
         return () => {
-            clearInterval(intervalId);
+            isMounted = false;
             resizeObserver.disconnect();
             chart.remove();
             chartRef.current = null;
             seriesRef.current = null;
         };
+    }, [stockCode, timeframe]);
+
+    // 2. 시간이 흐르면서 변동하는 라이브 틱 갱신 (Zustand subscribe)
+    useEffect(() => {
+        const unsubscribe = useStockStore.subscribe(
+            (state, prevState) => {
+                const currentPrice = state.currentPrice;
+                if (currentPrice === prevState.currentPrice) return;
+
+                const getCandlePeriod = (tf: TimeframeType) => {
+                    switch (tf) {
+                        case '1m': return 60;
+                        case '1h': return 3600;
+                        case '1d': return 86400;
+                        case '1w': return 604800; // 7 days
+                        default: return 60;
+                    }
+                };
+                const candlePeriod = getCandlePeriod(timeframe);
+                const currentTime = Math.floor(Date.now() / 1000);
+                const currentBucketTimeNum = Math.floor(currentTime / candlePeriod) * candlePeriod;
+                const currentBucketTime = currentBucketTimeNum as Time;
+
+                let lastCandle = lastCandleRef.current;
+                if (!lastCandle || !seriesRef.current) return;
+
+                const lastTimeSec = lastCandle.time as number;
+
+                if (currentBucketTimeNum > lastTimeSec) {
+                    // 새로운 봉 생성
+                    lastCandle = {
+                        time: currentBucketTime,
+                        open: lastCandle.close,
+                        high: Math.max(lastCandle.close, currentPrice),
+                        low: Math.min(lastCandle.close, currentPrice),
+                        close: currentPrice,
+                    };
+                } else {
+                    // 기존 봉 갱신
+                    lastCandle.high = Math.max(lastCandle.high, currentPrice);
+                    lastCandle.low = Math.min(lastCandle.low, currentPrice);
+                    lastCandle.close = currentPrice;
+                }
+
+                lastCandleRef.current = lastCandle;
+                seriesRef.current.update(lastCandle);
+            }
+        );
+
+        return () => unsubscribe();
     }, [timeframe]);
+
 
     return (
         <div className="w-full h-full relative" ref={chartContainerRef}>
