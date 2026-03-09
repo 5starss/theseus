@@ -20,22 +20,36 @@ const StockList: React.FC = () => {
     }, [connectMarketStream, disconnectMarketStream]);
 
     // activeTab에 따라 stocksMap을 배열로 변환한 후 정렬하여 sortedStocks를 생성.
+    const [currentTime, setCurrentTime] = React.useState('');
+
+    React.useEffect(() => {
+        const updateTime = () => {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            setCurrentTime(`오늘 ${hours}:${minutes} 기준`);
+        };
+        updateTime();
+        // 1분마다 시간 갱신
+        const interval = setInterval(updateTime, 60000);
+        return () => clearInterval(interval);
+    }, []);
     const sortedStocks = React.useMemo(() => {
         const stockArray = Object.values(stocksMap);
 
         return stockArray.sort((a, b) => {
             switch (activeTab) {
                 case '현재가':
-                    return b.price - a.price; 
+                    return b.currentPrice - a.currentPrice;
                 case '등락률':
                     return b.changeRate - a.changeRate;
                 case '종목명':
-                    return a.name.localeCompare(b.name, 'ko-KR'); 
+                    return a.name.localeCompare(b.name, 'ko-KR');
                 case '거래량':
-                    return b.volume - a.volume; 
+                    return b.accVolume - a.accVolume;
                 case '거래대금':
                 default:
-                    return (b.price * b.volume) - (a.price * a.volume);
+                    return (b.currentPrice * b.accVolume) - (a.currentPrice * a.accVolume);
             }
         }).map((stock, index) => ({
             ...stock,
@@ -44,8 +58,8 @@ const StockList: React.FC = () => {
     }, [stocksMap, activeTab]);
 
     return (
-        <div className="w-full h-full flex flex-col items-center bg-[#f9fafb] p-[12px]">
-            <div className="w-full bg-white border border-[#f3f4f6] rounded-[12px] shadow-sm flex flex-col">
+        <div className="flex-1 w-full flex flex-col items-center bg-[#f9fafb] p-[12px] min-h-0">
+            <div className="w-full bg-white border border-[#f3f4f6] rounded-[12px] shadow-sm flex flex-col flex-1 min-h-0 overflow-hidden">
 
                 {/* Tabs */}
                 <div className="px-[12px] pt-[12px]">
@@ -65,28 +79,54 @@ const StockList: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Table Header */}
-                <div className="flex items-center px-[30px] py-[12px] text-[#888] text-[13px] font-normal border-b border-[#f3f4f6] mt-[12px]">
-                    <div className="w-[60px]">순위</div>
-                    <div className="w-[311px]">오늘 10:09 기준</div>
-                    <div className="w-[120px] text-right">현재가</div>
-                    <div className="w-[120px] text-right">등락률</div>
-                    <div className="w-[60px]"></div>
-                    <div className="w-[194px]">거래대금</div>
-                    <div className="flex-1"></div>
-                    <div className="w-[116px]">거래비율</div>
-                </div>
+                {/* Table Header and List Area */}
+                <div className="flex flex-col flex-1 overflow-x-hidden min-h-0">
+                    <div className="min-w-[800px] flex flex-col flex-1 min-h-0">
+                        {/* Header and List Scroll Container */}
+                        <div className="flex flex-col flex-1 overflow-y-auto min-h-0 pb-[12px]">
+                            {/* Table Header (Sticky) */}
+                            <div className="sticky top-0 z-10 bg-white border-b border-[#f3f4f6] mt-[12px] py-[12px] shrink-0">
+                                <div className="mx-[12px]">
+                                    <div className="flex items-center px-[18px] text-[#888] text-[13px] font-normal w-full min-w-[776px]">
+                                        <div className="w-[60px] shrink-0">순위</div>
+                                        <div className="w-[220px] shrink-0">{currentTime}</div>
 
-                {/* 종목 리스트 */}
-                <div className="flex flex-col pb-[12px] pt-[4px]">
-                    {sortedStocks.map((stock) => (
-                        <div
-                            key={stock.code}
-                            className="hover:bg-[#fafafb] transition-colors cursor-pointer rounded-[8px] mx-[12px]"
-                        >
-                            <StockRow {...stock} />
+                                        {/* Flexible shrinking spacer */}
+                                        <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+
+                                        <div className="w-[110px] text-right shrink-0">현재가</div>
+
+                                        {/* Flexible shrinking spacer */}
+                                        <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+
+                                        <div className="w-[110px] text-right shrink-0">등락률</div>
+
+                                        {/* Flexible shrinking spacer */}
+                                        <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+
+                                        <div className="w-[130px] text-right shrink-0">거래대금</div>
+
+                                        {/* Flexible Space to push Buy/Sell Ratio */}
+                                        <div className="flex-1 min-w-[20px]"></div>
+
+                                        <div className="w-[116px] shrink-0">거래비율</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* 종목 리스트 */}
+                            <div className="flex flex-col pt-[4px]">
+                                {sortedStocks.map((stock) => (
+                                    <div
+                                        key={stock.ticker}
+                                        className="hover:bg-[#fafafb] transition-colors cursor-pointer rounded-[8px] mx-[12px] shrink-0"
+                                    >
+                                        <StockRow {...stock} />
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                    ))}
+                    </div>
                 </div>
 
             </div>
