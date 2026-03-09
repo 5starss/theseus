@@ -25,20 +25,51 @@ interface StockState {
 
 // Mock database
 export const MOCK_STOCKS: Record<string, { name: string; price: number }> = {
-    '005930': { name: '삼성전자', price: 214500 },
-    '000660': { name: 'SK하이닉스', price: 1037000 },
-    '122630': { name: 'KODEX 레버리지', price: 108470 },
-    '042700': { name: '한미반도체', price: 241500 },
-    '005380': { name: '현대차', price: 257000 },
-    '035720': { name: '카카오', price: 54200 },
-    '035420': { name: 'NAVER', price: 198000 },
-    '373220': { name: 'LG에너지솔루션', price: 412000 },
-    '068270': { name: '셀트리온', price: 187000 },
-    '005490': { name: 'POSCO홀딩스', price: 382000 },
+    "005930": { name: "삼성전자", price: 74500 },
+    "000660": { name: "SK하이닉스", price: 162300 },
+    "373220": { name: "LG에너지솔루션", price: 401000 },
+    "207940": { name: "삼성바이오로직스", price: 812000 },
+    "005380": { name: "현대차", price: 236000 },
+    "000270": { name: "기아", price: 114500 },
+    "068270": { name: "셀트리온", price: 178900 },
+    "005490": { name: "POSCO홀딩스", price: 395000 },
+    "035420": { name: "NAVER", price: 194500 },
+    "051910": { name: "LG화학", price: 450000 },
+    "028260": { name: "삼성물산", price: 153200 },
+    "012330": { name: "현대모비스", price: 245000 },
+    "105560": { name: "KB금융", price: 68100 },
+    "055550": { name: "신한지주", price: 47200 },
+    "032830": { name: "삼성생명", price: 92300 },
+    "003670": { name: "포스코퓨처엠", price: 312500 },
+    "035720": { name: "카카오", price: 54200 },
+    "066570": { name: "LG전자", price: 98100 },
+    "323410": { name: "카카오뱅크", price: 27100 },
+    "015760": { name: "한국전력", price: 22400 },
+    "000810": { name: "삼성화재", price: 298000 },
+    "316140": { name: "우리금융지주", price: 14200 },
+    "024110": { name: "기업은행", price: 11950 },
+    "011200": { name: "HMM", price: 18150 },
+    "010130": { name: "고려아연", price: 452000 },
+    "033780": { name: "KT&G", price: 92100 },
+    "086280": { name: "현대글로비스", price: 187200 },
+    "017670": { name: "SK텔레콤", price: 52100 },
+    "009150": { name: "삼성전기", price: 145200 },
+    "259960": { name: "크래프톤", price: 241000 },
+    "034020": { name: "두산에너빌리티", price: 16100 },
+    "036570": { name: "엔씨소프트", price: 198200 },
+    "018260": { name: "삼성SDS", price: 152000 },
+    "042700": { name: "한미반도체", price: 141500 },
+    "010140": { name: "삼성중공업", price: 8210 },
+    "011170": { name: "롯데케미칼", price: 122500 },
+    "267250": { name: "HD현대", price: 68200 },
+    "090430": { name: "아모레퍼시픽", price: 128500 },
+    "003490": { name: "대한항공", price: 21900 },
+    "051900": { name: "LG생활건강", price: 341000 },
 };
 
-// 실제 WebSocket 연결이 아니므로, setInterval을 사용하여 주식 데이터를 주기적으로 업데이트하는 방식
+// 실제 WebSocket 연결 혹은 fallback 시뮬레이션을 위한 타이머
 let stockInterval: ReturnType<typeof setInterval> | null = null;
+let stockWs: WebSocket | null = null;
 
 export const useStockStore = create<StockState>((set) => ({
     stockCode: '005930',
@@ -71,7 +102,7 @@ export const useStockStore = create<StockState>((set) => ({
                 bidPrice: stockInfo.price,
             };
         }),
-    
+
     // 현재가 업데이트 시, 가격 변화량과 등락률도 함께 계산하여 상태 업데이트
     setCurrentPrice: (price) =>
         set((state) => ({
@@ -79,7 +110,7 @@ export const useStockStore = create<StockState>((set) => ({
             priceChange: price - state.prevClose,
             changeRate: ((price - state.prevClose) / state.prevClose) * 100,
         })),
-    
+
     // 호가 업데이트 시, ask/bid 가격과 거래량을 함께 업데이트
     updateOrderbook: (ask, bid) =>
         set({
@@ -88,9 +119,14 @@ export const useStockStore = create<StockState>((set) => ({
             bidPrice: bid.price,
             bidVolume: bid.volume,
         }),
-    
-    // 주식 상세 페이지에서 WebSocket 스트림을 시뮬레이션하여 가격과 호가 정보를 주기적으로 업데이트하는 함수
+
+    // 주식 상세 페이지에서 WebSocket 스트림을 연결하는 함수 (실패 시 시뮬레이션 fallback)
     connectStockStream: (code) => {
+        // 기존 연결 정리
+        if (stockWs) {
+            stockWs.close();
+            stockWs = null;
+        }
         if (stockInterval) {
             clearInterval(stockInterval);
             stockInterval = null;
@@ -114,9 +150,9 @@ export const useStockStore = create<StockState>((set) => ({
             };
         });
 
-        console.log(`Connecting to Mock WebSockets for Dashbard [${code}]...`);
+        console.log(`Starting Dashboard Stream [${code}]...`);
 
-        // Start streaming data(랜덤 가격 변동과 호가 업데이트 시뮬레이션)
+        // 1. Fallback: 웹소켓 연결 성공 전까지 혹은 백엔드 에러 시 동작할 모의 데이터 인터벌 발생기
         stockInterval = setInterval(() => {
             set((state) => {
                 const diff = Math.floor(Math.random() * 3) * 100 - 100;
@@ -132,15 +168,81 @@ export const useStockStore = create<StockState>((set) => ({
                     bidVolume: Math.floor(Math.random() * 14000) + 1000,
                 };
             });
-        }, 200); // 200ms마다 업데이트 (실제 환경에서는 WebSocket 메시지 수신 시마다 업데이트)
+        }, 200);
+
+        // 2. 실제 WebSocket 연결
+        try {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/v1/stocks/ws`;
+            stockWs = new WebSocket(wsUrl);
+
+            stockWs.onopen = () => {
+                console.log(`Connected to Dashboard WebSocket [${code}]`);
+                // 백엔드 연결 성공 시 Fallback용 모의 인터벌 제거
+                if (stockInterval) {
+                    clearInterval(stockInterval);
+                    stockInterval = null;
+                }
+
+                // 구독 요청 전송
+                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: `TICK_${code}` }));
+                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: `ORDERBOOK_${code}` }));
+            };
+
+            stockWs.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.topic === `TICK_${code}` && data.data) {
+                        const tickData = data.data; // domain.Stock 호환
+                        set((state) => ({
+                            currentPrice: tickData.currentPrice,
+                            priceChange: tickData.currentPrice - state.prevClose,
+                            changeRate: tickData.changeRate || ((tickData.currentPrice - state.prevClose) / state.prevClose) * 100,
+                        }));
+                    } else if (data.topic === `ORDERBOOK_${code}` && data.data) {
+                        const obData = data.data; // domain.OrderbookResponse 호환
+                        set({
+                            askPrice: obData.askPrice1,
+                            askVolume: obData.askVolume1,
+                            bidPrice: obData.bidPrice1,
+                            bidVolume: obData.bidVolume1,
+                        });
+                    }
+                } catch (e) {
+                    console.error("Failed to parse stock websocket message", e);
+                }
+            };
+
+            stockWs.onclose = () => {
+                console.log('Dashboard WebSocket disconnected');
+                stockWs = null;
+            };
+
+            stockWs.onerror = (error) => {
+                console.error('Dashboard WebSocket error (using fallback):', error);
+                stockWs?.close();
+            };
+        } catch (error) {
+            console.error('Failed to initialize WebSocket:', error);
+        }
     },
 
     // 스트림 정리 함수 (컴포넌트 언마운트 시 호출)
     disconnectStockStream: () => {
+        if (stockWs) {
+            if (stockWs.readyState === WebSocket.OPEN) {
+                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: `TICK_${useStockStore.getState().stockCode}` }));
+                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: `ORDERBOOK_${useStockStore.getState().stockCode}` }));
+            }
+            stockWs.close();
+            stockWs = null;
+        }
         if (stockInterval) {
             clearInterval(stockInterval);
             stockInterval = null;
-            console.log('Disconnected Dashboard Mock WebSockets');
+            console.log('Disconnected Dashboard Mock Fallback WebSockets');
         }
+        console.log('Dashboard WebSocket stream cleaned up');
     }
 }));
