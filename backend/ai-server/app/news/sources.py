@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-from app.schemas import Document as AppDocument
+from app.shared.schemas import Document as AppDocument
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import save_snapshot
 

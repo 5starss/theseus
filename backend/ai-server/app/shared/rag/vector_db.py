@@ -7,8 +7,8 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document as LangChainDocument
 from rank_bm25 import BM25Okapi
 
-from app.rag.embedder import UpstageEmbedder
-from app.schemas import Document as AppDocument
+from app.shared.rag.embedder import UpstageEmbedder
+from app.shared.schemas import Document as AppDocument
 
 logger = logging.getLogger(__name__)
 

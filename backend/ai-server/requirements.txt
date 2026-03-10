@@ -12,3 +12,9 @@ pandas
 openpyxl
 rank_bm25
 numpy
+langchain-openai
+scikit-learn
+lightgbm
+xgboost
+catboost
+optuna
