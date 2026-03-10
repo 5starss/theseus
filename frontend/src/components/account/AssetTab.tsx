@@ -1,7 +1,13 @@
+import { useEffect } from "react";
 import { useAccountStore } from "../../store/useAccountStore";
 
 export const AssetTab = () => {
-    const { totalAssets, cashBalance, portfolio } = useAccountStore();
+    const { totalAssets, cashBalance, portfolio, fetchBalance, fetchPositions } = useAccountStore();
+
+    useEffect(() => {
+        fetchBalance();
+        fetchPositions();
+    }, [fetchBalance, fetchPositions]);
 
     // Calculate total invested and profit
     const totalInvested = portfolio.reduce((acc, item) => acc + (item.shares * item.avgPrice), 0);
