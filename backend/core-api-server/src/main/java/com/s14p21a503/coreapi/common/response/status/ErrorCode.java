@@ -28,6 +28,8 @@ public enum ErrorCode {
     EMAIL_SEND_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUTH006", "이메일 발송에 실패했습니다."),
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH007", "유효하지 않은 리프레시 토큰입니다."),
 
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USR001", "해당 유저를 찾을 수 없습니다."),
+
     // --- 주문 / 계좌 / 포지션 관련 에러 코드 ---
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACC001", "해당 유저의 계좌 정보를 찾을 수 없습니다."),
     POSITION_NOT_FOUND(HttpStatus.BAD_REQUEST, "POS001", "해당 종목의 보유 주식이 없습니다."),
