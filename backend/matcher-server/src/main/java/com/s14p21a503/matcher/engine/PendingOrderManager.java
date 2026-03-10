@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -35,6 +36,9 @@ public class PendingOrderManager {
 
     // 서비스 참여율 (시장 거래량의 몇 %를 우리 서비스 유동성으로 가져올지 정의)
     private final BigDecimal participationRate;
+
+    // 유동성 소수점 적립금 (버려지는 유동성 방지)
+    private BigDecimal liquidityRemainder = BigDecimal.ZERO;
 
     public PendingOrderManager(String ticker, ExecutionIdGenerator executionIdGenerator, BigDecimal participationRate) {
         this.ticker = ticker;
@@ -94,11 +98,16 @@ public class PendingOrderManager {
         try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 사용할 수 있는 시장 유동성 계산: tick.volume * participationRate
-            long usableLiquidity = new BigDecimal(tick.getVolume())
+            // 사용할 수 있는 시장 유동성 계산: (tick.volume * participationRate) + 기존 적립금
+            BigDecimal rawLiquidity = new BigDecimal(tick.getVolume())
                     .multiply(participationRate)
-                    .setScale(0, java.math.RoundingMode.DOWN)
-                    .longValue();
+                    .add(liquidityRemainder);
+
+            // 정수 부분만 이번 유동성으로 사용
+            long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
+            
+            // 남은 소수점 부분은 다음을 위해 다시 적립
+            this.liquidityRemainder = rawLiquidity.subtract(new BigDecimal(usableLiquidity));
 
             if (usableLiquidity <= 0) {
                 return trades;
@@ -185,6 +194,23 @@ public class PendingOrderManager {
             }
 
             return trades;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * [복구 전용] 매칭 로직을 실행하지 않고 유동성 적립금만 업데이트합니다.
+     * 이미 체결 결과(RES)가 존재하거나 COMMIT된 틱에 대해 상태 드리프트를 방지하기 위해 사용합니다.
+     */
+    public void updateLiquidityRemainderOnly(TickDataEvent tick) {
+        lock.lock();
+        try {
+            BigDecimal rawLiquidity = new BigDecimal(tick.getVolume())
+                    .multiply(participationRate)
+                    .add(liquidityRemainder);
+            long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
+            this.liquidityRemainder = rawLiquidity.subtract(new BigDecimal(usableLiquidity));
         } finally {
             lock.unlock();
         }
@@ -279,7 +305,8 @@ public class PendingOrderManager {
                     .pendingAsks(new TreeMap<>(pendingAsks))
                     .orderCache(new HashMap<>(orderCache))
                     .currentBestBid(currentBestBid)
-                    .currentBestAsk(currentBestAsk);
+                    .currentBestAsk(currentBestAsk)
+                    .liquidityRemainder(liquidityRemainder);
         } finally {
             lock.unlock();
         }
@@ -299,6 +326,7 @@ public class PendingOrderManager {
             this.orderCache.putAll(state.getOrderCache());
             this.currentBestBid = state.getCurrentBestBid();
             this.currentBestAsk = state.getCurrentBestAsk();
+            this.liquidityRemainder = state.getLiquidityRemainder() != null ? state.getLiquidityRemainder() : BigDecimal.ZERO;
             log.info("[{}] 오더북 상태 복원 완료 - 매수: {}, 매도: {}, 캐시: {}", 
                     ticker, pendingBids.size(), pendingAsks.size(), orderCache.size());
         } finally {

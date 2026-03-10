@@ -55,4 +55,10 @@ public class SnapshotState implements java.io.Serializable {
      * 액션(CREATE/CANCEL)별, 버킷 인덱스별로 관리됩니다.
      */
     Map<String, Map<Long, BitSet>> deduplicatorActionBuckets;
+
+    /**
+     * 유동성 소수점 적립금 상태.
+     */
+    @Builder.Default
+    BigDecimal liquidityRemainder = BigDecimal.ZERO;
 }
