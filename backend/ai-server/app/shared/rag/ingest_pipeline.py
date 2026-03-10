@@ -2,9 +2,9 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Dict
 
-from app.rag.vector_db import NewsVectorDB
-from app.sources import fetch_store_and_convert_news
-from app.sources_community import fetch_store_and_convert_community
+from app.shared.rag.vector_db import NewsVectorDB
+from app.news.sources import fetch_store_and_convert_news
+from app.news.sources_community import fetch_store_and_convert_community
 
 logger = logging.getLogger(__name__)
 

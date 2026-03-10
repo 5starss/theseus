@@ -8,7 +8,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_upstage import ChatUpstage
 
-from app.rag.embedder import UpstageEmbedder
+from app.shared.rag.embedder import UpstageEmbedder
 
 logger = logging.getLogger(__name__)
 

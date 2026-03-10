@@ -5,11 +5,11 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 
-from app.agent.llm_agent import NewsReporterAgent
-from app.eval.judge import RAGEvaluator
-from app.rag.ingest_pipeline import RAGIngestPipeline
-from app.rag.reranker import SolarReranker
-from app.rag.vector_db import NewsVectorDB
+from app.news.agent import NewsReporterAgent
+from app.news.eval import RAGEvaluator
+from app.shared.rag.ingest_pipeline import RAGIngestPipeline
+from app.shared.rag.reranker import SolarReranker
+from app.shared.rag.vector_db import NewsVectorDB
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import list_storage_files, save_snapshot
 from collector.toss_community import fetch_toss_community_comments
@@ -64,9 +64,12 @@ def collect_all(
 
 
 @app.get("/v1/storage/status")
-def storage_status(limit: int = Query(20, ge=1, le=200)) -> Dict[str, Any]:
+def storage_status(
+    category: str = Query("news", pattern=r"^(news|quant)$"),
+    limit: int = Query(20, ge=1, le=200),
+) -> Dict[str, Any]:
     try:
-        return list_storage_files(limit=limit)
+        return list_storage_files(category=category, limit=limit)
     except Exception as exc:
         logger.exception("Failed to read storage status")
         raise HTTPException(status_code=500, detail=f"Storage status failed: {exc}") from exc
