@@ -83,8 +83,8 @@ public class PendingOrderManager {
     public void updateMarketData(MarketDataEvent event) {
         lock.lock();
         try {
-            this.currentBestBid = event.getData().getBidPrice1();
-            this.currentBestAsk = event.getData().getAskPrice1();
+            this.currentBestBid = event.getBidPrice1();
+            this.currentBestAsk = event.getAskPrice1();
         } finally {
             lock.unlock();
         }
@@ -98,14 +98,14 @@ public class PendingOrderManager {
         try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 사용할 수 있는 시장 유동성 계산: (tick.volume * participationRate) + 기존 적립금
-            BigDecimal rawLiquidity = new BigDecimal(tick.getVolume())
+            // 사용할 수 있는 시장 유동성 계산: tick.volume * participationRate
+            BigDecimal rawLiquidity = new BigDecimal(tick.getAccVol())
                     .multiply(participationRate)
                     .add(liquidityRemainder);
 
             // 정수 부분만 이번 유동성으로 사용
             long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
-            
+
             // 남은 소수점 부분은 다음을 위해 다시 적립
             this.liquidityRemainder = rawLiquidity.subtract(new BigDecimal(usableLiquidity));
 
@@ -206,7 +206,7 @@ public class PendingOrderManager {
     public void updateLiquidityRemainderOnly(TickDataEvent tick) {
         lock.lock();
         try {
-            BigDecimal rawLiquidity = new BigDecimal(tick.getVolume())
+            BigDecimal rawLiquidity = new BigDecimal(tick.getAccVol())
                     .multiply(participationRate)
                     .add(liquidityRemainder);
             long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
@@ -327,7 +327,7 @@ public class PendingOrderManager {
             this.currentBestBid = state.getCurrentBestBid();
             this.currentBestAsk = state.getCurrentBestAsk();
             this.liquidityRemainder = state.getLiquidityRemainder() != null ? state.getLiquidityRemainder() : BigDecimal.ZERO;
-            log.info("[{}] 오더북 상태 복원 완료 - 매수: {}, 매도: {}, 캐시: {}", 
+            log.info("[{}] 오더북 상태 복원 완료 - 매수: {}, 매도: {}, 캐시: {}",
                     ticker, pendingBids.size(), pendingAsks.size(), orderCache.size());
         } finally {
             lock.unlock();
