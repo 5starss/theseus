@@ -68,6 +68,8 @@ const MOCK_TRANSACTIONS: Transaction[] = [
 ];
 
 const MOCK_ORDERS: Order[] = [
+    { id: 'o_pending1', date: '2.25', stockName: 'NAVER', type: 'buy', status: 'pending', quantity: 1, price: 185000 },
+    { id: 'o_pending2', date: '2.25', stockName: '카카오', type: 'sell', status: 'pending', quantity: 2, price: 110000 },
     { id: 'o1', date: '2.22', stockName: 'KODEX 200', type: 'buy', status: 'completed', quantity: 2, price: 176070 },
     { id: 'o2', date: '2.22', stockName: 'KODEX 미국S&P500', type: 'buy', status: 'completed', quantity: 2, price: 22455 },
     { id: 'o3', date: '2.22', stockName: '삼성전자', type: 'buy', status: 'completed', quantity: 1, price: 185100 },

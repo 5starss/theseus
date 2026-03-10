@@ -1,8 +1,17 @@
+import { Outlet } from "react-router-dom";
+import { SidebarNav } from "../components/account/SidebarNav";
+
 export default function Account() {
+
     return (
-        <div className="p-8">
-            <h1 className="text-2xl font-bold mb-4">내 계좌</h1>
-            <p className="text-slate-600">현재 준비 중인 페이지입니다.</p>
+        <div className="w-full h-full flex bg-white overflow-hidden">
+            {/* Left Sidebar Navigation */}
+            <SidebarNav />
+
+            {/* Main Content Area */}
+            <div className="flex-1 h-full min-w-0 bg-white">
+                <Outlet />
+            </div>
         </div>
     );
 }
