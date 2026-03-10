@@ -4,11 +4,15 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -87,5 +91,33 @@ public class RedisService {
 
     public void removeFromSet(String key, String value) {
         redisTemplate.opsForSet().remove(key, value);
+    }
+
+    public String getHashField(String key, String field) {
+        Object value = redisTemplate.opsForHash().get(key, field);
+        return value != null ? value.toString() : null;
+    }
+
+    // 여러 Hash 키에서 동일한 필드를 Pipeline으로 일괄 조회
+    // 반환: key → field 값 (없는 키는 포함되지 않음)
+    public Map<String, String> getHashFieldBulk(List<String> keys, String field) {
+        List<Object> results = redisTemplate.executePipelined(new SessionCallback<>() {
+            @Override
+            public Object execute(RedisOperations operations) {
+                for (String key : keys) {
+                    operations.opsForHash().get(key, field);
+                }
+                return null;
+            }
+        });
+
+        Map<String, String> resultMap = new HashMap<>();
+        for (int i = 0; i < keys.size(); i++) {
+            Object value = results.get(i);
+            if (value != null) {
+                resultMap.put(keys.get(i), value.toString());
+            }
+        }
+        return resultMap;
     }
 }
