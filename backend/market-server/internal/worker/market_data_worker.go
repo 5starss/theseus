@@ -91,7 +91,7 @@ func (w *MarketDataWorker) updateTickToRedis(ctx context.Context, tick Tick) {
 
 	hashKey := "stocks:current:" + tick.Ticker
 
-	// 현재가 단건 저장 (Hash)
+	// 현재가 단건 저장 (Hash) - 호가창/체결 워커 전용 캐시
 	pipe.HSet(ctx, hashKey, map[string]interface{}{
 		"price":       tick.CurrentPrice,
 		"open":        tick.OpenPrice,
@@ -100,6 +100,17 @@ func (w *MarketDataWorker) updateTickToRedis(ctx context.Context, tick Tick) {
 		"change_rate": tick.ChangeRate,
 		"acc_vol":     tick.AccVolume,
 		"name":        tick.Name,
+	})
+
+	// 전역 종목 정보 (stocks:info) 갱신 - GetTopByVolume(HOME_40) 조회용
+	infoKey := "stocks:info:" + tick.Ticker
+	pipe.HSet(ctx, infoKey, map[string]interface{}{
+		"currentPrice": tick.CurrentPrice,
+		"changeRate":   tick.ChangeRate,
+		"accVolume":    tick.AccVolume,
+		// ticker와 name 등은 BulkUpsertStocks 측에 존재하거나 여기서 추가로 덮어써도 무방함
+		"ticker": tick.Ticker,
+		"name":   tick.Name,
 	})
 
 	// 누적 거래량 랭킹 갱신 (Sorted Set)
