@@ -1,6 +1,7 @@
 /.idea/
 /CLAUDE.md
 text.md
+.vscode/
 /backend/market-server/tmp/api-server
 /backend/market-server/api
 /backend/api-gateway/docs/AGENT_PLAN.md
