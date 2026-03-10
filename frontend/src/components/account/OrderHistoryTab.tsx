@@ -1,13 +1,17 @@
+import { useEffect, useMemo, useState } from "react";
 import { useAccountStore, type Order } from "../../store/useAccountStore";
-import { useMemo, useState } from "react";
 import { HistoryDetailModal } from "./HistoryDetailModal";
 import { OrderDetail } from "./OrderDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export function OrderHistoryTab() {
-    const { orders } = useAccountStore();
+    const { orders, fetchOrders, cancelOrder } = useAccountStore();
     const [selectedMonth, setSelectedMonth] = useState<string>('전체');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+    useEffect(() => {
+        fetchOrders();
+    }, [fetchOrders]);
 
     const availableMonths = useMemo(() => {
         const months = new Set<string>();
@@ -90,7 +94,12 @@ export function OrderHistoryTab() {
                                             수정
                                         </button>
                                         <button
-                                            onClick={(e) => { e.stopPropagation(); /* TODO: 취소 기능 */ }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (window.confirm("정말 주문을 취소하시겠습니까?")) {
+                                                    cancelOrder(order.id);
+                                                }
+                                            }}
                                             className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
                                         >
                                             취소
@@ -113,7 +122,7 @@ export function OrderHistoryTab() {
                             <SelectContent align="end" className="rounded-xl shadow-lg border-[#f3f4f6]">
                                 {availableMonths.map(m => (
                                     <SelectItem key={m} value={m} className="font-medium cursor-pointer rounded-lg m-1">
-                                        {m === '전체' ? '전체' : `2024년 ${m}월`}
+                                        {m === '전체' ? '전체' : `2026년 ${m}월`}
                                     </SelectItem>
                                 ))}
                             </SelectContent>

@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+import { accountApi } from '../api/account';
+import { orderApi, type PendingOrder, type OrderHistory as ApiOrderHistory } from '../api/order';
+import { positionApi } from '../api/position';
 
 export interface PortfolioItem {
     code: string;
@@ -45,6 +48,10 @@ interface AccountState {
     orders: Order[];
 
     // Actions
+    fetchBalance: () => Promise<void>;
+    fetchPositions: () => Promise<void>;
+    fetchOrders: (params?: { page?: number; size?: number; status?: string; ticker?: string; yearMonth?: string }) => Promise<void>;
+    cancelOrder: (orderId: number | string) => Promise<void>;
     executeTrade: (trade: { stockName: string; stockCode: string; quantity: number; price: number; type: 'buy' | 'sell' }) => void;
 }
 
@@ -88,6 +95,77 @@ export const useAccountStore = create<AccountState>((set) => ({
     portfolio: MOCK_PORTFOLIO,
     transactions: MOCK_TRANSACTIONS,
     orders: MOCK_ORDERS,
+    fetchBalance: async () => {
+        try {
+            const balance = await accountApi.getBalance();
+            set({
+                // dncaTotAmt: 총 예수금, availableAmt: 주문 가능 금액
+                // 기존 totalAssets는 총 자산(예수금+투자금)이나 우선 예수금 총액으로 업데이트
+                totalAssets: Number(balance.dncaTotAmt),
+                cashBalance: Number(balance.availableAmt),
+            });
+        } catch (error) {
+            console.error('Failed to fetch balance in store:', error);
+        }
+    },
+    fetchPositions: async () => {
+        try {
+            const positions = await positionApi.getPositions();
+            const portfolio: PortfolioItem[] = positions.map(p => ({
+                code: p.ticker,
+                name: p.companyName,
+                shares: p.quantity,
+                avgPrice: p.averagePrice
+            }));
+            set({ portfolio });
+        } catch (error) {
+            console.error('Failed to fetch positions in store:', error);
+        }
+    },
+    fetchOrders: async (params) => {
+        try {
+            const data = await orderApi.getOrders(params);
+
+            const transformDate = (isoDate: string) => {
+                const date = new Date(isoDate);
+                return `${date.getMonth() + 1}.${date.getDate()}`;
+            };
+
+            const transformedPending: Order[] = data.pending.content.map((po: PendingOrder) => ({
+                id: po.orderId.toString(),
+                date: transformDate(po.createdAt),
+                stockName: po.companyName,
+                type: po.orderType.toLowerCase() as 'buy' | 'sell',
+                status: 'pending',
+                quantity: po.unexecutedQuantity,
+                price: po.totalPrice / po.unexecutedQuantity
+            }));
+
+            const transformedCompleted: Order[] = data.completed.content.map((oh: ApiOrderHistory) => ({
+                id: oh.historyId.toString(),
+                date: transformDate(oh.createdAt),
+                stockName: oh.companyName,
+                type: oh.orderType.toLowerCase() as 'buy' | 'sell',
+                status: oh.historyType === 'TRADE' ? 'completed' : 'canceled',
+                quantity: oh.quantity,
+                price: oh.price
+            }));
+
+            set({ orders: [...transformedPending, ...transformedCompleted] });
+        } catch (error) {
+            console.error('Failed to fetch orders in store:', error);
+        }
+    },
+    cancelOrder: async (orderId) => {
+        try {
+            await orderApi.cancelOrder(orderId);
+            const getBalance = useAccountStore.getState().fetchBalance;
+            const getOrders = useAccountStore.getState().fetchOrders;
+            await Promise.all([getBalance(), getOrders()]);
+        } catch (error) {
+            console.error('Failed to cancel order in store:', error);
+        }
+    },
     executeTrade: (trade) => set((state) => {
         const { stockName, stockCode, quantity, price, type } = trade;
         const totalAmount = quantity * price;
