@@ -145,6 +145,8 @@ public class UnifiedRecoveryManager {
                     replayCommand(ticker, orderManager, cmdEntry);
                     orderIdDeduplicator.checkAndMarkDuplicate(or.getOrderId(), or.getAction());
                 } else if (payload instanceof TickDataEvent) {
+                    TickDataEvent tick = (TickDataEvent) payload;
+                    // 항상 유동성을 업데이트하여 상태 드리프트를 방지함
                     if (results != null && !results.isEmpty()) {
                         // 과거 실체결 결과가 있다면 엔진 로직 대신 결과만 강제 적용 (Causality Protection)
                         for (ExecutionResult res : results) {
@@ -152,9 +154,13 @@ public class UnifiedRecoveryManager {
                             String dedupAction = (res.getEventType() == EventType.CANCELLED) ? "CANCEL" : "CREATE";
                             orderIdDeduplicator.checkAndMarkDuplicate(res.getOrderId(), dedupAction);
                         }
+                        orderManager.updateLiquidityRemainderOnly(tick);
                     } else if (!committedSeqs.contains(seqNo)) {
-                        // 결과가 없고 커밋도 안 된 틱은 리플레이
+                        // 결과가 없고 커밋도 안 된 틱은 리플레이 (matchWithTick이 적립 포함)
                         replayCommand(ticker, orderManager, cmdEntry);
+                    } else {
+                        // 결과가 없지만 이미 커밋된 건도 적립금은 업데이트해야 함
+                        orderManager.updateLiquidityRemainderOnly(tick);
                     }
                 } else if (payload instanceof MarketDataEvent) {
                     replayCommand(ticker, orderManager, cmdEntry);
