@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -7,6 +9,12 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.news.agent import NewsReporterAgent
 from app.news.eval import RAGEvaluator
+from app.quant.feature_engineer import IntradayFeatureEngineer
+from app.quant.sources import (
+    fetch_and_store_timeseries as quant_fetch_and_store_timeseries,
+    get_latest_raw_path as quant_get_latest_raw_path,
+    load_raw_from_storage as quant_load_raw_from_storage,
+)
 from app.shared.rag.ingest_pipeline import RAGIngestPipeline
 from app.shared.rag.reranker import SolarReranker
 from app.shared.rag.vector_db import NewsVectorDB
@@ -22,6 +30,9 @@ app = FastAPI(title="AI Server Infrastructure Base")
 TICKER_PATTERN = r"^\d{6}$"
 SOURCE_NEWS = "KIS_NEWS"
 SOURCE_COMMUNITY = "TOSS_COMMUNITY"
+QUANT_AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "quant_agent"))
+QUANT_AGENT_STORAGE_DIR = os.path.join(QUANT_AGENT_DIR, "storage")
+QUANT_AGENT_DATA_DIR = os.path.join(QUANT_AGENT_DIR, "data_cybos")
 
 
 @app.get("/health")
@@ -113,6 +124,57 @@ def rag_chat(
     except Exception as exc:
         logger.exception("Failed to run RAG chat")
         raise HTTPException(status_code=500, detail=f"RAG chat failed: {exc}") from exc
+
+
+@app.post("/v1/quant/feature-extract")
+def quant_feature_extract(
+    ticker: str = Query(..., pattern=TICKER_PATTERN),
+    run_fetch: bool = Query(True),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+) -> Dict[str, Any]:
+    try:
+        os.makedirs(QUANT_AGENT_STORAGE_DIR, exist_ok=True)
+        if run_fetch:
+            raw_path = quant_fetch_and_store_timeseries(ticker=ticker, data_dir=QUANT_AGENT_DATA_DIR, storage_dir=QUANT_AGENT_STORAGE_DIR)
+        else:
+            try:
+                raw_path = quant_get_latest_raw_path(ticker, QUANT_AGENT_STORAGE_DIR)
+            except FileNotFoundError:
+                raw_path = quant_fetch_and_store_timeseries(ticker=ticker, data_dir=QUANT_AGENT_DATA_DIR, storage_dir=QUANT_AGENT_STORAGE_DIR)
+
+        raw_df = quant_load_raw_from_storage(raw_path)
+        feat_df = IntradayFeatureEngineer(horizon_minutes=horizon_minutes).build(raw_df)
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        feat_path = os.path.join(QUANT_AGENT_STORAGE_DIR, f"feat_{ticker}_{stamp}.csv.gz")
+        feat_df.to_csv(feat_path, index=False, compression="gzip")
+
+        meta_path = os.path.join(QUANT_AGENT_STORAGE_DIR, f"feature_extract_{ticker}_{stamp}.json")
+        payload = {
+            "ticker": ticker,
+            "generated_at": datetime.now().isoformat(),
+            "source_raw_path": raw_path,
+            "feature_path": feat_path,
+            "horizon_minutes": horizon_minutes,
+            "feature_rows": int(len(feat_df)),
+            "feature_columns": list(feat_df.columns),
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        return {
+            "status": "ok",
+            "ticker": ticker,
+            "quant_agent_dir": QUANT_AGENT_DIR,
+            "raw_path": raw_path,
+            "feature_path": feat_path,
+            "feature_rows": int(len(feat_df)),
+            "feature_columns": list(feat_df.columns),
+            "meta_path": meta_path,
+        }
+    except Exception as exc:
+        logger.exception("Failed to run quant feature extraction for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Quant feature extraction failed: {exc}") from exc
 
 
 def _run_rag_chat_pipeline(
