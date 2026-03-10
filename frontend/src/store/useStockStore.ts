@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { stockApi } from '../api/stock';
 
 // 주식 호가 및 거래 관련 전역 상태 타입
 interface StockState {
@@ -152,6 +153,17 @@ export const useStockStore = create<StockState>((set) => ({
 
         console.log(`Starting Dashboard Stream [${code}]...`);
 
+        // 0. 초기 호가 데이터(Snapshot) 가져오기
+        stockApi.getOrderbook(code).then(obData => {
+            set({
+                askPrice: obData.askPrice1, // 1매수호가
+                askVolume: obData.askVolume1,  // 1매수호가 잔량
+                bidPrice: obData.bidPrice1, // 1매도호가
+                bidVolume: obData.bidVolume1, // 1매도호가 잔량
+                currentPrice: obData.currentPrice, // 현재가
+            });
+        });
+
         // 1. Fallback: 웹소켓 연결 성공 전까지 혹은 백엔드 에러 시 동작할 모의 데이터 인터벌 발생기
         stockInterval = setInterval(() => {
             set((state) => {
@@ -185,22 +197,22 @@ export const useStockStore = create<StockState>((set) => ({
                 }
 
                 // 구독 요청 전송
-                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: `TICK_${code}` }));
-                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: `ORDERBOOK_${code}` }));
+                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'TICK', ticker: code }));
+                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'ORDERBOOK', ticker: code }));
             };
 
             stockWs.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
 
-                    if (data.topic === `TICK_${code}` && data.data) {
+                    if (data.topic === `TICK:${code}` && data.data) {
                         const tickData = data.data; // domain.Stock 호환
                         set((state) => ({
                             currentPrice: tickData.currentPrice,
                             priceChange: tickData.currentPrice - state.prevClose,
                             changeRate: tickData.changeRate || ((tickData.currentPrice - state.prevClose) / state.prevClose) * 100,
                         }));
-                    } else if (data.topic === `ORDERBOOK_${code}` && data.data) {
+                    } else if (data.topic === `ORDERBOOK:${code}` && data.data) {
                         const obData = data.data; // domain.OrderbookResponse 호환
                         set({
                             askPrice: obData.askPrice1,
@@ -232,8 +244,8 @@ export const useStockStore = create<StockState>((set) => ({
     disconnectStockStream: () => {
         if (stockWs) {
             if (stockWs.readyState === WebSocket.OPEN) {
-                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: `TICK_${useStockStore.getState().stockCode}` }));
-                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: `ORDERBOOK_${useStockStore.getState().stockCode}` }));
+                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: 'TICK', ticker: useStockStore.getState().stockCode }));
+                stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: 'ORDERBOOK', ticker: useStockStore.getState().stockCode }));
             }
             stockWs.close();
             stockWs = null;

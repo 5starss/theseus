@@ -134,7 +134,50 @@ export const stockApi = {
             console.warn(`Backend is not available for candles [${ticker}]. Using dummy data.`);
             return generateDummyCandles(ticker, interval, limit);
         }
+    },
+
+    // 백엔드 명세: GET /api/v1/stocks/:ticker/orderbook (Gateway: /api/v1/market/stocks/:ticker/orderbook)
+    getOrderbook: async (ticker: string): Promise<OrderbookData> => {
+        try {
+            const response = await api.get<ApiResponse<OrderbookData>>(`/api/v1/market/stocks/${ticker}/orderbook`);
+
+            if (response.data.isSuccess && response.data.result) {
+                return response.data.result;
+            } else {
+                return generateDummyOrderbook(ticker);
+            }
+        } catch (error) {
+            console.warn(`Backend is not available for orderbook [${ticker}]. Using dummy data.`);
+            return generateDummyOrderbook(ticker);
+        }
     }
+};
+
+export interface OrderbookData {
+    ticker: string;
+    name: string;
+    currentPrice: number;
+    changeRate: number;
+    askPrice1: number;
+    askVolume1: number;
+    bidPrice1: number;
+    bidVolume1: number;
+}
+
+// Fallback: 가짜 호가 데이터 생성
+const generateDummyOrderbook = (ticker: string): OrderbookData => {
+    const name = TOP_40_STOCKS[ticker] || "알 수 없는 종목";
+    const basePrice = 50000;
+    return {
+        ticker,
+        name,
+        currentPrice: basePrice,
+        changeRate: 0.5,
+        askPrice1: basePrice + 100,
+        askVolume1: Math.floor(Math.random() * 1000) + 100,
+        bidPrice1: basePrice - 100,
+        bidVolume1: Math.floor(Math.random() * 1000) + 100,
+    };
 };
 
 // Fallback: 가짜 과거 캔들 데이터 생성
