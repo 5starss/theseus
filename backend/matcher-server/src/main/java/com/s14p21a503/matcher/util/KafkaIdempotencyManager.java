@@ -18,12 +18,11 @@ public class KafkaIdempotencyManager {
     private final Map<String, Long> lastProcessedOffsets = new ConcurrentHashMap<>();
 
     /**
-     * 특정 종목/파티션의 처리된 마지막 오프셋을 업데이트합니다.
-     * 주로 복구(Recovery) 단계에서 호출됩니다.
+     * 특정 토픽/종목/파티션의 처리된 마지막 오프셋을 업데이트합니다.
      */
-    public void updateLastOffset(String ticker, int partition, long offset) {
+    public void updateLastOffset(String topic, String ticker, int partition, long offset) {
         if (offset < 0) return;
-        String key = makeKey(ticker, partition);
+        String key = makeKey(topic, ticker, partition);
         lastProcessedOffsets.compute(key, (k, old) -> (old == null || offset > old) ? offset : old);
     }
 
@@ -32,20 +31,20 @@ public class KafkaIdempotencyManager {
      * 
      * @return true 만약 이미 처리된 오프셋인 경우 (중복)
      */
-    public boolean isDuplicate(String ticker, int partition, long offset) {
-        String key = makeKey(ticker, partition);
+    public boolean isDuplicate(String topic, String ticker, int partition, long offset) {
+        String key = makeKey(topic, ticker, partition);
         Long lastOffset = lastProcessedOffsets.get(key);
         
         if (lastOffset != null && offset <= lastOffset) {
-            log.trace("[{}] 중복 메시지 감지 (Partition: {}, Offset: {}, Last: {})", 
-                    ticker, partition, offset, lastOffset);
+            log.trace("[{}] {} 중복 메시지 감지 (Partition: {}, Offset: {}, Last: {})", 
+                    topic, ticker, partition, offset, lastOffset);
             return true;
         }
         return false;
     }
 
-    private String makeKey(String ticker, int partition) {
-        return ticker + ":" + partition;
+    private String makeKey(String topic, String ticker, int partition) {
+        return topic + ":" + ticker + ":" + partition;
     }
     
     public void clear() {

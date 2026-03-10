@@ -62,14 +62,14 @@ public class MatcherKafkaListener {
                                     Acknowledgment ack) {
         
         // 0. Exactly-Once 체크 (저널 복구와의 중복 방지)
-        if (idempotencyManager.isDuplicate(orderRequest.getTicker(), partition, offset)) {
+        if (idempotencyManager.isDuplicate(KafkaTopicConstants.ORDER_EVENT_TOPIC, orderRequest.getTicker(), partition, offset)) {
             ack.acknowledge();
             return;
         }
 
         // 시장 상태 및 타임스탬프 필터링 (모든 Action에 대해 적용)
         if (shouldIgnoreEvent("ORDER", orderRequest.getTicker(), orderRequest.getTimestamp())) {
-            idempotencyManager.updateLastOffset(orderRequest.getTicker(), partition, offset);
+            idempotencyManager.updateLastOffset(KafkaTopicConstants.ORDER_EVENT_TOPIC, orderRequest.getTicker(), partition, offset);
             ack.acknowledge();
             return;
         }
@@ -83,7 +83,7 @@ public class MatcherKafkaListener {
             // 1. 중복 체크 (액션별 독립 체크)
             if (deduplicator.checkAndMarkDuplicate(orderRequest.getOrderId(), orderRequest.getAction())) {
                 log.warn("중복 {} 요청 감지 - 무시 처리: {}", orderRequest.getAction(), orderRequest.getOrderId());
-                idempotencyManager.updateLastOffset(ticker, partition, offset);
+                idempotencyManager.updateLastOffset(KafkaTopicConstants.ORDER_EVENT_TOPIC, ticker, partition, offset);
                 ack.acknowledge();
                 return;
             }
@@ -101,7 +101,7 @@ public class MatcherKafkaListener {
 
             // [안전성] 디스크 기록(Flush)까지 완료되어야 카프카에게 오프셋 커밋(Ack)
             outcome.whenFlushed().thenAcceptAsync(seqNo -> {
-                idempotencyManager.updateLastOffset(ticker, partition, offset);
+                idempotencyManager.updateLastOffset(KafkaTopicConstants.ORDER_EVENT_TOPIC, ticker, partition, offset);
                 ack.acknowledge();
                 log.debug("디스크 입고 완료 및 Kafka Ack - Seq: {}", seqNo);
             }, tickerExecutor)
@@ -116,7 +116,6 @@ public class MatcherKafkaListener {
     }
 
     /**
-     * [TODO] : 시세서버 구현 후 수정
      * 시세 데이터(호가창) 수신 리스너
      */
     @KafkaListener(topics = KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, groupId = "matcher-group", concurrency = "3")
@@ -135,19 +134,19 @@ public class MatcherKafkaListener {
         }
         String ticker = event.getData().getTicker();
 
-        if (idempotencyManager.isDuplicate(ticker, partition, offset)) {
+        if (idempotencyManager.isDuplicate(KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, ticker, partition, offset)) {
             ack.acknowledge();
             return;
         }
 
         // 시장 상태 필터링 (주입된 타임스탬프 사용)
         if (shouldIgnoreEvent("MARKET_DATA", ticker, timestamp)) {
-            idempotencyManager.updateLastOffset(ticker, partition, offset);
+            idempotencyManager.updateLastOffset(KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, ticker, partition, offset);
             ack.acknowledge();
             return;
         }
 
-        log.debug("Kafka 시세 데이터 수신: {} (Partition: {}, Offset: {})", event, partition, offset);
+        log.info("Kafka 시세 데이터(OrderBook) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
 
         try {
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);
@@ -161,7 +160,7 @@ public class MatcherKafkaListener {
             }, tickerExecutor);
 
             outcome.whenFlushed().thenAcceptAsync(seqNo -> {
-                idempotencyManager.updateLastOffset(ticker, partition, offset);
+                idempotencyManager.updateLastOffset(KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, ticker, partition, offset);
                 ack.acknowledge();
             }, tickerExecutor);
         } catch (Exception e) {
@@ -184,19 +183,19 @@ public class MatcherKafkaListener {
         tickDataEvent.setTimestamp(timestamp);
         String ticker = tickDataEvent.getTicker();
 
-        if (idempotencyManager.isDuplicate(ticker, partition, offset)) {
+        if (idempotencyManager.isDuplicate(KafkaTopicConstants.TRADE_DATA_EVENT_TOPIC, ticker, partition, offset)) {
             ack.acknowledge();
             return;
         }
 
         // 시장 상태 필터링
         if (shouldIgnoreEvent("TICK", ticker, timestamp)) {
-            idempotencyManager.updateLastOffset(ticker, partition, offset);
+            idempotencyManager.updateLastOffset(KafkaTopicConstants.TRADE_DATA_EVENT_TOPIC, ticker, partition, offset);
             ack.acknowledge();
             return;
         }
 
-        log.debug("카프카 체결 데이터(Tick) 수신: {} (Partition: {}, Offset: {})", tickDataEvent, partition, offset);
+        log.info("Kafka 체결 데이터(Tick) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
 
         try {
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);
@@ -210,7 +209,7 @@ public class MatcherKafkaListener {
             }, tickerExecutor);
 
             outcome.whenFlushed().thenAcceptAsync(seqNo -> {
-                idempotencyManager.updateLastOffset(ticker, partition, offset);
+                idempotencyManager.updateLastOffset(KafkaTopicConstants.TRADE_DATA_EVENT_TOPIC, ticker, partition, offset);
                 ack.acknowledge();
             }, tickerExecutor);
         } catch (Exception e) {

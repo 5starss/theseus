@@ -18,6 +18,10 @@ import org.springframework.kafka.support.converter.JsonMessageConverter;
 import org.springframework.kafka.support.mapping.DefaultJackson2JavaTypeMapper;
 import org.springframework.kafka.support.mapping.Jackson2JavaTypeMapper;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -32,19 +36,28 @@ public class KafkaConfig {
     // Producer
     // =========================
     @Bean
-    public ProducerFactory<String, Object> producerFactory() {
+    public ObjectMapper objectMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        return mapper;
+    }
+
+    @Bean
+    public ProducerFactory<String, Object> producerFactory(ObjectMapper objectMapper) {
         Map<String, Object> config = new HashMap<>();
 
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-
-        return new DefaultKafkaProducerFactory<>(config);
+        
+        DefaultKafkaProducerFactory<String, Object> factory = new DefaultKafkaProducerFactory<>(config);
+        factory.setValueSerializer(new JsonSerializer<>(objectMapper));
+        return factory;
     }
 
     @Bean
-    public KafkaTemplate<String, Object> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+    public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> producerFactory) {
+        return new KafkaTemplate<>(producerFactory);
     }
 
     // =========================
@@ -65,13 +78,13 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(ObjectMapper objectMapper) {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         
         // JSON 메시지 변환기 설정 (Header의 __TypeId__ 무시하고 메서드 파라미터 타입 강제 사용)
-        JsonMessageConverter converter = new JsonMessageConverter();
+        JsonMessageConverter converter = new JsonMessageConverter(objectMapper);
         DefaultJackson2JavaTypeMapper typeMapper = new DefaultJackson2JavaTypeMapper();
         typeMapper.setTypePrecedence(Jackson2JavaTypeMapper.TypePrecedence.INFERRED);
         typeMapper.addTrustedPackages("*");

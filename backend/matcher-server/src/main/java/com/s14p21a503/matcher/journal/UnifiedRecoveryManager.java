@@ -6,6 +6,7 @@ import com.s14p21a503.matcher.engine.PendingOrderManagerHolder;
 import com.s14p21a503.matcher.engine.MarketStateManager;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import com.s14p21a503.matcher.util.KafkaIdempotencyManager;
+import com.s14p21a503.matcher.kafka.KafkaTopicConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -98,7 +99,15 @@ public class UnifiedRecoveryManager {
                 
                 // 오프셋 정보 업데이트 (중복 방지 필터 초기화용)
                 if (header.getType() == JournalType.CMD) {
-                    kafkaIdempotencyManager.updateLastOffset(ticker, header.getPartition(), header.getOffset());
+                    try {
+                        Object payload = JournalSerializer.deserialize(entry.getPayload());
+                        String topic = getTopicForPayload(payload);
+                        if (topic != null) {
+                            kafkaIdempotencyManager.updateLastOffset(topic, ticker, header.getPartition(), header.getOffset());
+                        }
+                    } catch (Exception e) {
+                        log.warn("[{}] CMD 오프셋 복구 중 스킵 (Seq: {})", ticker, header.getSeqNo());
+                    }
                 }
 
                 if (header.getSeqNo() <= startSeqNo) continue;
@@ -202,5 +211,12 @@ public class UnifiedRecoveryManager {
             MarketDataEvent mkt = (MarketDataEvent) payload;
             orderManager.updateMarketData(mkt);
         }
+    }
+
+    private String getTopicForPayload(Object payload) {
+        if (payload instanceof OrderRequest) return KafkaTopicConstants.ORDER_EVENT_TOPIC;
+        if (payload instanceof TickDataEvent) return KafkaTopicConstants.TRADE_DATA_EVENT_TOPIC;
+        if (payload instanceof MarketDataEvent) return KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC;
+        return null;
     }
 }
