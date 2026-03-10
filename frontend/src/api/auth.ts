@@ -61,15 +61,15 @@ api.interceptors.response.use(
         if (
             error.response?.status === 401 &&
             !originalRequest._retry &&
-            originalRequest.url !== '/api/v1/auth/refresh' &&
-            originalRequest.url !== '/api/v1/auth/login'
+            originalRequest.url !== '/api/v1/core/auth/refresh' &&
+            originalRequest.url !== '/api/v1/core/auth/login'
         ) {
             originalRequest._retry = true;
 
             try {
                 // 리프레시 토큰(쿠키)을 통해 새로운 액세스 토큰 발급 요청
                 const refreshResponse = await axios.post<ApiResponse<{ accessToken: string }>>(
-                    '/api/v1/auth/refresh',
+                    '/api/v1/core/auth/refresh',
                     {},
                     { withCredentials: true }
                 );
@@ -103,7 +103,7 @@ api.interceptors.response.use(
 export const authApi = {
     // 회원가입
     signup: async (data: SignupRequest): Promise<SignupResponse> => {
-        const response = await api.post<ApiResponse<SignupResponse>>('/api/v1/auth/signup', data);
+        const response = await api.post<ApiResponse<SignupResponse>>('/api/v1/core/auth/signup', data);
 
         if (!response.data.isSuccess) {
             throw new Error(response.data.message || '회원가입에 실패했습니다.');
@@ -113,7 +113,7 @@ export const authApi = {
     },
     // 로그인
     login: async (data: LoginRequest): Promise<LoginResponse> => {
-        const response = await api.post<ApiResponse<LoginResponse>>('/api/v1/auth/login', data);
+        const response = await api.post<ApiResponse<LoginResponse>>('/api/v1/core/auth/login', data);
 
         if (!response.data.isSuccess) {
             throw new Error(response.data.message || '로그인에 실패했습니다.');
@@ -123,6 +123,6 @@ export const authApi = {
     },
     // 로그아웃
     logout: async (): Promise<void> => {
-        await api.post('/api/v1/auth/logout');
+        await api.post('/api/v1/core/auth/logout');
     },
 };
