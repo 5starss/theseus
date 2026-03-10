@@ -5,6 +5,7 @@ import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import com.s14p21a503.coreapi.domain.auth.dto.request.LoginRequestDto;
 import com.s14p21a503.coreapi.domain.auth.dto.request.SignupRequestDto;
 import com.s14p21a503.coreapi.domain.auth.token.JwtProvider;
+import com.s14p21a503.coreapi.domain.account.service.AccountService;
 import com.s14p21a503.coreapi.domain.user.entity.User;
 import com.s14p21a503.coreapi.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class AuthService {
     private final BCryptPasswordEncoder passwordEncoder;
     private final JwtProvider jwtProvider;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final AccountService accountService;
 
     @Transactional
     public Long signUp(SignupRequestDto dto) {
@@ -47,12 +49,18 @@ public class AuthService {
                 .build();
 
 
-        // 4) 저장 (race condition 대비: UNIQUE 제약 예외 catch)
+        // 3) 저장 (race condition 대비: UNIQUE 제약 예외 catch)
+        User savedUser;
         try {
-            return userRepository.save(user).getId();
+            savedUser = userRepository.save(user);
         } catch (DataIntegrityViolationException e) {
             throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
         }
+
+        // 4) 가입 시 계좌 자동 생성
+        accountService.createAccount(savedUser.getId());
+
+        return savedUser.getId();
     }
 
     @Transactional

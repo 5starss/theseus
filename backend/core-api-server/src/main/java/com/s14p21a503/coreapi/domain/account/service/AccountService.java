@@ -30,6 +30,17 @@ public class AccountService {
     private final PositionRepository positionRepository;
     private final RedisService redisService;
 
+    @Transactional
+    public void createAccount(Long userId) {
+        Account account = Account.builder()
+                .userId(userId)
+                .dncaTotAmt(new BigDecimal("20000000"))
+                .build();
+
+        accountRepository.save(account);
+        log.info("새로운 계좌 생성 완료 - userId: {}, initialBalance: 20,000,000", userId);
+    }
+
     @Transactional(readOnly = true)
     public AccountBalanceResponseDto getBalance(Long userId) {
         Account account = accountRepository.findByUserId(userId)
