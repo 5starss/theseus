@@ -4,6 +4,7 @@ package com.s14p21a503.coreapi.domain.account.controller;
 import com.s14p21a503.coreapi.common.response.ApiResponse;
 import com.s14p21a503.coreapi.common.response.status.SuccessCode;
 import com.s14p21a503.coreapi.domain.account.dto.AccountBalanceResponseDto;
+import com.s14p21a503.coreapi.domain.account.dto.AccountSummaryResponseDto;
 import com.s14p21a503.coreapi.domain.account.service.AccountService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -22,5 +23,11 @@ public class AccountController {
     public ResponseEntity<ApiResponse<AccountBalanceResponseDto>> getBalance(
             @RequestHeader(value = "X-User-Id") Long userId) {
         return ApiResponse.onSuccess(SuccessCode.OK, accountService.getBalance(userId));
+    }
+
+    @GetMapping("/summary")
+    public ResponseEntity<ApiResponse<AccountSummaryResponseDto>> getSummary(
+            @RequestHeader(value = "X-User-Id") Long userId) {
+        return ApiResponse.onSuccess(SuccessCode.OK, accountService.getSummary(userId));
     }
 }
