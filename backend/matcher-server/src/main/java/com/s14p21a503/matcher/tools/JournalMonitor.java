@@ -93,11 +93,11 @@ public class JournalMonitor {
                     color, or.getOrderId(), or.getAction(), or.getOrderType(), or.getPrice(), or.getRequestedQuantity(), ANSI_RESET);
         }
         if (payload instanceof TickDataEvent td) {
-            return String.format(ANSI_GREEN + "Tick(P:%s, V:%d)" + ANSI_RESET, td.getPrice(), td.getVolume());
+            return String.format(ANSI_GREEN + "Tick(P:%s, V:%d)" + ANSI_RESET, td.getPrice(), td.getAccVol());
         }
         if (payload instanceof MarketDataEvent md) {
-            String bid = (md.getData() != null) ? md.getData().getBidPrice1().toString() : "-";
-            String ask = (md.getData() != null) ? md.getData().getAskPrice1().toString() : "-";
+            String bid = (md.getBidPrice1() != null) ? md.getBidPrice1().toString() : "-";
+            String ask = (md.getAskPrice1() != null) ? md.getAskPrice1().toString() : "-";
             return String.format("MktData(B:%s, A:%s)", bid, ask);
         }
         if (payload instanceof ExecutionResult er) {

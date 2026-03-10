@@ -127,12 +127,12 @@ public class MatcherKafkaListener {
         
         // 0. 타임스탬프 주입 (메시지 페이로드에 없는 경우 대비)
         event.setTimestamp(timestamp);
-        if (event.getData() == null) {
+        if (event.getTicker() == null) {
             log.warn("유효하지 않은 시세 데이터 수신 (data 객체 누락): {}", event);
             ack.acknowledge();
             return;
         }
-        String ticker = event.getData().getTicker();
+        String ticker = event.getTicker();
 
         if (idempotencyManager.isDuplicate(KafkaTopicConstants.MARKET_DATA_EVENT_TOPIC, ticker, partition, offset)) {
             ack.acknowledge();

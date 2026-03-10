@@ -1,5 +1,6 @@
 package com.s14p21a503.matcher.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -9,10 +10,6 @@ import lombok.ToString;
 import java.io.Serializable;
 import java.math.BigDecimal;
 
-/**
- * TODO [외부 시세 연동]:
- * 실제 시세 서버(Market Server)의 체결 데이터 포맷에 맞게 수정이 필요할 수 있습니다.
- */
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
@@ -22,8 +19,15 @@ public class TickDataEvent implements Serializable {
     private static final long serialVersionUID = 1L;
     private String topic;
     private String ticker;
-    private BigDecimal price; // 체결가
-    private Long volume; // 체결수량
+    private String name;
+    private BigDecimal price;
+    private BigDecimal open;
+    private BigDecimal high;
+    private BigDecimal low;
+    @JsonProperty("change_rate")
+    private Double changeRate;
+    @JsonProperty("acc_vol")
+    private Long accVol;
     private long timestamp; // 리스너 수신 시점 또는 Kafka 헤더 타임스탬프 주입용
 
     public void setTimestamp(long timestamp) {
