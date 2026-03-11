@@ -549,10 +549,39 @@ def recommend_parameters(opt_results: pd.DataFrame) -> Dict[str, Any]:
         - (0.5 * np.where(scored["hold_bars"] < 5, 1.0, 0.0))
     )
 
-    # 필터링 조건
-    strict = scored[(scored["min_trades_in_fold"] >= 10) & (scored["trade_count"] >= 500) & (scored["hold_bars"] >= 5) & (scored["dir_acc_trades"] >= 0.52)]
-    candidates = strict if not strict.empty else scored
-    filter_applied = not strict.empty
+    # 필터링 조건(강→중→약 순으로 적용; 저표본 파라미터를 최종 선택에서 배제)
+    strict = scored[
+        (scored["min_trades_in_fold"] >= 10)
+        & (scored["trade_count"] >= 500)
+        & (scored["hold_bars"] >= 5)
+        & (scored["dir_acc_trades"] >= 0.52)
+    ]
+    medium = scored[
+        (scored["min_trades_in_fold"] >= 5)
+        & (scored["trade_count"] >= 200)
+        & (scored["hold_bars"] >= 5)
+        & (scored["dir_acc_trades"] >= 0.50)
+    ]
+    loose = scored[
+        (scored["min_trades_in_fold"] >= 2)
+        & (scored["trade_count"] >= 50)
+        & (scored["hold_bars"] >= 3)
+    ]
+
+    if not strict.empty:
+        candidates = strict
+        selection_tier = "strict"
+    elif not medium.empty:
+        candidates = medium
+        selection_tier = "medium"
+    elif not loose.empty:
+        candidates = loose
+        selection_tier = "loose"
+    else:
+        # 최후 fallback도 거래 수를 우선시해 극단적 저표본 선택을 줄임
+        candidates = scored.sort_values(by=["trade_count", "robust_score"], ascending=False).head(30)
+        selection_tier = "fallback"
+    filter_applied = selection_tier != "fallback"
     
     top = candidates.sort_values(by=["dir_acc_trades", "robust_score"], ascending=False).head(5)
     best = top.iloc[0]
@@ -562,6 +591,7 @@ def recommend_parameters(opt_results: pd.DataFrame) -> Dict[str, Any]:
                        "vol_scale": round(float(best.get("vol_scale", 0)), 4), "baseline_vol": round(float(best.get("baseline_vol",0)), 6)},
         "top5": top.to_dict(orient="records"),
         "recommendation_reason": {"dir_acc": float(best["dir_acc"]), "dir_acc_trades": float(best["dir_acc_trades"]), 
-                                 "filter_applied": filter_applied, "baseline_volatility": float(best.get("baseline_vol", 0))}
+                                 "filter_applied": filter_applied, "selection_tier": selection_tier,
+                                 "baseline_volatility": float(best.get("baseline_vol", 0))}
     }
     return res

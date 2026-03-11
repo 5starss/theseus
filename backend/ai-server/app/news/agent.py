@@ -1,5 +1,7 @@
 import os
-from typing import List, Optional
+import json
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -47,6 +49,37 @@ class NewsReporterAgent:
             ]
         )
         self.chain = self.prompt | self.llm | StrOutputParser()
+        self.card_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """당신은 뉴스 투자심리 분석 에이전트입니다.
+반드시 JSON object 하나만 출력하세요. 코드블록/설명 금지.
+필수 키:
+$schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, top_reasons, risk_flags, requested_action
+제약:
+- agent는 "news"
+- stance는 strong_buy|buy|hold|sell|strong_sell
+- confidence는 0.0~1.0
+- score는 -30~30 정수
+- top_reasons는 최대 3개
+- requested_action은 object
+""",
+                ),
+                (
+                    "human",
+                    """질문: {question}
+종목코드: {ticker}
+뉴스(신뢰도 높음): {news_count}건
+커뮤니티(심리 참고): {community_count}건
+
+참고 데이터:
+{context}
+""",
+                ),
+            ]
+        )
+        self.card_chain = self.card_prompt | self.llm | StrOutputParser()
 
     def generate_response(
         self,
@@ -79,3 +112,77 @@ class NewsReporterAgent:
             footer += f"[{chr(65+i)}] [커뮤니티] {doc.page_content[:30]}...\n"
 
         return response + footer
+
+    def generate_analysis_card(
+        self,
+        ticker: str,
+        question: str,
+        news_docs: List[Document],
+        community_docs: Optional[List[Document]] = None,
+    ) -> Dict[str, Any]:
+        news_docs = news_docs or []
+        community_docs = community_docs or []
+
+        if not news_docs and not community_docs:
+            return {
+                "$schema": "analysis_card_v1",
+                "agent": "news",
+                "ticker": ticker,
+                "timestamp": datetime.now().isoformat(),
+                "stance": "hold",
+                "confidence": 0.0,
+                "score": 0,
+                "signal_breakdown": {"disclosure_signal": 0, "news_signal": 0, "community_signal": 0},
+                "top_reasons": ["분석 가능한 뉴스/커뮤니티 데이터가 없습니다."],
+                "risk_flags": ["no_data"],
+                "requested_action": {"preference": "hold", "avoid_if": "unknown"},
+            }
+
+        context_parts = []
+        if news_docs:
+            context_parts.append(
+                "\n".join(
+                    f"[N{i+1}] ({doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
+                    for i, doc in enumerate(news_docs)
+                )
+            )
+        if community_docs:
+            context_parts.append(
+                "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
+            )
+        context = "\n\n".join(context_parts)
+
+        try:
+            raw = self.card_chain.invoke(
+                {
+                    "question": question,
+                    "ticker": ticker,
+                    "news_count": len(news_docs),
+                    "community_count": len(community_docs),
+                    "context": context,
+                }
+            )
+            card = json.loads(raw)
+        except Exception:
+            card = {
+                "$schema": "analysis_card_v1",
+                "agent": "news",
+                "ticker": ticker,
+                "timestamp": datetime.now().isoformat(),
+                "stance": "hold",
+                "confidence": 0.0,
+                "score": 0,
+                "signal_breakdown": {"disclosure_signal": 0, "news_signal": 0, "community_signal": 0},
+                "top_reasons": ["뉴스 에이전트 분석 응답 파싱 실패"],
+                "risk_flags": ["agent_failure"],
+                "requested_action": {"preference": "hold", "avoid_if": "unknown"},
+            }
+
+        card["$schema"] = "analysis_card_v1"
+        card["agent"] = "news"
+        card["ticker"] = ticker
+        card["timestamp"] = card.get("timestamp") or datetime.now().isoformat()
+        card["top_reasons"] = (card.get("top_reasons") or [])[:3]
+        card["risk_flags"] = card.get("risk_flags") or []
+        card["requested_action"] = card.get("requested_action") or {}
+        return card

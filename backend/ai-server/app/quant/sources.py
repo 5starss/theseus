@@ -189,6 +189,8 @@ def get_latest_global_model_path() -> str:
     storage_dir = get_storage_dir(_QUANT_CATEGORY)
     pattern = os.path.join(storage_dir, "model_global_*.json")
     files = sorted(glob.glob(pattern))
+    r = re.compile(r"^model_global_\d{8}_\d{6}\.json$")
+    files = [f for f in files if r.match(os.path.basename(f))]
     if not files:
         raise FileNotFoundError("global model 데이터를 storage/quant 에서 찾을 수 없습니다.")
     return files[-1]
