@@ -387,6 +387,7 @@ func TestGetTickSnapshot_Success(t *testing.T) {
 	mr.HSet("stocks:current:005930", "open", "80000")
 	mr.HSet("stocks:current:005930", "high", "81000")
 	mr.HSet("stocks:current:005930", "low", "79500")
+	mr.HSet("stocks:current:005930", "trade_vol", "500")
 	mr.HSet("stocks:current:005930", "acc_vol", "1500000")
 
 	r := gin.New()
@@ -414,7 +415,7 @@ func TestGetTickSnapshot_Success(t *testing.T) {
 		t.Fatalf("failed to parse result: %v", err)
 	}
 
-	if snap.Ticker != "005930" || snap.CurrentPrice != 80500 || snap.ChangeRate != 1.25 || snap.AccVolume != 1500000 {
+	if snap.Ticker != "005930" || snap.CurrentPrice != 80500 || snap.ChangeRate != 1.25 || snap.TradeVolume != 500 || snap.AccVolume != 1500000 {
 		t.Errorf("unexpected tick snapshot response: %+v", snap)
 	}
 }

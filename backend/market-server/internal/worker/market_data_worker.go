@@ -98,6 +98,7 @@ func (w *MarketDataWorker) updateTickToRedis(ctx context.Context, tick Tick) {
 		"high":        tick.HighPrice,
 		"low":         tick.LowPrice,
 		"change_rate": tick.ChangeRate,
+		"trade_vol":   tick.TradeVolume, // 체결량 추가
 		"acc_vol":     tick.AccVolume,
 		"name":        tick.Name,
 	})

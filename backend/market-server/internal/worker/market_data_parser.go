@@ -14,6 +14,7 @@ type Tick struct {
 	HighPrice    float64 `json:"high"`
 	LowPrice     float64 `json:"low"`
 	ChangeRate   float64 `json:"change_rate"`
+	TradeVolume  int64   `json:"trade_vol"` // 단일 체결량 (추가됨)
 	AccVolume    int64   `json:"acc_vol"`
 }
 
@@ -55,6 +56,7 @@ func parseKISMessage(rawText string) (interface{}, string, error) {
 		high, _ := strconv.ParseFloat(bodyParts[8], 64)
 		low, _ := strconv.ParseFloat(bodyParts[9], 64)
 		rate, _ := strconv.ParseFloat(bodyParts[5], 64)
+		tradeVol, _ := strconv.ParseInt(bodyParts[12], 10, 64) // 단일 체결량
 		volume, _ := strconv.ParseInt(bodyParts[13], 10, 64)
 
 		return Tick{
@@ -65,6 +67,7 @@ func parseKISMessage(rawText string) (interface{}, string, error) {
 			HighPrice:    high,
 			LowPrice:     low,
 			ChangeRate:   rate,
+			TradeVolume:  tradeVol, // 추가됨
 			AccVolume:    volume,
 		}, "tick", nil
 

@@ -45,5 +45,7 @@ type TickSnapshotResponse struct {
 	OpenPrice    float64 `json:"openPrice"`    // 시가
 	HighPrice    float64 `json:"highPrice"`    // 고가
 	LowPrice     float64 `json:"lowPrice"`     // 저가
+	TradeVolume  int64   `json:"tradeVolume"`  // 단일 체결량 (추가됨)
 	AccVolume    int64   `json:"accVolume"`    // 누적 거래량
 }
+
