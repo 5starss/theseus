@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -9,17 +8,19 @@ from fastapi import FastAPI, HTTPException, Query
 
 from app.news.agent import NewsReporterAgent
 from app.news.eval import RAGEvaluator
-from app.quant.feature_engineer import IntradayFeatureEngineer
-from app.quant.sources import (
-    fetch_and_store_timeseries as quant_fetch_and_store_timeseries,
-    get_latest_raw_path as quant_get_latest_raw_path,
-    load_raw_from_storage as quant_load_raw_from_storage,
+from app.quant.pipeline import (
+    extract_features_for_ticker,
+    load_latest_global_model,
+    resolve_tickers,
+    run_adaptive_winrate_for_ticker,
+    train_for_ticker,
+    train_global_model,
 )
 from app.shared.rag.ingest_pipeline import RAGIngestPipeline
 from app.shared.rag.reranker import SolarReranker
 from app.shared.rag.vector_db import NewsVectorDB
 from collector.kis_news import fetch_kis_news_title
-from collector.storage import list_storage_files, save_snapshot
+from collector.storage import get_storage_dir, list_storage_files, save_snapshot
 from collector.toss_community import fetch_toss_community_comments
 
 load_dotenv()
@@ -30,9 +31,8 @@ app = FastAPI(title="AI Server Infrastructure Base")
 TICKER_PATTERN = r"^\d{6}$"
 SOURCE_NEWS = "KIS_NEWS"
 SOURCE_COMMUNITY = "TOSS_COMMUNITY"
-QUANT_AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "quant_agent"))
-QUANT_AGENT_STORAGE_DIR = os.path.join(QUANT_AGENT_DIR, "storage")
-QUANT_AGENT_DATA_DIR = os.path.join(QUANT_AGENT_DIR, "data_cybos")
+DEFAULT_QUANT_DATA_DIR = os.path.join(get_storage_dir("quant"), "data_cybos")
+QUANT_DATA_DIR = os.getenv("QUANT_DATA_DIR", DEFAULT_QUANT_DATA_DIR)
 
 
 @app.get("/health")
@@ -133,48 +133,209 @@ def quant_feature_extract(
     horizon_minutes: int = Query(5, ge=1, le=120),
 ) -> Dict[str, Any]:
     try:
-        os.makedirs(QUANT_AGENT_STORAGE_DIR, exist_ok=True)
-        if run_fetch:
-            raw_path = quant_fetch_and_store_timeseries(ticker=ticker, data_dir=QUANT_AGENT_DATA_DIR, storage_dir=QUANT_AGENT_STORAGE_DIR)
-        else:
-            try:
-                raw_path = quant_get_latest_raw_path(ticker, QUANT_AGENT_STORAGE_DIR)
-            except FileNotFoundError:
-                raw_path = quant_fetch_and_store_timeseries(ticker=ticker, data_dir=QUANT_AGENT_DATA_DIR, storage_dir=QUANT_AGENT_STORAGE_DIR)
-
-        raw_df = quant_load_raw_from_storage(raw_path)
-        feat_df = IntradayFeatureEngineer(horizon_minutes=horizon_minutes).build(raw_df)
-
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        feat_path = os.path.join(QUANT_AGENT_STORAGE_DIR, f"feat_{ticker}_{stamp}.csv.gz")
-        feat_df.to_csv(feat_path, index=False, compression="gzip")
-
-        meta_path = os.path.join(QUANT_AGENT_STORAGE_DIR, f"feature_extract_{ticker}_{stamp}.json")
-        payload = {
-            "ticker": ticker,
-            "generated_at": datetime.now().isoformat(),
-            "source_raw_path": raw_path,
-            "feature_path": feat_path,
-            "horizon_minutes": horizon_minutes,
-            "feature_rows": int(len(feat_df)),
-            "feature_columns": list(feat_df.columns),
-        }
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-
+        out = extract_features_for_ticker(
+            ticker=ticker,
+            data_dir=QUANT_DATA_DIR,
+            run_fetch=run_fetch,
+            horizon_minutes=horizon_minutes,
+        )
         return {
             "status": "ok",
             "ticker": ticker,
-            "quant_agent_dir": QUANT_AGENT_DIR,
-            "raw_path": raw_path,
-            "feature_path": feat_path,
-            "feature_rows": int(len(feat_df)),
-            "feature_columns": list(feat_df.columns),
-            "meta_path": meta_path,
+            "storage_dir": out["storage_dir"],
+            "raw_path": out["raw_path"],
+            "feature_path": out["feature_path"],
+            "feature_rows": out["feature_rows"],
+            "feature_columns": out["feature_columns"],
+            "meta_path": out["meta_path"],
         }
     except Exception as exc:
         logger.exception("Failed to run quant feature extraction for %s", ticker)
         raise HTTPException(status_code=500, detail=f"Quant feature extraction failed: {exc}") from exc
+
+
+@app.post("/v1/quant/train")
+def quant_train(
+    ticker: str = Query(..., pattern=TICKER_PATTERN),
+    run_fetch: bool = Query(True),
+    run_feature_extract: bool = Query(True),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
+) -> Dict[str, Any]:
+    """1분봉 raw -> feature -> model 학습을 ai-server/quant 내부 로직으로 수행합니다."""
+    try:
+        out = train_for_ticker(
+            ticker=ticker,
+            data_dir=QUANT_DATA_DIR,
+            run_fetch=run_fetch,
+            run_feature_extract=run_feature_extract,
+            horizon_minutes=horizon_minutes,
+            model_type=model_type,
+        )
+        return {
+            "status": "ok",
+            "ticker": ticker,
+            "model_type": model_type,
+            "storage_dir": out["storage_dir"],
+            "raw_path": out["raw_path"],
+            "feature_path": out["feature_path"],
+            "model_path": out["model_path"],
+            "metrics": out["metrics"],
+            "feature_count": out["feature_count"],
+            "feature_names": out["feature_names"],
+            "threshold": out["threshold"],
+        }
+    except Exception as exc:
+        logger.exception("Failed to run quant train for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Quant train failed: {exc}") from exc
+
+
+@app.post("/v1/quant/train-global")
+def quant_train_global(
+    tickers: Optional[str] = Query(None, description="콤마 구분 종목코드. 미지정 시 data_dir 전체"),
+    run_fetch: bool = Query(True),
+    run_feature_extract: bool = Query(True),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
+) -> Dict[str, Any]:
+    try:
+        ticker_list = resolve_tickers(tickers=tickers, data_dir=QUANT_DATA_DIR)
+        if not ticker_list:
+            raise ValueError("처리할 종목이 없습니다.")
+
+        out = train_global_model(
+            tickers=ticker_list,
+            data_dir=QUANT_DATA_DIR,
+            run_fetch=run_fetch,
+            run_feature_extract=run_feature_extract,
+            horizon_minutes=horizon_minutes,
+            model_type=model_type,
+        )
+        return {
+            "status": "ok",
+            "mode": "trained",
+            "model_type": model_type,
+            "tickers": out["tickers"],
+            "rows_total": out["rows_total"],
+            "feature_count": out["feature_count"],
+            "metrics": out["metrics"],
+            "model_path": out["model_path"],
+        }
+    except Exception as exc:
+        logger.exception("Failed to run quant global train")
+        raise HTTPException(status_code=500, detail=f"Quant global train failed: {exc}") from exc
+
+
+@app.post("/v1/quant/adaptive-winrate")
+def quant_adaptive_winrate(
+    tickers: Optional[str] = Query(None, description="콤마 구분 종목코드. 미지정 시 data_dir 전체"),
+    run_fetch: bool = Query(True),
+    run_feature_extract: bool = Query(True),
+    run_train: bool = Query(True),
+    use_pretrained: bool = Query(True),
+    use_panel_model: bool = Query(True, description="여러 종목 통합 학습 모델 사용 여부"),
+    reuse_global_model: bool = Query(True, description="저장된 공통 모델 우선 재사용 여부"),
+    train_global_if_missing: bool = Query(True, description="공통 모델 미존재 시 자동 학습 여부"),
+    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
+    dynamic_hold: bool = Query(True),
+    train_rows: int = Query(80000, ge=1000),
+    test_rows: int = Query(2000, ge=200),
+    step_rows: int = Query(2000, ge=200),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+) -> Dict[str, Any]:
+    """
+    종목별 adaptive threshold 최적화 및 백테스트를 수행해 승률(win_rate)을 산출합니다.
+    LLM 호출 없이 quant 파이프라인 계산까지만 수행합니다.
+    """
+    try:
+        ticker_list = resolve_tickers(tickers=tickers, data_dir=QUANT_DATA_DIR)
+        if not ticker_list:
+            raise ValueError("처리할 종목이 없습니다.")
+
+        results: List[Dict[str, Any]] = []
+        failures: List[Dict[str, str]] = []
+
+        global_artifact = None
+        global_model_path: Optional[str] = None
+        global_training_info: Optional[Dict[str, Any]] = None
+        if use_panel_model:
+            reused = False
+            if reuse_global_model:
+                try:
+                    g_latest = load_latest_global_model()
+                    global_artifact = g_latest["artifact"]
+                    global_model_path = g_latest["model_path"]
+                    global_training_info = {
+                        "mode": "reused",
+                        "model_path": global_model_path,
+                        "metrics": global_artifact.metrics,
+                    }
+                    reused = True
+                    logger.info("  [Global] 기존 공통 모델 재사용: %s", global_model_path)
+                except Exception:
+                    logger.info("  [Global] 재사용 가능한 공통 모델이 없어 새로 학습합니다.")
+
+            if not reused:
+                if not train_global_if_missing:
+                    raise ValueError("공통 모델이 없고 train_global_if_missing=false 입니다.")
+                logger.info("  [Global] %d종목 통합 공통 모델(Panel Model) 학습 시작...", len(ticker_list))
+                g_out = train_global_model(
+                    tickers=ticker_list,
+                    data_dir=QUANT_DATA_DIR,
+                    run_fetch=run_fetch,
+                    run_feature_extract=run_feature_extract,
+                    horizon_minutes=horizon_minutes,
+                    model_type=model_type,
+                )
+                global_artifact = g_out["artifact"]
+                global_model_path = g_out["model_path"]
+                global_training_info = {
+                    "mode": "trained",
+                    "tickers": g_out["tickers"],
+                    "rows_total": g_out["rows_total"],
+                    "model_path": global_model_path,
+                    "metrics": g_out["metrics"],
+                }
+                logger.info("  [Global] 공통 모델 학습 완료 (정확도: %.4f)", global_artifact.metrics.get("directional_accuracy", 0.0))
+
+        for ticker in ticker_list:
+            try:
+                results.append(
+                    run_adaptive_winrate_for_ticker(
+                        ticker=ticker,
+                        data_dir=QUANT_DATA_DIR,
+                        run_fetch=run_fetch,
+                        run_feature_extract=run_feature_extract,
+                        run_train=run_train,
+                        use_pretrained=use_pretrained,
+                        model_type=model_type,
+                        dynamic_hold=dynamic_hold,
+                        train_rows=train_rows,
+                        test_rows=test_rows,
+                        step_rows=step_rows,
+                        horizon_minutes=horizon_minutes,
+                        global_artifact=global_artifact,
+                        global_model_path=global_model_path,
+                    )
+                )
+            except Exception as ticker_exc:
+                logger.exception("Adaptive winrate 처리 실패: %s", ticker)
+                failures.append({"ticker": ticker, "error": str(ticker_exc)})
+
+        return {
+            "status": "ok",
+            "model_type": model_type,
+            "dynamic_hold": dynamic_hold,
+            "tickers_total": len(ticker_list),
+            "success_count": len(results),
+            "failure_count": len(failures),
+            "global_model": global_training_info,
+            "results": results,
+            "failures": failures,
+        }
+    except Exception as exc:
+        logger.exception("Failed to run quant adaptive winrate pipeline")
+        raise HTTPException(status_code=500, detail=f"Quant adaptive winrate failed: {exc}") from exc
 
 
 def _run_rag_chat_pipeline(
