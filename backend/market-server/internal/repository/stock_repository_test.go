@@ -324,3 +324,82 @@ func TestBulkUpsertStocks_DataIntegrity(t *testing.T) {
 		t.Errorf("data mismatch: want Name=%s CurrentPrice=45000, got Name=%s CurrentPrice=%s", original.Name, name, cpStr)
 	}
 }
+
+// ─── GetTickSnapshot Tests ─────────────────────────────────────────────
+
+func TestGetTickSnapshot_Success_WithCurrentKey(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	// 1. Info 데이터 셋업 (기본 데이터)
+	mr.HSet("stocks:info:005930", "name", "삼성전자")
+	mr.HSet("stocks:info:005930", "currentPrice", "80000")
+	mr.HSet("stocks:info:005930", "changeRate", "0.5")
+	mr.HSet("stocks:info:005930", "accVolume", "1000000")
+
+	// 2. Current 데이터 셋업 (실시간 오버라이드 데이터)
+	mr.HSet("stocks:current:005930", "price", "80500")
+	mr.HSet("stocks:current:005930", "change_rate", "1.25")
+	mr.HSet("stocks:current:005930", "open", "80000")
+	mr.HSet("stocks:current:005930", "high", "81000")
+	mr.HSet("stocks:current:005930", "low", "79500")
+	mr.HSet("stocks:current:005930", "acc_vol", "1500000")
+
+	snap, err := repo.GetTickSnapshot(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+
+	if snap.Ticker != "005930" || snap.Name != "삼성전자" {
+		t.Errorf("ticker/name mismatch: %+v", snap)
+	}
+	if snap.CurrentPrice != 80500 {
+		t.Errorf("expected currentPrice=80500, got %v", snap.CurrentPrice)
+	}
+	if snap.ChangeRate != 1.25 {
+		t.Errorf("expected changeRate=1.25, got %v", snap.ChangeRate)
+	}
+	if snap.AccVolume != 1500000 {
+		t.Errorf("expected accVolume=1500000, got %v", snap.AccVolume)
+	}
+}
+
+func TestGetTickSnapshot_FallbackToInfoKey(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	// 1. Info 데이터만 셋업
+	mr.HSet("stocks:info:005930", "name", "삼성전자")
+	mr.HSet("stocks:info:005930", "currentPrice", "80000")
+	mr.HSet("stocks:info:005930", "changeRate", "0.5")
+	mr.HSet("stocks:info:005930", "accVolume", "1000000")
+
+	snap, err := repo.GetTickSnapshot(context.Background(), "005930")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap == nil {
+		t.Fatal("expected non-nil snapshot")
+	}
+
+	if snap.CurrentPrice != 80000 || snap.ChangeRate != 0.5 {
+		t.Errorf("expected fallback data, got %+v", snap)
+	}
+}
+
+func TestGetTickSnapshot_NotFound(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	snap, err := repo.GetTickSnapshot(context.Background(), "999999")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap != nil {
+		t.Errorf("expected nil when no data exists, got %v", snap)
+	}
+}
+

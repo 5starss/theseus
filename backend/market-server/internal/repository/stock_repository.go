@@ -227,3 +227,81 @@ func (r *StockRepository) GetOrderbookSnapshot(ctx context.Context, ticker strin
 
 	return &resp, nil
 }
+
+// GetTickSnapshot Redis에서 상세 종목 실시간 체결 스냅샷 정보를 조회하여 반환한다.
+func (r *StockRepository) GetTickSnapshot(ctx context.Context, ticker string) (*domain.TickSnapshotResponse, error) {
+	currentKey := "stocks:current:" + ticker
+	infoKey := fmt.Sprintf(stockInfoKeyFmt, ticker)
+
+	// 1. Pipeline으로 current 와 info 동시 조회
+	pipe := r.rdb.Pipeline()
+	currCmd := pipe.HGetAll(ctx, currentKey)
+	infoCmd := pipe.HGetAll(ctx, infoKey)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("pipeline exec failed: %w", err)
+	}
+
+	currHash, err := currCmd.Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("redis hgetall current failed: %w", err)
+	}
+
+	infoHash, err := infoCmd.Result()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("redis hgetall info failed: %w", err)
+	}
+
+	if len(currHash) == 0 && len(infoHash) == 0 {
+		return nil, nil // 데이터 없음
+	}
+
+	var resp domain.TickSnapshotResponse
+	resp.Ticker = ticker
+
+	// Helper 함수들
+	parseFloat := func(s string) float64 {
+		val, _ := strconv.ParseFloat(s, 64)
+		return val
+	}
+	parseInt := func(s string) int64 {
+		val, _ := strconv.ParseInt(s, 10, 64)
+		return val
+	}
+
+	// 2. Info 기준 기본 데이터 설정 (정적인 데이터 + 초기 데이터)
+	if len(infoHash) > 0 {
+		resp.Name = infoHash["name"]
+		resp.CurrentPrice = parseFloat(infoHash["currentPrice"])
+		resp.ChangeRate = parseFloat(infoHash["changeRate"])
+		resp.AccVolume = parseInt(infoHash["accVolume"])
+	}
+
+	// 3. Current(실시간) 기준 데이터 덮어쓰기 및 추가 데이터 병합
+	if len(currHash) > 0 {
+		if name, ok := currHash["name"]; ok && name != "" {
+			resp.Name = name
+		}
+		if price, ok := currHash["price"]; ok {
+			resp.CurrentPrice = parseFloat(price)
+		}
+		if cr, ok := currHash["change_rate"]; ok {
+			resp.ChangeRate = parseFloat(cr)
+		}
+		if open, ok := currHash["open"]; ok {
+			resp.OpenPrice = parseFloat(open)
+		}
+		if high, ok := currHash["high"]; ok {
+			resp.HighPrice = parseFloat(high)
+		}
+		if low, ok := currHash["low"]; ok {
+			resp.LowPrice = parseFloat(low)
+		}
+		if accVol, ok := currHash["acc_vol"]; ok {
+			resp.AccVolume = parseInt(accVol)
+		}
+	}
+
+	return &resp, nil
+}

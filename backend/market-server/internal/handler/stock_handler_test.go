@@ -213,13 +213,13 @@ func TestGetStockList_InvalidLimit_Zero(t *testing.T) {
 	}
 }
 
-func TestGetStockList_InvalidLimit_Over40(t *testing.T) {
+func TestGetStockList_InvalidLimit_Over20(t *testing.T) {
 	h, _, mr := newTestComponents(t)
 	defer mr.Close()
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks?limit=41", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks?limit=21", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -363,6 +363,71 @@ func TestGetOrderbook_NotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/000000/orderbook", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// ─── GetTickSnapshot 핸들러 테스트 ──────────────────────────────────────────────
+
+func TestGetTickSnapshot_Success(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	// 1. Info와 Current 데이터 셋업
+	mr.HSet("stocks:info:005930", "name", "삼성전자")
+	mr.HSet("stocks:info:005930", "currentPrice", "80000")
+	mr.HSet("stocks:info:005930", "changeRate", "0.5")
+	mr.HSet("stocks:info:005930", "accVolume", "1000000")
+
+	mr.HSet("stocks:current:005930", "price", "80500")
+	mr.HSet("stocks:current:005930", "change_rate", "1.25")
+	mr.HSet("stocks:current:005930", "open", "80000")
+	mr.HSet("stocks:current:005930", "high", "81000")
+	mr.HSet("stocks:current:005930", "low", "79500")
+	mr.HSet("stocks:current:005930", "acc_vol", "1500000")
+
+	r := gin.New()
+	r.GET("/api/v1/stocks/:ticker", h.GetTickSnapshot)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/005930", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if !resp.IsSuccess {
+		t.Error("expected isSuccess=true")
+	}
+
+	var snap domain.TickSnapshotResponse
+	if err := json.Unmarshal(resp.Result, &snap); err != nil {
+		t.Fatalf("failed to parse result: %v", err)
+	}
+
+	if snap.Ticker != "005930" || snap.CurrentPrice != 80500 || snap.ChangeRate != 1.25 || snap.AccVolume != 1500000 {
+		t.Errorf("unexpected tick snapshot response: %+v", snap)
+	}
+}
+
+func TestGetTickSnapshot_NotFound(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := gin.New()
+	r.GET("/api/v1/stocks/:ticker", h.GetTickSnapshot)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/999999", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {

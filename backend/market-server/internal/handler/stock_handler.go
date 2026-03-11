@@ -21,13 +21,13 @@ func NewStockHandler(svc *service.StockService) *StockHandler {
 
 // GetStockList GET /api/v1/stocks
 // 쿼리 파라미터:
-//   - limit    : 조회 개수 (1~100, 기본값 40)
+//   - limit    : 조회 개수 (1~20, 기본값 20)
 //   - rankType : 순위 기준 (VOLUME, 기본값 VOLUME)
 func (h *StockHandler) GetStockList(c *gin.Context) {
-	limitStr := c.DefaultQuery("limit", "40")
+	limitStr := c.DefaultQuery("limit", "20")
 	limit, err := strconv.ParseInt(limitStr, 10, 64)
-	if err != nil || limit < 1 || limit > 40 {
-		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1~40 사이의 정수여야 합니다."))
+	if err != nil || limit < 1 || limit > 20 {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1~20 사이의 정수여야 합니다."))
 		return
 	}
 
@@ -102,4 +102,27 @@ func (h *StockHandler) GetOrderbook(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response.OK(ob))
+}
+
+// GetTickSnapshot GET /api/v1/stocks/:ticker
+// 상세 종목 실시간 요약 (TICK 스냅샷) 조회 API
+func (h *StockHandler) GetTickSnapshot(c *gin.Context) {
+	ticker := c.Param("ticker")
+	if ticker == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "종목코드가 필요합니다."))
+		return
+	}
+
+	snap, err := h.svc.GetTickSnapshot(c.Request.Context(), ticker)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("STOCK-500", "TICK 스냅샷 조회 중 오류가 발생했습니다."))
+		return
+	}
+
+	if snap == nil {
+		c.JSON(http.StatusNotFound, response.Fail("STOCK-404", "해당 종목의 TICK 스냅샷 데이터가 존재하지 않습니다."))
+		return
+	}
+
+	c.JSON(http.StatusOK, response.OK(snap))
 }
