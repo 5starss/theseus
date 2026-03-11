@@ -1,18 +1,11 @@
-import axios from 'axios';
-import type { ApiResponse } from './stock';
+import api from './client';
+import type { ApiResponse } from './client';
 
 export interface AccountBalance {
     dncaTotAmt: number;    // 총 예수금
     lockedAmt: number;     // 묶인 금액 (미체결 주문 등)
     availableAmt: number;  // 출금/주문 가능 금액
 }
-
-const api = axios.create({
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    withCredentials: true,
-});
 
 export const accountApi = {
     // 백엔드 명세: GET /api/v1/core/accounts/balance

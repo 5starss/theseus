@@ -246,14 +246,18 @@ export function MyStockInfo() {
     const stockName = useStockStore(state => state.stockName);
     const currentPrice = useStockStore(state => state.currentPrice);
 
-    // 임시 보유 데이터
-    const ownedShares = 120;
-    const avgPrice = 59525;
+    const stockCode = useStockStore(state => state.stockCode);
+    const portfolio = useAccountStore(state => state.portfolio);
+
+    // 실제 보유 데이터 찾기
+    const myHolding = portfolio.find(p => p.code === stockCode);
+    const ownedShares = myHolding ? myHolding.shares : 0;
+    const avgPrice = myHolding ? myHolding.avgPrice : 0;
 
     // 계산식 적용
     const totalValue = currentPrice * ownedShares;
-    const totalProfit = totalValue - (avgPrice * ownedShares);
-    const profitRate = (totalProfit / (avgPrice * ownedShares)) * 100;
+    const totalProfit = ownedShares > 0 ? totalValue - (avgPrice * ownedShares) : 0;
+    const profitRate = (ownedShares > 0 && avgPrice > 0) ? (totalProfit / (avgPrice * ownedShares)) * 100 : 0;
     const isProfit = totalProfit >= 0;
 
     return (
@@ -305,20 +309,14 @@ export function MyOrderHistory() {
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const [tab, setTab] = useState<"pending" | "completed">("pending");
 
-    // 미체결 (대기) 주문 데이터
-    const pendingOrders = [
-        { date: "10:42", type: "매수", price: 69800, qty: 10 },
-        { date: "09:15", type: "매도", price: 71500, qty: 5 },
-    ];
+    const orders = useAccountStore(state => state.orders);
 
-    // 체결 (완료) 주문 데이터
-    const completedOrders = [
-        { date: "10.24", type: "매수", price: 68000, qty: 20 },
-        { date: "09.10", type: "매도", price: 70200, qty: 15 },
-        { date: "08.22", type: "매수", price: 66500, qty: 30 },
-    ];
+    // 현재 종목의 주문 내역만 필터링 (필요 시)
+    const stockOrders = orders.filter(o => o.stockName === useStockStore.getState().stockName);
 
-    const currentOrders = tab === "pending" ? pendingOrders : completedOrders;
+    const currentOrders = tab === "pending"
+        ? stockOrders.filter(o => o.status === 'pending')
+        : stockOrders.filter(o => o.status !== 'pending');
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col relative overflow-hidden">
@@ -365,9 +363,9 @@ export function MyOrderHistory() {
                                 currentOrders.map((order, idx) => (
                                     <tr key={idx} className="border-b border-slate-50 last:border-none hover:bg-slate-50/50 transition-colors">
                                         <td className="py-2.5 text-xs font-medium text-slate-600 text-center">{order.date}</td>
-                                        <td className={`py-2.5 text-xs font-bold text-center ${order.type === '매수' ? 'text-red-500' : 'text-blue-500'}`}>{order.type}</td>
+                                        <td className={`py-2.5 text-xs font-bold text-center ${order.type === 'buy' ? 'text-red-500' : 'text-blue-500'}`}>{order.type === 'buy' ? '매수' : '매도'}</td>
                                         <td className="py-2.5 text-xs font-semibold text-slate-700 text-right pr-2">{order.price.toLocaleString()}</td>
-                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-right">{order.qty}주</td>
+                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-right">{order.quantity}주</td>
                                     </tr>
                                 ))
                             )}

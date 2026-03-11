@@ -1,5 +1,5 @@
-import axios from 'axios';
-import type { ApiResponse } from './stock';
+import api from './client';
+import type { ApiResponse } from './client';
 
 export interface PageResponse<T> {
     content: T[];
@@ -66,13 +66,6 @@ export interface OrderHistoryDetailResponse {
     orderCreatedAt: string;
     createdAt: string; // 체결 또는 취소 시각
 }
-
-const api = axios.create({
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    withCredentials: true,
-});
 
 export const orderApi = {
     // 백엔드 명세: GET /api/v1/core/orders

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { stockApi } from '../api/stock';
+import { useAuthStore } from './useAuthStore';
 
 // 주식 호가 및 거래 관련 전역 상태 타입
 interface StockState {
@@ -71,37 +72,34 @@ export const MOCK_STOCKS: Record<string, { name: string; price: number }> = {
 // 실제 WebSocket 연결 혹은 fallback 시뮬레이션을 위한 타이머
 let stockInterval: ReturnType<typeof setInterval> | null = null;
 let stockWs: WebSocket | null = null;
+let stockTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export const useStockStore = create<StockState>((set) => ({
-    stockCode: '005930',
-    stockName: '삼성전자',
-    currentPrice: 214500,
-    prevClose: 203500,
-    priceChange: 11000,
-    changeRate: 5.40,
+    stockCode: '',
+    stockName: '',
+    currentPrice: 0,
+    prevClose: 0,
+    priceChange: 0,
+    changeRate: 0,
 
-    askPrice: 215000,
-    askVolume: 10537,
-    bidPrice: 214500,
-    bidVolume: 2593,
+    askPrice: 0,
+    askVolume: 0,
+    bidPrice: 0,
+    bidVolume: 0,
 
     // 주식 코드로 초기 데이터 설정
     setStock: (code) =>
-        set(() => {
-            const stockInfo = MOCK_STOCKS[code] || { name: '알 수 없음', price: 50000 };
-            const pseudoPrevClose = Math.round(stockInfo.price * 0.95); // 임의의 전일 종가
-            const priceChange = stockInfo.price - pseudoPrevClose;
-            const changeRate = (priceChange / pseudoPrevClose) * 100;
-            return {
-                stockCode: code,
-                stockName: stockInfo.name,
-                currentPrice: stockInfo.price,
-                prevClose: pseudoPrevClose,
-                priceChange,
-                changeRate,
-                askPrice: stockInfo.price + 500,
-                bidPrice: stockInfo.price,
-            };
+        set({
+            stockCode: code,
+            stockName: '-',
+            currentPrice: 0,
+            prevClose: 0,
+            priceChange: 0,
+            changeRate: 0,
+            askPrice: 0,
+            askVolume: 0,
+            bidPrice: 0,
+            bidVolume: 0,
         }),
 
     // 현재가 업데이트 시, 가격 변화량과 등락률도 함께 계산하여 상태 업데이트
@@ -123,6 +121,9 @@ export const useStockStore = create<StockState>((set) => ({
 
     // 주식 상세 페이지에서 WebSocket 스트림을 연결하는 함수 (실패 시 시뮬레이션 fallback)
     connectStockStream: (code) => {
+        // 즉시 stockCode 설정 (다른 컴포넌트 관찰용)
+        set({ stockCode: code });
+
         // 기존 연결 정리
         if (stockWs) {
             stockWs.close();
@@ -132,116 +133,114 @@ export const useStockStore = create<StockState>((set) => ({
             clearInterval(stockInterval);
             stockInterval = null;
         }
+        if (stockTimeout) {
+            clearTimeout(stockTimeout);
+            stockTimeout = null;
+        }
 
-        // 초기 주식 정보 설정
-        set(() => {
-            const stockInfo = MOCK_STOCKS[code] || { name: '알 수 없음', price: 50000 };
-            const pseudoPrevClose = Math.round(stockInfo.price * 0.95);
-            const priceChange = stockInfo.price - pseudoPrevClose;
-            const changeRate = (priceChange / pseudoPrevClose) * 100;
-            return {
-                stockCode: code,
-                stockName: stockInfo.name,
-                currentPrice: stockInfo.price,
-                prevClose: pseudoPrevClose,
-                priceChange,
-                changeRate,
-                askPrice: stockInfo.price + 500,
-                bidPrice: stockInfo.price,
-            };
-        });
-
+        // 초기 데이터 로딩
         console.log(`Starting Dashboard Stream [${code}]...`);
 
         // 0. 초기 호가 데이터(Snapshot) 가져오기
         stockApi.getOrderbook(code).then(obData => {
+            const currentPrice = obData.currentPrice;
+            const changeRate = obData.changeRate;
+            const prevClose = Math.round(currentPrice / (1 + (changeRate / 100)));
+
             set({
-                askPrice: obData.askPrice1, // 1매수호가
-                askVolume: obData.askVolume1,  // 1매수호가 잔량
-                bidPrice: obData.bidPrice1, // 1매도호가
-                bidVolume: obData.bidVolume1, // 1매도호가 잔량
-                currentPrice: obData.currentPrice, // 현재가
+                stockCode: code,
+                stockName: obData.name,
+                currentPrice: currentPrice,
+                prevClose: prevClose,
+                priceChange: currentPrice - prevClose,
+                changeRate: changeRate,
+                askPrice: obData.askPrice1,
+                askVolume: obData.askVolume1,
+                bidPrice: obData.bidPrice1,
+                bidVolume: obData.bidVolume1,
             });
+        }).catch(err => {
+            console.error("Failed to fetch initial orderbook snapshot", err);
         });
 
-        // 1. Fallback: 웹소켓 연결 성공 전까지 혹은 백엔드 에러 시 동작할 모의 데이터 인터벌 발생기
-        stockInterval = setInterval(() => {
-            set((state) => {
-                const diff = Math.floor(Math.random() * 3) * 100 - 100;
-                const newPrice = Math.max(0, state.currentPrice + diff);
+        // 1. 실제 WebSocket 연결 (React StrictMode 연속 렌더링에 의한 소켓 폭주 방지용 딜레이)
+        stockTimeout = setTimeout(() => {
+            try {
+                const token = useAuthStore.getState().token;
+                const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${wsProtocol}//${window.location.host}/v1/stocks/ws${token ? `?token=${token}` : ''}`;
 
-                return {
-                    currentPrice: newPrice,
-                    priceChange: newPrice - state.prevClose,
-                    changeRate: ((newPrice - state.prevClose) / state.prevClose) * 100,
-                    askPrice: newPrice + 100,
-                    askVolume: Math.floor(Math.random() * 14000) + 1000,
-                    bidPrice: newPrice,
-                    bidVolume: Math.floor(Math.random() * 14000) + 1000,
+                stockWs = new WebSocket(wsUrl);
+
+                stockWs.onopen = () => {
+                    console.log(`Connected to Dashboard WebSocket [${code}]`);
+                    // 구독 요청 전송
+                    stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'TICK', ticker: code }));
+                    stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'ORDERBOOK', ticker: code }));
                 };
-            });
-        }, 200);
 
-        // 2. 실제 WebSocket 연결
-        try {
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/v1/stocks/ws`;
-            stockWs = new WebSocket(wsUrl);
+                stockWs.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
 
-            stockWs.onopen = () => {
-                console.log(`Connected to Dashboard WebSocket [${code}]`);
-                // 백엔드 연결 성공 시 Fallback용 모의 인터벌 제거
-                if (stockInterval) {
-                    clearInterval(stockInterval);
-                    stockInterval = null;
-                }
+                        if (data.topic === "ERROR") {
+                            console.warn("WS ERROR Received:", data.data);
+                            return;
+                        }
 
-                // 구독 요청 전송
-                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'TICK', ticker: code }));
-                stockWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'ORDERBOOK', ticker: code }));
-            };
+                        if (data.topic === "TICK" && data.data && data.data.ticker === code) {
+                            const tickData = data.data;
+                            console.log("WS TICK data processed:", tickData.price, "Change Rate:", tickData.change_rate);
+                            set((state) => {
+                                let newPrevClose = state.prevClose;
+                                // 스냅샷 실패 시 TICK 데이터를 이용해 기준 가격(전일 종가)을 역산
+                                if (newPrevClose === 0 && tickData.change_rate) {
+                                    newPrevClose = Math.round(tickData.price / (1 + (tickData.change_rate / 100)));
+                                }
 
-            stockWs.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-
-                    if (data.topic === `TICK:${code}` && data.data) {
-                        const tickData = data.data; // domain.Stock 호환
-                        set((state) => ({
-                            currentPrice: tickData.currentPrice,
-                            priceChange: tickData.currentPrice - state.prevClose,
-                            changeRate: tickData.changeRate || ((tickData.currentPrice - state.prevClose) / state.prevClose) * 100,
-                        }));
-                    } else if (data.topic === `ORDERBOOK:${code}` && data.data) {
-                        const obData = data.data; // domain.OrderbookResponse 호환
-                        set({
-                            askPrice: obData.askPrice1,
-                            askVolume: obData.askVolume1,
-                            bidPrice: obData.bidPrice1,
-                            bidVolume: obData.bidVolume1,
-                        });
+                                return {
+                                    stockName: state.stockName === '-' && tickData.name ? tickData.name : state.stockName,
+                                    currentPrice: tickData.price,
+                                    prevClose: newPrevClose,
+                                    priceChange: newPrevClose > 0 ? tickData.price - newPrevClose : ((tickData.price - state.prevClose) || 0),
+                                    changeRate: tickData.change_rate !== undefined ? tickData.change_rate : (newPrevClose > 0 ? ((tickData.price - newPrevClose) / newPrevClose) * 100 : 0),
+                                };
+                            });
+                        } else if (data.topic === "ORDERBOOK" && data.data && data.data.ticker === code) {
+                            const obData = data.data;
+                            set({
+                                askPrice: obData.askPrice1,
+                                askVolume: obData.askVolume1,
+                                bidPrice: obData.bidPrice1,
+                                bidVolume: obData.bidVolume1,
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse stock websocket message", e);
                     }
-                } catch (e) {
-                    console.error("Failed to parse stock websocket message", e);
-                }
-            };
+                };
 
-            stockWs.onclose = () => {
-                console.log('Dashboard WebSocket disconnected');
-                stockWs = null;
-            };
+                stockWs.onclose = (e) => {
+                    console.log(`Dashboard WebSocket disconnected. Code: ${e.code}, Reason: ${e.reason}`);
+                    stockWs = null;
+                };
 
-            stockWs.onerror = (error) => {
-                console.error('Dashboard WebSocket error (using fallback):', error);
-                stockWs?.close();
-            };
-        } catch (error) {
-            console.error('Failed to initialize WebSocket:', error);
-        }
+                stockWs.onerror = (error) => {
+                    console.error('Dashboard WebSocket error:', error);
+                    stockWs?.close();
+                };
+            } catch (error) {
+                console.error('Failed to initialize WebSocket:', error);
+            }
+        }, 150);
     },
 
     // 스트림 정리 함수 (컴포넌트 언마운트 시 호출)
     disconnectStockStream: () => {
+        if (stockTimeout) {
+            clearTimeout(stockTimeout);
+            stockTimeout = null;
+        }
         if (stockWs) {
             if (stockWs.readyState === WebSocket.OPEN) {
                 stockWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: 'TICK', ticker: useStockStore.getState().stockCode }));
@@ -253,7 +252,6 @@ export const useStockStore = create<StockState>((set) => ({
         if (stockInterval) {
             clearInterval(stockInterval);
             stockInterval = null;
-            console.log('Disconnected Dashboard Mock Fallback WebSockets');
         }
         console.log('Dashboard WebSocket stream cleaned up');
     }

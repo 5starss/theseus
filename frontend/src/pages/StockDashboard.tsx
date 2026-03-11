@@ -5,6 +5,8 @@ import { Orderbook } from "../components/stock/Orderbook";
 import { OrderPanel, MyStockInfo, MyOrderHistory } from "../components/stock/TradePanels";
 import { StockChart } from "../components/stock/StockChart";
 import { useStockStore } from "../store/useStockStore";
+import { useAccountStore } from "../store/useAccountStore";
+import { useAuthStore } from "../store/useAuthStore";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -15,17 +17,25 @@ export default function StockDashboard() {
     const { code } = useParams<{ code: string }>();
     const connectStockStream = useStockStore(state => state.connectStockStream);
     const disconnectStockStream = useStockStore(state => state.disconnectStockStream);
+    const { fetchBalance, fetchPositions, fetchOrders } = useAccountStore();
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const [timeframe, setTimeframe] = useState<TimeframeType>('1m');
 
     useEffect(() => {
         if (code) {
             connectStockStream(code);
+            // 상세 페이지 진입 시 계좌 데이터 최신화 (로그인 된 경우)
+            if (isLoggedIn) {
+                fetchBalance();
+                fetchPositions();
+                fetchOrders({ ticker: code, size: 20 });
+            }
         }
 
         return () => {
             disconnectStockStream();
         };
-    }, [code, connectStockStream, disconnectStockStream]);
+    }, [code, connectStockStream, disconnectStockStream, isLoggedIn, fetchBalance, fetchPositions, fetchOrders]);
 
     return (
         <div className="w-full h-full flex flex-col p-4 gap-4 overflow-hidden bg-slate-50">

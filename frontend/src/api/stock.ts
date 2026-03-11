@@ -1,4 +1,5 @@
-import axios from 'axios';
+import api from './client';
+import type { ApiResponse } from './client';
 
 export interface Stock {
     ticker: string;
@@ -7,20 +8,6 @@ export interface Stock {
     changeRate: number;
     accVolume: number;
 }
-
-export interface ApiResponse<T> {
-    isSuccess: boolean;
-    code: string;
-    message: string;
-    result: T;
-}
-
-const api = axios.create({
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    withCredentials: true,
-});
 
 const TOP_40_STOCKS: Record<string, string> = {
     "005930": "삼성전자",
@@ -118,10 +105,10 @@ export const stockApi = {
         }
     },
 
-    // 백엔드 명세: GET /api/v1/stocks/:ticker/candles
+    // 백엔드 명세: GET /api/v1/market/stocks/:ticker/candles
     getCandles: async (ticker: string, interval: string = 'D', limit: number = 50): Promise<Candle[]> => {
         try {
-            const response = await api.get<ApiResponse<Candle[]>>(`/api/v1/stocks/${ticker}/candles`, {
+            const response = await api.get<ApiResponse<Candle[]>>(`/api/v1/market/stocks/${ticker}/candles`, {
                 params: { interval, limit }
             });
 
