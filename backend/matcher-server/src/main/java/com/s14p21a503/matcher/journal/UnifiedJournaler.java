@@ -29,9 +29,15 @@ public class UnifiedJournaler implements AutoCloseable {
     private final FileChannel channel;
     private final AtomicLong currentSeqNo = new AtomicLong(0);
     
-    private final BlockingQueue<JournalRecord> writeQueue = new LinkedBlockingQueue<>(10000);
+    private final BlockingQueue<JournalRecord> writeQueue = new LinkedBlockingQueue<>(100000);
     private final Thread writerThread;
     private final AtomicBoolean running = new AtomicBoolean(true);
+    
+    private int batchDelayMs = 1;      // 기본 1ms 대기 (Group Commit 유도)
+    private int maxBatchSize = 1000;   // 최대 1000개씩 묶음
+    
+    // Direct Buffer 재사용을 위한 필드 (매번 할당 방지)
+    private ByteBuffer sharedDirectBuffer;
 
     /**
      * 특정 종목의 저널러를 초기화합니다.
@@ -84,6 +90,12 @@ public class UnifiedJournaler implements AutoCloseable {
             log.warn("[{}] 기존 저널 시퀀스 초기화 실패 (신규 파일로 간주): {}", ticker, e.getMessage());
             this.currentSeqNo.set(0);
         }
+    }
+    
+    public void setConfig(int batchDelayMs, int maxBatchSize) {
+        this.batchDelayMs = batchDelayMs;
+        this.maxBatchSize = maxBatchSize;
+        log.info("[{}] 저널러 설정 변경: batchDelay={}ms, maxBatchSize={}", ticker, batchDelayMs, maxBatchSize);
     }
 
     /**
@@ -143,60 +155,75 @@ public class UnifiedJournaler implements AutoCloseable {
      * 백그라운드에서 큐의 데이터를 꺼내 시퀀스를 할당하고 배치 쓰기를 수행하는 루프입니다.
      */
     private void writerLoop() {
-        List<JournalRecord> batch = new ArrayList<>(100);
+        List<JournalRecord> batch = new ArrayList<>(maxBatchSize);
         while (running.get() || !writeQueue.isEmpty()) {
             try {
-                // 최대 100ms 만큼 기다림
+                // 1. 첫 번째 아이템 대기 (CPU 점유율 방지)
                 JournalRecord first = writeQueue.poll(100, TimeUnit.MILLISECONDS);
-                if (first != null) {
-                        batch.add(first);
-                        writeQueue.drainTo(batch, 99); // 최대 100개를 배치로 한 번에 이동
+                if (first == null) continue;
+                
+                batch.add(first);
+                
+                // 2. Active Group Commit: 아주 짧은 시간 동안 큐를 더 긁어모음
+                if (batchDelayMs > 0) {
+                    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(batchDelayMs);
+                    while (batch.size() < maxBatchSize) {
+                        long remaining = deadline - System.nanoTime();
+                        if (remaining <= 0) break;
                         
-                        List<JournalRecord> writeBatchList = new ArrayList<>();
-                        
-                        for (JournalRecord r : batch) {
-                            if (r.type == JournalType.TRUNCATE) {
-                                // 1. TRUNCATE 이전에 쌓인 데이터가 있다면 먼저 씀
-                                if (!writeBatchList.isEmpty()) {
-                                    flushBatch(writeBatchList);
-                                    writeBatchList.clear();
-                                }
-                                
-                                // 2. 파일 비우기 직접 수행 (Writer 스레드이므로 락 불필요)
-                                try {
-                                    channel.truncate(0);
-                                    channel.position(0);
-                                    log.info("[{}] 저널 파일이 이벤트를 통해 비워졌습니다. (시퀀스 유지: {})", ticker, currentSeqNo.get());
-                                    r.outcome.flushedFuture.complete(currentSeqNo.get());
-                                    r.outcome.assignedFuture.complete(currentSeqNo.get());
-                                } catch (IOException e) {
-                                    log.error("[{}] Truncate 처리 중 오류", ticker, e);
-                                    r.outcome.flushedFuture.completeExceptionally(e);
-                                    r.outcome.assignedFuture.completeExceptionally(e);
-                                }
-                            } else {
-                                // 일반 레코드는 시퀀스 할당 후 배기 리스트에 추가
-                                r.seq = currentSeqNo.incrementAndGet();
-                                r.outcome.assignedFuture.complete(r.seq);
-                                writeBatchList.add(r);
-                            }
-                        }
+                        JournalRecord next = writeQueue.poll(remaining, TimeUnit.NANOSECONDS);
+                        if (next == null) break;
+                        batch.add(next);
+                    }
+                } else {
+                    writeQueue.drainTo(batch, maxBatchSize - 1);
+                }
 
-                        // 3. 남은 일반 레코드들 마저 쓰기
+                List<JournalRecord> writeBatchList = new ArrayList<>();
+                for (JournalRecord r : batch) {
+                    if (r.type == JournalType.TRUNCATE) {
                         if (!writeBatchList.isEmpty()) {
                             flushBatch(writeBatchList);
+                            writeBatchList.clear();
                         }
-                    
-                    batch.clear();
+                        handleTruncate(r);
+                    } else {
+                        r.seq = currentSeqNo.incrementAndGet();
+                        r.outcome.assignedFuture.complete(r.seq);
+                        writeBatchList.add(r);
+                    }
                 }
+
+                if (!writeBatchList.isEmpty()) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("[{}] 배치 쓰기 수행: size={}", ticker, writeBatchList.size());
+                    }
+                    flushBatch(writeBatchList);
+                }
+                
+                batch.clear();
             } catch (Exception e) {
                 log.error("[{}] 저널 배치 쓰기 중 심각한 오류", ticker, e);
                 for (JournalRecord r : batch) {
-                    r.outcome.assignedFuture.completeExceptionally(e);
-                    r.outcome.flushedFuture.completeExceptionally(e);
+                    if (!r.outcome.assignedFuture.isDone()) r.outcome.assignedFuture.completeExceptionally(e);
+                    if (!r.outcome.flushedFuture.isDone()) r.outcome.flushedFuture.completeExceptionally(e);
                 }
                 batch.clear();
             }
+        }
+    }
+
+    private void handleTruncate(JournalRecord r) {
+        try {
+            channel.truncate(0);
+            channel.position(0);
+            log.info("[{}] 저널 파일 비워짐 (Seq: {})", ticker, currentSeqNo.get());
+            r.outcome.flushedFuture.complete(currentSeqNo.get());
+            r.outcome.assignedFuture.complete(currentSeqNo.get());
+        } catch (IOException e) {
+            log.error("[{}] Truncate 실패", ticker, e);
+            r.outcome.flushedFuture.completeExceptionally(e);
+            r.outcome.assignedFuture.completeExceptionally(e);
         }
     }
 
@@ -209,14 +236,18 @@ public class UnifiedJournaler implements AutoCloseable {
             totalSize += JournalHeader.HEADER_SIZE + (r.payload != null ? r.payload.length : 0) + 4;
         }
 
-        // [최적화] Heap 메모리가 아닌 Direct Buffer를 사용하여 커널로의 복사 비용(Zero-copy)을 줄입니다.
-        ByteBuffer fullBuf = ByteBuffer.allocateDirect(totalSize);
+        // Direct Buffer 재사용 및 필요 시 확장
+        if (sharedDirectBuffer == null || sharedDirectBuffer.capacity() < totalSize) {
+            sharedDirectBuffer = ByteBuffer.allocateDirect(Math.max(totalSize, 1024 * 1024)); // 최소 1MB
+        }
+        
+        sharedDirectBuffer.clear();
+        ByteBuffer fullBuf = sharedDirectBuffer;
         
         for (JournalRecord r : batch) {
             int pSize = (r.payload != null) ? r.payload.length : 0;
             int headerStart = fullBuf.position();
             
-            // [최적화] 별도의 헤더용 Buffer 할당 없이 직접 메인 Buffer에 기록 (GC Pressure 제거)
             fullBuf.putLong(r.seq);
             fullBuf.put(r.type.getCode());
             fullBuf.putLong(r.refSeq);
@@ -225,7 +256,6 @@ public class UnifiedJournaler implements AutoCloseable {
             fullBuf.putLong(r.offset);
             fullBuf.putInt(pSize);
             
-            // 헤더 정보만 사용하여 체크섬 계산 (복사 없이 ByteBuffer 직접 참조)
             long checksum = JournalChecksum.calculate(fullBuf, headerStart, JournalHeader.HEADER_SIZE, r.payload);
             
             if (r.payload != null) {

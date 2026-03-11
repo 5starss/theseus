@@ -21,6 +21,12 @@ public class JournalService {
     @Value("${matcher.journal.dir:./logs}")
     private String logDir;
 
+    @Value("${matcher.journal.batch-delay-ms:1}")
+    private int batchDelayMs;
+
+    @Value("${matcher.journal.max-batch-size:1000}")
+    private int maxBatchSize;
+
     private final Map<String, UnifiedJournaler> journalers = new ConcurrentHashMap<>();
     private final Map<String, ExecutorService> executors = new ConcurrentHashMap<>();
 
@@ -34,7 +40,9 @@ public class JournalService {
     public UnifiedJournaler getJournaler(String ticker) {
         return journalers.computeIfAbsent(ticker, t -> {
             try {
-                return new UnifiedJournaler(t, logDir);
+                UnifiedJournaler journaler = new UnifiedJournaler(t, logDir);
+                journaler.setConfig(batchDelayMs, maxBatchSize);
+                return journaler;
             } catch (IOException e) {
                 log.error("[{}] 저널러 생성 실패", t, e);
                 throw new RuntimeException("저널러 생성 실패", e);

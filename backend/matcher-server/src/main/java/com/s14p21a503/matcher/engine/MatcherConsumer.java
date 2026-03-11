@@ -2,6 +2,7 @@ package com.s14p21a503.matcher.engine;
 
 import com.s14p21a503.matcher.dto.*;
 import com.s14p21a503.matcher.kafka.MatcherKafkaPublisher;
+import com.s14p21a503.matcher.kafka.MatcherKafkaPublisherHolder;
 import com.s14p21a503.matcher.journal.*;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +22,7 @@ public class MatcherConsumer {
 
     private final MessageQueueManager queueManager;
     private final PendingOrderManagerHolder orderManagerHolder;
-    private final MatcherKafkaPublisher kafkaPublisher;
+    private final MatcherKafkaPublisherHolder publisherHolder;
     private final MarketStateManager marketStateManager;
     private final HolidayManager holidayManager;
 
@@ -58,7 +59,7 @@ public class MatcherConsumer {
 
     // 종목별 처리된 이벤트 카운트 (스냅샷 주기 관리용)
     private final Map<String, Long> processedCountMap = new ConcurrentHashMap<>();
-    private static final long SNAPSHOT_INTERVAL = 1000; // 1000건마다 스냅샷
+    private static final long SNAPSHOT_INTERVAL = 5000; // 5,000건마다 스냅샷 (성능과 복구 시간의 균형)
 
     private void consumeOrders(String ticker) {
         // [무한 루프] 종목별 전담 스레드가 큐를 계속 감시하며 이벤트를 처리합니다.
@@ -86,10 +87,10 @@ public class MatcherConsumer {
                         // [Case B: 주문 생성] 오더북 대기열(TreeMap)에 적재합니다.
                         orderManager.addOrder(order);
                         
-                        // [Sync] 적재 성공을 저널에 COMMIT 타입으로 기록하여 처리가 끝났음을 마킹합니다.
-                        journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
+                        // [Async] COMMIT 기록 (대기하지 않음)
+                        journaler.write(JournalType.COMMIT, cmdSeqNo, null);
                         
-                        // 중복 방지 필터에 마킹하여 동일 주문의 재처리를 방지합니다.
+                        // 중복 방지 필터에 마킹
                         orderIdDeduplicator.checkAndMarkDuplicate(order.getOrderId(), order.getAction());
                     }
                 } else if (event instanceof TickDataEvent) {
@@ -102,13 +103,13 @@ public class MatcherConsumer {
                         processExecutionResult(ticker, journaler, cmdSeqNo, res);
                     }
                     
-                    // 해당 틱에 의한 모든 매칭 처리가 끝났음을 COMMIT 기록으로 확정합니다.
-                    journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
+                    // 해당 틱에 의한 모든 매칭 처리가 끝났음을 COMMIT 기록으로 확정 (비차단)
+                    journaler.write(JournalType.COMMIT, cmdSeqNo, null);
                 } else if (event instanceof MarketDataEvent) {
                     // [Case D: 호가 업데이트] 엔진 내부의 최우선 호가 정보(Best Bid/Ask)를 갱신합니다.
                     MarketDataEvent mkt = (MarketDataEvent) event;
                     orderManager.updateMarketData(mkt);
-                    journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
+                    journaler.write(JournalType.COMMIT, cmdSeqNo, null);
                 } else if (event instanceof MarketControlEvent) {
                     // [Case E: 관리용 제어 이벤트] 장 개시/종료/강제제어 명령을 처리합니다.
                     MarketControlEvent control = (MarketControlEvent) event;
@@ -144,7 +145,7 @@ public class MatcherConsumer {
                     }
                     
                     // 제어 이벤트 처리가 완료되었음을 저널에 기록
-                    journaler.write(JournalType.COMMIT, cmdSeqNo, null).whenFlushed().get();
+                    journaler.write(JournalType.COMMIT, cmdSeqNo, null);
                 }
 
                 // 3. [Snapshot] 주기적으로 덤프를 생성하여 장애 복구 시 리플레이 시간을 단축합니다.
@@ -165,14 +166,26 @@ public class MatcherConsumer {
     }
 
     private void processExecutionResult(String ticker, UnifiedJournaler journaler, long cmdSeqNo, ExecutionResult res) throws Exception {
-        // 1. RES 저널 기록 (비동기 완료 및 물리적 플러시 대기)
-        journaler.write(JournalType.RES, cmdSeqNo, JournalSerializer.serialize(res)).whenFlushed().get();
+        // 1. RES 저널 기록 (비차단 요청)
+        UnifiedJournaler.JournalOutcome outcome = journaler.write(JournalType.RES, cmdSeqNo, JournalSerializer.serialize(res));
         
-        // 2. 카프카 발행
-        kafkaPublisher.publishExecutionResult(res);
-        
-        // 3. Deduplicator 최종 마킹
-        String dedupAction = (res.getEventType() == EventType.CANCELLED) ? "CANCEL" : "CREATE";
-        orderIdDeduplicator.checkAndMarkDuplicate(res.getOrderId(), dedupAction);
+        // 2. 디스크 기록 완료(fsync) 시점에 종목별 전용 스레드에서 비동기 후속 처리
+        // 이를 통해 엔진(Consumer) 스레드는 I/O를 기다리지 않고 즉시 다음 작업을 수행할 수 있습니다.
+        outcome.whenFlushed().thenAcceptAsync(seq -> {
+            try {
+                // 카프카 발행 (종목별 전용 Publisher 사용)
+                publisherHolder.getPublisher(ticker).publishExecutionResult(res);
+                
+                // Deduplicator 최종 마킹 (중복 방지)
+                String dedupAction = (res.getEventType() == EventType.CANCELLED) ? "CANCEL" : "CREATE";
+                orderIdDeduplicator.checkAndMarkDuplicate(res.getOrderId(), dedupAction);
+                
+                if (log.isTraceEnabled()) {
+                    log.trace("[{}] 비동기 발행 완료 (Seq: {})", ticker, seq);
+                }
+            } catch (Exception e) {
+                log.error("[{}] 비동기 발행 중 오류 발생 (Seq: {})", ticker, seq, e);
+            }
+        }, journalService.getExecutor(ticker));
     }
 }

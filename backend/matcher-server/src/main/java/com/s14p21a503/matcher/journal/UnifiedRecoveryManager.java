@@ -7,6 +7,8 @@ import com.s14p21a503.matcher.engine.MarketStateManager;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import com.s14p21a503.matcher.util.KafkaIdempotencyManager;
 import com.s14p21a503.matcher.kafka.KafkaTopicConstants;
+import com.s14p21a503.matcher.kafka.MatcherKafkaPublisher;
+import com.s14p21a503.matcher.kafka.MatcherKafkaPublisherHolder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,6 +33,7 @@ public class UnifiedRecoveryManager {
     private final JournalService journalService;
     private final SnapshotService snapshotService;
     private final MarketStateManager marketStateManager;
+    private final MatcherKafkaPublisherHolder publisherHolder;
 
     @Value("${matcher.journal.dir:./logs}")
     private String logDir;
@@ -119,6 +122,8 @@ public class UnifiedRecoveryManager {
                     case RES:
                         ExecutionResult res = (ExecutionResult) JournalSerializer.deserialize(entry.getPayload());
                         resMap.computeIfAbsent(header.getRefSeq(), k -> new ArrayList<>()).add(res);
+                        // 복구 중 발견된 모든 RES는 해당 종목 Publisher를 통해 다시 보냄
+                        publisherHolder.getPublisher(ticker).publishExecutionResult(res);
                         break;
                     case COMMIT:
                         committedSeqs.add(header.getRefSeq());

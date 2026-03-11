@@ -9,5 +9,7 @@ matcher:
   participation-rate: ${MATCHER_PARTICIPATION_RATE:0.05} # 시장 거래량 대비 서비스 체결 참여율
   journal:
     dir: ${MATCHER_JOURNAL_DIR:c:\MATERCHER-DATA} # 저널 및 스냅샷 저장 경로
+    batch-delay-ms: ${MATCHER_JOURNAL_BATCH_DELAY:5}
+    max-batch-size: ${MATCHER_JOURNAL_MAX_BATCH_SIZE:1000}
   snapshot:
     retention: ${MATCHER_SNAPSHOT_RETENTION:3} # 보관할 스냅샷 개수
