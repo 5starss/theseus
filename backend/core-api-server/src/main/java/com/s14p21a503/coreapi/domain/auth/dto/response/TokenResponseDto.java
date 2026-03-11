@@ -14,6 +14,7 @@ public class TokenResponseDto {
 
     private String tokenType;
     private String accessToken;
+    private String nickname;
 
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime accessTokenExpiresAt;
