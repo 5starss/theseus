@@ -2,6 +2,8 @@ package com.s14p21a503.matcher.journal;
 
 import com.s14p21a503.matcher.engine.PendingOrderManager;
 import com.s14p21a503.matcher.engine.PendingOrderManagerHolder;
+import com.s14p21a503.matcher.kafka.MatcherKafkaPublisher;
+import com.s14p21a503.matcher.kafka.MatcherKafkaPublisherHolder;
 import com.s14p21a503.matcher.util.OrderIdDeduplicator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,7 @@ public class SnapshotService {
     private final PendingOrderManagerHolder orderManagerHolder;
     private final OrderIdDeduplicator orderIdDeduplicator;
     private final JournalService journalService;
+    private final MatcherKafkaPublisherHolder publisherHolder;
 
     @Value("${matcher.journal.dir:./logs}")
     private String logDir;
@@ -64,8 +67,15 @@ public class SnapshotService {
 
             log.info("[{}] 스냅샷 저장 완료: seqNo={}, 경로={}", ticker, lastSeqNo, snapshotPath);
             
-            // 저널 로테이션 수행 (성공한 스냅샷 이후의 저널만 남기기 위해 파일 비움)
-            journalService.rotateJournal(ticker);
+            // 카프카 전송이 완료될 때까지 최대 500ms 대기 (Flush)
+            // 성공한 경우에만 저널 로테이션(삭제)을 수행하여 유실 방지.
+            boolean flushSuccess = publisherHolder.getPublisher(ticker).flush(500);
+            if (flushSuccess) {
+                journalService.rotateJournal(ticker);
+                log.info("[{}] 카프카 전송 확인됨. 저널 파일 로테이트 수행 완료.", ticker);
+            } else {
+                log.warn("[{}] 카프카 전송 확인 실패(타임아웃). 정합성을 위해 저널 파일을 유지합니다.", ticker);
+            }
 
             // 오래된 스냅샷 정리 (Optional)
             cleanupOldSnapshots(tickerDir, lastSeqNo);
