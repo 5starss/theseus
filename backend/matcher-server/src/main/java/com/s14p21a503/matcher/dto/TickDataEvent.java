@@ -28,6 +28,8 @@ public class TickDataEvent implements Serializable {
     private Double changeRate;
     @JsonProperty("acc_vol")
     private Long accVol;
+    @JsonProperty("trade_vol")
+    private Long tradeVol;
     private long timestamp; // 리스너 수신 시점 또는 Kafka 헤더 타임스탬프 주입용
 
     public void setTimestamp(long timestamp) {

@@ -98,8 +98,9 @@ public class PendingOrderManager {
         try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 사용할 수 있는 시장 유동성 계산: tick.volume * participationRate
-            BigDecimal rawLiquidity = new BigDecimal(tick.getAccVol())
+            // 사용할 수 있는 시장 유동성 계산: tick.tradeVol * participationRate
+            long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
+            BigDecimal rawLiquidity = new BigDecimal(tradeVol)
                     .multiply(participationRate)
                     .add(liquidityRemainder);
 
@@ -206,7 +207,8 @@ public class PendingOrderManager {
     public void updateLiquidityRemainderOnly(TickDataEvent tick) {
         lock.lock();
         try {
-            BigDecimal rawLiquidity = new BigDecimal(tick.getAccVol())
+            long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
+            BigDecimal rawLiquidity = new BigDecimal(tradeVol)
                     .multiply(participationRate)
                     .add(liquidityRemainder);
             long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
