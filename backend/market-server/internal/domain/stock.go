@@ -35,3 +35,15 @@ type OrderbookResponse struct {
 	BidPrice1    float64 `json:"bidPrice1"`
 	BidVolume1   int64   `json:"bidVolume1"`
 }
+
+// TickSnapshotResponse 상세 종목 실시간 체결 스냅샷 응답 모델
+type TickSnapshotResponse struct {
+	Ticker       string  `json:"ticker"`       // 종목코드
+	Name         string  `json:"name"`         // 종목명
+	CurrentPrice float64 `json:"currentPrice"` // 현재가
+	ChangeRate   float64 `json:"changeRate"`   // 전일 대비 등락률(%)
+	OpenPrice    float64 `json:"openPrice"`    // 시가
+	HighPrice    float64 `json:"highPrice"`    // 고가
+	LowPrice     float64 `json:"lowPrice"`     // 저가
+	AccVolume    int64   `json:"accVolume"`    // 누적 거래량
+}

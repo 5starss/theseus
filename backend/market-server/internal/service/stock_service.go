@@ -68,3 +68,12 @@ func (s *StockService) GetOrderbook(ctx context.Context, ticker string) (*domain
 	}
 	return ob, nil
 }
+
+// GetTickSnapshot 상세 종목 실시간 체결 스냅샷 정보를 조회한다.
+func (s *StockService) GetTickSnapshot(ctx context.Context, ticker string) (*domain.TickSnapshotResponse, error) {
+	snap, err := s.repo.GetTickSnapshot(ctx, ticker)
+	if err != nil {
+		return nil, fmt.Errorf("repository get tick snapshot error: %w", err)
+	}
+	return snap, nil
+}
