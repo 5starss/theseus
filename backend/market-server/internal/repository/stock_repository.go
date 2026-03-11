@@ -298,6 +298,9 @@ func (r *StockRepository) GetTickSnapshot(ctx context.Context, ticker string) (*
 		if low, ok := currHash["low"]; ok {
 			resp.LowPrice = parseFloat(low)
 		}
+		if tradeVol, ok := currHash["trade_vol"]; ok {
+			resp.TradeVolume = parseInt(tradeVol)
+		}
 		if accVol, ok := currHash["acc_vol"]; ok {
 			resp.AccVolume = parseInt(accVol)
 		}

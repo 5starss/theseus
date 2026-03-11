@@ -343,6 +343,7 @@ func TestGetTickSnapshot_Success_WithCurrentKey(t *testing.T) {
 	mr.HSet("stocks:current:005930", "open", "80000")
 	mr.HSet("stocks:current:005930", "high", "81000")
 	mr.HSet("stocks:current:005930", "low", "79500")
+	mr.HSet("stocks:current:005930", "trade_vol", "500")
 	mr.HSet("stocks:current:005930", "acc_vol", "1500000")
 
 	snap, err := repo.GetTickSnapshot(context.Background(), "005930")
@@ -361,6 +362,9 @@ func TestGetTickSnapshot_Success_WithCurrentKey(t *testing.T) {
 	}
 	if snap.ChangeRate != 1.25 {
 		t.Errorf("expected changeRate=1.25, got %v", snap.ChangeRate)
+	}
+	if snap.TradeVolume != 500 {
+		t.Errorf("expected tradeVolume=500, got %v", snap.TradeVolume)
 	}
 	if snap.AccVolume != 1500000 {
 		t.Errorf("expected accVolume=1500000, got %v", snap.AccVolume)
