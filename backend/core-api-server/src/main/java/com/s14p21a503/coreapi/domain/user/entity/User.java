@@ -45,6 +45,11 @@ public class User extends BaseEntity {
         this.isEmailVerified = false;
     }
 
+    // 투자 성향 수정 메서드
+    public void updateInvestmentStyle(InvestmentStyle investmentStyle) {
+        this.investmentStyle = investmentStyle;
+    }
+
     // 이메일 인증 메서드 (확장 예정)
     public void verifyEmail() {
         this.isEmailVerified = true;

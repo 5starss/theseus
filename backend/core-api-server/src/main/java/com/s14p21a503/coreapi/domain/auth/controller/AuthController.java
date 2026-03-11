@@ -91,6 +91,7 @@ public class AuthController {
         return TokenResponseDto.builder()
                 .tokenType(tokenPair.tokenType())
                 .accessToken(tokenPair.accessToken())
+                .nickname(tokenPair.nickname())
                 .accessTokenExpiresAt(tokenPair.accessTokenExpiresAt())
                 .build();
     }

@@ -72,7 +72,7 @@ public class AuthService {
             throw new CustomException(ErrorCode.LOGIN_FAILED);
         }
 
-        return issueTokenPair(user.getId());
+        return issueTokenPair(user);
     }
 
     @Transactional
@@ -94,11 +94,10 @@ public class AuthService {
             throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
 
-        if (!userRepository.existsById(userId)) {
-            throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
-        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.INVALID_REFRESH_TOKEN));
 
-        return issueTokenPair(userId);
+        return issueTokenPair(user);
     }
 
     @Transactional
@@ -106,7 +105,8 @@ public class AuthService {
         redisTemplate.delete(refreshTokenKey(userId));
     }
 
-    private TokenPair issueTokenPair(Long userId) {
+    private TokenPair issueTokenPair(User user) {
+        Long userId = user.getId();
         String accessToken = jwtProvider.createAccessToken(userId);
         String refreshToken = jwtProvider.createRefreshToken(userId);
 
@@ -118,6 +118,7 @@ public class AuthService {
                 "Bearer",
                 accessToken,
                 refreshToken,
+                user.getNickname(),
                 now.plus(Duration.ofMillis(jwtProvider.getAccessExpiration())),
                 now.plus(Duration.ofMillis(jwtProvider.getRefreshExpiration()))
         );
@@ -144,6 +145,7 @@ public class AuthService {
             String tokenType,
             String accessToken,
             String refreshToken,
+            String nickname,
             LocalDateTime accessTokenExpiresAt,
             LocalDateTime refreshTokenExpiresAt
     ) {
