@@ -29,7 +29,7 @@ class SolarReranker:
                     질문(Query)과 문서(Document) 목록을 비교해 각 문서의 관련성을 0~1 점수로 평가하세요.
                     반드시 JSON 리스트로만 응답하세요.
                     형식 예시:
-                    [{"index": 0, "score": 0.9, "reason": "..."}]
+                    [{{"index": 0, "score": 0.9, "reason": "..."}}]
                     """,
                 ),
                 ("human", "질문: {query}\n\n문서 목록:\n{documents}"),
