@@ -89,19 +89,20 @@ public class JournalMonitor {
         if (payload == null) return "-";
         if (payload instanceof OrderRequest or) {
             String color = (or.getOrderType() == com.s14p21a503.matcher.dto.OrderType.BUY) ? ANSI_RED : ANSI_CYAN;
-            return String.format("%sOrder(ID:%d, %s[%s], P:%s, Q:%d)%s", 
+            return String.format("%sOrder(ID:%d, Action:%s, Type:%s, Price:%s, Qty:%d)%s", 
                     color, or.getOrderId(), or.getAction(), or.getOrderType(), or.getPrice(), or.getRequestedQuantity(), ANSI_RESET);
         }
         if (payload instanceof TickDataEvent td) {
-            return String.format(ANSI_GREEN + "Tick(P:%s, V:%d)" + ANSI_RESET, td.getPrice(), td.getAccVol());
+            return String.format(ANSI_GREEN + "Tick(Price:%s, Volume:%d)" + ANSI_RESET, 
+                    td.getPrice(), td.getTradeVol());
         }
         if (payload instanceof MarketDataEvent md) {
             String bid = (md.getBidPrice1() != null) ? md.getBidPrice1().toString() : "-";
             String ask = (md.getAskPrice1() != null) ? md.getAskPrice1().toString() : "-";
-            return String.format("MktData(B:%s, A:%s)", bid, ask);
+            return String.format("MktData(Bid:%s, Ask:%s)", bid, ask);
         }
         if (payload instanceof ExecutionResult er) {
-            return String.format(ANSI_YELLOW + "Result(ID:%d, P:%s, Q:%d)" + ANSI_RESET, 
+            return String.format(ANSI_YELLOW + "Result(OrderID:%d, Price:%s, Qty:%d)" + ANSI_RESET, 
                     er.getOrderId(), er.getMatchPrice(), er.getMatchQuantity());
         }
         return payload.toString();
