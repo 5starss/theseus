@@ -184,6 +184,16 @@ def get_latest_model_path(ticker: str) -> str:
     return _find_latest_path(ticker, "model", [".json"], regex_pattern=regex)
 
 
+def get_latest_global_model_path() -> str:
+    """가장 최근의 공통(global/panel) model 파일 경로를 반환합니다."""
+    storage_dir = get_storage_dir(_QUANT_CATEGORY)
+    pattern = os.path.join(storage_dir, "model_global_*.json")
+    files = sorted(glob.glob(pattern))
+    if not files:
+        raise FileNotFoundError("global model 데이터를 storage/quant 에서 찾을 수 없습니다.")
+    return files[-1]
+
+
 def get_latest_optimal_path(ticker: str) -> str:
     """가장 최근의 optimal_params 파일 경로를 반환합니다."""
     return _find_latest_path(ticker, "optimal_params", [".json"])
