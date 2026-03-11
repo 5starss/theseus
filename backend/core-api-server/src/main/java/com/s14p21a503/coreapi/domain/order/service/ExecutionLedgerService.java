@@ -3,6 +3,9 @@ package com.s14p21a503.coreapi.domain.order.service;
 import com.s14p21a503.coreapi.common.exception.CustomException;
 import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
+import com.s14p21a503.coreapi.domain.account.entity.AccountHistory;
+import com.s14p21a503.coreapi.domain.account.entity.TransactionType;
+import com.s14p21a503.coreapi.domain.account.repository.AccountHistoryRepository;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
 import com.s14p21a503.coreapi.domain.order.dto.ExecutionEventDto;
 import com.s14p21a503.coreapi.domain.order.entity.*;
@@ -28,6 +31,7 @@ public class ExecutionLedgerService {
     private final ExecutionRepository executionRepository;
     private final OrderHistoryRepository orderHistoryRepository;
     private final AccountRepository accountRepository;
+    private final AccountHistoryRepository accountHistoryRepository;
     private final PositionRepository positionRepository;
 
     @Transactional
@@ -82,7 +86,7 @@ public class ExecutionLedgerService {
         if (event.getOrderType() == OrderType.BUY) {
             processBuy(event, account, order, quantity);
         } else {
-            processSell(event, account, quantity);
+            processSell(event, account, order, quantity);
         }
     }
 
@@ -184,9 +188,24 @@ public class ExecutionLedgerService {
         }
 
         position.applyBuy(quantity, event.getMatchPrice());
+
+        // 원장 거래 내역 저장
+        String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
+        BigDecimal amount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
+        accountHistoryRepository.save(AccountHistory.builder()
+                .userId(event.getUserId())
+                .transactionType(TransactionType.BUY)
+                .ticker(event.getTicker())
+                .stockName(stockName)
+                .quantity(quantity)
+                .price(event.getMatchPrice())
+                .amount(amount)
+                .balanceAfter(account.getDncaTotAmt())
+                .executedAt(event.getExecutedAt())
+                .build());
     }
 
-    private void processSell(ExecutionEventDto event, Account account, int quantity) {
+    private void processSell(ExecutionEventDto event, Account account, Order order, int quantity) {
         // 계좌 정산 (매도 대금 입금)
         account.settleSell(event.getMatchPrice(), quantity);
 
@@ -201,5 +220,20 @@ public class ExecutionLedgerService {
         if (position.getQuantity() == 0) {
             positionRepository.delete(position);
         }
+
+        // 원장 거래 내역 저장
+        String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
+        BigDecimal amount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
+        accountHistoryRepository.save(AccountHistory.builder()
+                .userId(event.getUserId())
+                .transactionType(TransactionType.SELL)
+                .ticker(event.getTicker())
+                .stockName(stockName)
+                .quantity(quantity)
+                .price(event.getMatchPrice())
+                .amount(amount)
+                .balanceAfter(account.getDncaTotAmt())
+                .executedAt(event.getExecutedAt())
+                .build());
     }
 }

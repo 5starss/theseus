@@ -1,21 +1,28 @@
 package com.s14p21a503.coreapi.domain.account.service;
 
 import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.PageResponseDto;
 import com.s14p21a503.coreapi.common.response.status.ErrorCode;
-import com.s14p21a503.coreapi.domain.account.dto.AccountBalanceResponseDto;
-import com.s14p21a503.coreapi.domain.account.dto.AccountSummaryResponseDto;
+import com.s14p21a503.coreapi.domain.account.dto.*;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.common.infra.redis.RedisService;
+import com.s14p21a503.coreapi.domain.account.entity.AccountHistory;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
+import com.s14p21a503.coreapi.domain.account.repository.AccountHistoryRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
 import com.s14p21a503.coreapi.domain.position.repository.PositionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +34,7 @@ import java.util.stream.Collectors;
 public class AccountService {
 
     private final AccountRepository accountRepository;
+    private final AccountHistoryRepository accountHistoryRepository;
     private final PositionRepository positionRepository;
     private final RedisService redisService;
 
@@ -39,6 +47,31 @@ public class AccountService {
 
         accountRepository.save(account);
         log.info("새로운 계좌 생성 완료 - userId: {}, initialBalance: 20,000,000", userId);
+    }
+
+    @Transactional(readOnly = true)
+    public AccountHistoryResponseDto getHistories(Long userId, Integer year, Integer month, Pageable pageable) {
+        Page<AccountHistory> historyPage;
+
+        // 1) 연/월 필터링이 있는 경우
+        if (year != null && month != null) {
+            YearMonth yearMonth = YearMonth.of(year, month);
+            LocalDateTime startOfMonth = yearMonth.atDay(1).atStartOfDay();
+            LocalDateTime endOfMonth = yearMonth.atEndOfMonth().atTime(LocalTime.MAX);
+
+            historyPage = accountHistoryRepository
+                    .findAllByUserIdAndExecutedAtBetweenOrderByExecutedAtDesc(userId, startOfMonth, endOfMonth, pageable);
+        }
+        // 2) 전체 기간 조회
+        else {
+            historyPage = accountHistoryRepository.findAllByUserIdOrderByExecutedAtDesc(userId, pageable);
+        }
+
+        return AccountHistoryResponseDto.builder()
+                .year(year)
+                .month(month)
+                .histories(PageResponseDto.from(historyPage.map(AccountHistoryResponseDto.HistoryDto::from)))
+                .build();
     }
 
     @Transactional(readOnly = true)

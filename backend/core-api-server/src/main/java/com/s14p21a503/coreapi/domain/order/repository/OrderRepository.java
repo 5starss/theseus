@@ -19,7 +19,7 @@ import java.util.Optional;
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT o FROM Order o WHERE o.id = :orderId")
+    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.stock WHERE o.id = :orderId")
     Optional<Order> findByIdForUpdate(@Param("orderId") Long orderId);
 
     @Query(value = "SELECT o FROM Order o LEFT JOIN FETCH o.stock WHERE o.userId = :userId " +
