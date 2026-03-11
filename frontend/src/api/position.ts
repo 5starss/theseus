@@ -1,5 +1,5 @@
-import axios from 'axios';
-import type { ApiResponse } from './stock';
+import api from './client';
+import type { ApiResponse } from './client';
 
 export interface PositionResponse {
     ticker: string;
@@ -10,13 +10,6 @@ export interface PositionResponse {
     totalPurchaseAmount: number;
     companyName: string;
 }
-
-const api = axios.create({
-    headers: {
-        'Content-Type': 'application/json',
-    },
-    withCredentials: true,
-});
 
 export const positionApi = {
     // 백엔드 명세: GET /api/v1/core/positions
