@@ -107,16 +107,21 @@ func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain
 // GetCandlesFromCache Redis에서 캔들 데이터를 단기 캐시로 조회한다.
 func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string, interval domain.Interval) ([]domain.Candle, error) {
 	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
-	val, err := r.rdb.Get(ctx, key).Result()
-	if err == redis.Nil {
+	
+	vals, err := r.rdb.ZRevRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis zrevrange failed: %w", err)
+	}
+	if len(vals) == 0 {
 		return nil, nil // Cache Miss
-	} else if err != nil {
-		return nil, fmt.Errorf("redis get failed: %w", err)
 	}
 
 	var candles []domain.Candle
-	if err := json.Unmarshal([]byte(val), &candles); err != nil {
-		return nil, fmt.Errorf("json unmarshal failed: %w", err)
+	for _, val := range vals {
+		var c domain.Candle
+		if err := json.Unmarshal([]byte(val), &c); err == nil {
+			candles = append(candles, c)
+		}
 	}
 	return candles, nil
 }
@@ -125,19 +130,46 @@ func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string
 func (r *StockRepository) SaveCandlesToCache(ctx context.Context, ticker string, interval domain.Interval, candles []domain.Candle) error {
 	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
 	
-	bytes, err := json.Marshal(candles)
-	if err != nil {
-		return fmt.Errorf("json marshal failed: %w", err)
-	}
+	pipe := r.rdb.Pipeline()
+	// 기존 데이터 지우고 새로 캐싱 (단기 캐시이므로)
+	pipe.Del(ctx, key)
+	
+	for _, c := range candles {
+		bytes, err := json.Marshal(c)
+		if err != nil {
+			continue
+		}
+		
+		var score float64
+		if interval == domain.IntervalDay {
+			// MySQL DATE (2006-01-02)
+			if t, err := time.Parse("2006-01-02", c.Timestamp); err == nil {
+				score = float64(t.Unix())
+			}
+		} else {
+			// MySQL DATETIME (2006-01-02 15:04:05)
+			if t, err := time.Parse("2006-01-02 15:04:05", c.Timestamp); err == nil {
+				score = float64(t.Unix())
+			}
+		}
 
-	if err := r.rdb.Set(ctx, key, string(bytes), 1*time.Minute).Err(); err != nil {
-		return fmt.Errorf("redis set failed: %w", err)
+		pipe.ZAdd(ctx, key, redis.Z{
+			Score:  score,
+			Member: string(bytes),
+		})
 	}
+	
+	pipe.Expire(ctx, key, 1*time.Minute)
+	
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("redis zadd pipeline failed: %w", err)
+	}
+	
 	return nil
 }
 
 // GetCandlesFromDB MySQL에서 캔들 데이터를 조회한다.
-func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, interval domain.Interval, limit int64) ([]domain.Candle, error) {
+func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, interval domain.Interval, limit int64, endTime string) ([]domain.Candle, error) {
 	var tableName, timeCol string
 	if interval == domain.IntervalDay {
 		tableName = "candle_1d"
@@ -149,15 +181,30 @@ func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, i
 		return nil, fmt.Errorf("unsupported interval for db fetch: %s", interval)
 	}
 
-	query := fmt.Sprintf(`
-		SELECT %s, open_price, high_price, low_price, close_price, volume
-		FROM %s
-		WHERE ticker = ?
-		ORDER BY %s DESC
-		LIMIT ?
-	`, timeCol, tableName, timeCol)
+	var query string
+	var args []interface{}
 
-	rows, err := r.db.QueryContext(ctx, query, ticker, limit)
+	if endTime != "" {
+		query = fmt.Sprintf(`
+			SELECT %s, open_price, high_price, low_price, close_price, volume
+			FROM %s
+			WHERE ticker = ? AND %s < ?
+			ORDER BY %s DESC
+			LIMIT ?
+		`, timeCol, tableName, timeCol, timeCol)
+		args = append(args, ticker, endTime, limit)
+	} else {
+		query = fmt.Sprintf(`
+			SELECT %s, open_price, high_price, low_price, close_price, volume
+			FROM %s
+			WHERE ticker = ?
+			ORDER BY %s DESC
+			LIMIT ?
+		`, timeCol, tableName, timeCol)
+		args = append(args, ticker, limit)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("mysql query failed: %w", err)
 	}

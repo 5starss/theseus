@@ -57,6 +57,7 @@ func (h *StockHandler) GetStockList(c *gin.Context) {
 // 쿼리 파라미터:
 //   - interval : 간격 (D, W, M 등, 기본값 D)
 //   - limit    : 캔들 개수 (1~1000, 기본값 50)
+//   - endTime  : 특정 시간 이전의 데이터 조회용 커서 (형식: 2006-01-02T15:04:05, 옵션)
 func (h *StockHandler) GetCandles(c *gin.Context) {
 	ticker := c.Param("ticker")
 	if ticker == "" {
@@ -85,7 +86,9 @@ func (h *StockHandler) GetCandles(c *gin.Context) {
 		return
 	}
 
-	candles, err := h.svc.GetCandles(c.Request.Context(), ticker, interval, limit)
+	endTime := c.Query("endTime")
+
+	candles, err := h.svc.GetCandles(c.Request.Context(), ticker, interval, limit, endTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, response.Fail("STOCK-500", "캔들 데이터 조회 중 오류가 발생했습니다."))
 		return

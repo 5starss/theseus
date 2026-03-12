@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 
 // ─── 1d 인터벌 On-the-fly 캔들 테스트 헬퍼 ──────────────────────────────────
 
-func newTestService1d(t *testing.T) (*StockService, *miniredis.Miniredis) {
+func newTestService1d(t *testing.T) (*StockService, *repository.StockRepository, *miniredis.Miniredis) {
 	t.Helper()
 	mr, err := miniredis.Run()
 	if err != nil {
@@ -24,17 +23,16 @@ func newTestService1d(t *testing.T) (*StockService, *miniredis.Miniredis) {
 	}
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	repo := repository.NewStockRepository(rdb, nil)
-	return NewStockService(repo), mr
+	return NewStockService(repo), repo, mr
 }
 
-// seedPastDailyCandles 1d 캔들 캐시에 과거 날짜 데이터를 세팅한다.
-func seedPastDailyCandles(t *testing.T, mr *miniredis.Miniredis, ticker string, candles []domain.Candle) {
+// seedPastDailyCandles 1d 캔들 ZSet 캐시에 과거 날짜 데이터를 세팅한다.
+// Timestamp 포맷은 반드시 "2006-01-02" (MySQL DATE 형식) 이어야 한다.
+func seedPastDailyCandles(t *testing.T, repo *repository.StockRepository, ticker string, candles []domain.Candle) {
 	t.Helper()
-	b, err := json.Marshal(candles)
-	if err != nil {
-		t.Fatalf("json marshal failed: %v", err)
+	if err := repo.SaveCandlesToCache(context.Background(), ticker, domain.IntervalDay, candles); err != nil {
+		t.Fatalf("seedPastDailyCandles failed: %v", err)
 	}
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", ticker, domain.IntervalDay), string(b))
 }
 
 // seedLiveCurrentData stocks:current:{ticker} 해시에 실시간 체결 데이터를 세팅한다.
@@ -63,17 +61,17 @@ func todayStr() string {
 // TestGetCandles_1d_PrependsTodayLiveCandle
 // 과거 일봉 캐시 + 실시간 Redis 데이터 → 결과 첫 번째가 오늘 캔들이어야 한다.
 func TestGetCandles_1d_PrependsTodayLiveCandle(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	past := []domain.Candle{
 		{Timestamp: yesterdayStr(), Open: 79000, High: 80000, Low: 78000, Close: 79500, Volume: 1000000},
-		{Timestamp: time.Now().AddDate(0, 0, -2).Format("20060102"), Open: 78000, High: 79000, Low: 77000, Close: 78500, Volume: 900000},
+		{Timestamp: time.Now().AddDate(0, 0, -2).Format("2006-01-02"), Open: 78000, High: 79000, Low: 77000, Close: 78500, Volume: 900000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	seedLiveCurrentData(t, mr, "005930", 80500, 79000, 81000, 78500, 2000000)
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -112,7 +110,7 @@ func TestGetCandles_1d_PrependsTodayLiveCandle(t *testing.T) {
 // TestGetCandles_1d_ReplacesTodaysExistingCandle
 // 캐시의 첫 번째 캔들이 오늘 날짜인 경우 → 실시간 데이터로 덮어써야 한다.
 func TestGetCandles_1d_ReplacesTodaysExistingCandle(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	// 캐시에 오늘 날짜 캔들이 이미 있는 상태 (과거 가격)
@@ -124,12 +122,12 @@ func TestGetCandles_1d_ReplacesTodaysExistingCandle(t *testing.T) {
 		cachedToday,
 		{Timestamp: yesterdayStr(), Open: 78000, High: 79000, Low: 77000, Close: 78500, Volume: 900000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 
 	// 실시간 최신 가격 (캐시보다 높은 가격)
 	seedLiveCurrentData(t, mr, "005930", 80500, 79000, 81000, 78500, 2000000)
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -152,24 +150,24 @@ func TestGetCandles_1d_ReplacesTodaysExistingCandle(t *testing.T) {
 // TestGetCandles_1d_LimitTruncatesAfterPrepend
 // 오늘 캔들 추가 후 limit을 초과하면 잘라내야 한다.
 func TestGetCandles_1d_LimitTruncatesAfterPrepend(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
-	// 과거 캔들 5개 (오늘 날짜 없음)
+	// 과거 캔들 5개 (오늘 날짜 없음), "2006-01-02" 포맷 사용
 	past := make([]domain.Candle, 5)
 	for i := range past {
 		past[i] = domain.Candle{
-			Timestamp: time.Now().AddDate(0, 0, -(i + 1)).Format("20060102"),
+			Timestamp: time.Now().AddDate(0, 0, -(i + 1)).Format("2006-01-02"),
 			Open:      int64(79000 - i*100), High: int64(80000 - i*100),
 			Low:       int64(78000 - i*100), Close: int64(79500 - i*100),
 			Volume:    int64(1000000 - i*10000),
 		}
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	seedLiveCurrentData(t, mr, "005930", 80500, 79000, 81000, 78500, 2000000)
 
 	// limit=5 → 오늘 추가(6개) 후 5개로 잘라야 함
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 5)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 5, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -184,16 +182,17 @@ func TestGetCandles_1d_LimitTruncatesAfterPrepend(t *testing.T) {
 // TestGetCandles_1d_NoTickSnapshot_ReturnsHistoricalOnly
 // stocks:current에 데이터가 없는 경우 → 과거 캔들만 반환, 오늘 캔들 추가 안 함.
 func TestGetCandles_1d_NoTickSnapshot_ReturnsHistoricalOnly(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	past := []domain.Candle{
 		{Timestamp: yesterdayStr(), Open: 79000, High: 80000, Low: 78000, Close: 79500, Volume: 1000000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	// stocks:current 설정 없음 → GetTickSnapshot returns nil
+	_ = mr
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -208,18 +207,18 @@ func TestGetCandles_1d_NoTickSnapshot_ReturnsHistoricalOnly(t *testing.T) {
 // TestGetCandles_1d_ZeroCurrentPrice_NoPrepend
 // 실시간 가격이 0이면 오늘 캔들을 추가하지 않아야 한다.
 func TestGetCandles_1d_ZeroCurrentPrice_NoPrepend(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	past := []domain.Candle{
 		{Timestamp: yesterdayStr(), Open: 79000, High: 80000, Low: 78000, Close: 79500, Volume: 1000000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 
 	// 가격 0으로 세팅 (장 전, 또는 데이터 오류 상황)
 	seedLiveCurrentData(t, mr, "005930", 0, 0, 0, 0, 0)
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -234,16 +233,16 @@ func TestGetCandles_1d_ZeroCurrentPrice_NoPrepend(t *testing.T) {
 // TestGetCandles_1d_LiveCandleOHLCFromCurrentHash
 // 당일 캔들의 Open/High/Low/Close/Volume이 stocks:current에서 올바르게 매핑된다.
 func TestGetCandles_1d_LiveCandleOHLCFromCurrentHash(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
-	seedPastDailyCandles(t, mr, "000660", []domain.Candle{
+	seedPastDailyCandles(t, repo, "000660", []domain.Candle{
 		{Timestamp: yesterdayStr(), Open: 180000, High: 182000, Low: 178000, Close: 181000, Volume: 3000000},
 	})
 	// SK하이닉스 당일 데이터
 	seedLiveCurrentData(t, mr, "000660", 183000, 181000, 185000, 179000, 4500000)
 
-	got, err := svc.GetCandles(context.Background(), "000660", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "000660", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -273,17 +272,18 @@ func TestGetCandles_1d_LiveCandleOHLCFromCurrentHash(t *testing.T) {
 // TestGetCandles_1d_CacheHit_NoLiveData_ReturnsCache
 // 캐시에 데이터가 있고 실시간이 없는 경우 → 캐시 데이터 그대로 반환 (DB 호출 없음).
 func TestGetCandles_1d_CacheHit_NoLiveData_ReturnsCache(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	past := []domain.Candle{
 		{Timestamp: yesterdayStr(), Open: 79000, High: 80000, Low: 78000, Close: 79500, Volume: 1000000},
 		{Timestamp: time.Now().AddDate(0, 0, -2).Format("2006-01-02"), Open: 78000, High: 79000, Low: 77000, Close: 78500, Volume: 900000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	// 실시간 데이터 없음 → 과거 데이터만 반환
+	_ = mr
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -301,21 +301,22 @@ func TestGetCandles_1d_CacheHit_NoLiveData_ReturnsCache(t *testing.T) {
 // TestGetCandles_1d_LimitZero_ReturnsAllCandles
 // limit=0은 제한 없이 모두 반환해야 한다 (캐시 히트 경우).
 func TestGetCandles_1d_LimitZero_ReturnsAllCandles(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
+	// "2006-01-02" 포맷 사용
 	past := make([]domain.Candle, 10)
 	for i := range past {
 		past[i] = domain.Candle{
-			Timestamp: time.Now().AddDate(0, 0, -(i + 1)).Format("20060102"),
+			Timestamp: time.Now().AddDate(0, 0, -(i + 1)).Format("2006-01-02"),
 			Volume:    int64(i + 1),
 		}
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	seedLiveCurrentData(t, mr, "005930", 80000, 79000, 81000, 78500, 2000000)
 
 	// limit=0은 캐시에서 반환된 전체 + 오늘 캔들 prepend
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 0)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 0, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}
@@ -328,17 +329,17 @@ func TestGetCandles_1d_LimitZero_ReturnsAllCandles(t *testing.T) {
 // TestGetCandles_1d_LimitOne_ReturnsOnlyToday
 // limit=1이고 실시간 데이터가 있는 경우 → 오늘 캔들만 반환.
 func TestGetCandles_1d_LimitOne_ReturnsOnlyToday(t *testing.T) {
-	svc, mr := newTestService1d(t)
+	svc, repo, mr := newTestService1d(t)
 	defer mr.Close()
 
 	past := []domain.Candle{
 		{Timestamp: yesterdayStr(), Volume: 1000000},
-		{Timestamp: time.Now().AddDate(0, 0, -2).Format("20060102"), Volume: 900000},
+		{Timestamp: time.Now().AddDate(0, 0, -2).Format("2006-01-02"), Volume: 900000},
 	}
-	seedPastDailyCandles(t, mr, "005930", past)
+	seedPastDailyCandles(t, repo, "005930", past)
 	seedLiveCurrentData(t, mr, "005930", 80000, 79000, 81000, 78500, 2000000)
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 1)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 1, "")
 	if err != nil {
 		t.Fatalf("GetCandles error: %v", err)
 	}

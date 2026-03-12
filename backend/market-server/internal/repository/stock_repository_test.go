@@ -113,27 +113,93 @@ func TestSaveAndGetCandlesFromCache(t *testing.T) {
 	defer mr.Close()
 
 	ctx := context.Background()
+	// MySQL DATE 포맷("2006-01-02") 사용해야 ZSet score가 올바르게 계산된다
 	original := []domain.Candle{
-		{Timestamp: "20240101", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
-		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
+		{Timestamp: "2024-01-01", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
+		{Timestamp: "2024-01-02", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
 	}
 
-	if err := repo.SaveCandlesToCache(ctx, "005930", "D", original); err != nil {
+	if err := repo.SaveCandlesToCache(ctx, "005930", domain.IntervalDay, original); err != nil {
 		t.Fatalf("SaveCandlesToCache failed: %v", err)
 	}
 
-	result, err := repo.GetCandlesFromCache(ctx, "005930", "D")
+	result, err := repo.GetCandlesFromCache(ctx, "005930", domain.IntervalDay)
 	if err != nil {
 		t.Fatalf("GetCandlesFromCache failed: %v", err)
 	}
 	if len(result) != len(original) {
 		t.Fatalf("expected %d candles, got %d", len(original), len(result))
 	}
-	if result[0].Timestamp != "20240101" || result[0].Close != 70500 || result[0].Volume != 1000000 {
-		t.Errorf("candle data mismatch: %+v", result[0])
+	// ZRevRange로 조회하므로 최신(2024-01-02)이 먼저 반환된다
+	if result[0].Timestamp != "2024-01-02" || result[0].Close != 71500 || result[0].Volume != 1200000 {
+		t.Errorf("first candle mismatch (expect newest): %+v", result[0])
 	}
-	if result[1].Timestamp != "20240102" || result[1].High != 72000 {
-		t.Errorf("candle data mismatch: %+v", result[1])
+	if result[1].Timestamp != "2024-01-01" || result[1].High != 71000 {
+		t.Errorf("second candle mismatch: %+v", result[1])
+	}
+}
+
+// TestSaveAndGetCandlesFromCache_ZSetOrdering_Minute
+// IntervalMinute는 "2006-01-02 15:04:05" 포맷으로 score를 계산하고 내림차순 반환한다.
+func TestSaveAndGetCandlesFromCache_ZSetOrdering_Minute(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	candles := []domain.Candle{
+		{Timestamp: "2024-01-02 09:00:00", Open: 70000, High: 70500, Low: 69800, Close: 70200, Volume: 5000},
+		{Timestamp: "2024-01-02 09:01:00", Open: 70200, High: 70800, Low: 70100, Close: 70700, Volume: 6000},
+		{Timestamp: "2024-01-02 09:02:00", Open: 70700, High: 71000, Low: 70600, Close: 70900, Volume: 7000},
+	}
+
+	if err := repo.SaveCandlesToCache(ctx, "005930", domain.IntervalMinute, candles); err != nil {
+		t.Fatalf("SaveCandlesToCache failed: %v", err)
+	}
+
+	result, err := repo.GetCandlesFromCache(ctx, "005930", domain.IntervalMinute)
+	if err != nil {
+		t.Fatalf("GetCandlesFromCache failed: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("expected 3 candles, got %d", len(result))
+	}
+	// 최신 시간이 먼저 반환되어야 한다
+	if result[0].Timestamp != "2024-01-02 09:02:00" {
+		t.Errorf("expected newest candle first, got %s", result[0].Timestamp)
+	}
+	if result[2].Timestamp != "2024-01-02 09:00:00" {
+		t.Errorf("expected oldest candle last, got %s", result[2].Timestamp)
+	}
+}
+
+// TestSaveCandlesToCache_OverwritesPreviousData
+// SaveCandlesToCache 재호출 시 기존 데이터가 새 데이터로 완전히 교체된다.
+func TestSaveCandlesToCache_OverwritesPreviousData(t *testing.T) {
+	repo, mr := newTestRepo(t)
+	defer mr.Close()
+
+	ctx := context.Background()
+	first := []domain.Candle{
+		{Timestamp: "2024-01-01", Close: 70000, Volume: 1000000},
+		{Timestamp: "2024-01-02", Close: 71000, Volume: 1100000},
+	}
+	second := []domain.Candle{
+		{Timestamp: "2024-01-03", Close: 72000, Volume: 1200000},
+	}
+
+	_ = repo.SaveCandlesToCache(ctx, "005930", domain.IntervalDay, first)
+	_ = repo.SaveCandlesToCache(ctx, "005930", domain.IntervalDay, second)
+
+	result, err := repo.GetCandlesFromCache(ctx, "005930", domain.IntervalDay)
+	if err != nil {
+		t.Fatalf("GetCandlesFromCache failed: %v", err)
+	}
+	// 두 번째 저장으로 첫 번째 데이터가 완전히 지워져야 한다
+	if len(result) != 1 {
+		t.Errorf("expected 1 candle after overwrite, got %d", len(result))
+	}
+	if len(result) > 0 && result[0].Timestamp != "2024-01-03" {
+		t.Errorf("expected overwritten candle, got %s", result[0].Timestamp)
 	}
 }
 
@@ -142,21 +208,21 @@ func TestSaveAndGetCandlesFromCache_IntervalIsolation(t *testing.T) {
 	defer mr.Close()
 
 	ctx := context.Background()
-	daily := []domain.Candle{{Timestamp: "20240101", Volume: 1000000}}
-	weekly := []domain.Candle{{Timestamp: "20240101", Volume: 5000000}}
+	daily := []domain.Candle{{Timestamp: "2024-01-01", Volume: 1000000}}
+	weekly := []domain.Candle{{Timestamp: "2024-01-01", Volume: 5000000}}
 
-	if err := repo.SaveCandlesToCache(ctx, "005930", "D", daily); err != nil {
+	if err := repo.SaveCandlesToCache(ctx, "005930", domain.IntervalDay, daily); err != nil {
 		t.Fatalf("save daily failed: %v", err)
 	}
-	if err := repo.SaveCandlesToCache(ctx, "005930", "W", weekly); err != nil {
+	if err := repo.SaveCandlesToCache(ctx, "005930", domain.Interval("week"), weekly); err != nil {
 		t.Fatalf("save weekly failed: %v", err)
 	}
 
-	gotD, err := repo.GetCandlesFromCache(ctx, "005930", "D")
+	gotD, err := repo.GetCandlesFromCache(ctx, "005930", domain.IntervalDay)
 	if err != nil {
 		t.Fatalf("get daily failed: %v", err)
 	}
-	gotW, err := repo.GetCandlesFromCache(ctx, "005930", "W")
+	gotW, err := repo.GetCandlesFromCache(ctx, "005930", domain.Interval("week"))
 	if err != nil {
 		t.Fatalf("get weekly failed: %v", err)
 	}
@@ -174,14 +240,14 @@ func TestSaveAndGetCandlesFromCache_TickerIsolation(t *testing.T) {
 	defer mr.Close()
 
 	ctx := context.Background()
-	samsung := []domain.Candle{{Timestamp: "20240101", Close: 70500}}
-	skhynix := []domain.Candle{{Timestamp: "20240101", Close: 181000}}
+	samsung := []domain.Candle{{Timestamp: "2024-01-01", Close: 70500}}
+	skhynix := []domain.Candle{{Timestamp: "2024-01-01", Close: 181000}}
 
-	_ = repo.SaveCandlesToCache(ctx, "005930", "D", samsung)
-	_ = repo.SaveCandlesToCache(ctx, "000660", "D", skhynix)
+	_ = repo.SaveCandlesToCache(ctx, "005930", domain.IntervalDay, samsung)
+	_ = repo.SaveCandlesToCache(ctx, "000660", domain.IntervalDay, skhynix)
 
-	gotS, _ := repo.GetCandlesFromCache(ctx, "005930", "D")
-	gotH, _ := repo.GetCandlesFromCache(ctx, "000660", "D")
+	gotS, _ := repo.GetCandlesFromCache(ctx, "005930", domain.IntervalDay)
+	gotH, _ := repo.GetCandlesFromCache(ctx, "000660", domain.IntervalDay)
 
 	if gotS[0].Close != 70500 {
 		t.Errorf("expected samsung close 70500, got %d", gotS[0].Close)

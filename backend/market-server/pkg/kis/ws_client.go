@@ -179,12 +179,14 @@ func (w *WSClient) readPump(ctx context.Context) {
 					} `json:"body"`
 				}
 				if err := json.Unmarshal(msg, &ctrl); err == nil {
-					if ctrl.Body.RtCd != "0" {
+					// rt_cd가 빈 문자열이면 body 구조가 없는 제어 메시지(header-only 등)이므로 무시.
+					// "" != "0" 조건만으로는 정상 메시지를 에러로 오판할 수 있다.
+					if ctrl.Body.RtCd != "" && ctrl.Body.RtCd != "0" {
 						log.Printf("KIS WS control error [%s]: %s — 재연결 중단, 서버를 재시작하세요", ctrl.Body.MsgCd, ctrl.Body.Msg1)
 						w.mu.Lock()
 						w.noReconnect = true
 						w.mu.Unlock()
-					} else {
+					} else if ctrl.Body.RtCd == "0" {
 						log.Printf("KIS WS control: %s", ctrl.Body.Msg1)
 					}
 				}

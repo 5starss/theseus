@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"testing"
 
 	"market-server/internal/domain"
@@ -26,56 +24,58 @@ func newTestService(t *testing.T) (*StockService, *repository.StockRepository, *
 	return NewStockService(repo), repo, mr
 }
 
-func seedCandleCache(t *testing.T, mr *miniredis.Miniredis, ticker string, interval domain.Interval, candles []domain.Candle) {
+// seedCandleCache ZSet 기반 캔들 캐시에 테스트 데이터를 적재한다.
+// Timestamp 포맷은 IntervalDay: "2006-01-02", IntervalMinute: "2006-01-02 15:04:05" 이어야 한다.
+func seedCandleCache(t *testing.T, repo *repository.StockRepository, ticker string, interval domain.Interval, candles []domain.Candle) {
 	t.Helper()
-	b, err := json.Marshal(candles)
-	if err != nil {
-		t.Fatalf("json marshal failed: %v", err)
+	if err := repo.SaveCandlesToCache(context.Background(), ticker, interval, candles); err != nil {
+		t.Fatalf("seedCandleCache failed: %v", err)
 	}
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", ticker, interval), string(b))
 }
 
 // ─── GetCandles 테스트 ────────────────────────────────────────────────────────
 
 func TestGetCandles_CacheHit(t *testing.T) {
-	svc, _, mr := newTestService(t)
+	svc, repo, mr := newTestService(t)
 	defer mr.Close()
 
-	want := []domain.Candle{
-		{Timestamp: "20240101", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
-		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
+	// ZSet score 계산을 위해 MySQL DATE 포맷("2006-01-02") 사용
+	candles := []domain.Candle{
+		{Timestamp: "2024-01-01", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
+		{Timestamp: "2024-01-02", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
 	}
-	seedCandleCache(t, mr, "005930", domain.IntervalDay, want)
+	seedCandleCache(t, repo, "005930", domain.IntervalDay, candles)
 
-	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("expected %d candles, got %d", len(want), len(got))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 candles, got %d", len(got))
 	}
-	if got[0].Timestamp != want[0].Timestamp || got[0].Close != want[0].Close {
-		t.Errorf("first candle mismatch: want %+v, got %+v", want[0], got[0])
+	// ZRevRange로 조회하므로 최신(2024-01-02)이 먼저 반환된다
+	if got[0].Timestamp != "2024-01-02" || got[0].Close != 71500 {
+		t.Errorf("first candle mismatch: %+v", got[0])
 	}
-	if got[1].Volume != want[1].Volume {
-		t.Errorf("second candle volume mismatch: want %d, got %d", want[1].Volume, got[1].Volume)
+	if got[1].Timestamp != "2024-01-01" || got[1].Volume != 1000000 {
+		t.Errorf("second candle mismatch: %+v", got[1])
 	}
 }
 
 func TestGetCandles_CacheHit_IntervalIsolation(t *testing.T) {
-	svc, _, mr := newTestService(t)
+	svc, repo, mr := newTestService(t)
 	defer mr.Close()
 
-	dailyCandles := []domain.Candle{{Timestamp: "20240101", Volume: 1000000}}
-	weeklyCandles := []domain.Candle{{Timestamp: "20240101", Volume: 5000000}}
-	seedCandleCache(t, mr, "005930", domain.IntervalDay, dailyCandles)
-	seedCandleCache(t, mr, "005930", domain.Interval("week"), weeklyCandles)
+	dailyCandles := []domain.Candle{{Timestamp: "2024-01-01", Volume: 1000000}}
+	weeklyCandles := []domain.Candle{{Timestamp: "2024-01-01", Volume: 5000000}}
+	seedCandleCache(t, repo, "005930", domain.IntervalDay, dailyCandles)
+	seedCandleCache(t, repo, "005930", domain.Interval("week"), weeklyCandles)
 
-	gotD, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
+	gotD, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50, "")
 	if err != nil {
 		t.Fatalf("unexpected error for day: %v", err)
 	}
-	gotW, err := svc.GetCandles(context.Background(), "005930", domain.Interval("week"), 50)
+	gotW, err := svc.GetCandles(context.Background(), "005930", domain.Interval("week"), 50, "")
 	if err != nil {
 		t.Fatalf("unexpected error for week: %v", err)
 	}
@@ -89,15 +89,15 @@ func TestGetCandles_CacheHit_IntervalIsolation(t *testing.T) {
 }
 
 func TestGetCandles_CacheHit_AllFields(t *testing.T) {
-	svc, _, mr := newTestService(t)
+	svc, repo, mr := newTestService(t)
 	defer mr.Close()
 
 	want := []domain.Candle{
-		{Timestamp: "20240315", Open: 72000, High: 73500, Low: 71000, Close: 73000, Volume: 2500000},
+		{Timestamp: "2024-03-15", Open: 72000, High: 73500, Low: 71000, Close: 73000, Volume: 2500000},
 	}
-	seedCandleCache(t, mr, "000660", domain.IntervalDay, want)
+	seedCandleCache(t, repo, "000660", domain.IntervalDay, want)
 
-	got, err := svc.GetCandles(context.Background(), "000660", domain.IntervalDay, 1)
+	got, err := svc.GetCandles(context.Background(), "000660", domain.IntervalDay, 1, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,4 +217,29 @@ func TestGetTopStocks_EmptyRedis(t *testing.T) {
 	if len(result) != 0 {
 		t.Errorf("expected empty slice, got %d", len(result))
 	}
+}
+
+// ─── endTime 커서 페이징 테스트 ───────────────────────────────────────────────
+
+// TestGetCandles_WithEndTime_SkipsCache
+// endTime이 지정되면 Redis 캐시를 무시하고 DB로 직접 요청한다.
+// DB가 nil인 테스트 환경에서는 패닉(nil pointer dereference)이 발생해야 한다.
+func TestGetCandles_WithEndTime_SkipsCache(t *testing.T) {
+	svc, repo, mr := newTestService(t)
+	defer mr.Close()
+
+	// 캐시에 데이터가 있어도 endTime이 지정되면 캐시를 건너뛰어야 한다.
+	candles := []domain.Candle{
+		{Timestamp: "2024-01-01", Close: 70500, Volume: 1000000},
+	}
+	seedCandleCache(t, repo, "005930", domain.IntervalDay, candles)
+
+	// endTime != "" → GetCandlesFromDB(db=nil) 직접 호출 → nil pointer dereference → panic
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic from nil DB when endTime is set, but did not panic")
+		}
+	}()
+
+	_, _ = svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 10, "2024-01-02")
 }
