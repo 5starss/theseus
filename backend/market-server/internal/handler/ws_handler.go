@@ -35,7 +35,7 @@ func NewWSHandler(hub *service.WSHub) *WSHandler {
 	}
 }
 
-// ServeWS는 GET /v1/stocks/ws 요청을 처리합니다
+// ServeWS는 GET /ws/v1/stocks 요청을 처리합니다
 func (h *WSHandler) ServeWS(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {

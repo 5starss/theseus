@@ -42,7 +42,7 @@ jwt:
     - /api/v1/market/stocks/*
     - /api/v1/market/stocks/*/candles
     - /api/v1/market/stocks/search
-    - /v1/stocks/ws
+    - /ws/v1/stocks
     - /swagger-ui.html
     - /swagger-ui/**
     - /v3/api-docs/**
