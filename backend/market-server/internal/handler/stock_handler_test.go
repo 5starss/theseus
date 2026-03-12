@@ -57,7 +57,7 @@ func TestGetCandles_Success(t *testing.T) {
 		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
 	}
 	b, _ := json.Marshal(candles)
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", "D"), string(b))
+	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", domain.IntervalDay), string(b))
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()
@@ -92,10 +92,10 @@ func TestGetCandles_DefaultInterval(t *testing.T) {
 	h, _, mr := newTestComponents(t)
 	defer mr.Close()
 
-	// interval 미지정 시 "D"로 캐시에서 조회해야 함
+	// interval 미지정 시 "D" -> domain.IntervalDay 로 맵핑되어 캐시에서 조회해야 함
 	candles := []domain.Candle{{Timestamp: "20240101", Close: 70500}}
 	b, _ := json.Marshal(candles)
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", "D"), string(b))
+	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", domain.IntervalDay), string(b))
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()

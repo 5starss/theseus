@@ -5,6 +5,14 @@ type RankType string
 
 const RankTypeVolume RankType = "VOLUME" // 거래량 기준
 
+// Interval 캔들(차트) 조회 간격 타입
+type Interval string
+
+const (
+	IntervalDay    Interval = "day" // 1일봉
+	IntervalMinute Interval = "min" // 1분봉
+)
+
 // Stock 종목 도메인 모델
 type Stock struct {
 	Ticker       string  `json:"ticker"`       // 종목코드

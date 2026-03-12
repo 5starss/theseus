@@ -83,6 +83,19 @@ func main() {
 	stockRepo := repository.NewStockRepository(rdb, db)
 	stockSvc := service.NewStockService(stockRepo)
 
+	// 8-1. KIS REST API 클라이언트 초기화 및 토큰 워커 시작 (과거 일봉 동기화 등)
+	restKisClient := kisClient.NewClient(cfg.KIS)
+	go restKisClient.StartTokenWorker(ctx)
+
+	// 8-2. DailySyncWorker 구동 (비동기 과거 일봉 동기화)
+	dailySyncWorker := worker.NewDailySyncWorker(restKisClient, stockRepo)
+	go dailySyncWorker.SyncPastDailyCandles(ctx)
+
+	// 8-3. CandleWorker 구동 (1분봉 생성 및 저장)
+	candleConsumer := kafka.NewConsumer(cfg.Kafka, "candle-worker-group")
+	candleWorker := worker.NewCandleWorker(candleConsumer, stockRepo, cfg.Kafka.TickTopic)
+	candleWorker.Start(ctx)
+
 	// 9. 라우터 설정
 	r := gin.Default()
 
@@ -132,10 +145,16 @@ func main() {
 		close(wsClient.MessageChan)
 		dataWorker.Wait()
 
-		// Streamer 컨슈머 종료 대기
+		// Kafka Consumer (Streamer) 종료 대기
 		streamer.Wait()
 		if err := kafkaConsumer.Close(); err != nil {
-			log.Printf("Kafka Consumer 종료 오류: %v", err)
+			log.Printf("Streamer Kafka Consumer 종료 오류: %v", err)
+		}
+
+		// CandleWorker 종료 대기
+		candleWorker.Stop()
+		if err := candleConsumer.Close(); err != nil {
+			log.Printf("CandleWorker Kafka Consumer 종료 오류: %v", err)
 		}
 
 		// Kafka 종료

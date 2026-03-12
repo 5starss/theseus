@@ -26,7 +26,7 @@ func newTestService(t *testing.T) (*StockService, *repository.StockRepository, *
 	return NewStockService(repo), repo, mr
 }
 
-func seedCandleCache(t *testing.T, mr *miniredis.Miniredis, ticker, interval string, candles []domain.Candle) {
+func seedCandleCache(t *testing.T, mr *miniredis.Miniredis, ticker string, interval domain.Interval, candles []domain.Candle) {
 	t.Helper()
 	b, err := json.Marshal(candles)
 	if err != nil {
@@ -45,9 +45,9 @@ func TestGetCandles_CacheHit(t *testing.T) {
 		{Timestamp: "20240101", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
 		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
 	}
-	seedCandleCache(t, mr, "005930", "D", want)
+	seedCandleCache(t, mr, "005930", domain.IntervalDay, want)
 
-	got, err := svc.GetCandles(context.Background(), "005930", "D", 50)
+	got, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -68,16 +68,16 @@ func TestGetCandles_CacheHit_IntervalIsolation(t *testing.T) {
 
 	dailyCandles := []domain.Candle{{Timestamp: "20240101", Volume: 1000000}}
 	weeklyCandles := []domain.Candle{{Timestamp: "20240101", Volume: 5000000}}
-	seedCandleCache(t, mr, "005930", "D", dailyCandles)
-	seedCandleCache(t, mr, "005930", "W", weeklyCandles)
+	seedCandleCache(t, mr, "005930", domain.IntervalDay, dailyCandles)
+	seedCandleCache(t, mr, "005930", domain.Interval("week"), weeklyCandles)
 
-	gotD, err := svc.GetCandles(context.Background(), "005930", "D", 50)
+	gotD, err := svc.GetCandles(context.Background(), "005930", domain.IntervalDay, 50)
 	if err != nil {
-		t.Fatalf("unexpected error for D: %v", err)
+		t.Fatalf("unexpected error for day: %v", err)
 	}
-	gotW, err := svc.GetCandles(context.Background(), "005930", "W", 50)
+	gotW, err := svc.GetCandles(context.Background(), "005930", domain.Interval("week"), 50)
 	if err != nil {
-		t.Fatalf("unexpected error for W: %v", err)
+		t.Fatalf("unexpected error for week: %v", err)
 	}
 
 	if gotD[0].Volume != 1000000 {
@@ -95,9 +95,9 @@ func TestGetCandles_CacheHit_AllFields(t *testing.T) {
 	want := []domain.Candle{
 		{Timestamp: "20240315", Open: 72000, High: 73500, Low: 71000, Close: 73000, Volume: 2500000},
 	}
-	seedCandleCache(t, mr, "000660", "D", want)
+	seedCandleCache(t, mr, "000660", domain.IntervalDay, want)
 
-	got, err := svc.GetCandles(context.Background(), "000660", "D", 1)
+	got, err := svc.GetCandles(context.Background(), "000660", domain.IntervalDay, 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -193,11 +193,6 @@ func (w *WSClient) readPump(ctx context.Context) {
 
 			// 수신된 Raw 데이터를 파서(Worker)가 처리할 수 있도록 버퍼드 채널로 비동기 전송
 			rawCount++
-			preview := msg
-			if len(preview) > 200 {
-				preview = preview[:200]
-			}
-			log.Printf("[KIS RAW #%d] %d bytes (chan=%d) | %s", rawCount, len(msg), len(w.MessageChan), preview)
 			select {
 			case <-ctx.Done():
 				return
