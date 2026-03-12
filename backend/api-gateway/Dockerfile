@@ -26,4 +26,5 @@ RUN apk add --no-cache tzdata && \
 COPY --from=builder /build/build/libs/*SNAPSHOT.jar app.jar
 
 # 컨테이너 실행 시 jar 파일 구동
+EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

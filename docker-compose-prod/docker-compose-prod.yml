@@ -1,0 +1,73 @@
+services:
+  api-gateway:
+    build:
+      context: ../backend/api-gateway
+      dockerfile: ../backend/api-gateway/Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      - core-api-server
+      - market-server
+      - ai-server
+    expose:
+      - "8080"
+    networks:
+      - stock-network
+
+  core-api-server:
+    build:
+      context: ../backend/core-api-server
+      dockerfile: ../backend/core-api-server/Dockerfile
+    container_name: core-api-server
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      kafka:
+        condition: service_healthy
+    expose:
+      - "8081"
+    networks:
+      - stock-network
+
+  market-server:
+    build:
+      context: ../backend/market-server
+      dockerfile: ../backend/market-server/Dockerfile
+    container_name: market-server
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      kafka:
+        condition: service_healthy
+    expose:
+      - "8085"
+    networks:
+      - stock-network
+
+  ai-server:
+    build:
+      context: ../backend/ai-server
+      dockerfile: ../backend/ai-server/Dockerfile
+    container_name: ai-server
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    depends_on:
+      kafka:
+        condition: service_healthy
+    expose:
+      - "8086"
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    external: true
+    name: stock-network
+
+volumes:
+  kafka_data:
