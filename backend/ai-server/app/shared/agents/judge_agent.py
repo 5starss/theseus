@@ -9,8 +9,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_upstage import ChatUpstage
 
 load_dotenv()
-
-
 KST = timezone(timedelta(hours=9))
 
 
@@ -48,32 +46,10 @@ class JudgeAgent:
                     "system",
                     """당신은 한국 주식 매매 의사결정 에이전트(Judge)입니다.
 입력된 News/Quant 카드와 시장값만 사용하여 주문 결정을 생성하세요.
-
-출력은 JSON object 하나만:
-{
-  "$schema":"order_card_v1",
-  "ticker":"000000",
-  "timestamp":"ISO8601",
-  "final_stance":"strong_buy|buy|hold|sell|strong_sell|conditional_buy|conditional_sell",
-  "final_score":-30~30,
-  "order":{"action":"buy|sell|hold","order_type":"market|limit","price":0,"quantity":0,"time_in_force":"day"},
-  "risk_management":{"stop_loss_price":0,"take_profit_price":0},
-  "verdict":"짧은 판단 근거"
-}
-
-제약:
-1) quantity는 정수, 음수 금지
-2) hold일 때 quantity=0
-3) price는 현재가 기반 합리적 값
-4) 과도한 확신 금지 (리스크 플래그 반영)
+반드시 JSON object 하나만 출력하세요.
 """,
                 ),
-                (
-                    "human",
-                    """[Input]
-{payload}
-""",
-                ),
+                ("human", "[Input]\n{payload}"),
             ]
         )
         self.chain = self.prompt | self.llm | StrOutputParser()
