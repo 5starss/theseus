@@ -2,31 +2,24 @@ services:
   api-gateway:
     build:
       context: ../backend/api-gateway
-      dockerfile: ../backend/api-gateway/Dockerfile
+      dockerfile: Dockerfile
     container_name: api-gateway
     restart: unless-stopped
     env_file:
-      - .env.prod
-    depends_on:
-      - core-api-server
-      - market-server
-      - ai-server
-    expose:
-      - "8080"
+      - .env
+    ports:
+      - "8080:8080"
     networks:
       - stock-network
 
   core-api-server:
     build:
       context: ../backend/core-api-server
-      dockerfile: ../backend/core-api-server/Dockerfile
+      dockerfile: Dockerfile
     container_name: core-api-server
     restart: unless-stopped
     env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
+      - .env
     expose:
       - "8081"
     networks:
@@ -35,14 +28,11 @@ services:
   market-server:
     build:
       context: ../backend/market-server
-      dockerfile: ../backend/market-server/Dockerfile
+      dockerfile: Dockerfile
     container_name: market-server
     restart: unless-stopped
     env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
+      - .env
     expose:
       - "8085"
     networks:
@@ -51,14 +41,11 @@ services:
   ai-server:
     build:
       context: ../backend/ai-server
-      dockerfile: ../backend/ai-server/Dockerfile
+      dockerfile: Dockerfile
     container_name: ai-server
     restart: unless-stopped
     env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
+      - .env
     expose:
       - "8086"
     networks:
