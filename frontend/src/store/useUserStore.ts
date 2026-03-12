@@ -20,8 +20,8 @@ export const useUserStore = create<UserState>((set) => ({
         try {
             const profile = await userApi.getUserProfile();
             set({ profile, isLoading: false });
-        } catch (error: any) {
-            set({ error: error.message, isLoading: false });
+        } catch (_err) {
+            set({ error: (_err as Error).message, isLoading: false });
         }
     },
 
@@ -30,8 +30,8 @@ export const useUserStore = create<UserState>((set) => ({
         try {
             const updatedProfile = await userApi.updateInvestmentStyle(style);
             set({ profile: updatedProfile, isLoading: false });
-        } catch (error: any) {
-            set({ error: error.message, isLoading: false });
+        } catch (_err) {
+            set({ error: (_err as Error).message, isLoading: false });
         }
     }
 }));

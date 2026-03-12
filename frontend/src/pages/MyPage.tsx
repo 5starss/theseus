@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../store/useUserStore';
-import { User, Mail, TrendingUp, ChevronLeft, Check, Loader2 } from 'lucide-react';
+import { User, Mail, TrendingUp, Check, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import type { InvestmentStyle } from '../api/user';
@@ -13,7 +12,6 @@ const STYLE_LABELS: Record<InvestmentStyle, string> = {
 };
 
 const MyPage = () => {
-    const navigate = useNavigate();
     const { profile, fetchProfile, updateInvestmentStyle, isLoading, error } = useUserStore();
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [selectedStyle, setSelectedStyle] = useState<InvestmentStyle | null>(null);
