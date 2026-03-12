@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from typing import Any, Dict
 
 from dotenv import load_dotenv
@@ -8,6 +9,16 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_upstage import ChatUpstage
 
 load_dotenv()
+
+
+def _load_json_object(text: str) -> Dict[str, Any]:
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            raise
+        return json.loads(m.group(0))
 
 
 class RebuttalAgent:
@@ -26,16 +37,13 @@ class RebuttalAgent:
                     """당신은 투자 분석 카드 충돌 조정자입니다.
 반드시 JSON object 하나만 출력하세요. 설명/코드블록 금지.
 
-출력 스키마:
-{
-  "news_rebuttal": "문장",
-  "quant_rebuttal": "문장"
-}
+출력 스키마(예시):
+{{"news_rebuttal":"문장","quant_rebuttal":"문장"}}
 
 규칙:
 1) news_rebuttal: Quant 카드의 약점/모순 1문장
 2) quant_rebuttal: News 카드의 약점/모순 1문장
-3) 각 문장은 최대 25 토큰, 짧고 구체적으로
+3) 각 문장은 최대 25 토큰
 4) 공격적 표현 금지, 근거 기반만
 """,
                 ),
@@ -59,10 +67,7 @@ class RebuttalAgent:
                 "quant_card": json.dumps(quant_card, ensure_ascii=False),
             }
         )
-        data = json.loads(raw)
+        data = _load_json_object(raw)
         news_text = str(data.get("news_rebuttal", "")).strip()
         quant_text = str(data.get("quant_rebuttal", "")).strip()
-        return {
-            "news_rebuttal": news_text[:200],
-            "quant_rebuttal": quant_text[:200],
-        }
+        return {"news_rebuttal": news_text[:200], "quant_rebuttal": quant_text[:200]}
