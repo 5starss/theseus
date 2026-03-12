@@ -1,13 +1,17 @@
 import { useAccountStore, type Transaction } from "../../store/useAccountStore";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { HistoryDetailModal } from "./HistoryDetailModal";
 import { TransactionDetail } from "./TransactionDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 export const TransactionHistoryTab = () => {
-    const { cashBalance, transactions } = useAccountStore();
+    const { cashBalance, transactions, fetchTransactions } = useAccountStore();
     const [selectedMonth, setSelectedMonth] = useState<string>('전체');
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+
+    useEffect(() => {
+        fetchTransactions();
+    }, [fetchTransactions]);
 
     const availableMonths = useMemo(() => {
         const months = new Set<string>();
@@ -94,22 +98,24 @@ export const TransactionHistoryTab = () => {
                                             }`}
                                     >
                                         <div className="flex flex-col gap-1">
-                                            <p className="font-bold text-[#101828] text-sm">
+                                            <p className="font-bold text-[#101828] text-[15px]">
                                                 {item.description}
+                                                {item.quantity !== undefined && item.quantity > 0 && (item.type.toLowerCase() === 'buy' || item.type.toLowerCase() === 'sell') && (
+                                                    <span className="text-[#101828] font-bold text-[15px] ml-1">{item.quantity}주</span>
+                                                )}
                                             </p>
-                                            <div className="flex items-center gap-2 text-xs text-[#6a7282]">
+                                            <div className="flex items-center gap-2 text-sm text-[#6a7282]">
                                                 <span>{item.time}</span>
                                                 <span className="text-[#d1d5db]">|</span>
-                                                <span>{item.type === 'buy' ? '구매' : item.type === 'sell' ? '판매' : item.type === 'deposit' ? '입금' : '출금'}</span>
+                                                <span>{item.type.toLowerCase() === 'buy' ? '구매' : item.type.toLowerCase() === 'sell' ? '판매' : item.type.toLowerCase() === 'deposit' ? '입금' : '출금'}</span>
                                             </div>
                                         </div>
 
                                         <div className="flex flex-col items-end gap-1">
-                                            <p className={`font-bold text-sm text-right ${item.amount > 0 ? 'text-[#fb2c36]' : 'text-[#101828]'
-                                                }`}>
+                                            <p className="font-bold text-base text-right text-[#101828]">
                                                 {item.amount > 0 ? '+' : ''}{formatCurrency(item.amount)}
                                             </p>
-                                            <p className="text-xs text-right text-[#99a1af]">
+                                            <p className="text-sm text-right text-[#99a1af]">
                                                 {formatCurrency(item.remainingBalance)}
                                             </p>
                                         </div>

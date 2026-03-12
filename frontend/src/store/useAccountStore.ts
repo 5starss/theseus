@@ -2,12 +2,14 @@ import { create } from 'zustand';
 import { accountApi } from '../api/account';
 import { orderApi, type PendingOrder, type OrderHistory as ApiOrderHistory } from '../api/order';
 import { positionApi } from '../api/position';
+import { stockApi } from '../api/stock';
 
 export interface PortfolioItem {
     code: string;
     name: string;
     shares: number;
     avgPrice: number;
+    currentPrice: number; // 현재가 추가
 }
 
 export interface Transaction {
@@ -38,8 +40,10 @@ export interface Order {
 interface AccountState {
     // Total Balances
     totalAssets: number;
-    totalInvested: number;
-    cashBalance: number;
+    totalInvested: number;      // 총 매수 금액
+    totalEvaluated: number;     // 총 평가 금액 (현재가 기준)
+    cashBalance: number;        // 주문 가능 금액
+    totalCash: number;          // 예수금 총액 (dncaTotAmt)
 
     // Portfolio
     portfolio: PortfolioItem[];
@@ -51,6 +55,7 @@ interface AccountState {
     // Actions
     fetchBalance: () => Promise<void>;
     fetchPositions: () => Promise<void>;
+    fetchTransactions: (params?: { year?: number; month?: number; page?: number; size?: number }) => Promise<void>;
     fetchOrders: (params?: { page?: number; size?: number; status?: string; ticker?: string; yearMonth?: string }) => Promise<void>;
     cancelOrder: (orderId: number | string) => Promise<void>;
     executeTrade: (trade: { stockName: string; stockCode: string; quantity: number; price: number; type: 'buy' | 'sell' }) => void;
@@ -59,7 +64,9 @@ interface AccountState {
 export const useAccountStore = create<AccountState>((set) => ({
     totalAssets: 0,
     totalInvested: 0,
+    totalEvaluated: 0,
     cashBalance: 0,
+    totalCash: 0,
     portfolio: [],
     transactions: [],
     orders: [],
@@ -68,11 +75,14 @@ export const useAccountStore = create<AccountState>((set) => ({
     fetchBalance: async () => {
         try {
             const balance = await accountApi.getBalance();
+            const totalCash = Number(balance.dncaTotAmt);
+            const totalEvaluated = useAccountStore.getState().totalEvaluated || 0;
+
             set({
-                // dncaTotAmt: 총 예수금, availableAmt: 주문 가능 금액
-                // 기존 totalAssets는 총 자산(예수금+투자금)이나 우선 예수금 총액으로 업데이트
-                totalAssets: Number(balance.dncaTotAmt),
+                totalCash: totalCash,
                 cashBalance: Number(balance.availableAmt),
+                // totalAssets = 총 예수금 + 주식 평가 금액
+                totalAssets: totalCash + totalEvaluated,
             });
         } catch (error) {
             console.error('Failed to fetch balance in store:', error);
@@ -83,15 +93,81 @@ export const useAccountStore = create<AccountState>((set) => ({
     fetchPositions: async () => {
         try {
             const positions = await positionApi.getPositions();
-            const portfolio: PortfolioItem[] = positions.map(p => ({
-                code: p.ticker,
-                name: p.companyName,
-                shares: p.quantity,
-                avgPrice: p.averagePrice
-            }));
-            set({ portfolio });
+
+            // 각 종목별 현재가 병렬 조회
+            const portfolioWithPrices: PortfolioItem[] = await Promise.all(
+                positions.map(async (p) => {
+                    let currentPrice = p.averagePrice; // 기본값은 매수가
+                    try {
+                        const tick = await stockApi.getTickSnapshot(p.ticker);
+                        if (tick) currentPrice = tick.currentPrice;
+                    } catch (e) {
+                        console.warn(`Failed to fetch price for ${p.ticker}`, e);
+                    }
+
+                    return {
+                        code: p.ticker,
+                        name: p.companyName,
+                        shares: p.quantity,
+                        avgPrice: p.averagePrice,
+                        currentPrice: currentPrice
+                    };
+                })
+            );
+
+            const totalInvested = portfolioWithPrices.reduce((acc, item) => acc + (item.shares * item.avgPrice), 0);
+            const totalEvaluated = portfolioWithPrices.reduce((acc, item) => acc + (item.shares * item.currentPrice), 0);
+            const totalCash = useAccountStore.getState().totalCash;
+
+            set({
+                portfolio: portfolioWithPrices,
+                totalInvested,
+                totalEvaluated,
+                // 총 자산 일관성 유지 (예수금 총액 + 평가 금액)
+                totalAssets: totalCash + totalEvaluated
+            });
         } catch (error) {
             console.error('Failed to fetch positions in store:', error);
+        }
+    },
+
+    // 실제 계좌 거래 내역(입출금, 체결)을 가져오는 함수
+    fetchTransactions: async (params) => {
+        try {
+            const data = await accountApi.getHistory(params);
+
+            const transformed: Transaction[] = data.histories.content.map(item => {
+                const date = new Date(item.executedAt);
+                const monthDay = `${date.getMonth() + 1}.${date.getDate()}`;
+                const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+
+                let description = item.stockName || '입출금';
+                if (item.transactionType === 'DEPOSIT') description = '입금';
+                else if (item.transactionType === 'WITHDRAWAL') description = '출금';
+
+                let amount = Number(item.amount);
+                if (item.transactionType === 'BUY' || item.transactionType === 'WITHDRAWAL') {
+                    amount = -Math.abs(amount);
+                } else {
+                    amount = Math.abs(amount);
+                }
+
+                return {
+                    id: item.historyId.toString(),
+                    date: monthDay,
+                    time: time,
+                    type: item.transactionType.toLowerCase() as 'deposit' | 'withdrawal' | 'buy' | 'sell',
+                    amount: amount,
+                    description: description,
+                    stockName: item.stockName,
+                    quantity: item.quantity,
+                    remainingBalance: Number(item.balanceAfter)
+                };
+            });
+
+            set({ transactions: transformed });
+        } catch (error) {
+            console.error('Failed to fetch transactions in store:', error);
         }
     },
 

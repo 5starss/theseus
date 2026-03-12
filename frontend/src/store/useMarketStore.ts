@@ -30,8 +30,8 @@ export const useMarketStore = create<MarketState>((set) => ({
         console.log('Fetching Top Stocks and Connecting WebSockets...');
         set({ isConnecting: true });
 
-        // 1. API(또는 더미)에서 40개 목록 받아오기 (백엔드는 HOME_40)
-        const initialStocksList = await stockApi.getTopStocks(40, 'VOLUME');
+        // 1. API(또는 더미)에서 20개 목록 받아오기 (백엔드 최대 limit: 20)
+        const initialStocksList = await stockApi.getTopStocks(20, 'VOLUME');
         const initialStocksMap: Record<string, MarketStock> = {};
 
         initialStocksList.forEach((stock, index) => {
