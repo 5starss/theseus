@@ -1,0 +1,29 @@
+# 의존성 및 빌드 결과물
+node_modules
+npm-debug.log
+dist
+build
+
+# 환경 변수 및 설정
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Git 및 IDE 설정
+.git
+.gitignore
+.editorconfig
+.vscode
+.idea
+
+# 기타 불필요한 문서
+README.md
+LICENSE
+.github
+Jenkinsfile
+
+# OS 메타데이터
+.DS_Store
+Thumbs.db
