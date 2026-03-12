@@ -64,7 +64,20 @@ func (h *StockHandler) GetCandles(c *gin.Context) {
 		return
 	}
 
-	interval := c.DefaultQuery("interval", "D")
+	intervalStr := c.DefaultQuery("interval", "D")
+	
+	// Normalize interval based on API_SPEC to internal domain format
+	var interval domain.Interval
+	switch intervalStr {
+	case "D", "d", "day", "1d":
+		interval = domain.IntervalDay
+	case "1", "1M", "1m", "min":
+		interval = domain.IntervalMinute
+	default:
+		// 지원하지 않는 interval은 일단 일봉으로 Fallback 하거나 에러 리턴
+		interval = domain.IntervalDay
+	}
+
 	limitStr := c.DefaultQuery("limit", "50")
 	limit, err := strconv.ParseInt(limitStr, 10, 64)
 	if err != nil || limit < 1 {

@@ -105,7 +105,7 @@ func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain
 }
 
 // GetCandlesFromCache Redis에서 캔들 데이터를 단기 캐시로 조회한다.
-func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string, interval string) ([]domain.Candle, error) {
+func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string, interval domain.Interval) ([]domain.Candle, error) {
 	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
 	val, err := r.rdb.Get(ctx, key).Result()
 	if err == redis.Nil {
@@ -122,7 +122,7 @@ func (r *StockRepository) GetCandlesFromCache(ctx context.Context, ticker string
 }
 
 // SaveCandlesToCache Redis에 캔들 데이터를 적재시킨다. (TTL: 1분)
-func (r *StockRepository) SaveCandlesToCache(ctx context.Context, ticker string, interval string, candles []domain.Candle) error {
+func (r *StockRepository) SaveCandlesToCache(ctx context.Context, ticker string, interval domain.Interval, candles []domain.Candle) error {
 	key := fmt.Sprintf(candlesKeyFmt, ticker, interval)
 	
 	bytes, err := json.Marshal(candles)
@@ -137,15 +137,27 @@ func (r *StockRepository) SaveCandlesToCache(ctx context.Context, ticker string,
 }
 
 // GetCandlesFromDB MySQL에서 캔들 데이터를 조회한다.
-func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, interval string, limit int64) ([]domain.Candle, error) {
-	query := `
-		SELECT timestamp, open, high, low, close, volume
-		FROM candles
-		WHERE ticker = ? AND interval_type = ?
-		ORDER BY timestamp DESC
+func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, interval domain.Interval, limit int64) ([]domain.Candle, error) {
+	var tableName, timeCol string
+	if interval == domain.IntervalDay {
+		tableName = "candle_1d"
+		timeCol = "candle_date"
+	} else if interval == domain.IntervalMinute {
+		tableName = "candle_1m"
+		timeCol = "candle_time"
+	} else {
+		return nil, fmt.Errorf("unsupported interval for db fetch: %s", interval)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s, open_price, high_price, low_price, close_price, volume
+		FROM %s
+		WHERE ticker = ?
+		ORDER BY %s DESC
 		LIMIT ?
-	`
-	rows, err := r.db.QueryContext(ctx, query, ticker, interval, limit)
+	`, timeCol, tableName, timeCol)
+
+	rows, err := r.db.QueryContext(ctx, query, ticker, limit)
 	if err != nil {
 		return nil, fmt.Errorf("mysql query failed: %w", err)
 	}
@@ -154,12 +166,12 @@ func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, i
 	var candles []domain.Candle
 	for rows.Next() {
 		var c domain.Candle
-		var ts string
+		var ts []byte // DB Driver 가 반환하는 date/datetime 문자열 처리
 		
 		if err := rows.Scan(&ts, &c.Open, &c.High, &c.Low, &c.Close, &c.Volume); err != nil {
 			return nil, fmt.Errorf("rows scan failed: %w", err)
 		}
-		c.Timestamp = ts
+		c.Timestamp = string(ts)
 		candles = append(candles, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -167,6 +179,93 @@ func (r *StockRepository) GetCandlesFromDB(ctx context.Context, ticker string, i
 	}
 
 	return candles, nil
+}
+
+// BulkInsertCandles 여러 종목의 캔들 데이터를 한 번의 다중 INSERT 처리로 DB에 적재한다.
+func (r *StockRepository) BulkInsertCandles(ctx context.Context, candlesMap map[string]*domain.Candle, interval domain.Interval) error {
+	if len(candlesMap) == 0 {
+		return nil
+	}
+
+	var tableName, timeCol string
+	if interval == domain.IntervalDay {
+		tableName = "candle_1d"
+		timeCol = "candle_date"
+	} else if interval == domain.IntervalMinute {
+		tableName = "candle_1m"
+		timeCol = "candle_time"
+	} else {
+		return fmt.Errorf("unsupported interval for bulk insert: %s", interval)
+	}
+
+	query := fmt.Sprintf("INSERT INTO %s (ticker, %s, open_price, high_price, low_price, close_price, volume) VALUES ", tableName, timeCol)
+	var args []interface{}
+
+	i := 0
+	for ticker, c := range candlesMap {
+		if c == nil {
+			continue
+		}
+		if i > 0 {
+			query += ", "
+		}
+		query += "(?, ?, ?, ?, ?, ?, ?)"
+		args = append(args, ticker, c.Timestamp, c.Open, c.High, c.Low, c.Close, c.Volume)
+		i++
+	}
+
+	if i == 0 {
+		return nil // 넣을 유효한 캔들이 없음
+	}
+
+	// 타임스탬프 중복 시 덮어쓰기 (ON DUPLICATE KEY UPDATE)
+	query += " ON DUPLICATE KEY UPDATE open_price=VALUES(open_price), high_price=VALUES(high_price), low_price=VALUES(low_price), close_price=VALUES(close_price), volume=VALUES(volume)"
+
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mysql bulk insert candles failed: %w", err)
+	}
+
+	return nil
+}
+
+// BulkInsertCandlesSlice 한 종목의 여러 캔들(과거 데이터)을 한 번에 DB에 적재한다.
+func (r *StockRepository) BulkInsertCandlesSlice(ctx context.Context, candles []domain.Candle, ticker string, interval domain.Interval) error {
+	if len(candles) == 0 {
+		return nil
+	}
+
+	var tableName, timeCol string
+	if interval == domain.IntervalDay {
+		tableName = "candle_1d"
+		timeCol = "candle_date"
+	} else if interval == domain.IntervalMinute {
+		tableName = "candle_1m"
+		timeCol = "candle_time"
+	} else {
+		return fmt.Errorf("unsupported interval for bulk insert slice: %s", interval)
+	}
+
+	query := fmt.Sprintf("INSERT INTO %s (ticker, %s, open_price, high_price, low_price, close_price, volume) VALUES ", tableName, timeCol)
+	var args []interface{}
+
+	for i, c := range candles {
+		if i > 0 {
+			query += ", "
+		}
+		query += "(?, ?, ?, ?, ?, ?, ?)"
+		args = append(args, ticker, c.Timestamp, c.Open, c.High, c.Low, c.Close, c.Volume)
+	}
+
+	// 타임스탬프 중복 시 덮어쓰기
+	query += " ON DUPLICATE KEY UPDATE open_price=VALUES(open_price), high_price=VALUES(high_price), low_price=VALUES(low_price), close_price=VALUES(close_price), volume=VALUES(volume)"
+
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mysql bulk insert candles slice failed: %w", err)
+	}
+
+	return nil
 }
 
 // GetOrderbookSnapshot Redis에서 호가창 스냅샷 및 현재가 정보를 조회하여 반환한다.
