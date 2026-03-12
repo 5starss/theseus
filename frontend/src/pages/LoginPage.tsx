@@ -26,7 +26,7 @@ export default function LoginPage() {
             setIsLoading(true);
             try {
                 const response = await authApi.login({ email, password });
-                login(email, response.accessToken);
+                login(email, response.accessToken, response.nickname);
 
                 // ProtectedRoute 등에서 넘겨준 이전 페이지 주소가 있다면 그곳으로, 없다면 홈으로 이동
                 const from = location.state?.from?.pathname || "/";

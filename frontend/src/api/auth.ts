@@ -21,6 +21,7 @@ export interface LoginRequest {
 export interface LoginResponse {
     tokenType: string;
     accessToken: string;
+    nickname: string;
     accessTokenExpiresAt: string;  // 액세스 토큰 만료 시간
 }
 

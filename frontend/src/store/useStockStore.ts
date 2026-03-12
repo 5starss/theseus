@@ -141,26 +141,48 @@ export const useStockStore = create<StockState>((set) => ({
         // 초기 데이터 로딩
         console.log(`Starting Dashboard Stream [${code}]...`);
 
-        // 0. 초기 호가 데이터(Snapshot) 가져오기
-        stockApi.getOrderbook(code).then(obData => {
-            const currentPrice = obData.currentPrice;
-            const changeRate = obData.changeRate;
-            const prevClose = Math.round(currentPrice / (1 + (changeRate / 100)));
+        // 0. 초기 틱 데이터(Snapshot) 가져오기 (비로그인 상태에서도 현재가 확인 가능)
+        stockApi.getTickSnapshot(code).then(tickData => {
+            if (tickData) {
+                const currentPrice = tickData.currentPrice;
+                const changeRate = tickData.changeRate;
+                const prevClose = Math.round(currentPrice / (1 + (changeRate / 100)));
 
-            set({
-                stockCode: code,
-                stockName: obData.name,
-                currentPrice: currentPrice,
-                prevClose: prevClose,
-                priceChange: currentPrice - prevClose,
-                changeRate: changeRate,
-                askPrice: obData.askPrice1,
-                askVolume: obData.askVolume1,
-                bidPrice: obData.bidPrice1,
-                bidVolume: obData.bidVolume1,
-            });
+                set({
+                    stockCode: code,
+                    stockName: tickData.name,
+                    currentPrice: currentPrice,
+                    prevClose: prevClose,
+                    priceChange: currentPrice - prevClose,
+                    changeRate: changeRate,
+                    // 호가 정보는 WebSocket 연결 전까지 초기값 유지 또는 Orderbook API 별도 호출 필요 시 추가
+                    askPrice: 0,
+                    askVolume: 0,
+                    bidPrice: 0,
+                    bidVolume: 0,
+                });
+            } else {
+                // Tick 샷 실패 시 Orderbook API로 임시 Fallback 시도
+                stockApi.getOrderbook(code).then(obData => {
+                    const cp = obData.currentPrice;
+                    const cr = obData.changeRate;
+                    const pc = Math.round(cp / (1 + (cr / 100)));
+                    set({
+                        stockCode: code,
+                        stockName: obData.name,
+                        currentPrice: cp,
+                        prevClose: pc,
+                        priceChange: cp - pc,
+                        changeRate: cr,
+                        askPrice: obData.askPrice1,
+                        askVolume: obData.askVolume1,
+                        bidPrice: obData.bidPrice1,
+                        bidVolume: obData.bidVolume1,
+                    });
+                });
+            }
         }).catch(err => {
-            console.error("Failed to fetch initial orderbook snapshot", err);
+            console.error("Failed to fetch initial tick snapshot", err);
         });
 
         // 1. 실제 WebSocket 연결 (React StrictMode 연속 렌더링에 의한 소켓 폭주 방지용 딜레이)
