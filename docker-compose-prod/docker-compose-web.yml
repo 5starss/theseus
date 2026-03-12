@@ -1,0 +1,18 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nginx
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    external: true
+    name: stock-network

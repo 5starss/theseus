@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // RedisConfig Redis 연결 설정
 type RedisConfig struct {
@@ -71,7 +74,7 @@ func Load() *Config {
 			Port: getEnvOrDefault("SERVER_PORT", "8085"),
 		},
 		Kafka: KafkaConfig{
-			Brokers:        []string{getEnvOrDefault("KAFKA_BROKER", "localhost:9092")},
+			Brokers:        getKafkaBrokers(),
 			TickTopic:      getEnvOrDefault("KAFKA_TICK_TOPIC", "market.tick"),
 			OrderbookTopic: getEnvOrDefault("KAFKA_ORDERBOOK_TOPIC", "market.orderbook"),
 		},
@@ -84,4 +87,29 @@ func getEnvOrDefault(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+func getKafkaBrokers() []string {
+	if brokers := strings.TrimSpace(os.Getenv("KAFKA_BOOTSTRAP_SERVERS")); brokers != "" {
+		return splitAndTrim(brokers)
+	}
+	if broker := strings.TrimSpace(os.Getenv("KAFKA_BROKER")); broker != "" {
+		return []string{broker}
+	}
+	return []string{"localhost:9092"}
+}
+
+func splitAndTrim(value string) []string {
+	parts := strings.Split(value, ",")
+	brokers := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			brokers = append(brokers, trimmed)
+		}
+	}
+	if len(brokers) == 0 {
+		return []string{"localhost:9092"}
+	}
+	return brokers
 }

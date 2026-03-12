@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: api-gateway
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
   cloud:
     gateway:
       globalcors:
@@ -31,7 +33,7 @@ springdoc:
         url: /v3/api-docs/ai
 
 jwt:
-  public-key-path: classpath:public_key.pem 
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:public_key.pem}
   whitelist:
     - /api/v1/core/auth/signup
     - /api/v1/core/auth/login
