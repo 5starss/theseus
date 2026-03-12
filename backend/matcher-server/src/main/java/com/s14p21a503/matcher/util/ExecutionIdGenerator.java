@@ -9,13 +9,13 @@ import java.util.concurrent.atomic.AtomicLong;
 public class ExecutionIdGenerator {
     /**
      * 결정론적 ExecutionId 생성.
-     * [seqNo(54)][fillIndex(10)] 조합 (64비트)
-     * 하나의 CMD당 최대 1024개의 체결 건수 수용 가능.
+     * [seqNo(44)][fillIndex(20)] 조합 (64비트)
+     * 하나의 CMD당 최대 1,048,576개의 체결/취소 건수 수용 가능. (기존 1024개에서 확장)
      */
     public long generate(long seqNo, int fillIndex) {
-        if (fillIndex < 0 || fillIndex > 1023) {
-            throw new IllegalArgumentException("fillIndex 값은 0에서 1023 사이여야 합니다.");
+        if (fillIndex < 0 || fillIndex > 1_048_575) {
+            throw new IllegalArgumentException("fillIndex 값은 0에서 1,048,575 사이여야 합니다.");
         }
-        return (seqNo << 10) | fillIndex;
+        return (seqNo << 20) | fillIndex;
     }
 }

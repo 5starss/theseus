@@ -1,5 +1,7 @@
 package com.s14p21a503.coreapi.domain.order.service;
 
+import com.s14p21a503.coreapi.domain.market.annotation.CheckMarketOpen;
+import com.s14p21a503.coreapi.domain.market.service.MarketStateManager;
 import com.s14p21a503.coreapi.domain.order.dto.*;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
@@ -46,10 +48,13 @@ public class OrderService {
     private final PositionRepository positionRepository;
     private final AccountRepository accountRepository;
     private final OutboxEventRepository outboxEventRepository;
+    private final MarketStateManager marketStateManager;
     private final ObjectMapper objectMapper;
 
+    @CheckMarketOpen
     @Transactional
     public OrderResponseDto createOrder(Long userId, OrderRequestDto requestDto) {
+
         // 비관적 락으로 계좌 정보를 조회 (트랜잭션 종료 시까지 락 유지)
         Account account = accountRepository.findByUserIdForUpdate(userId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
@@ -142,8 +147,10 @@ public class OrderService {
                 .build();
     }
 
+    @CheckMarketOpen
     @Transactional
     public void cancelOrder(Long userId, Long orderId) {
+
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new CustomException(ErrorCode.ORDER_NOT_FOUND));
 

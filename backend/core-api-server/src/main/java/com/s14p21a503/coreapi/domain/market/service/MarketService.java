@@ -7,6 +7,7 @@ import com.s14p21a503.coreapi.common.kafka.KafkaTopicConstants;
 import com.s14p21a503.coreapi.common.response.status.ErrorCode;
 import com.s14p21a503.coreapi.domain.market.dto.MarketControlEvent;
 import com.s14p21a503.coreapi.domain.market.entity.Holiday;
+import com.s14p21a503.coreapi.domain.market.entity.MarketStatus;
 import com.s14p21a503.coreapi.domain.market.repository.HolidayRepository;
 import com.s14p21a503.coreapi.domain.outbox.entity.OutboxEvent;
 import com.s14p21a503.coreapi.domain.outbox.repository.OutboxEventRepository;
@@ -26,6 +27,7 @@ public class MarketService {
     private final OutboxEventRepository outboxEventRepository;
     private final HolidayRepository holidayRepository;
     private final HolidayManager holidayManager;
+    private final MarketStateManager marketStateManager;
     private final ObjectMapper objectMapper;
 
     /**
@@ -36,6 +38,7 @@ public class MarketService {
         // 매일 아침 개장 시 현재 DB에 등록된 최신 휴장일 리스트를 함께 전파하여 정합성 강화
         List<String> currentHolidays = new java.util.ArrayList<>(holidayManager.getHolidayDates());
         saveControlEvent(MarketControlEvent.ControlType.MARKET_OPEN, null, currentHolidays);
+        marketStateManager.updateMarketStatus(MarketStatus.OPEN);
     }
 
     /**
@@ -44,6 +47,7 @@ public class MarketService {
     @Transactional
     public void closeMarket() {
         saveControlEvent(MarketControlEvent.ControlType.MARKET_CLOSE, null, null);
+        marketStateManager.updateMarketStatus(MarketStatus.CLOSED);
     }
 
     /**
@@ -52,6 +56,7 @@ public class MarketService {
     @Transactional
     public void haltMarket() {
         saveControlEvent(MarketControlEvent.ControlType.MARKET_HALT, null, null);
+        marketStateManager.updateMarketStatus(MarketStatus.HALTED);
     }
 
     /**
@@ -60,6 +65,7 @@ public class MarketService {
     @Transactional
     public void resumeMarket() {
         saveControlEvent(MarketControlEvent.ControlType.MARKET_RESUME, null, null);
+        marketStateManager.updateMarketStatus(MarketStatus.OPEN);
     }
 
     /**
