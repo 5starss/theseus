@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useStockStore } from "../../store/useStockStore";
 import { useAccountStore } from "../../store/useAccountStore";
@@ -15,7 +15,7 @@ export function OrderPanel() {
     const [orderType, setOrderType] = useState<"buy" | "sell">("buy");
     const isBuy = orderType === "buy";
 
-    // Store State
+    // 스토어에서 현재가, 종목명, 종목코드 가져오기
     const currentPrice = useStockStore(state => state.currentPrice);
     const stockName = useStockStore(state => state.stockName);
     const stockCode = useStockStore(state => state.stockCode);
@@ -24,29 +24,35 @@ export function OrderPanel() {
     const portfolio = useAccountStore(state => state.portfolio);
     const executeTrade = useAccountStore(state => state.executeTrade);
 
-    // Local State
+    // 주문 가격, 수량, 주문 확인 모달, 이전 종목코드
     const [orderPrice, setOrderPrice] = useState(currentPrice);
     const [quantity, setQuantity] = useState(0);
     const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
     const [prevStockCode, setPrevStockCode] = useState(stockCode);
 
-    // Sync order price and quantity when navigating to a different stock
-    if (stockCode !== prevStockCode) {
-        setPrevStockCode(stockCode);
-        setOrderPrice(currentPrice);
-        setQuantity(0);
-    }
-
-    // Available Resources calculation
+    // 주식 종목이 바뀌거나 현재가가 로드될 때 주문 가격과 수량을 동기화
+    useEffect(() => {
+        if (stockCode !== prevStockCode) {
+            setPrevStockCode(stockCode);
+            setOrderPrice(currentPrice);
+            setQuantity(0);
+        } else if (orderPrice === 0 && currentPrice > 0) {
+            setOrderPrice(currentPrice);
+        }
+    }, [stockCode, currentPrice, prevStockCode, orderPrice]);
+    // 구매/판매 가능 수량 계산
     const availableShares = portfolio.find(p => p.name === stockName)?.shares || 0;
-    const availableText = isBuy ? `${cashBalance.toLocaleString()}원` : `${availableShares.toLocaleString()}주`;
 
-    // Helpers
+
+    // 주문 총액 계산
     const totalAmount = orderPrice * quantity;
     const canTrade = quantity > 0 && orderPrice > 0;
 
     const maxBuyQty = orderPrice > 0 ? Math.floor(cashBalance / orderPrice) : 0;
     const maxSellQty = availableShares;
+
+    // 구매/판매 가능 수량 계산
+    const availableText = isBuy ? `${maxBuyQty.toLocaleString()}주` : `${availableShares.toLocaleString()}주`;
 
     const handleQuantityChange = (delta: number) => {
         setQuantity(prev => {
@@ -58,6 +64,19 @@ export function OrderPanel() {
         });
     };
 
+    const handleManualPriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value.replace(/[^0-9]/g, '');
+        setOrderPrice(val ? parseInt(val, 10) : 0);
+    };
+
+    const handleManualQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value.replace(/[^0-9]/g, '');
+        let next = val ? parseInt(val, 10) : 0;
+        if (isBuy && next > maxBuyQty) next = maxBuyQty;
+        if (!isBuy && next > maxSellQty) next = maxSellQty;
+        setQuantity(next);
+    };
+
     const handlePercentage = (percent: number) => {
         if (isBuy) {
             setQuantity(Math.floor(maxBuyQty * percent));
@@ -66,19 +85,23 @@ export function OrderPanel() {
         }
     };
 
-    const handleConfirmTrade = () => {
+    const handleConfirmTrade = async () => {
         if (!canTrade) return;
 
-        executeTrade({
-            stockName,
-            stockCode,
-            quantity,
-            price: orderPrice,
-            type: orderType
-        });
-
-        setIsConfirmModalOpen(false);
-        setQuantity(0);
+        try {
+            await executeTrade({
+                stockName,
+                stockCode,
+                quantity,
+                price: orderPrice,
+                type: orderType
+            });
+            setIsConfirmModalOpen(false);
+            setQuantity(0);
+        } catch (error) {
+            console.error("Trade execution failed:", error);
+            alert("주문에 실패했습니다. 다시 시도해주세요.");
+        }
     };
 
     return (
@@ -115,8 +138,9 @@ export function OrderPanel() {
                         <input
                             type="text"
                             className="w-full bg-transparent text-right text-sm font-bold text-slate-700 outline-none px-2"
-                            value={orderPrice.toLocaleString()}
-                            readOnly
+                            value={orderPrice === 0 ? '' : orderPrice.toLocaleString()}
+                            onChange={handleManualPriceChange}
+                            placeholder="0"
                         />
                         <Button
                             variant="ghost" size="icon"
@@ -135,12 +159,16 @@ export function OrderPanel() {
                         </div>
                         <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md p-1">
                             <Button variant="ghost" size="icon" onClick={() => handleQuantityChange(-1)} className="w-8 h-8 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors">-</Button>
-                            <input
-                                type="text"
-                                className="w-full bg-transparent text-right text-sm font-semibold outline-none px-2"
-                                value={quantity > 0 ? `${quantity}주` : "0주"}
-                                readOnly
-                            />
+                            <div className="flex flex-1 items-center justify-end px-2">
+                                <input
+                                    type="text"
+                                    className="w-full bg-transparent text-right text-sm font-semibold outline-none"
+                                    value={quantity === 0 ? '' : quantity.toLocaleString()}
+                                    onChange={handleManualQuantityChange}
+                                    placeholder="0"
+                                />
+                                <span className="text-sm font-semibold text-slate-700 ml-0.5 whitespace-nowrap">주</span>
+                            </div>
                             <Button variant="ghost" size="icon" onClick={() => handleQuantityChange(1)} className="w-8 h-8 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors">+</Button>
                         </div>
                         <div className="flex gap-1 mt-2">
@@ -307,12 +335,15 @@ export function MyStockInfo() {
 
 export function MyOrderHistory() {
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
-    const [tab, setTab] = useState<"pending" | "completed">("pending");
+    const navigate = useNavigate();
+    const [tab, setTab] = useState<"pending" | "completed">("completed");
 
     const orders = useAccountStore(state => state.orders);
+    const fetchOrders = useAccountStore(state => state.fetchOrders);
+    const stockCode = useStockStore(state => state.stockCode);
 
-    // 현재 종목의 주문 내역만 필터링 (필요 시)
-    const stockOrders = orders.filter(o => o.stockName === useStockStore.getState().stockName);
+    // 현재 종목의 주문 내역만 필터링
+    const stockOrders = orders.filter(o => o.stockCode === stockCode);
 
     const currentOrders = tab === "pending"
         ? stockOrders.filter(o => o.status === 'pending')
@@ -326,10 +357,17 @@ export function MyOrderHistory() {
             <div className={`flex flex-col h-full ${!isLoggedIn ? 'opacity-30 pointer-events-none blur-[2px]' : ''}`}>
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="font-bold text-slate-800">나의 주문내역</h3>
-                    <Button variant="ghost" className="h-6 px-2 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors">더보기</Button>
+                    <Button variant="ghost" onClick={() => navigate('/account/orders')} className="h-6 px-2 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors">더보기</Button>
                 </div>
 
-                <Tabs value={tab} onValueChange={(val) => setTab(val as "pending" | "completed")} className="mb-4">
+                <Tabs
+                    value={tab}
+                    onValueChange={(val) => {
+                        setTab(val as "pending" | "completed");
+                        fetchOrders();
+                    }}
+                    className="mb-4"
+                >
                     <TabsList className="w-full h-auto flex gap-2 bg-transparent p-0">
                         <TabsTrigger
                             value="pending"
@@ -350,22 +388,61 @@ export function MyOrderHistory() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="border-b border-slate-200">
-                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[23%] text-center">{tab === "pending" ? "시간" : "일자"}</th>
-                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">구분</th>
-                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[29%] text-center">단가</th>
-                                <th className="pb-2 text-xs font-semibold text-slate-500 w-[24%] text-center">수량</th>
+                                {tab === "completed" && <th className="pb-2 text-xs font-semibold text-slate-500 w-[20%] text-center">일자</th>}
+                                <th className={`pb-2 text-xs font-semibold text-slate-500 ${tab === "pending" ? "w-[20%]" : "w-[20%]"} text-center`}>구분</th>
+                                <th className={`pb-2 text-xs font-semibold text-slate-500 ${tab === "pending" ? "w-[30%]" : "w-[35%]"} text-center`}>단가</th>
+                                <th className={`pb-2 text-xs font-semibold text-slate-500 ${tab === "pending" ? "w-[20%]" : "w-[25%]"} text-center`}>수량</th>
+                                {tab === "pending" && <th className="pb-2 text-xs font-semibold text-slate-500 w-[30%] text-center">관리</th>}
                             </tr>
                         </thead>
                         <tbody>
                             {currentOrders.length === 0 ? (
-                                <tr><td colSpan={4} className="py-4 text-center text-xs text-slate-400">내역이 없습니다.</td></tr>
+                                <tr><td colSpan={tab === "pending" ? 4 : 4} className="py-4 text-center text-xs text-slate-400">내역이 없습니다.</td></tr>
                             ) : (
                                 currentOrders.map((order, idx) => (
                                     <tr key={idx} className="border-b border-slate-50 last:border-none hover:bg-slate-50/50 transition-colors">
-                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-center">{order.date}</td>
-                                        <td className={`py-2.5 text-xs font-bold text-center ${order.type === 'buy' ? 'text-red-500' : 'text-blue-500'}`}>{order.type === 'buy' ? '매수' : '매도'}</td>
-                                        <td className="py-2.5 text-xs font-semibold text-slate-700 text-right pr-2">{order.price.toLocaleString()}</td>
-                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-right">{order.quantity}주</td>
+                                        {tab === "completed" && (
+                                            <td className="py-2.5 text-xs font-medium text-slate-500 text-center">{order.date}</td>
+                                        )}
+                                        <td className={`py-2.5 text-xs font-bold text-center ${order.status === 'canceled' || order.status === 'canceling' ? 'text-slate-400' : order.type === 'buy' ? 'text-red-500' : 'text-blue-500'}`}>
+                                            {order.status === 'canceled'
+                                                ? (order.type === 'buy' ? '매수취소' : '매도취소')
+                                                : order.status === 'canceling'
+                                                    ? (order.type === 'buy' ? '매수취소중' : '매도취소중')
+                                                    : order.type === 'buy' ? '매수' : '매도'}
+                                        </td>
+                                        <td className="py-2.5 text-xs font-semibold text-slate-700 text-center">{order.price.toLocaleString()}</td>
+                                        <td className="py-2.5 text-xs font-medium text-slate-600 text-center">{order.quantity}주</td>
+                                        {tab === "pending" && (
+                                            <td className="py-2.5">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    {order.status === 'canceling' ? (
+                                                        <span className="text-slate-400 font-medium text-[10px] px-2 py-1">취소중</span>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); /* TODO: 수정 기능 */ }}
+                                                                className="bg-slate-100 text-slate-600 font-medium text-[10px] px-2 py-1 rounded hover:bg-slate-200 transition-colors"
+                                                            >
+                                                                수정
+                                                            </button>
+                                                            <button
+                                                                onClick={async (e) => {
+                                                                    e.stopPropagation();
+                                                                    if (window.confirm("정말 주문을 취소하시겠습니까?")) {
+                                                                        await useAccountStore.getState().cancelOrder(order.id);
+                                                                        setTab("completed");
+                                                                    }
+                                                                }}
+                                                                className="bg-slate-100 text-slate-600 font-medium text-[10px] px-2 py-1 rounded hover:bg-slate-200 transition-colors"
+                                                            >
+                                                                취소
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        )}
                                     </tr>
                                 ))
                             )}

@@ -87,23 +87,31 @@ export function OrderHistoryTab() {
                                     </div>
 
                                     <div className="flex items-center gap-2 shrink-0">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); /* TODO: 수정 기능 */ }}
-                                            className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
-                                        >
-                                            수정
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (window.confirm("정말 주문을 취소하시겠습니까?")) {
-                                                    cancelOrder(order.id);
-                                                }
-                                            }}
-                                            className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
-                                        >
-                                            취소
-                                        </button>
+                                        {order.status === 'canceling' ? (
+                                            <span className="text-[#99a1af] font-bold text-sm px-4 py-2.5">
+                                                취소중
+                                            </span>
+                                        ) : (
+                                            <>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); /* TODO: 수정 기능 */ }}
+                                                    className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
+                                                >
+                                                    수정
+                                                </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (window.confirm("정말 주문을 취소하시겠습니까?")) {
+                                                            cancelOrder(order.id);
+                                                        }
+                                                    }}
+                                                    className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
+                                                >
+                                                    취소
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -157,9 +165,17 @@ export function OrderHistoryTab() {
                                                     <div className="flex items-center gap-2 text-xs text-[#6a7282]">
                                                         {/* 주문 상태 */}
                                                         {isCompleted ? (
-                                                            <span className="text-[#fb2c36]">구매완료</span>
+                                                            <span className={order.type === 'buy' ? "text-[#fb2c36]" : "text-blue-500"}>
+                                                                {order.type === 'buy' ? '구매완료' : '판매완료'}
+                                                            </span>
                                                         ) : isCanceled ? (
-                                                            <span className="text-[#99a1af]">구매취소</span>
+                                                            <span className="text-[#99a1af]">
+                                                                {order.type === 'buy' ? '구매취소' : '판매취소'}
+                                                            </span>
+                                                        ) : order.status === 'canceling' ? (
+                                                            <span className="text-[#99a1af]">
+                                                                {order.type === 'buy' ? '구매취소중' : '판매취소중'}
+                                                            </span>
                                                         ) : (
                                                             <span className="text-blue-500">진행중</span>
                                                         )}

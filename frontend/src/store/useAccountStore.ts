@@ -27,9 +27,10 @@ export interface Transaction {
 export interface Order {
     id: string;
     date: string;
+    stockCode: string;
     stockName: string;
     type: 'buy' | 'sell';
-    status: 'completed' | 'canceled' | 'pending';
+    status: 'completed' | 'canceled' | 'pending' | 'canceling';
     quantity: number;
     price: number;
 }
@@ -55,46 +56,15 @@ interface AccountState {
     executeTrade: (trade: { stockName: string; stockCode: string; quantity: number; price: number; type: 'buy' | 'sell' }) => void;
 }
 
-// Initial Mock Data
-const MOCK_PORTFOLIO: PortfolioItem[] = [
-    { code: '005930', name: '삼성전자', shares: 120, avgPrice: 65000 },
-    { code: '000660', name: 'SK하이닉스', shares: 45, avgPrice: 120000 },
-    { code: '035420', name: 'NAVER', shares: 80, avgPrice: 185000 },
-];
-
-const MOCK_TRANSACTIONS: Transaction[] = [
-    { id: 't1', date: '2.25', time: '00:27', type: 'buy', amount: -185100, remainingBalance: 247816, description: '삼성전자 1주', stockName: '삼성전자', quantity: 1 },
-    { id: 't2', date: '2.25', time: '00:27', type: 'buy', amount: -44910, remainingBalance: 432916, description: 'KODEX 미국S&P500 2주', stockName: 'KODEX 미국S&P500', quantity: 2 },
-    { id: 't3', date: '2.25', time: '00:27', type: 'buy', amount: -176070, remainingBalance: 477826, description: 'KODEX 200 2주', stockName: 'KODEX 200', quantity: 2 },
-    { id: 't4', date: '2.24', time: '00:23', type: 'buy', amount: -30865, remainingBalance: 653896, description: '휴림로봇 2주', stockName: '휴림로봇', quantity: 2 },
-    { id: 't5', date: '2.23', time: '00:29', type: 'buy', amount: -45250, remainingBalance: 684761, description: '한화솔루션 1주', stockName: '한화솔루션', quantity: 1 },
-    { id: 't6', date: '2.23', time: '00:29', type: 'buy', amount: -168720, remainingBalance: 730011, description: '한미반도체 1주', stockName: '한미반도체', quantity: 1 },
-    { id: 't7', date: '2.13', time: '00:21', type: 'buy', amount: -171000, remainingBalance: 898731, description: '삼성전자 1주', stockName: '삼성전자', quantity: 1 },
-    { id: 't8', date: '2.11', time: '00:26', type: 'buy', amount: -46080, remainingBalance: 1069731, description: 'KODEX 미국S&P500 2주', stockName: 'KODEX 미국S&P500', quantity: 2 },
-    { id: 't9', date: '2.11', time: '00:26', type: 'buy', amount: -157270, remainingBalance: 1116811, description: '기아 1주', stockName: '기아', quantity: 1 },
-];
-
-const MOCK_ORDERS: Order[] = [
-    { id: 'o_pending1', date: '2.25', stockName: 'NAVER', type: 'buy', status: 'pending', quantity: 1, price: 185000 },
-    { id: 'o_pending2', date: '2.25', stockName: '카카오', type: 'sell', status: 'pending', quantity: 2, price: 110000 },
-    { id: 'o1', date: '2.22', stockName: 'KODEX 200', type: 'buy', status: 'completed', quantity: 2, price: 176070 },
-    { id: 'o2', date: '2.22', stockName: 'KODEX 미국S&P500', type: 'buy', status: 'completed', quantity: 2, price: 22455 },
-    { id: 'o3', date: '2.22', stockName: '삼성전자', type: 'buy', status: 'completed', quantity: 1, price: 185100 },
-    { id: 'o4', date: '2.20', stockName: '휴림로봇', type: 'buy', status: 'completed', quantity: 2, price: 30865 },
-    { id: 'o5', date: '2.19', stockName: '한미반도체', type: 'buy', status: 'completed', quantity: 1, price: 168720 },
-    { id: 'o6', date: '2.19', stockName: '한화솔루션', type: 'buy', status: 'completed', quantity: 1, price: 45250 },
-    { id: 'o7', date: '2.11', stockName: '삼성전자', type: 'buy', status: 'completed', quantity: 1, price: 171000 },
-    { id: 'o8', date: '2.11', stockName: '삼성전자', type: 'buy', status: 'canceled', quantity: 1, price: 171000 },
-    { id: 'o9', date: '2.9', stockName: '기아', type: 'buy', status: 'completed', quantity: 1, price: 157270 },
-];
-
 export const useAccountStore = create<AccountState>((set) => ({
-    totalAssets: 48500200,
-    totalInvested: 28000000,
-    cashBalance: 20500200,
-    portfolio: MOCK_PORTFOLIO,
-    transactions: MOCK_TRANSACTIONS,
-    orders: MOCK_ORDERS,
+    totalAssets: 0,
+    totalInvested: 0,
+    cashBalance: 0,
+    portfolio: [],
+    transactions: [],
+    orders: [],
+
+    // 총 예수금, 주문 가능 금액을 가져오는 함수
     fetchBalance: async () => {
         try {
             const balance = await accountApi.getBalance();
@@ -108,6 +78,8 @@ export const useAccountStore = create<AccountState>((set) => ({
             console.error('Failed to fetch balance in store:', error);
         }
     },
+
+    // 보유 종목 정보를 가져오는 함수
     fetchPositions: async () => {
         try {
             const positions = await positionApi.getPositions();
@@ -122,6 +94,9 @@ export const useAccountStore = create<AccountState>((set) => ({
             console.error('Failed to fetch positions in store:', error);
         }
     },
+
+    // 미체결, 체결 및 취소된 주문 내역을 가져오는 함수
+    // params: { page?: number; size?: number; status?: string; ticker?: string; yearMonth?: string }
     fetchOrders: async (params) => {
         try {
             const data = await orderApi.getOrders(params);
@@ -134,9 +109,10 @@ export const useAccountStore = create<AccountState>((set) => ({
             const transformedPending: Order[] = data.pending.content.map((po: PendingOrder) => ({
                 id: po.orderId.toString(),
                 date: transformDate(po.createdAt),
+                stockCode: po.ticker,
                 stockName: po.companyName,
                 type: po.orderType.toLowerCase() as 'buy' | 'sell',
-                status: 'pending',
+                status: po.status === 'PENDING_CANCEL' ? 'canceling' : 'pending',
                 quantity: po.unexecutedQuantity,
                 price: po.totalPrice / po.unexecutedQuantity
             }));
@@ -144,9 +120,10 @@ export const useAccountStore = create<AccountState>((set) => ({
             const transformedCompleted: Order[] = data.completed.content.map((oh: ApiOrderHistory) => ({
                 id: oh.historyId.toString(),
                 date: transformDate(oh.createdAt),
+                stockCode: oh.ticker,
                 stockName: oh.companyName,
                 type: oh.orderType.toLowerCase() as 'buy' | 'sell',
-                status: oh.historyType === 'TRADE' ? 'completed' : 'canceled',
+                status: oh.historyType === 'EXECUTION' ? 'completed' : 'canceled',
                 quantity: oh.quantity,
                 price: oh.price
             }));
@@ -156,61 +133,79 @@ export const useAccountStore = create<AccountState>((set) => ({
             console.error('Failed to fetch orders in store:', error);
         }
     },
+
+    // 주문을 취소하는 함수
     cancelOrder: async (orderId) => {
         try {
+            // Optimistic update(낙관적 업데이트): 취소 버튼 누르면 바로 취소된 주문으로 변경
+            set((state) => {
+                const now = new Date();
+                const today = `${now.getMonth() + 1}.${now.getDate()}`;
+                const newOrders = state.orders.map(o =>
+                    o.id === String(orderId)
+                        ? { ...o, status: 'canceled' as const, date: today }
+                        : o
+                );
+                return { orders: newOrders };
+            });
+
+            // API 호출
             await orderApi.cancelOrder(orderId);
-            const getBalance = useAccountStore.getState().fetchBalance;
-            const getOrders = useAccountStore.getState().fetchOrders;
-            await Promise.all([getBalance(), getOrders()]);
+
+            // 1초 후 백엔드와 동기화
+            setTimeout(async () => {
+                const getBalance = useAccountStore.getState().fetchBalance;
+                const getOrders = useAccountStore.getState().fetchOrders;
+                await Promise.all([getBalance(), getOrders()]);
+            }, 1000);
+
         } catch (error) {
             console.error('Failed to cancel order in store:', error);
+            // 실패 시 optimistic update 되돌리기
+            await useAccountStore.getState().fetchOrders();
         }
     },
-    executeTrade: (trade) => set((state) => {
-        const { stockName, stockCode, quantity, price, type } = trade;
-        const totalAmount = quantity * price;
-        const newCashBalance = type === 'buy' ? state.cashBalance - totalAmount : state.cashBalance + totalAmount;
 
-        // Update portfolio
-        const newPortfolio = [...state.portfolio];
-        const existingItemIndex = newPortfolio.findIndex(item => item.name === stockName);
+    // 주문을 실행하는 함수
+    executeTrade: async (trade) => {
+        const { stockCode, quantity, price, type } = trade;
 
-        if (type === 'buy') {
-            if (existingItemIndex >= 0) {
-                const existing = newPortfolio[existingItemIndex];
-                const newShares = existing.shares + quantity;
-                const newAvgPrice = ((existing.shares * existing.avgPrice) + totalAmount) / newShares;
-                newPortfolio[existingItemIndex] = { ...existing, shares: newShares, avgPrice: newAvgPrice };
-            } else {
-                newPortfolio.push({ code: stockCode, name: stockName, shares: quantity, avgPrice: price });
-            }
-        } else { // sell
-            if (existingItemIndex >= 0) {
-                const existing = newPortfolio[existingItemIndex];
-                const newShares = existing.shares - quantity;
-                if (newShares <= 0) {
-                    newPortfolio.splice(existingItemIndex, 1);
-                } else {
-                    newPortfolio[existingItemIndex] = { ...existing, shares: newShares };
-                }
-            }
+        try {
+            await orderApi.createOrder({
+                ticker: stockCode,
+                order_type: type.toUpperCase() as 'BUY' | 'SELL',
+                price_type: 'LIMIT', // 현재 지정가 주문만 지원
+                price: price,
+                quantity: quantity
+            });
+
+            // 주문 생성 직후 백엔드와 동기화
+            const { fetchBalance, fetchPositions, fetchOrders } = useAccountStore.getState();
+            await Promise.all([
+                fetchBalance(),
+                fetchPositions(),
+                fetchOrders()
+            ]);
+
+            // 매칭 엔진 처리 시간 고려한 지연 호출 (1초, 2.5초)
+            setTimeout(() => {
+                const state = useAccountStore.getState();
+                state.fetchBalance();
+                state.fetchPositions();
+                state.fetchOrders();
+            }, 1000);
+
+            setTimeout(() => {
+                const state = useAccountStore.getState();
+                state.fetchBalance();
+                state.fetchPositions();
+                state.fetchOrders();
+            }, 2500);
+
+        } catch (error) {
+            console.error('Failed to execute trade:', error);
+            throw error; // 컴포넌트에서 에러 표시
         }
-
-        // Add to orders
-        const newOrder: Order = {
-            id: `o${Date.now()}`,
-            date: new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }).replace('/', '.'),
-            stockName,
-            type,
-            status: 'completed',
-            quantity,
-            price
-        };
-
-        return {
-            cashBalance: newCashBalance,
-            portfolio: newPortfolio,
-            orders: [newOrder, ...state.orders]
-        };
-    })
+    }
 }));
+

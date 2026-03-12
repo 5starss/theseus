@@ -27,7 +27,7 @@ export interface OrderHistory {
     ticker: string;
     companyName: string;
     orderType: 'BUY' | 'SELL';
-    historyType: 'TRADE' | 'CANCEL';
+    historyType: 'EXECUTION' | 'CANCELLATION' | 'SYSTEM_CANCELLATION';
     price: number;
     quantity: number;
     totalPrice: number;
@@ -59,7 +59,7 @@ export interface OrderHistoryDetailResponse {
     ticker: string;
     orderType: 'BUY' | 'SELL';
     priceType: 'LIMIT' | 'MARKET';
-    historyType: 'TRADE' | 'CANCEL';
+    historyType: 'EXECUTION' | 'CANCELLATION' | 'SYSTEM_CANCELLATION';
     pricePerShare: number;
     quantity: number;
     totalAmount: number;
@@ -68,6 +68,25 @@ export interface OrderHistoryDetailResponse {
 }
 
 export const orderApi = {
+    // 백엔드 명세: POST /api/v1/core/orders
+    createOrder: async (data: {
+        ticker: string;
+        order_type: 'BUY' | 'SELL';
+        price_type: 'LIMIT' | 'MARKET';
+        price: number;
+        quantity: number;
+    }): Promise<void> => {
+        try {
+            const response = await api.post<ApiResponse<any>>('/api/v1/core/orders', data);
+            if (!response.data.isSuccess) {
+                throw new Error(response.data.message || 'Failed to create order');
+            }
+        } catch (error) {
+            console.error('Error creating order:', error);
+            throw error;
+        }
+    },
+
     // 백엔드 명세: GET /api/v1/core/orders
     getOrders: async (params: {
         page?: number;

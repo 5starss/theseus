@@ -137,8 +137,33 @@ export const stockApi = {
             console.warn(`Backend is not available for orderbook [${ticker}]. Using dummy data.`);
             return generateDummyOrderbook(ticker);
         }
+    },
+
+    // 백엔드 명세: GET /api/v1/stocks/:ticker
+    getTickSnapshot: async (ticker: string): Promise<TickSnapshot | null> => {
+        try {
+            const response = await api.get<ApiResponse<TickSnapshot>>(`/api/v1/market/stocks/${ticker}`);
+            if (response.data.isSuccess && response.data.result) {
+                return response.data.result;
+            }
+            return null;
+        } catch (error) {
+            console.warn(`Backend is not available for tick snapshot [${ticker}].`);
+            return null;
+        }
     }
 };
+
+export interface TickSnapshot {
+    ticker: string;
+    name: string;
+    currentPrice: number;
+    changeRate: number;
+    openPrice: number;
+    highPrice: number;
+    lowPrice: number;
+    accVolume: number;
+}
 
 export interface OrderbookData {
     ticker: string;

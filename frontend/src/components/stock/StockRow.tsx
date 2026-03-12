@@ -8,8 +8,6 @@ export interface StockRowProps {
     currentPrice: number;
     changeRate: number;
     accVolume: number;
-    buyRatio: number;
-    sellRatio: number;
 }
 
 const getStockIcon = (name: string) => {
@@ -44,8 +42,6 @@ const StockRow: React.FC<StockRowProps> = ({
     currentPrice,
     changeRate,
     accVolume,
-    buyRatio,
-    sellRatio,
 }) => {
     const isPositive = changeRate > 0;
     const changeColor = isPositive ? 'text-[#e84c3d]' : 'text-[#2b7fff]';
@@ -94,26 +90,6 @@ const StockRow: React.FC<StockRowProps> = ({
                 </span>
             </div>
 
-            {/* Flexible Spacer to push Buy/Sell Ratio to the right */}
-            <div className="flex-1 min-w-[20px]"></div>
-
-            {/* Buy/Sell Ratio */}
-            <div className="w-[116px] shrink-0 flex flex-col items-start justify-center gap-[4px]">
-                <div className="bg-[#eee] flex gap-[2px] h-[4px] w-full rounded-[4px] overflow-hidden">
-                    <div
-                        className="bg-[#2f80ed] h-full"
-                        style={{ width: `${(buyRatio / (buyRatio + sellRatio)) * 100}%` }}
-                    />
-                    <div
-                        className="bg-[#e84c3d] h-full"
-                        style={{ width: `${(sellRatio / (buyRatio + sellRatio)) * 100}%` }}
-                    />
-                </div>
-                <div className="flex justify-between w-full">
-                    <span className="text-[#2f80ed] font-medium text-[10px]">{buyRatio}</span>
-                    <span className="text-[#e84c3d] font-medium text-[10px]">{sellRatio}</span>
-                </div>
-            </div>
         </Link>
     );
 };
@@ -124,8 +100,6 @@ export default memo(StockRow, (prev, next) => {
         prev.currentPrice === next.currentPrice &&
         prev.changeRate === next.changeRate &&
         prev.rank === next.rank &&
-        prev.accVolume === next.accVolume &&
-        prev.buyRatio === next.buyRatio &&
-        prev.sellRatio === next.sellRatio
+        prev.accVolume === next.accVolume
     );
 });

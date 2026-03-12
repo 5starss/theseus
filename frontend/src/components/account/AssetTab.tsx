@@ -9,16 +9,17 @@ export const AssetTab = () => {
         fetchPositions();
     }, [fetchBalance, fetchPositions]);
 
-    // Calculate total invested and profit
+    // 총 투자 금액, 수익, 수익률
     const totalInvested = portfolio.reduce((acc, item) => acc + (item.shares * item.avgPrice), 0);
-    const profit = totalAssets - totalInvested - cashBalance; // Simplified profit calculation based on mock data structure
-    const returnRate = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
+    const profit = 0;
+    const returnRate = 0;
 
-    // Format numbers
+    // 금액 포맷
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('ko-KR').format(Math.round(value)) + '원';
     };
 
+    // 수익 양수/음수 판별  
     const isPositive = profit >= 0;
 
     return (

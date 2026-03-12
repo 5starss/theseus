@@ -54,10 +54,12 @@ client.interceptors.response.use(
 
                 if (refreshResponse.data.isSuccess) {
                     const newAccessToken = refreshResponse.data.result.accessToken;
-                    const email = useAuthStore.getState().user?.email || '';
+                    const user = useAuthStore.getState().user;
+                    const email = user?.email || '';
+                    const nickname = user?.name || '';
 
                     // 스토어 업데이트
-                    useAuthStore.getState().login(email, newAccessToken);
+                    useAuthStore.getState().login(email, newAccessToken, nickname);
 
                     // 원래 요청의 헤더를 새 토큰으로 교체하고 재요청
                     originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;

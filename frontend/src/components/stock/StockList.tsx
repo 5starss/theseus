@@ -105,11 +105,6 @@ const StockList: React.FC = () => {
                                         <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
 
                                         <div className="w-[130px] text-right shrink-0">거래대금</div>
-
-                                        {/* Flexible Space to push Buy/Sell Ratio */}
-                                        <div className="flex-1 min-w-[20px]"></div>
-
-                                        <div className="w-[116px] shrink-0">거래비율</div>
                                     </div>
                                 </div>
                             </div>
