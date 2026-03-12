@@ -1,12 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useAccountStore } from "../../store/useAccountStore";
 
 export const AssetTab = () => {
-    const { totalAssets, cashBalance, totalInvested, totalEvaluated, fetchBalance, fetchPositions } = useAccountStore();
+    const { totalAssets, cashBalance, totalInvested, totalEvaluated, transactions, fetchBalance, fetchPositions, fetchTransactions } = useAccountStore();
 
     useEffect(() => {
         fetchBalance();
         fetchPositions();
+        fetchTransactions({ size: 500 }); // 평단가 추적을 위해 더 많은 과거 내역(500건) 가져오기
 
         // 1초마다 시세 갱신을 위해 포지션 정보 다시 가져오기
         const interval = setInterval(() => {
@@ -14,11 +15,50 @@ export const AssetTab = () => {
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [fetchBalance, fetchPositions]);
+    }, [fetchBalance, fetchPositions, fetchTransactions]);
 
-    // 수익 및 수익률 계산
-    const profit = totalEvaluated - totalInvested;
-    const returnRate = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
+    // 실시간 평가 손익 및 수익률 계산
+    const unrealizedProfit = totalEvaluated - totalInvested;
+    const unrealizedReturnRate = totalInvested > 0 ? (unrealizedProfit / totalInvested) * 100 : 0;
+
+    // 실현 손익 계산 (매도 시점의 차익 합계 - 이번 달 기준)
+    const currentMonth = new Date().getMonth() + 1;
+    const monthlyRealizedProfit = useMemo(() => {
+        const currentMonthStr = currentMonth.toString(); // 현재 시점 기준
+        const costBasisMap: Record<string, { qty: number; totalCost: number }> = {};
+        let realizedProfit = 0;
+
+        // 과거 내역부터 순회하여 평단가 추적 (transactions는 최신순이므로 reverse)
+        const sortedTransactions = [...transactions].reverse();
+
+        sortedTransactions.forEach(t => {
+            if (!t.stockName || !t.quantity) return;
+
+            if (!costBasisMap[t.stockName]) {
+                costBasisMap[t.stockName] = { qty: 0, totalCost: 0 };
+            }
+            const record = costBasisMap[t.stockName];
+
+            if (t.type === 'buy') {
+                record.qty += t.quantity;
+                record.totalCost += Math.abs(t.amount);
+            } else if (t.type === 'sell' && record.qty > 0) {
+                const avgPrice = record.totalCost / record.qty;
+                const profit = t.amount - (avgPrice * t.quantity);
+
+                // 이번 달 거래인 경우에만 실현손익 가산
+                if (t.date.split('.')[0] === currentMonthStr) {
+                    realizedProfit += profit;
+                }
+
+                // 평단가 정보 업데이트 (남은 수량에 맞춰 비용 차감)
+                record.qty -= t.quantity;
+                record.totalCost -= (avgPrice * t.quantity);
+            }
+        });
+
+        return realizedProfit;
+    }, [transactions]);
 
     // 금액 포맷
     const formatCurrency = (value: number) => {
@@ -26,7 +66,8 @@ export const AssetTab = () => {
     };
 
     // 수익 양수/음수 판별  
-    const isPositive = profit >= 0;
+    const isPositiveUnrealized = unrealizedProfit >= 0;
+    const isPositiveMonthly = monthlyRealizedProfit >= 0;
 
     return (
         <div className="flex-[1] min-w-0 relative flex flex-col pt-6 px-12 md:px-24 max-w-5xl mx-auto w-full h-full overflow-y-auto">
@@ -53,9 +94,9 @@ export const AssetTab = () => {
                     </div>
                 </div>
 
-                {/* 2. Total Investment Card */}
+                {/* 2. Total Investment Card (Real-time Evaluation) */}
                 <div className="bg-white border-[#f3f4f6] border-[0.5px] border-solid flex flex-col gap-4 p-6 rounded-2xl shadow-sm w-full">
-                    <h3 className="font-bold text-[#101828] text-sm">총 투자 금액</h3>
+                    <h3 className="font-bold text-[#101828] text-sm md:text-base">총 투자 및 실시간 평가</h3>
 
                     <div className="flex items-end justify-between w-full">
                         <div className="flex flex-col gap-1">
@@ -65,25 +106,36 @@ export const AssetTab = () => {
                         </div>
 
                         <div className="flex flex-col items-end">
-                            <p className={`font-bold text-sm text-right ${isPositive ? 'text-[#fb2c36]' : 'text-[#2b7fff]'}`}>
-                                {isPositive ? '+' : ''}{formatCurrency(profit)}
+                            <p className={`font-bold text-base text-right ${isPositiveUnrealized ? 'text-[#fb2c36]' : 'text-[#2b7fff]'}`}>
+                                {isPositiveUnrealized ? '+' : ''}{formatCurrency(unrealizedProfit)}
                             </p>
-                            <p className={`text-xs text-right ${isPositive ? 'text-[#fb2c36]' : 'text-[#2b7fff]'}`}>
-                                {isPositive ? '+' : ''}{returnRate.toFixed(2)}%
+                            <p className={`text-xs text-right font-medium ${isPositiveUnrealized ? 'text-[#fb2c36]' : 'text-[#2b7fff]'}`}>
+                                {isPositiveUnrealized ? '+' : ''}{unrealizedReturnRate.toFixed(2)}%
                             </p>
                         </div>
                     </div>
                 </div>
 
-                {/* 3. Recent Profit Card */}
-                <div className="bg-white border-[#f3f4f6] border-[0.5px] border-solid flex flex-col gap-4 p-6 rounded-2xl shadow-sm w-full">
-                    <h3 className="font-bold text-[#101828] text-sm">수익 현황</h3>
+                {/* 3. Detailed Realized Profit Card */}
+                <div className="bg-white border-[#f3f4f6] border-[0.5px] border-solid flex flex-col gap-5 p-6 rounded-2xl shadow-sm w-full">
+                    <h3 className="font-bold text-[#101828] text-sm md:text-base">수익 현황</h3>
 
-                    <div className="bg-[#f9fafb] flex flex-col gap-2 p-4 rounded-xl w-full">
-                        <p className="text-[#6a7282] text-xs">2일 수익</p>
-                        <p className="font-bold text-[#2b7fff] text-lg">
-                            -9,986원
-                        </p>
+                    <div className="w-full">
+                        {/* 당월 실현 손익 */}
+                        <div className="bg-[#f9fafb] flex flex-col gap-3 p-6 rounded-2xl">
+                            <div className="flex justify-between items-start">
+                                <p className="text-[#6a7282] text-xs font-semibold">{currentMonth}월 수익</p>
+                            </div>
+                            <div className="flex items-baseline gap-2 mt-1">
+                                <p className={`font-bold text-3xl ${isPositiveMonthly && monthlyRealizedProfit !== 0 ? 'text-[#fb2c36]' : monthlyRealizedProfit < 0 ? 'text-[#2b7fff]' : 'text-[#101828]'}`}>
+                                    {monthlyRealizedProfit > 0 ? '+' : ''}{formatCurrency(monthlyRealizedProfit)}
+                                </p>
+                            </div>
+                            <p className="text-[#99a1af] text-[10px] mt-4 leading-relaxed">
+                                * 이번 달에 완료된 매도 거래의 이익/손실 합계입니다.<br />
+                                * 최근 500건의 매매 데이터를 분석하며, 장기 보유 종목 매도 시 평단가 계산에 오차가 있을 수 있습니다.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
