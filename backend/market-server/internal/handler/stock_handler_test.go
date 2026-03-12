@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,15 +49,14 @@ func newRouter(h *StockHandler) *gin.Engine {
 // ─── GetCandles 핸들러 테스트 ─────────────────────────────────────────────────
 
 func TestGetCandles_Success(t *testing.T) {
-	h, _, mr := newTestComponents(t)
+	h, repo, mr := newTestComponents(t)
 	defer mr.Close()
 
 	candles := []domain.Candle{
 		{Timestamp: "20240101", Open: 70000, High: 71000, Low: 69000, Close: 70500, Volume: 1000000},
 		{Timestamp: "20240102", Open: 70500, High: 72000, Low: 70000, Close: 71500, Volume: 1200000},
 	}
-	b, _ := json.Marshal(candles)
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", domain.IntervalDay), string(b))
+	repo.SaveCandlesToCache(context.Background(), "005930", domain.IntervalDay, candles)
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()
@@ -83,19 +82,18 @@ func TestGetCandles_Success(t *testing.T) {
 	if len(result) != 2 {
 		t.Errorf("expected 2 candles, got %d", len(result))
 	}
-	if result[0].Timestamp != "20240101" || result[0].Close != 70500 {
+	if result[0].Timestamp != "20240102" || result[0].Close != 71500 {
 		t.Errorf("unexpected first candle: %+v", result[0])
 	}
 }
 
 func TestGetCandles_DefaultInterval(t *testing.T) {
-	h, _, mr := newTestComponents(t)
+	h, repo, mr := newTestComponents(t)
 	defer mr.Close()
 
 	// interval 미지정 시 "D" -> domain.IntervalDay 로 맵핑되어 캐시에서 조회해야 함
 	candles := []domain.Candle{{Timestamp: "20240101", Close: 70500}}
-	b, _ := json.Marshal(candles)
-	mr.Set(fmt.Sprintf("stocks:candles:%s:%s", "005930", domain.IntervalDay), string(b))
+	repo.SaveCandlesToCache(context.Background(), "005930", domain.IntervalDay, candles)
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()
@@ -152,6 +150,33 @@ func TestGetCandles_InvalidLimit_NotANumber(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestGetCandles_WithEndTime_Returns500WhenNoDB
+// endTime 파라미터가 지정되면 캐시를 우회하여 DB를 직접 조회한다.
+// 테스트 환경에서 DB는 nil이므로 패닉이 발생 → gin.Recovery()가 500을 반환한다.
+func TestGetCandles_WithEndTime_Returns500WhenNoDB(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	// 캐시에 데이터가 있어도 endTime이 있으면 DB를 직접 조회해야 한다
+	candles := []domain.Candle{
+		{Timestamp: "2024-01-01", Close: 70500, Volume: 1000000},
+	}
+	repo.SaveCandlesToCache(context.Background(), "005930", domain.IntervalDay, candles)
+
+	// gin.Recovery() 미들웨어로 nil DB panic → 500 응답
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.GET("/api/v1/stocks/:ticker/candles", h.GetCandles)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/005930/candles?interval=D&limit=10&endTime=2024-01-02", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 (nil DB panic recovered), got %d: %s", w.Code, w.Body.String())
 	}
 }
 

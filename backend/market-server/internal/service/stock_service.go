@@ -29,8 +29,20 @@ func (s *StockService) GetTopStocks(ctx context.Context, limit int64, rankType d
 }
 
 // GetCandles 종목의 캔들 데이터를 Cache-Aside 패턴으로 조회한다.
-func (s *StockService) GetCandles(ctx context.Context, ticker string, interval domain.Interval, limit int64) ([]domain.Candle, error) {
-	// 1. Redis 캐시 조회 (DB 데이터 캐싱 부분)
+func (s *StockService) GetCandles(ctx context.Context, ticker string, interval domain.Interval, limit int64, endTime string) ([]domain.Candle, error) {
+	// 최신 데이터 조회가 아닐 경우 (커서 페이징 - 이전 데이터 조회)
+	if endTime != "" {
+		// 과거 데이터는 자주 변하지 않고 온전한 상태로 DB에만 의존해서 가져온다고 가정
+		// ZSet 캐시를 사용하도록 repository가 변경되면 여기서 그냥 찔러도 무방하게 바뀜
+		candles, err := s.repo.GetCandlesFromDB(ctx, ticker, interval, limit, endTime)
+		if err != nil {
+			return nil, fmt.Errorf("historical db fetch error: %w", err)
+		}
+		return candles, nil
+	}
+
+	// 1. 최신 데이터 조회 진행 (endTime == "")
+	// Redis 캐시 조회 (DB 데이터 캐싱 부분)
 	candles, err := s.repo.GetCandlesFromCache(ctx, ticker, interval)
 	if err != nil {
 		log.Printf("[StockService] Cache read error for %s (%s): %v", ticker, interval, err)
@@ -38,7 +50,7 @@ func (s *StockService) GetCandles(ctx context.Context, ticker string, interval d
 
 	// 2. Cache Miss: DB 조회
 	if len(candles) == 0 {
-		candles, err = s.repo.GetCandlesFromDB(ctx, ticker, interval, limit)
+		candles, err = s.repo.GetCandlesFromDB(ctx, ticker, interval, limit, "") // endTime 빈 문자열 전달
 		if err != nil {
 			return nil, fmt.Errorf("db fetch error: %w", err)
 		}
@@ -62,7 +74,6 @@ func (s *StockService) GetCandles(ctx context.Context, ticker string, interval d
 			todayStr := time.Now().Format("2006-01-02")
 			
 			// DB에 이미 오늘자 캔들이 있는지 확인하고, 있으면 덮어쓰거나, 없으면 맨 앞에 추가
-			// (과거 일봉 동기화 로직이 오늘자를 넣었을 수도 있기 때문에 중복 방지)
 			hasToday := false
 			if len(candles) > 0 && candles[0].Timestamp == todayStr {
 				hasToday = true

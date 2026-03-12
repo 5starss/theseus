@@ -366,7 +366,7 @@ func TestGetCandlesFromDB_1m_ReturnsDescendingOrder(t *testing.T) {
 		t.Fatalf("INSERT 실패: %v", err)
 	}
 
-	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 10)
+	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 10, "")
 	if err != nil {
 		t.Fatalf("GetCandlesFromDB 실패: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestGetCandlesFromDB_1d_ReturnsDescendingOrder(t *testing.T) {
 		t.Fatalf("INSERT 실패: %v", err)
 	}
 
-	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalDay, 10)
+	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalDay, 10, "")
 	if err != nil {
 		t.Fatalf("GetCandlesFromDB 실패: %v", err)
 	}
@@ -441,7 +441,7 @@ func TestGetCandlesFromDB_LimitRespected(t *testing.T) {
 		t.Fatalf("INSERT 실패: %v", err)
 	}
 
-	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 3)
+	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 3, "")
 	if err != nil {
 		t.Fatalf("GetCandlesFromDB 실패: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestGetCandlesFromDB_NotFound_ReturnsEmpty(t *testing.T) {
 	repo, _, teardown := newTestRepoWithDB(t)
 	defer teardown()
 
-	result, err := repo.GetCandlesFromDB(context.Background(), "ZZZNONE", domain.IntervalMinute, 10)
+	result, err := repo.GetCandlesFromDB(context.Background(), "ZZZNONE", domain.IntervalMinute, 10, "")
 	if err != nil {
 		t.Fatalf("없는 종목 조회에서 에러: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestGetCandlesFromDB_AllFieldsCorrect(t *testing.T) {
 		t.Fatalf("INSERT 실패: %v", err)
 	}
 
-	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 10)
+	result, err := repo.GetCandlesFromDB(ctx, ticker, domain.IntervalMinute, 10, "")
 	if err != nil {
 		t.Fatalf("GetCandlesFromDB 실패: %v", err)
 	}

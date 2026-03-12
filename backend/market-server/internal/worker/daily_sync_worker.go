@@ -36,12 +36,23 @@ func (w *DailySyncWorker) SyncPastDailyCandles(ctx context.Context) {
 	endDate := now.Format("20060102")
 
 	for ticker, name := range Top40Stocks {
-		err := w.syncTickerDaily(ctx, ticker, name, startDate, endDate)
+		var err error
+		// KIS API가 일시적으로 500을 반환하는 경우를 대비해 최대 3회 재시도
+		for attempt := 1; attempt <= 3; attempt++ {
+			err = w.syncTickerDaily(ctx, ticker, name, startDate, endDate)
+			if err == nil {
+				break
+			}
+			if attempt < 3 {
+				log.Printf("[DailySyncWorker] Retry %d/3 for %s (%s): %v", attempt, ticker, name, err)
+				time.Sleep(500 * time.Millisecond * time.Duration(attempt))
+			}
+		}
 		if err != nil {
 			log.Printf("[DailySyncWorker] Failed to sync %s (%s): %v", ticker, name, err)
 		}
-		// KIS API Rate Limit (초당 20건 등) 고려하여 약간의 딜레이
-		time.Sleep(100 * time.Millisecond)
+		// KIS API Rate Limit 고려 딜레이 (100ms → 200ms로 증가)
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	log.Println("[DailySyncWorker] Past daily candles sync completed.")
