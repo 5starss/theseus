@@ -2,17 +2,23 @@ import { useEffect } from "react";
 import { useAccountStore } from "../../store/useAccountStore";
 
 export const AssetTab = () => {
-    const { totalAssets, cashBalance, portfolio, fetchBalance, fetchPositions } = useAccountStore();
+    const { totalAssets, cashBalance, totalInvested, totalEvaluated, fetchBalance, fetchPositions } = useAccountStore();
 
     useEffect(() => {
         fetchBalance();
         fetchPositions();
+
+        // 1초마다 시세 갱신을 위해 포지션 정보 다시 가져오기
+        const interval = setInterval(() => {
+            fetchPositions();
+        }, 1000);
+
+        return () => clearInterval(interval);
     }, [fetchBalance, fetchPositions]);
 
-    // 총 투자 금액, 수익, 수익률
-    const totalInvested = portfolio.reduce((acc, item) => acc + (item.shares * item.avgPrice), 0);
-    const profit = 0;
-    const returnRate = 0;
+    // 수익 및 수익률 계산
+    const profit = totalEvaluated - totalInvested;
+    const returnRate = totalInvested > 0 ? (profit / totalInvested) * 100 : 0;
 
     // 금액 포맷
     const formatCurrency = (value: number) => {
@@ -53,9 +59,8 @@ export const AssetTab = () => {
 
                     <div className="flex items-end justify-between w-full">
                         <div className="flex flex-col gap-1">
-                            <p className="text-[#6a7282] text-xs">총 자산</p>
                             <p className="font-bold text-[#101828] text-2xl md:text-3xl">
-                                {formatCurrency(totalInvested)}
+                                {formatCurrency(totalEvaluated)}
                             </p>
                         </div>
 

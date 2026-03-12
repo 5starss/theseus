@@ -159,22 +159,22 @@ export function OrderHistoryTab() {
                                                     }`}
                                             >
                                                 <div className="flex flex-col gap-1">
-                                                    <p className={`font-bold text-sm ${isCanceled ? 'text-[#99a1af]' : 'text-[#101828]'}`}>
+                                                    <p className={`font-bold text-[15px] ${isCanceled ? 'text-[#99a1af]' : 'text-[#101828]'}`}>
                                                         {order.stockName}
                                                     </p>
-                                                    <div className="flex items-center gap-2 text-xs text-[#6a7282]">
+                                                    <div className="flex items-center gap-2 text-sm text-[#6a7282]">
                                                         {/* 주문 상태 */}
                                                         {isCompleted ? (
-                                                            <span className={order.type === 'buy' ? "text-[#fb2c36]" : "text-blue-500"}>
-                                                                {order.type === 'buy' ? '구매완료' : '판매완료'}
+                                                            <span className={order.type.toLowerCase() === 'buy' ? "text-[#fb2c36]" : "text-blue-500"}>
+                                                                {order.type.toLowerCase() === 'buy' ? '구매완료' : '판매완료'}
                                                             </span>
                                                         ) : isCanceled ? (
                                                             <span className="text-[#99a1af]">
-                                                                {order.type === 'buy' ? '구매취소' : '판매취소'}
+                                                                {order.type.toLowerCase() === 'buy' ? '구매취소' : '판매취소'}
                                                             </span>
                                                         ) : order.status === 'canceling' ? (
                                                             <span className="text-[#99a1af]">
-                                                                {order.type === 'buy' ? '구매취소중' : '판매취소중'}
+                                                                {order.type.toLowerCase() === 'buy' ? '구매취소중' : '판매취소중'}
                                                             </span>
                                                         ) : (
                                                             <span className="text-blue-500">진행중</span>
@@ -190,7 +190,7 @@ export function OrderHistoryTab() {
                                                 </div>
 
                                                 <div className="flex flex-col items-end gap-1">
-                                                    <p className={`font-bold text-sm text-right ${isCanceled ? 'hidden' : 'text-[#101828]'}`}>
+                                                    <p className={`font-bold text-base text-right ${isCanceled ? 'hidden' : 'text-[#101828]'}`}>
                                                         {order.price.toLocaleString()}원
                                                     </p>
                                                 </div>

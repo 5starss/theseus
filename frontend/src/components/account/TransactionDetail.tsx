@@ -53,10 +53,6 @@ export function TransactionDetail({ transaction, onClose }: TransactionDetailPro
                     <span className="text-sm text-[#6a7282]">거래금액</span>
                     <span className="text-sm font-medium text-[#101828]">{formatCurrency(Math.abs(transaction.amount))}</span>
                 </div>
-                <div className="flex justify-between items-center w-full">
-                    <span className="text-sm text-[#6a7282]">거래 후 잔액</span>
-                    <span className="text-sm font-medium text-[#101828]">{formatCurrency(transaction.remainingBalance)}</span>
-                </div>
             </div>
 
             {/* Actions */}
