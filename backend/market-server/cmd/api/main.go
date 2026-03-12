@@ -117,7 +117,7 @@ func main() {
 	r.GET("/api/v1/stocks/:ticker", stockHandler.GetTickSnapshot)
 	r.GET("/api/v1/stocks/:ticker/candles", stockHandler.GetCandles)
 	r.GET("/api/v1/stocks/:ticker/orderbook", stockHandler.GetOrderbook)
-	r.GET("/v1/stocks/ws", wsHandler.ServeWS)
+	r.GET("/ws/v1/stocks", wsHandler.ServeWS)
 
 	// 10. HTTP 서버 설정 및 Graceful Shutdown
 	srv := &http.Server{

@@ -27,7 +27,7 @@ func dialWS(t *testing.T, ts *httptest.Server) *websocket.Conn {
 // dialWSWithHeader는 커스텀 헤더로 WebSocket 클라이언트를 연결한다.
 func dialWSWithHeader(t *testing.T, ts *httptest.Server, header http.Header) *websocket.Conn {
 	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/stocks/ws"
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/v1/stocks"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
 	if err != nil {
 		t.Fatalf("WebSocket 연결 실패: %v", err)
@@ -57,7 +57,7 @@ func newFullWSEnv(t *testing.T) (*httptest.Server, *service.WSHub, *miniredis.Mi
 
 	r := gin.New()
 	wsH := NewWSHandler(hub)
-	r.GET("/v1/stocks/ws", wsH.ServeWS)
+	r.GET("/ws/v1/stocks", wsH.ServeWS)
 
 	ts := httptest.NewServer(r)
 	t.Cleanup(ts.Close)

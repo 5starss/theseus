@@ -51,7 +51,7 @@ public class GatewayConfig {
                 .uri(marketUrl))
 
             // 3. Market WebSocket Service
-            .route("market-ws-route", r -> r.path("/v1/stocks/ws")
+            .route("market-ws-route", r -> r.path("/ws/v1/stocks")
                 .filters(f -> f.filter(jwtFilter))
                 .uri(marketWsUrl))
 
