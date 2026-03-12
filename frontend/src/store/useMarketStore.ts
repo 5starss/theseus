@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-
 import { stockApi } from '../api/stock';
 import type { Stock } from '../api/stock';
+import { useSocketStore } from './useSocketStore';
 
 export interface MarketStock extends Stock {
     buyRatio: number;
@@ -14,100 +14,82 @@ interface MarketState {
     isConnecting: boolean;
     connectMarketStream: () => Promise<void>;
     disconnectMarketStream: () => void;
+    // 수신한 데이터를 처리하는 내부 함수
+    handleWsMessage: (event: CustomEvent) => void;
 }
 
-// 이 변수는 컴포넌트가 마운트될 때 스트림을 시작하고 언마운트될 때 스트림을 정리하는 데 사용
-let marketWs: WebSocket | null = null;
-
 // Zustand 스토어 생성
-export const useMarketStore = create<MarketState>((set) => ({
+export const useMarketStore = create<MarketState>((set, get) => ({
     stocks: {},
     isConnecting: false,
 
-    connectMarketStream: async () => {
-        if (marketWs && marketWs.readyState === WebSocket.OPEN) return; // 이미 연결되어 있으면 무시
+    handleWsMessage: (event: any) => {
+        const rawData = event.detail;
+        if (!rawData) return;
 
-        console.log('Fetching Top Stocks and Connecting WebSockets...');
+        try {
+            const data = JSON.parse(rawData.toString());
+            if (data.topic === 'HOME_40' && Array.isArray(data.data)) {
+                set((state) => {
+                    const newStocks = { ...state.stocks };
+                    data.data.forEach((stock: MarketStock, index: number) => {
+                        if (newStocks[stock.ticker]) {
+                            newStocks[stock.ticker] = {
+                                ...newStocks[stock.ticker],
+                                ...stock,
+                                rank: index + 1
+                            };
+                        } else {
+                            newStocks[stock.ticker] = {
+                                ...stock,
+                                buyRatio: Math.floor(Math.random() * 60) + 20,
+                                sellRatio: Math.floor(Math.random() * 60) + 20,
+                                rank: index + 1
+                            };
+                        }
+                    });
+                    return { stocks: newStocks };
+                });
+            }
+        } catch (e) {
+            console.error("Failed to parse market websocket segment", e);
+        }
+    },
+
+    connectMarketStream: async () => {
+        console.log('Connecting Market Stream via Singleton...');
         set({ isConnecting: true });
 
-        // 1. API(또는 더미)에서 20개 목록 받아오기 (백엔드 최대 limit: 20)
-        const initialStocksList = await stockApi.getTopStocks(20, 'VOLUME');
-        const initialStocksMap: Record<string, MarketStock> = {};
+        // 1. 초기 데이터 가져오기
+        try {
+            const initialStocksList = await stockApi.getTopStocks(20, 'VOLUME');
+            const initialStocksMap: Record<string, MarketStock> = {};
 
-        initialStocksList.forEach((stock, index) => {
-            initialStocksMap[stock.ticker] = {
-                ...stock,
-                buyRatio: Math.floor(Math.random() * 60) + 20,
-                sellRatio: Math.floor(Math.random() * 60) + 20,
-                rank: index + 1 // 정렬되어 오므로 그대로 순위 지정
-            };
-        });
+            initialStocksList.forEach((stock, index) => {
+                initialStocksMap[stock.ticker] = {
+                    ...stock,
+                    buyRatio: Math.floor(Math.random() * 60) + 20,
+                    sellRatio: Math.floor(Math.random() * 60) + 20,
+                    rank: index + 1
+                };
+            });
 
-        set({ stocks: initialStocksMap, isConnecting: false });
+            set({ stocks: initialStocksMap, isConnecting: false });
+        } catch (err) {
+            console.error("Failed to fetch top stocks", err);
+            set({ isConnecting: false });
+        }
 
-        // 2. WebSocket 연결
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/v1/stocks/ws`;
+        // 2. 싱글톤 구독 설정
+        useSocketStore.getState().subscribe('HOME_40');
 
-        marketWs = new WebSocket(wsUrl);
-
-        marketWs.onopen = () => {
-            console.log('Connected to Market WebSocket');
-            // 구독 요청 전송
-            marketWs?.send(JSON.stringify({ action: 'SUBSCRIBE', topic: 'HOME_40' }));
-        };
-
-        marketWs.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                // HOME_40 토픽의 메시지 처리
-                if (data.topic === 'HOME_40' && Array.isArray(data.data)) {
-                    set((state) => {
-                        const newStocks = { ...state.stocks };
-                        data.data.forEach((stock: any, index: number) => {
-                            if (newStocks[stock.ticker]) {
-                                newStocks[stock.ticker] = {
-                                    ...newStocks[stock.ticker],
-                                    ...stock,
-                                    rank: index + 1
-                                };
-                            } else {
-                                newStocks[stock.ticker] = {
-                                    ...stock,
-                                    buyRatio: Math.floor(Math.random() * 60) + 20,
-                                    sellRatio: Math.floor(Math.random() * 60) + 20,
-                                    rank: index + 1
-                                };
-                            }
-                        });
-                        return { stocks: newStocks };
-                    });
-                }
-            } catch (e) {
-                console.error("Failed to parse websocket message", e);
-            }
-        };
-
-        marketWs.onclose = () => {
-            console.log('Market WebSocket disconnected');
-            marketWs = null;
-        };
-
-        marketWs.onerror = (error) => {
-            console.error('Market WebSocket error:', error);
-            marketWs?.close();
-        };
+        // 3. 메시지 핸들러 등록
+        window.addEventListener('ws-message' as any, get().handleWsMessage);
     },
 
     disconnectMarketStream: () => {
-        if (marketWs) {
-            if (marketWs.readyState === WebSocket.OPEN) {
-                marketWs.send(JSON.stringify({ action: 'UNSUBSCRIBE', topic: 'HOME_40' }));
-            }
-            marketWs.close();
-            marketWs = null;
-            console.log('Disconnected Market WebSockets');
-            set({ isConnecting: false });
-        }
+        console.log('Disconnecting Market Stream (Unsubscribe)...');
+        useSocketStore.getState().unsubscribe('HOME_40');
+        window.removeEventListener('ws-message' as any, get().handleWsMessage);
     }
 }));

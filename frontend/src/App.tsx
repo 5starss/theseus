@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useSocketStore } from "./store/useSocketStore";
 import Layout from "./components/layout/Layout";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import Home from "./pages/Home";
@@ -12,6 +14,12 @@ import { TransactionHistoryTab } from "./components/account/TransactionHistoryTa
 import { OrderHistoryTab } from "./components/account/OrderHistoryTab";
 
 function App() {
+  const connect = useSocketStore(state => state.connect);
+
+  useEffect(() => {
+    connect();
+  }, [connect]);
+
   return (
     <BrowserRouter>
       <Routes>
