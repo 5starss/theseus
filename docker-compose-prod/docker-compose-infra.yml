@@ -67,3 +67,6 @@ networks:
   stock-network:
     external: true
     name: stock-network
+
+volumes:
+  kafka_data:
