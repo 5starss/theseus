@@ -18,7 +18,12 @@ interface StockState {
 
     prevClose: number; // 전일 종가
 
+    candles: any[]; // 캔들 데이터 배열
+    candlesLoading: boolean;
+
     setStock: (code: string) => void;
+    setCandles: (candles: any[]) => void;
+    appendHistoricalCandles: (historical: any[]) => void;
     setCurrentPrice: (price: number) => void;
     updateOrderbook: (ask: { price: number; volume: number }, bid: { price: number; volume: number }) => void;
     connectStockStream: (code: string) => void;
@@ -83,6 +88,9 @@ export const useStockStore = create<StockState>((set, get) => ({
     bidPrice: 0,
     bidVolume: 0,
 
+    candles: [],
+    candlesLoading: false,
+
     // 주식 코드로 초기 데이터 설정
     setStock: (code) =>
         set({
@@ -96,6 +104,23 @@ export const useStockStore = create<StockState>((set, get) => ({
             askVolume: 0,
             bidPrice: 0,
             bidVolume: 0,
+            candles: [],
+            candlesLoading: false
+        }),
+
+    setCandles: (candles) => set({ candles }),
+
+    appendHistoricalCandles: (historical) =>
+        set((state) => {
+            // 시간 순서 보장 및 중복 제거
+            const combined = [...historical, ...state.candles];
+            const uniqueMap = new Map();
+            combined.forEach(c => uniqueMap.set(c.time, c));
+
+            const uniqueSorted = Array.from(uniqueMap.values())
+                .sort((a, b) => (a.time as number) - (b.time as number));
+
+            return { candles: uniqueSorted };
         }),
 
     // 현재가 업데이트 시, 가격 변화량과 등락률도 함께 계산하여 상태 업데이트

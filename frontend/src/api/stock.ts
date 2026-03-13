@@ -106,25 +106,28 @@ export const stockApi = {
     },
 
     // 백엔드 명세: GET /api/v1/market/stocks/:ticker/candles
-    getCandles: async (ticker: string, interval: string = 'D', limit: number = 50): Promise<Candle[]> => {
+    getCandles: async (ticker: string, interval: string = 'D', limit: number = 50, endTime?: string): Promise<Candle[]> => {
+        if (!ticker) return [];
         try {
             const response = await api.get<ApiResponse<Candle[]>>(`/api/v1/market/stocks/${ticker}/candles`, {
-                params: { interval, limit }
+                params: { interval, limit, endTime }
             });
 
             if (response.data.isSuccess && response.data.result && response.data.result.length > 0) {
+                console.log(`[API] Received ${response.data.result.length} candles for ${ticker} (requested limit: ${limit})`);
                 return response.data.result;
             } else {
-                return generateDummyCandles(ticker, interval, limit);
+                return generateDummyCandles(ticker, interval, limit, endTime);
             }
         } catch (error) {
             console.warn(`Backend is not available for candles [${ticker}]. Using dummy data.`);
-            return generateDummyCandles(ticker, interval, limit);
+            return generateDummyCandles(ticker, interval, limit, endTime);
         }
     },
 
     // 백엔드 명세: GET /api/v1/stocks/:ticker/orderbook (Gateway: /api/v1/market/stocks/:ticker/orderbook)
     getOrderbook: async (ticker: string): Promise<OrderbookData> => {
+        if (!ticker) return generateDummyOrderbook('');
         try {
             const response = await api.get<ApiResponse<OrderbookData>>(`/api/v1/market/stocks/${ticker}/orderbook`);
 
@@ -141,6 +144,7 @@ export const stockApi = {
 
     // 백엔드 명세: GET /api/v1/stocks/:ticker
     getTickSnapshot: async (ticker: string): Promise<TickSnapshot | null> => {
+        if (!ticker) return null;
         try {
             const response = await api.get<ApiResponse<TickSnapshot>>(`/api/v1/market/stocks/${ticker}`);
             if (response.data.isSuccess && response.data.result) {
@@ -193,16 +197,26 @@ const generateDummyOrderbook = (ticker: string): OrderbookData => {
 };
 
 // Fallback: 가짜 과거 캔들 데이터 생성
-const generateDummyCandles = (_ticker: string, interval: string, limit: number): Candle[] => {
+const generateDummyCandles = (_ticker: string, interval: string, limit: number, endTime?: string): Candle[] => {
     const data: Candle[] = [];
-    const now = Math.floor(Date.now() / 1000);
+    const now = endTime ? Math.floor(new Date(endTime).getTime() / 1000) : Math.floor(Date.now() / 1000);
 
     let candlePeriod = 60; // 1m
     switch (interval) {
-        case 'm': candlePeriod = 60; break;
-        case 'h': candlePeriod = 3600; break;
-        case 'D': candlePeriod = 86400; break;
-        case 'W': candlePeriod = 604800; break;
+        case 'm':
+        case '1m':
+            candlePeriod = 60; break;
+        case 'h':
+        case '1h':
+            candlePeriod = 3600; break;
+        case 'D':
+        case '1d':
+            candlePeriod = 86400; break;
+        case 'W':
+        case '1w':
+            candlePeriod = 604800; break;
+        default:
+            candlePeriod = 86400; // Default to Day
     }
 
     const alignedNow = Math.floor(now / candlePeriod) * candlePeriod;
@@ -210,10 +224,11 @@ const generateDummyCandles = (_ticker: string, interval: string, limit: number):
     // 원래는 해당 주식의 실제 초기 가격을 가져와야 하나, 목업용으로 50000 시작
     let price = 50000;
 
-    for (let i = limit; i >= 0; i--) {
-        const timeStr = new Date((alignedNow - i * candlePeriod) * 1000).toISOString();
+    for (let i = limit; i >= 1; i--) {
+        const timeValue = alignedNow - i * candlePeriod;
+        const timeStr = new Date(timeValue * 1000).toISOString();
 
-        if (i !== limit && i !== 0) {
+        if (i !== limit) {
             price = price + (Math.random() - 0.5) * 500;
             price = Math.round(price / 100) * 100;
         }
