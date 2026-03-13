@@ -19,7 +19,15 @@ export default function StockDashboard() {
     const disconnectStockStream = useStockStore(state => state.disconnectStockStream);
     const { fetchBalance, fetchPositions, fetchOrders } = useAccountStore();
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
-    const [timeframe, setTimeframe] = useState<TimeframeType>('1m');
+    const [timeframe, setTimeframeState] = useState<TimeframeType>(() => {
+        const saved = localStorage.getItem('stock_chart_timeframe');
+        return (saved as TimeframeType) || '1m';
+    });
+
+    const setTimeframe = (tf: TimeframeType) => {
+        setTimeframeState(tf);
+        localStorage.setItem('stock_chart_timeframe', tf);
+    };
 
     useEffect(() => {
         if (code) {
