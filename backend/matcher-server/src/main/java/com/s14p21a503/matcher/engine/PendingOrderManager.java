@@ -132,6 +132,11 @@ public class PendingOrderManager {
                     Iterator<OrderRequest> queueIterator = queue.iterator();
                     while (queueIterator.hasNext() && usableLiquidity > 0) {
                         OrderRequest bid = queueIterator.next();
+                        
+                        // 주문 생성 시간이 틱 발생 시간보다 이후라면 매칭 대상에서 제외
+                        if (bid.getTimestamp() > tick.getTimestamp()) {
+                            continue;
+                        }
 
                         long fillQty = Math.min(bid.getRemainingQuantity(), usableLiquidity);
                         if (fillQty > 0) {
@@ -174,6 +179,11 @@ public class PendingOrderManager {
                     Iterator<OrderRequest> queueIterator = queue.iterator();
                     while (queueIterator.hasNext() && usableLiquidity > 0) {
                         OrderRequest ask = queueIterator.next();
+
+                        // [Safety] 주문 생성 시간이 틱 발생 시간보다 이후라면 매칭 대상에서 제외 (다른 토픽 간의 시차/지연 대응)
+                        if (ask.getTimestamp() > tick.getTimestamp()) {
+                            continue;
+                        }
 
                         long fillQty = Math.min(ask.getRemainingQuantity(), usableLiquidity);
                         if (fillQty > 0) {
