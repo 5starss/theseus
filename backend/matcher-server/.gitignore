@@ -43,3 +43,5 @@ out/
 .vscode/
 
 /tools/mock-market-server/node_modules
+
+/src/main/resources/application.yml

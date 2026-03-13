@@ -5,8 +5,10 @@ services:
       dockerfile: Dockerfile
     container_name: api-gateway
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
     ports:
       - "8080:8080"
     networks:
@@ -18,10 +20,27 @@ services:
       dockerfile: Dockerfile
     container_name: core-api-server
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
     ports:
       - "8081:8081"
+    networks:
+      - stock-network
+
+  matcher-server:
+    build:
+      context: ../backend/matcher-server
+      dockerfile: Dockerfile
+    container_name: matcher-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
+    volumes:
+      - /var/lib/matcher-data:/var/lib/matcher-data
     networks:
       - stock-network
 
@@ -31,8 +50,7 @@ services:
       dockerfile: Dockerfile
     container_name: market-server
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
     ports:
       - "8085:8085"
     networks:
@@ -44,8 +62,7 @@ services:
       dockerfile: Dockerfile
     container_name: ai-server
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
     ports:
       - "8086:8086"
     networks:
@@ -55,6 +72,3 @@ networks:
   stock-network:
     external: true
     name: stock-network
-
-volumes:
-  kafka_data:
