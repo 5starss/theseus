@@ -10,6 +10,12 @@ text.md
 /backend/ai-server/collector/data_cybos_1m.zip
 /infra/docker/.env.local
 /infra/docker/.env.prod
+/infra/docker/.env
+/docker-compose-prod/.env
+
+**/resources/keys/*.pem
+**/resources/keys/private_key.pem
+**/resources/keys/public_key.pem
 
 /backend/api-gateway/src/main/resources/application.yml
 /backend/core-api-server/src/main/resources/application.yml
