@@ -14,8 +14,10 @@ import com.s14p21a503.coreapi.domain.order.repository.OrderHistoryRepository;
 import com.s14p21a503.coreapi.domain.order.repository.OrderRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
 import com.s14p21a503.coreapi.domain.position.repository.PositionRepository;
+import com.s14p21a503.coreapi.domain.notification.event.ExecutionNotificationEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,7 @@ public class ExecutionLedgerService {
     private final AccountRepository accountRepository;
     private final AccountHistoryRepository accountHistoryRepository;
     private final PositionRepository positionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public void processExecution(ExecutionEventDto event) {
@@ -88,6 +91,9 @@ public class ExecutionLedgerService {
         } else {
             processSell(event, account, order, quantity);
         }
+
+        // 8. 실시간 알림 전송 (트랜잭션 커밋 후 발송)
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), event));
     }
 
     @Transactional
@@ -127,6 +133,9 @@ public class ExecutionLedgerService {
                     .orElseThrow(() -> new CustomException(ErrorCode.POSITION_NOT_FOUND));
             position.unlockQuantity(remainingQuantity);
         }
+
+        // 실시간 알림 전송 (트랜잭션 커밋 후 발송)
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), event));
     }
 
     private void processCancel(ExecutionEventDto event, Order order) {
@@ -164,6 +173,9 @@ public class ExecutionLedgerService {
                     .orElseThrow(() -> new CustomException(ErrorCode.POSITION_NOT_FOUND));
             position.unlockQuantity(remainingQuantity);
         }
+
+        // 실시간 알림 전송 (트랜잭션 커밋 후 발송)
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), event));
     }
 
     private void processBuy(ExecutionEventDto event, Account account, Order order, int quantity) {
