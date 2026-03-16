@@ -20,6 +20,7 @@ export default defineConfig({
       '/ws/v1/stocks': {
         target: 'http://localhost:8080',
         ws: true,
+        changeOrigin: true,
       },
     },
   },

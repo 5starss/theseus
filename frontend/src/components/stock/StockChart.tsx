@@ -33,16 +33,27 @@ const toLocalISOString = (date: Date) => {
 const processCandleData = (history: any[]): { candles: ExtendedCandle[], volumes: HistogramData<Time>[] } => {
     if (!history || !Array.isArray(history)) return { candles: [], volumes: [] };
 
-    const cleaned = history
-        .filter(d => d && d.timestamp && isFinite(Number(d.open)) && isFinite(Number(d.high)) && isFinite(Number(d.low)) && isFinite(Number(d.close)))
-        .map(d => ({
-            time: (new Date(d.timestamp).getTime() / 1000) as Time,
-            open: Number(d.open),
-            high: Number(d.high),
-            low: Number(d.low),
-            close: Number(d.close),
-            volume: Number(d.volume || 0),
-        }))
+    const cleaned: ExtendedCandle[] = history
+        .map(d => {
+            if (!d || !d.timestamp) return null;
+            const t = new Date(d.timestamp).getTime();
+            if (!isFinite(t)) return null;
+
+            const candle: ExtendedCandle = {
+                time: (t / 1000) as Time,
+                open: Number(d.open),
+                high: Number(d.high),
+                low: Number(d.low),
+                close: Number(d.close),
+                volume: Number(d.volume || 0),
+            };
+            return candle;
+        })
+        .filter((d): d is ExtendedCandle =>
+            d !== null &&
+            isFinite(d.open) && isFinite(d.high) &&
+            isFinite(d.low) && isFinite(d.close)
+        )
         .sort((a, b) => (a.time as number) - (b.time as number));
 
     const uniqueCandles: ExtendedCandle[] = [];
@@ -50,12 +61,14 @@ const processCandleData = (history: any[]): { candles: ExtendedCandle[], volumes
 
     for (const item of cleaned) {
         const volumeColor = item.close >= item.open ? "#fb2c36" : "#2b7fff";
-        if (uniqueCandles.length === 0 || (item.time as number) > (uniqueCandles[uniqueCandles.length - 1].time as number)) {
+        const lastIdx = uniqueCandles.length - 1;
+
+        if (uniqueCandles.length === 0 || (item.time as number) > (uniqueCandles[lastIdx].time as number)) {
             uniqueCandles.push({ ...item });
-            uniqueVolumes.push({ time: item.time, value: item.volume, color: volumeColor });
-        } else if ((item.time as number) === (uniqueCandles[uniqueCandles.length - 1].time as number)) {
-            uniqueCandles[uniqueCandles.length - 1] = { ...item };
-            uniqueVolumes[uniqueVolumes.length - 1] = { time: item.time, value: item.volume, color: volumeColor };
+            uniqueVolumes.push({ time: item.time, value: item.volume ?? 0, color: volumeColor });
+        } else if ((item.time as number) === (uniqueCandles[lastIdx].time as number)) {
+            uniqueCandles[lastIdx] = { ...item };
+            uniqueVolumes[lastIdx] = { time: item.time, value: item.volume ?? 0, color: volumeColor };
         }
     }
     return { candles: uniqueCandles, volumes: uniqueVolumes };
@@ -214,13 +227,23 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
 
         // 2-1. 크로스헤어 동기화(가격차트 -> 거래량차트)
         priceChart.subscribeCrosshairMove((param) => {
-            if (param.time) volumeChart.setCrosshairPosition(0, param.time, volumeSeries);
-            else volumeChart.clearCrosshairPosition();
+            if (param.time && volumeSeries) {
+                try {
+                    volumeChart.setCrosshairPosition(0, param.time, volumeSeries);
+                } catch (e) { /* ignore sync error */ }
+            } else {
+                volumeChart.clearCrosshairPosition();
+            }
         });
         // 2-2. 크로스헤어 동기화(거래량차트 -> 가격차트)
         volumeChart.subscribeCrosshairMove((param) => {
-            if (param.time) priceChart.setCrosshairPosition(0, param.time, candlestickSeries);
-            else priceChart.clearCrosshairPosition();
+            if (param.time && candlestickSeries) {
+                try {
+                    priceChart.setCrosshairPosition(0, param.time, candlestickSeries);
+                } catch (e) { /* ignore sync error */ }
+            } else {
+                priceChart.clearCrosshairPosition();
+            }
         });
 
         // 3. 레이블 노출 제어 (DOM 이벤트를 통한 안정화)

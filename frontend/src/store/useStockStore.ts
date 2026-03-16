@@ -146,35 +146,47 @@ export const useStockStore = create<StockState>((set, get) => ({
         if (!rawData) return;
         const code = get().stockCode;
 
-        try {
-            const data = JSON.parse(rawData.toString());
+        // 백엔드에서 여러 메시지를 \n으로 묶어 보낼 수 있으므로 분리해서 처리
+        const lines = rawData.toString().split('\n');
 
-            if (data.topic === "TICK" && data.data && data.data.ticker === code) {
-                const tickData = data.data;
-                let newPrevClose = get().prevClose;
-                if (newPrevClose === 0 && tickData.change_rate) {
-                    newPrevClose = Math.round(tickData.price / (1 + (tickData.change_rate / 100)));
+        for (const line of lines) {
+            if (!line.trim()) continue;
+
+            try {
+                const data = JSON.parse(line);
+
+                if (data.topic === "TICK" && data.data && data.data.ticker === code) {
+                    const tickData = data.data;
+
+                    if (!isFinite(tickData.price)) continue;
+
+                    let newPrevClose = get().prevClose;
+                    if (newPrevClose === 0 && isFinite(tickData.change_rate) && tickData.change_rate !== -100) {
+                        newPrevClose = Math.round(tickData.price / (1 + (tickData.change_rate / 100)));
+                    }
+
+                    if (!isFinite(newPrevClose)) newPrevClose = get().prevClose;
+
+                    set({
+                        stockName: get().stockName === '-' && tickData.name ? tickData.name : get().stockName,
+                        currentPrice: tickData.price,
+                        prevClose: newPrevClose,
+                        priceChange: isFinite(newPrevClose) && newPrevClose > 0 ? tickData.price - newPrevClose : (tickData.price - get().prevClose || 0),
+                        changeRate: isFinite(tickData.change_rate) ? tickData.change_rate : (isFinite(newPrevClose) && newPrevClose > 0 ? ((tickData.price - newPrevClose) / newPrevClose) * 100 : 0)
+                    });
+
+                } else if (data.topic === "ORDERBOOK" && data.data && data.data.ticker === code) {
+                    const obData = data.data;
+                    set({
+                        askPrice: obData.askPrice1,
+                        askVolume: obData.askVolume1,
+                        bidPrice: obData.bidPrice1,
+                        bidVolume: obData.bidVolume1,
+                    });
                 }
-
-                set({
-                    stockName: get().stockName === '-' && tickData.name ? tickData.name : get().stockName,
-                    currentPrice: tickData.price,
-                    prevClose: newPrevClose,
-                    priceChange: newPrevClose > 0 ? tickData.price - newPrevClose : (tickData.price - get().prevClose || 0),
-                    changeRate: tickData.change_rate !== undefined ? tickData.change_rate : (newPrevClose > 0 ? ((tickData.price - newPrevClose) / newPrevClose) * 100 : 0)
-                });
-
-            } else if (data.topic === "ORDERBOOK" && data.data && data.data.ticker === code) {
-                const obData = data.data;
-                set({
-                    askPrice: obData.askPrice1,
-                    askVolume: obData.askVolume1,
-                    bidPrice: obData.bidPrice1,
-                    bidVolume: obData.bidVolume1,
-                });
+            } catch (err) {
+                console.error("Failed to parse stock websocket segment", err, line);
             }
-        } catch (e) {
-            console.error("Failed to parse stock websocket segment", e);
         }
     },
 
@@ -183,40 +195,35 @@ export const useStockStore = create<StockState>((set, get) => ({
         set({ stockCode: code });
         console.log(`Starting Dashboard Stream via Singleton [${code}]...`);
 
-        // 1. 초기 데이터 스냅샷 로딩
-        stockApi.getTickSnapshot(code).then(tickData => {
+        // 1. 초기 데이터 스냅샷 로딩 (시세 + 호가 병렬 호출)
+        Promise.all([
+            stockApi.getTickSnapshot(code),
+            stockApi.getOrderbook(code)
+        ]).then(([tickData, obData]) => {
+            const newState: Partial<StockState> = {};
+
             if (tickData) {
                 const cp = tickData.currentPrice;
                 const cr = tickData.changeRate;
                 const pc = Math.round(cp / (1 + (cr / 100)));
 
-                set({
-                    stockName: tickData.name,
-                    currentPrice: cp,
-                    prevClose: pc,
-                    priceChange: cp - pc,
-                    changeRate: cr
-                });
-            } else {
-                // Snapshot 실패 시 Orderbook API로 핸들링 (기존 로직 유지 가능)
-                stockApi.getOrderbook(code).then(obData => {
-                    if (obData) {
-                        const cp = obData.currentPrice;
-                        const cr = obData.changeRate;
-                        const pc = Math.round(cp / (1 + (cr / 100)));
-                        set({
-                            stockName: obData.name,
-                            currentPrice: cp,
-                            prevClose: pc,
-                            priceChange: cp - pc,
-                            changeRate: cr,
-                            askPrice: obData.askPrice1,
-                            askVolume: obData.askVolume1,
-                            bidPrice: obData.bidPrice1,
-                            bidVolume: obData.bidVolume1,
-                        });
-                    }
-                });
+                newState.stockName = tickData.name;
+                newState.currentPrice = cp;
+                newState.prevClose = pc;
+                newState.priceChange = cp - pc;
+                newState.changeRate = cr;
+            }
+
+            if (obData) {
+                newState.askPrice = obData.askPrice1;
+                newState.askVolume = obData.askVolume1;
+                newState.bidPrice = obData.bidPrice1;
+                newState.bidVolume = obData.bidVolume1;
+                if (!newState.stockName) newState.stockName = obData.name;
+            }
+
+            if (Object.keys(newState).length > 0) {
+                set(newState);
             }
         }).catch(err => console.error("Snapshot error", err));
 
