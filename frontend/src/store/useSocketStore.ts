@@ -20,7 +20,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         const token = useAuthStore.getState().token;
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         // 호스트 주소가 실시간 서버와 다른 경우 등 환경에 맞게 조정 필요
-        const wsUrl = `${wsProtocol}//${window.location.host}/v1/stocks/ws${token ? `?token=${token}` : ''}`;
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/v1/stocks${token ? `?token=${token}` : ''}`;
 
         console.log('Attempting to connect to Global WebSocket singleton...');
         const ws = new WebSocket(wsUrl);
