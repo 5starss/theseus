@@ -9,6 +9,7 @@ services:
     environment:
       - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=prod
+      - AUTH_CORS_ALLOWED_ORIGINS=${AUTH_CORS_ALLOWED_ORIGINS}
     ports:
       - "8080:8080"
     networks:
@@ -24,6 +25,7 @@ services:
     environment:
       - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=prod
+      - AUTH_CORS_ALLOWED_ORIGINS=${AUTH_CORS_ALLOWED_ORIGINS}
     ports:
       - "8081:8081"
     networks:

@@ -11,7 +11,7 @@ spring:
       globalcors:
         cors-configurations:
           '[/**]':
-            allowedOrigins: "*" 
+            allowedOrigins: ${AUTH_CORS_ALLOWED_ORIGINS:http://localhost:5173}
             allowedMethods:
               - GET
               - POST
@@ -20,6 +20,7 @@ spring:
               - PATCH
               - OPTIONS
             allowedHeaders: "*"
+            allowCredentials: true
 
 springdoc:
   swagger-ui:
