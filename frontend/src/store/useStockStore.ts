@@ -10,6 +10,7 @@ interface StockState {
     currentPrice: number;
     priceChange: number;
     changeRate: number;
+    lastTickVolume: number; // 마지막 체결 거래량
 
     askPrice: number;
     askVolume: number;
@@ -82,6 +83,7 @@ export const useStockStore = create<StockState>((set, get) => ({
     prevClose: 0,
     priceChange: 0,
     changeRate: 0,
+    lastTickVolume: 0,
 
     askPrice: 0,
     askVolume: 0,
@@ -100,6 +102,7 @@ export const useStockStore = create<StockState>((set, get) => ({
             prevClose: 0,
             priceChange: 0,
             changeRate: 0,
+            lastTickVolume: 0,
             askPrice: 0,
             askVolume: 0,
             bidPrice: 0,
@@ -172,7 +175,8 @@ export const useStockStore = create<StockState>((set, get) => ({
                         currentPrice: tickData.price,
                         prevClose: newPrevClose,
                         priceChange: isFinite(newPrevClose) && newPrevClose > 0 ? tickData.price - newPrevClose : (tickData.price - get().prevClose || 0),
-                        changeRate: isFinite(tickData.change_rate) ? tickData.change_rate : (isFinite(newPrevClose) && newPrevClose > 0 ? ((tickData.price - newPrevClose) / newPrevClose) * 100 : 0)
+                        changeRate: isFinite(tickData.change_rate) ? tickData.change_rate : (isFinite(newPrevClose) && newPrevClose > 0 ? ((tickData.price - newPrevClose) / newPrevClose) * 100 : 0),
+                        lastTickVolume: tickData.trade_vol || 0
                     });
 
                 } else if (data.topic === "ORDERBOOK" && data.data && data.data.ticker === code) {

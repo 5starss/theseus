@@ -39,13 +39,19 @@ const processCandleData = (history: any[]): { candles: ExtendedCandle[], volumes
             const t = new Date(d.timestamp).getTime();
             if (!isFinite(t)) return null;
 
+            // 정수형 유닉스 타임스탬프 보장
+            const timeNum = Math.floor(t / 1000);
+
+            // 백엔드 도메인 모델(Candle.volume, TickSnapshotResponse.tradeVolume) 대응
+            const volumeVal = Number(d.volume || d.tradeVolume || 0);
+
             const candle: ExtendedCandle = {
-                time: (t / 1000) as Time,
+                time: timeNum as Time,
                 open: Number(d.open),
                 high: Number(d.high),
                 low: Number(d.low),
                 close: Number(d.close),
-                volume: Number(d.volume || 0),
+                volume: volumeVal,
             };
             return candle;
         })
@@ -347,6 +353,11 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
                     if (isIntraday) timeScale.setVisibleLogicalRange({ from: Math.max(0, initialCandles.length - 100), to: initialCandles.length });
                     else timeScale.fitContent();
                 }
+                if (volumeChartRef.current) {
+                    const timeScale = volumeChartRef.current.timeScale();
+                    if (isIntraday) timeScale.setVisibleLogicalRange({ from: Math.max(0, initialCandles.length - 100), to: initialCandles.length });
+                    else timeScale.fitContent();
+                }
             }
         })();
         return () => { isMounted = false; };
@@ -377,7 +388,13 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
     useEffect(() => {
         const sub = useStockStore.subscribe((state, prev) => {
             const price = state.currentPrice;
-            if (price === prev.currentPrice || !isFinite(price) || !lastCandleRef.current || !candlestickSeriesRef.current) return;
+            const tickVolume = state.lastTickVolume;
+
+            // 가격 변동이 없더라도 거래량이 발생했다면 업데이트 진행
+            const hasPriceChanged = price !== prev.currentPrice;
+            const hasVolumeChanged = tickVolume > 0 && state.lastTickVolume !== prev.lastTickVolume;
+
+            if ((!hasPriceChanged && !hasVolumeChanged) || !isFinite(price) || !lastCandleRef.current || !candlestickSeriesRef.current) return;
 
             const candlePeriod = { '1m': 60, '1h': 3600, '1d': 86400, '1w': 604800 }[timeframe] || 60;
             const currentBucketTimeNum = Math.floor(Date.now() / 1000 / candlePeriod) * candlePeriod;
@@ -386,16 +403,35 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
 
             let updated: ExtendedCandle;
             if (currentBucketTimeNum > lastTimeSec) {
-                updated = { time: currentBucketTimeNum as Time, open: lastCandleRef.current.close, high: Math.max(lastCandleRef.current.close, price), low: Math.min(lastCandleRef.current.close, price), close: price, volume: 0 };
+                // 새로운 캔들 시작
+                updated = {
+                    time: currentBucketTimeNum as Time,
+                    open: lastCandleRef.current.close,
+                    high: Math.max(lastCandleRef.current.close, price),
+                    low: Math.min(lastCandleRef.current.close, price),
+                    close: price,
+                    volume: tickVolume
+                };
             } else {
-                updated = { ...lastCandleRef.current, high: Math.max(lastCandleRef.current.high, price), low: Math.min(lastCandleRef.current.low, price), close: price };
+                // 기존 캔들 업데이트 (거래량 누적)
+                updated = {
+                    ...lastCandleRef.current,
+                    high: Math.max(lastCandleRef.current.high, price),
+                    low: Math.min(lastCandleRef.current.low, price),
+                    close: price,
+                    volume: (lastCandleRef.current.volume || 0) + tickVolume
+                };
             }
 
             lastCandleRef.current = updated;
             candlestickSeriesRef.current.update(updated);
             if (volumeSeriesRef.current) {
                 const prevClose = updated.time === (lastTimeSec as any) ? (candlesRef.current.slice(-2)[0]?.close || updated.open) : lastCandleRef.current.close;
-                volumeSeriesRef.current.update({ time: updated.time, value: updated.volume || 0, color: updated.close >= prevClose ? "#fb2c36" : "#2b7fff" });
+                volumeSeriesRef.current.update({
+                    time: updated.time,
+                    value: updated.volume || 0,
+                    color: updated.close >= prevClose ? "#fb2c36" : "#2b7fff"
+                });
             }
 
             const curCandles = [...candlesRef.current];
@@ -414,7 +450,15 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
     }, [timeframe]);
 
     return (
-        <div className="w-full h-full flex flex-col bg-white">
+        <div className="w-full h-full flex flex-col bg-white relative">
+            {/* MA Legend Overlay */}
+            <div className="absolute top-2 left-2 z-10 flex items-center gap-2 bg-white/80 backdrop-blur-sm px-2 py-1 rounded-md border border-slate-100 shadow-sm pointer-events-none">
+                <span className="text-[10px] font-bold text-slate-500">이동평균선</span>
+                <span className="text-[10px] font-bold" style={{ color: '#10b981' }}>5</span>
+                <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>20</span>
+                <span className="text-[10px] font-bold" style={{ color: '#8b5cf6' }}>60</span>
+            </div>
+
             <div ref={priceContainerRef} className="flex-grow min-h-[50%]" />
             <div className="h-[1px] bg-gray-200 w-full" />
             <div ref={volumeContainerRef} className="h-32 min-h-[128px]" />
