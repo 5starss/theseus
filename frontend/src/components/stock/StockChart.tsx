@@ -13,7 +13,6 @@ import {
     type LineData,
     type HistogramData,
     type Time,
-    type LogicalRange,
 } from "lightweight-charts";
 import { useStockStore } from "../../store/useStockStore";
 import { stockApi } from "../../api/stock";
@@ -102,7 +101,7 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
 
     useEffect(() => { candlesRef.current = candles; }, [candles]);
 
-    // 초기화 가드
+    //     // 초기화 가드
     useEffect(() => {
         setCandles([]);
         hasHitLimit.current = false;
@@ -244,9 +243,9 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
         volumeSeriesRef.current = volumeSeries;
 
         // ──────────────── 페이징 ────────────────
-        // 1. 페이징 로직(가격차트) 
+        // 1. 페이징 로직(가격차트)
         priceChart.timeScale().subscribeVisibleTimeRangeChange(async () => {
-            // 1-1. 로딩 중이거나 최대치에 도달했으면 리턴
+            // 1-1. 로딩 중이거나 최�?치에 ?�달?�으�?리턴
             if (hasHitLimit.current || isLoadingMore.current) return;
 
             // 1-2. 현재 시각 범위 가져오기
@@ -399,3 +398,4 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
         </div>
     );
 });
+
