@@ -6,7 +6,7 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 KST = timezone(timedelta(hours=9))
@@ -35,11 +35,15 @@ class JudgeAgent:
     """News/Quant 카드를 종합해 실행 가능한 주문 카드를 생성합니다."""
 
     def __init__(self):
-        api_key = os.getenv("UPSTAGE_API_KEY")
+        api_key = os.getenv("GMS_API_KEY")
         if not api_key:
-            raise ValueError("UPSTAGE_API_KEY가 설정되어 있지 않습니다.")
+            raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
-        self.llm = ChatUpstage(model="solar-1-mini-chat")
+        self.llm = ChatOpenAI(
+            model="gpt-5-nano",
+            openai_api_key=api_key,
+            openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
+        )
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -89,4 +93,12 @@ class JudgeAgent:
             "take_profit_price": int(max(0, int(float(risk.get("take_profit_price", 0))))),
         }
         card["verdict"] = str(card.get("verdict") or "")
+
+        # 허용된 스키마 키만 남기고 나머지 top-level 키 제거
+        allowed_keys = {
+            "$schema", "ticker", "timestamp", "final_stance", "final_score",
+            "order", "risk_management", "verdict"
+        }
+        card = {k: v for k, v in card.items() if k in allowed_keys}
+
         return card

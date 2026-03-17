@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
@@ -16,11 +16,15 @@ class NewsReporterAgent:
     """검색된 뉴스/커뮤니티 문서를 바탕으로 최종 분석 답변을 생성합니다."""
 
     def __init__(self):
-        api_key = os.getenv("UPSTAGE_API_KEY")
+        api_key = os.getenv("GMS_API_KEY")
         if not api_key:
-            raise ValueError("UPSTAGE_API_KEY가 설정되어 있지 않습니다.")
+            raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
-        self.llm = ChatUpstage(model="solar-1-mini-chat")
+        self.llm = ChatOpenAI(
+            model="gpt-4.1-nano",
+            openai_api_key=api_key,
+            openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
+        )
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -81,16 +85,28 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         )
         self.card_chain = self.card_prompt | self.llm | StrOutputParser()
 
-    def generate_response(
-        self,
-        question: str,
-        news_docs: List[Document],
-        community_docs: Optional[List[Document]] = None,
-    ) -> str:
-        if not news_docs and not community_docs:
-            return "관련 정보를 찾지 못해 분석을 생성할 수 없습니다."
+    @staticmethod
+    def _build_empty_analysis_card(ticker: str, reason: str, risk_flag: str) -> Dict[str, Any]:
+        return {
+            "$schema": "analysis_card_v1",
+            "agent": "news",
+            "ticker": ticker,
+            "timestamp": datetime.now().isoformat(),
+            "stance": "hold",
+            "confidence": 0.0,
+            "score": 0,
+            "signal_breakdown": {"disclosure_signal": 0, "news_signal": 0, "community_signal": 0},
+            "top_reasons": [reason],
+            "risk_flags": [risk_flag],
+            "requested_action": {"preference": "hold", "avoid_if": "unknown"},
+        }
 
-        context_parts = []
+    @staticmethod
+    def _build_response_context(
+        news_docs: List[Document],
+        community_docs: List[Document],
+    ) -> str:
+        context_parts: List[str] = []
         if news_docs:
             news_lines = [
                 f"[{i+1}] (발행: {doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
@@ -102,13 +118,55 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
             comm_lines = [f"[{chr(65+i)}] {doc.page_content}" for i, doc in enumerate(community_docs)]
             context_parts.append("💬 [커뮤니티 여론 - 신뢰도 0.2, 투자자 심리 참고용]\n" + "\n".join(comm_lines))
 
-        context = "\n\n".join(context_parts)
+        return "\n\n".join(context_parts)
+
+    @staticmethod
+    def _build_card_context(
+        news_docs: List[Document],
+        community_docs: List[Document],
+    ) -> str:
+        context_parts: List[str] = []
+        if news_docs:
+            context_parts.append(
+                "\n".join(
+                    f"[N{i+1}] ({doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
+                    for i, doc in enumerate(news_docs)
+                )
+            )
+        if community_docs:
+            context_parts.append(
+                "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
+            )
+        return "\n\n".join(context_parts)
+
+    @staticmethod
+    def _normalize_card_payload(card: Dict[str, Any], ticker: str) -> Dict[str, Any]:
+        card["$schema"] = "analysis_card_v1"
+        card["agent"] = "news"
+        card["ticker"] = ticker
+        card["timestamp"] = card.get("timestamp") or datetime.now().isoformat()
+        card["top_reasons"] = (card.get("top_reasons") or [])[:3]
+        card["risk_flags"] = card.get("risk_flags") or []
+        card["requested_action"] = card.get("requested_action") or {}
+        return card
+
+    def generate_response(
+        self,
+        question: str,
+        news_docs: List[Document],
+        community_docs: Optional[List[Document]] = None,
+    ) -> str:
+        normalized_community_docs = community_docs or []
+        if not news_docs and not normalized_community_docs:
+            return "관련 정보를 찾지 못해 분석을 생성할 수 없습니다."
+
+        context = self._build_response_context(news_docs, normalized_community_docs)
         response = self.chain.invoke({"context": context, "question": question})
 
         footer = "\n\n[참조 출처 리스트]\n"
         for i, doc in enumerate(news_docs or []):
             footer += f"[{i+1}] [뉴스] {doc.metadata.get('title', '')} ({doc.metadata.get('published_at', '시간 미상')})\n"
-        for i, doc in enumerate(community_docs or []):
+        for i, doc in enumerate(normalized_community_docs):
             footer += f"[{chr(65+i)}] [커뮤니티] {doc.page_content[:30]}...\n"
 
         return response + footer
@@ -124,33 +182,13 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         community_docs = community_docs or []
 
         if not news_docs and not community_docs:
-            return {
-                "$schema": "analysis_card_v1",
-                "agent": "news",
-                "ticker": ticker,
-                "timestamp": datetime.now().isoformat(),
-                "stance": "hold",
-                "confidence": 0.0,
-                "score": 0,
-                "signal_breakdown": {"disclosure_signal": 0, "news_signal": 0, "community_signal": 0},
-                "top_reasons": ["분석 가능한 뉴스/커뮤니티 데이터가 없습니다."],
-                "risk_flags": ["no_data"],
-                "requested_action": {"preference": "hold", "avoid_if": "unknown"},
-            }
+            return self._build_empty_analysis_card(
+                ticker=ticker,
+                reason="분석 가능한 뉴스/커뮤니티 데이터가 없습니다.",
+                risk_flag="no_data",
+            )
 
-        context_parts = []
-        if news_docs:
-            context_parts.append(
-                "\n".join(
-                    f"[N{i+1}] ({doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
-                    for i, doc in enumerate(news_docs)
-                )
-            )
-        if community_docs:
-            context_parts.append(
-                "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
-            )
-        context = "\n\n".join(context_parts)
+        context = self._build_card_context(news_docs, community_docs)
 
         try:
             raw = self.card_chain.invoke(
@@ -164,25 +202,10 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
             )
             card = json.loads(raw)
         except Exception:
-            card = {
-                "$schema": "analysis_card_v1",
-                "agent": "news",
-                "ticker": ticker,
-                "timestamp": datetime.now().isoformat(),
-                "stance": "hold",
-                "confidence": 0.0,
-                "score": 0,
-                "signal_breakdown": {"disclosure_signal": 0, "news_signal": 0, "community_signal": 0},
-                "top_reasons": ["뉴스 에이전트 분석 응답 파싱 실패"],
-                "risk_flags": ["agent_failure"],
-                "requested_action": {"preference": "hold", "avoid_if": "unknown"},
-            }
+            card = self._build_empty_analysis_card(
+                ticker=ticker,
+                reason="뉴스 에이전트 분석 응답 파싱 실패",
+                risk_flag="agent_failure",
+            )
 
-        card["$schema"] = "analysis_card_v1"
-        card["agent"] = "news"
-        card["ticker"] = ticker
-        card["timestamp"] = card.get("timestamp") or datetime.now().isoformat()
-        card["top_reasons"] = (card.get("top_reasons") or [])[:3]
-        card["risk_flags"] = card.get("risk_flags") or []
-        card["requested_action"] = card.get("requested_action") or {}
-        return card
+        return self._normalize_card_payload(card, ticker=ticker)

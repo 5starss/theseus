@@ -8,39 +8,47 @@ import pandas as pd
 from app.quant.backtest import recommend_parameters, run_parameter_optimization, run_walkforward_backtest
 from app.quant.feature_engineer import IntradayFeatureEngineer
 from app.quant.modeling import TimeSeriesModeler, load_model, save_model
+from app.quant.preparation import (
+    build_feature_df,
+    prepare_feature_df,
+    resolve_raw_path,
+    resolve_tickers,
+    save_feature_df,
+)
+from app.quant.quality import build_backtest_quality_flags
 from app.quant.sources import (
-    fetch_and_store_timeseries as quant_fetch_and_store_timeseries,
-    get_latest_feature_path as quant_get_latest_feature_path,
     get_latest_global_model_path as quant_get_latest_global_model_path,
     get_latest_model_path as quant_get_latest_model_path,
-    get_latest_raw_path as quant_get_latest_raw_path,
-    list_available_tickers as quant_list_available_tickers,
     load_raw_from_storage as quant_load_raw_from_storage,
 )
 from collector.storage import get_storage_dir
 
+def _timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-def resolve_tickers(tickers: Optional[str], data_dir: str) -> List[str]:
-    if tickers:
-        return [t.strip() for t in tickers.split(",") if t.strip()]
-    return quant_list_available_tickers(data_dir)
 
+def _write_json_artifact(path: str, payload: Dict[str, Any]) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 def extract_features_for_ticker(
     ticker: str,
     data_dir: str,
     run_fetch: bool,
     horizon_minutes: int,
+    feature_profile: str = "baseline",
+    recent_window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     storage_dir = get_storage_dir("quant")
-    raw_path = _resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
-    feat_df = IntradayFeatureEngineer(horizon_minutes=horizon_minutes).build(
-        quant_load_raw_from_storage(raw_path)
+    raw_path = resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
+    feat_df = build_feature_df(
+        raw_path=raw_path,
+        horizon_minutes=horizon_minutes,
+        feature_profile=feature_profile,
+        recent_window_days=recent_window_days,
     )
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    feat_path = os.path.join(storage_dir, f"feat_{ticker}_{stamp}.csv.gz")
-    feat_df.to_csv(feat_path, index=False, compression="gzip")
-
+    stamp = _timestamp()
+    feat_path = _save_feature_df(storage_dir=storage_dir, ticker=ticker, feat_df=feat_df)
     meta_path = os.path.join(storage_dir, f"feature_extract_{ticker}_{stamp}.json")
     payload = {
         "ticker": ticker,
@@ -50,9 +58,10 @@ def extract_features_for_ticker(
         "horizon_minutes": horizon_minutes,
         "feature_rows": int(len(feat_df)),
         "feature_columns": list(feat_df.columns),
+        "feature_profile": feature_profile,
+        "recent_window_days": recent_window_days,
     }
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    _write_json_artifact(meta_path, payload)
 
     return {
         "storage_dir": storage_dir,
@@ -72,20 +81,23 @@ def train_for_ticker(
     run_feature_extract: bool,
     horizon_minutes: int,
     model_type: str,
+    feature_profile: str = "baseline",
+    recent_window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     storage_dir = get_storage_dir("quant")
-    raw_path, feat_path, feat_df = _prepare_feature_df(
+    raw_path, feat_path, feat_df = prepare_feature_df(
         ticker=ticker,
         data_dir=data_dir,
         run_fetch=run_fetch,
         run_feature_extract=run_feature_extract,
         horizon_minutes=horizon_minutes,
+        feature_profile=feature_profile,
+        recent_window_days=recent_window_days,
     )
-    modeler = TimeSeriesModeler(model_type=model_type)
+    modeler = TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile)
     artifact = modeler.train(feat_df)
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = os.path.join(storage_dir, f"model_{ticker}_{stamp}.json")
+    model_path = os.path.join(storage_dir, f"model_{ticker}_{_timestamp()}.json")
     save_model(model_path, artifact)
 
     return {
@@ -97,6 +109,7 @@ def train_for_ticker(
         "feature_count": len(artifact.feature_names),
         "feature_names": artifact.feature_names,
         "threshold": artifact.threshold,
+        "feature_profile": feature_profile,
     }
 
 
@@ -107,29 +120,32 @@ def train_global_model(
     run_feature_extract: bool,
     horizon_minutes: int,
     model_type: str,
+    feature_profile: str = "baseline",
+    recent_window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     """여러 종목의 데이터를 통합(Panel)하여 글로벌 공통 모델을 학습합니다."""
     storage_dir = get_storage_dir("quant")
     all_feats = []
     
     for ticker in tickers:
-        _, _, feat_df = _prepare_feature_df(
+        _, _, feat_df = prepare_feature_df(
             ticker=ticker,
             data_dir=data_dir,
             run_fetch=run_fetch,
             run_feature_extract=run_feature_extract,
             horizon_minutes=horizon_minutes,
+            feature_profile=feature_profile,
+            recent_window_days=recent_window_days,
         )
         feat_df["ticker"] = ticker
         all_feats.append(feat_df)
     
     panel_df = pd.concat(all_feats, ignore_index=True).sort_values("ts").reset_index(drop=True)
     
-    modeler = TimeSeriesModeler(model_type=model_type)
+    modeler = TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile)
     artifact = modeler.train(panel_df)
     
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_path = os.path.join(storage_dir, f"model_global_{stamp}.json")
+    model_path = os.path.join(storage_dir, f"model_global_{_timestamp()}.json")
     save_model(model_path, artifact)
     
     return {
@@ -140,6 +156,7 @@ def train_global_model(
         "feature_count": len(artifact.feature_names),
         "rows_total": len(panel_df),
         "artifact": artifact,
+        "feature_profile": feature_profile,
     }
 
 
@@ -162,26 +179,29 @@ def run_adaptive_winrate_for_ticker(
     test_rows: int,
     step_rows: int,
     horizon_minutes: int,
+    feature_profile: str = "baseline",
+    recent_window_days: Optional[int] = None,
     global_artifact: Optional[Any] = None,
     global_model_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     storage_dir = get_storage_dir("quant")
-    raw_path, feat_path, feat_df = _prepare_feature_df(
+    raw_path, feat_path, feat_df = prepare_feature_df(
         ticker=ticker,
         data_dir=data_dir,
         run_fetch=run_fetch,
         run_feature_extract=run_feature_extract,
         horizon_minutes=horizon_minutes,
+        feature_profile=feature_profile,
+        recent_window_days=recent_window_days,
     )
 
     pretrained_artifact = global_artifact
     model_path = global_model_path if global_model_path else None
     
     if run_train and not pretrained_artifact:
-        modeler = TimeSeriesModeler(model_type=model_type)
+        modeler = TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile)
         artifact = modeler.train(feat_df)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_path = os.path.join(storage_dir, f"model_{ticker}_{stamp}.json")
+        model_path = os.path.join(storage_dir, f"model_{ticker}_{_timestamp()}.json")
         save_model(model_path, artifact)
         pretrained_artifact = artifact
     elif not pretrained_artifact and use_pretrained:
@@ -196,6 +216,7 @@ def run_adaptive_winrate_for_ticker(
     opt_df = run_parameter_optimization(
         feat_df=feat_df,
         model_type=model_type,
+        feature_profile=feature_profile,
         train_rows=train_rows,
         test_rows=test_rows,
         step_rows=step_rows,
@@ -208,6 +229,7 @@ def run_adaptive_winrate_for_ticker(
     bt_result = run_walkforward_backtest(
         feat_df=feat_df,
         model_type=model_type,
+        feature_profile=feature_profile,
         train_rows=train_rows,
         test_rows=test_rows,
         step_rows=step_rows,
@@ -218,39 +240,34 @@ def run_adaptive_winrate_for_ticker(
         pretrained_artifact=artifact_for_eval,
     )
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stamp = _timestamp()
     optimal_path = os.path.join(storage_dir, f"optimal_params_{ticker}_{stamp}.json")
     opt_detail_path = os.path.join(storage_dir, f"optimization_results_{ticker}_{stamp}.csv")
     bt_summary_path = os.path.join(storage_dir, f"backtest_{ticker}_{stamp}.json")
     bt_detail_path = os.path.join(storage_dir, f"backtest_detail_{ticker}_{stamp}.csv")
 
-    with open(optimal_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "ticker": ticker,
-                "generated_at": datetime.now().isoformat(),
-                "best_params": rec["best_params"],
-                "top5": rec["top5"],
-                "recommendation_reason": rec["recommendation_reason"],
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+    _write_json_artifact(
+        optimal_path,
+        {
+            "ticker": ticker,
+            "generated_at": datetime.now().isoformat(),
+            "best_params": rec["best_params"],
+            "top5": rec["top5"],
+            "recommendation_reason": rec["recommendation_reason"],
+        },
+    )
     opt_df.to_csv(opt_detail_path, index=False)
-    with open(bt_summary_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {"ticker": ticker, "summary": bt_result.summary, "folds": bt_result.folds},
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+    _write_json_artifact(
+        bt_summary_path,
+        {"ticker": ticker, "summary": bt_result.summary, "folds": bt_result.folds},
+    )
     bt_result.detail.to_csv(bt_detail_path, index=False)
 
     s = bt_result.summary
     quality = build_backtest_quality_flags(s)
     return {
         "ticker": ticker,
+        "model_type": model_type,
         "raw_path": raw_path,
         "feature_path": feat_path,
         "model_path": model_path,
@@ -267,99 +284,247 @@ def run_adaptive_winrate_for_ticker(
         "reliability_reasons": quality["reasons"],
         "confidence_band": quality["confidence_band"],
         "is_reliable_for_llm": quality["is_reliable_for_llm"],
+        "feature_profile": feature_profile,
     }
 
 
-def build_backtest_quality_flags(summary: Dict[str, Any]) -> Dict[str, Any]:
-    trade_count = int(summary.get("trade_count", 0))
-    sharpe = float(summary.get("sharpe", 0.0))
-    dir_acc = float(summary.get("directional_accuracy_all", 0.0))
-    dir_base = float(summary.get("directional_baseline_all", 0.0))
-    exposure = float(summary.get("exposure", 0.0))
-
-    flags: List[str] = []
-    if trade_count < 100:
-        flags.append("LOW_SAMPLE_SIZE")
-    if sharpe > 8.0:
-        flags.append("EXTREME_SHARPE")
-    if not (0.0 <= dir_acc <= 1.0 and 0.0 <= dir_base <= 1.0):
-        flags.append("DIRECTION_METRIC_OUT_OF_RANGE")
-    if dir_acc < dir_base:
-        flags.append("DIRECTION_UNDER_BASELINE")
-        if (dir_base - dir_acc) > 0.10:
-            flags.append("DIRECTION_SIGNIFICANTLY_UNDER_BASELINE")
-    if abs(dir_acc - dir_base) > 0.35:
-        flags.append("DIRECTION_GAP_TOO_LARGE")
-    if exposure < 0.02:
-        flags.append("LOW_EXPOSURE")
-
-    if "LOW_SAMPLE_SIZE" in flags or "DIRECTION_METRIC_OUT_OF_RANGE" in flags:
-        confidence_band = "low"
-    elif "EXTREME_SHARPE" in flags or "DIRECTION_GAP_TOO_LARGE" in flags:
-        confidence_band = "medium"
-    else:
-        confidence_band = "high"
-
-    reason_map = {
-        "LOW_SAMPLE_SIZE": f"거래 표본 수 부족(trade_count={trade_count})",
-        "EXTREME_SHARPE": f"샤프 비정상적으로 높음(sharpe={sharpe:.2f})",
-        "DIRECTION_METRIC_OUT_OF_RANGE": "방향성 지표 범위 이상",
-        "DIRECTION_UNDER_BASELINE": f"방향성 정확도가 기준선 미달(acc={dir_acc:.3f}, base={dir_base:.3f})",
-        "DIRECTION_SIGNIFICANTLY_UNDER_BASELINE": f"방향성 정확도 기준선 대비 큰 열위(gap={dir_base - dir_acc:.3f})",
-        "DIRECTION_GAP_TOO_LARGE": f"방향성 지표 편차 과다(gap={abs(dir_acc - dir_base):.3f})",
-        "LOW_EXPOSURE": f"노출도 부족(exposure={exposure:.4f})",
-    }
-    reasons = [reason_map[f] for f in flags if f in reason_map]
-
-    hard_unreliable_flags = {
-        "LOW_SAMPLE_SIZE",
-        "DIRECTION_METRIC_OUT_OF_RANGE",
-        "DIRECTION_SIGNIFICANTLY_UNDER_BASELINE",
-        "LOW_EXPOSURE",
-    }
-    is_reliable_for_llm = (confidence_band != "low") and not any(
-        f in hard_unreliable_flags for f in flags
-    )
-
-    return {
-        "flags": flags,
-        "reasons": reasons,
-        "confidence_band": confidence_band,
-        "is_reliable_for_llm": is_reliable_for_llm,
-    }
-
-
-def _resolve_raw_path(ticker: str, data_dir: str, run_fetch: bool) -> str:
-    if run_fetch:
-        return quant_fetch_and_store_timeseries(ticker=ticker, data_dir=data_dir)
-    try:
-        return quant_get_latest_raw_path(ticker)
-    except FileNotFoundError:
-        return quant_fetch_and_store_timeseries(ticker=ticker, data_dir=data_dir)
-
-
-def _prepare_feature_df(
+def compare_model_performance_for_ticker(
     ticker: str,
     data_dir: str,
     run_fetch: bool,
-    run_feature_extract: bool,
     horizon_minutes: int,
-) -> tuple[str, str, pd.DataFrame]:
+    model_type: str,
+    dynamic_hold: bool,
+    train_rows: int,
+    test_rows: int,
+    step_rows: int,
+) -> Dict[str, Any]:
     storage_dir = get_storage_dir("quant")
-    raw_path = _resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
+    raw_path = resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
+    raw_df = quant_load_raw_from_storage(raw_path)
 
-    if run_feature_extract:
-        feat_df = IntradayFeatureEngineer(horizon_minutes=horizon_minutes).build(
-            quant_load_raw_from_storage(raw_path)
+    variant_specs = [
+        {
+            "name": "baseline_current",
+            "feature_profile": "baseline",
+            "recent_window_days": None,
+        },
+        {
+            "name": "baseline_recent_1y",
+            "feature_profile": "baseline",
+            "recent_window_days": 365,
+        },
+        {
+            "name": "mtf_recent_1y",
+            "feature_profile": "mtf",
+            "recent_window_days": 365,
+        },
+        {
+            "name": "enhanced_recent_1y",
+            "feature_profile": "enhanced",
+            "recent_window_days": 365,
+        },
+    ]
+
+    results: List[Dict[str, Any]] = []
+    for spec in variant_specs:
+        feat_df = IntradayFeatureEngineer(
+            horizon_minutes=horizon_minutes,
+            feature_profile=spec["feature_profile"],
+            recent_window_days=spec["recent_window_days"],
+        ).build(raw_df)
+        opt_df = run_parameter_optimization(
+            feat_df=feat_df,
+            model_type=model_type,
+            feature_profile=spec["feature_profile"],
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+            dynamic_hold=dynamic_hold,
         )
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        feat_path = os.path.join(storage_dir, f"feat_{ticker}_{stamp}.csv.gz")
-        feat_df.to_csv(feat_path, index=False, compression="gzip")
-    else:
-        feat_path = quant_get_latest_feature_path(ticker)
-        feat_df = pd.read_csv(feat_path)
-        if "ts" in feat_df.columns:
-            feat_df["ts"] = pd.to_datetime(feat_df["ts"], errors="coerce")
-            feat_df = feat_df.dropna(subset=["ts"]).reset_index(drop=True)
+        rec = recommend_parameters(opt_df)
+        best = rec["best_params"]
+        bt = run_walkforward_backtest(
+            feat_df=feat_df,
+            model_type=model_type,
+            feature_profile=spec["feature_profile"],
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+            cost_bps=float(best["cost_bps"]),
+            hold_bars=int(best["hold_bars"]),
+            threshold_override=float(best["threshold"]),
+            dynamic_hold=dynamic_hold,
+        )
+        summary = dict(bt.summary)
+        summary["variant"] = spec["name"]
+        summary["feature_profile"] = spec["feature_profile"]
+        summary["recent_window_days"] = spec["recent_window_days"]
+        summary["best_params"] = best
+        results.append(summary)
 
-    return raw_path, feat_path, feat_df
+    baseline = next((r for r in results if r["variant"] == "baseline_current"), None)
+    baseline_recent = next((r for r in results if r["variant"] == "baseline_recent_1y"), None)
+    deltas: List[Dict[str, Any]] = []
+    for row in results:
+        delta_row = {"variant": row["variant"]}
+        if baseline is not None:
+            delta_row.update(
+                {
+                    "delta_sharpe_vs_baseline_current": float(row.get("sharpe", 0.0) - baseline.get("sharpe", 0.0)),
+                    "delta_cum_return_vs_baseline_current": float(row.get("cum_return", 0.0) - baseline.get("cum_return", 0.0)),
+                    "delta_win_rate_vs_baseline_current": float(row.get("win_rate", 0.0) - baseline.get("win_rate", 0.0)),
+                    "delta_dir_acc_vs_baseline_current": float(row.get("directional_accuracy_all", 0.0) - baseline.get("directional_accuracy_all", 0.0)),
+                    "delta_max_drawdown_vs_baseline_current": float(row.get("max_drawdown", 0.0) - baseline.get("max_drawdown", 0.0)),
+                }
+            )
+        if baseline_recent is not None:
+            delta_row.update(
+                {
+                    "delta_sharpe_vs_baseline_recent_1y": float(row.get("sharpe", 0.0) - baseline_recent.get("sharpe", 0.0)),
+                    "delta_cum_return_vs_baseline_recent_1y": float(row.get("cum_return", 0.0) - baseline_recent.get("cum_return", 0.0)),
+                    "delta_win_rate_vs_baseline_recent_1y": float(row.get("win_rate", 0.0) - baseline_recent.get("win_rate", 0.0)),
+                    "delta_dir_acc_vs_baseline_recent_1y": float(row.get("directional_accuracy_all", 0.0) - baseline_recent.get("directional_accuracy_all", 0.0)),
+                    "delta_max_drawdown_vs_baseline_recent_1y": float(row.get("max_drawdown", 0.0) - baseline_recent.get("max_drawdown", 0.0)),
+                }
+            )
+        deltas.append(delta_row)
+
+    stamp = _timestamp()
+    report_path = os.path.join(storage_dir, f"performance_compare_{ticker}_{stamp}.json")
+    _write_json_artifact(
+        report_path,
+        {
+            "ticker": ticker,
+            "generated_at": datetime.now().isoformat(),
+            "raw_path": raw_path,
+            "model_type": model_type,
+            "dynamic_hold": dynamic_hold,
+            "train_rows": train_rows,
+            "test_rows": test_rows,
+            "step_rows": step_rows,
+            "variants": results,
+            "deltas": deltas,
+        },
+    )
+
+    recent_results = [r for r in results if r.get("recent_window_days") == 365]
+    best_variant = max(results, key=lambda x: (float(x.get("sharpe", 0.0)), float(x.get("cum_return", 0.0))))
+    best_recent_variant = max(recent_results, key=lambda x: (float(x.get("sharpe", 0.0)), float(x.get("cum_return", 0.0)))) if recent_results else best_variant
+    return {
+        "ticker": ticker,
+        "raw_path": raw_path,
+        "report_path": report_path,
+        "variants": results,
+        "deltas": deltas,
+        "best_variant": best_variant["variant"],
+        "best_recent_variant": best_recent_variant["variant"],
+    }
+
+
+def compare_model_performance_for_universe(
+    tickers: List[str],
+    data_dir: str,
+    run_fetch: bool,
+    horizon_minutes: int,
+    model_type: str,
+    dynamic_hold: bool,
+    train_rows: int,
+    test_rows: int,
+    step_rows: int,
+) -> Dict[str, Any]:
+    storage_dir = get_storage_dir("quant")
+    reports: List[Dict[str, Any]] = []
+    failures: List[Dict[str, str]] = []
+
+    for ticker in tickers:
+        try:
+            reports.append(
+                compare_model_performance_for_ticker(
+                    ticker=ticker,
+                    data_dir=data_dir,
+                    run_fetch=run_fetch,
+                    horizon_minutes=horizon_minutes,
+                    model_type=model_type,
+                    dynamic_hold=dynamic_hold,
+                    train_rows=train_rows,
+                    test_rows=test_rows,
+                    step_rows=step_rows,
+                )
+            )
+        except Exception as exc:
+            failures.append({"ticker": ticker, "error": str(exc)})
+
+    aggregate_rows: List[Dict[str, Any]] = []
+    variant_names = sorted({v["variant"] for report in reports for v in report["variants"]})
+    for variant_name in variant_names:
+        variant_metrics = []
+        for report in reports:
+            found = next((v for v in report["variants"] if v["variant"] == variant_name), None)
+            if found is not None:
+                variant_metrics.append(found)
+        if not variant_metrics:
+            continue
+        aggregate_rows.append(
+            {
+                "variant": variant_name,
+                "ticker_count": len(variant_metrics),
+                "avg_sharpe": float(sum(v.get("sharpe", 0.0) for v in variant_metrics) / len(variant_metrics)),
+                "avg_cum_return": float(sum(v.get("cum_return", 0.0) for v in variant_metrics) / len(variant_metrics)),
+                "avg_win_rate": float(sum(v.get("win_rate", 0.0) for v in variant_metrics) / len(variant_metrics)),
+                "avg_max_drawdown": float(sum(v.get("max_drawdown", 0.0) for v in variant_metrics) / len(variant_metrics)),
+            }
+        )
+
+    delta_rows: List[Dict[str, Any]] = []
+    delta_variant_names = sorted({d["variant"] for report in reports for d in report["deltas"]})
+    for variant_name in delta_variant_names:
+        variant_deltas = []
+        for report in reports:
+            found = next((d for d in report["deltas"] if d["variant"] == variant_name), None)
+            if found is not None:
+                variant_deltas.append(found)
+        if not variant_deltas:
+            continue
+        keys = [k for k in variant_deltas[0].keys() if k != "variant"]
+        row: Dict[str, Any] = {"variant": variant_name, "ticker_count": len(variant_deltas)}
+        for key in keys:
+            row[f"avg_{key}"] = float(sum(d.get(key, 0.0) for d in variant_deltas) / len(variant_deltas))
+        delta_rows.append(row)
+
+    best_recent_counts: Dict[str, int] = {}
+    for report in reports:
+        key = report["best_recent_variant"]
+        best_recent_counts[key] = best_recent_counts.get(key, 0) + 1
+
+    stamp = _timestamp()
+    report_path = os.path.join(storage_dir, f"performance_compare_universe_{stamp}.json")
+    _write_json_artifact(
+        report_path,
+        {
+            "tickers": tickers,
+            "generated_at": datetime.now().isoformat(),
+            "model_type": model_type,
+            "dynamic_hold": dynamic_hold,
+            "train_rows": train_rows,
+            "test_rows": test_rows,
+            "step_rows": step_rows,
+            "reports": reports,
+            "aggregate_variants": aggregate_rows,
+            "aggregate_deltas": delta_rows,
+            "best_recent_variant_counts": best_recent_counts,
+            "failures": failures,
+        },
+    )
+
+    return {
+        "tickers_total": len(tickers),
+        "success_count": len(reports),
+        "failure_count": len(failures),
+        "report_path": report_path,
+        "aggregate_variants": aggregate_rows,
+        "aggregate_deltas": delta_rows,
+        "best_recent_variant_counts": best_recent_counts,
+        "failures": failures,
+    }
+

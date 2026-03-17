@@ -4,21 +4,25 @@ import time
 from typing import List
 
 from dotenv import load_dotenv
-from langchain_upstage import UpstageEmbeddings
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 
 class UpstageEmbedder:
-    """Upstage 임베딩 래퍼."""
+    """GMS 임베딩 래퍼."""
 
     def __init__(self):
-        api_key = os.getenv("UPSTAGE_API_KEY")
+        api_key = os.getenv("GMS_API_KEY")
         if not api_key:
-            raise ValueError("UPSTAGE_API_KEY가 설정되어 있지 않습니다.")
+            raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
-        self.embeddings = UpstageEmbeddings(model="solar-embedding-1-large")
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-large",
+            openai_api_key=api_key,
+            openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
+        )
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         start_ts = time.perf_counter()

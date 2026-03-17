@@ -1,30 +1,18 @@
 import logging
+import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import RobustScaler
 
 from app.quant.modeling import LinearModelArtifact, TimeSeriesModeler
 
-# Optional ML libraries
-try:
-    from lightgbm import LGBMRegressor
-except ImportError:
-    LGBMRegressor = None
-
-try:
-    from xgboost import XGBRegressor
-except ImportError:
-    XGBRegressor = None
-
-try:
-    from catboost import CatBoostRegressor
-except ImportError:
-    CatBoostRegressor = None
-
 logger = logging.getLogger(__name__)
+
+
+def _fast_optimization_mode() -> bool:
+    return os.getenv("QUANT_FAST_OPTIMIZATION", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 # --- Data Structures ---
@@ -128,133 +116,25 @@ def _calc_metrics(
     }
 
 
-# --- Model Fitting Helpers ---
-
-def _predict_safe(model: Any, x: np.ndarray, feature_cols: List[str]) -> np.ndarray:
-    """
-    sklearn 래퍼 모델의 feature name 기대치와 입력 포맷을 맞춰 경고를 방지합니다.
-    """
-    try:
-        names_in = getattr(model, "feature_names_in_", None)
-        if names_in is not None and len(names_in) == x.shape[1]:
-            return model.predict(pd.DataFrame(x, columns=list(names_in)))
-    except Exception:
-        pass
-    return model.predict(x)
-
-
 def _fit_predict_fold_model(
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
     feature_cols: List[str],
     model_type: str,
+    feature_profile: str,
     cost_bps: float = 1.0,
     pretrained_artifact: Optional[LinearModelArtifact] = None,
 ) -> Tuple[np.ndarray, float]:
     """한 폴드(Train/Test 셋)에 대해 모델을 학습하고 예측값을 반환합니다."""
-    
-    def optimize_threshold_profitability(y_true: np.ndarray, y_pred: np.ndarray, cost_bps_local: float) -> float:
-        """훈련 데이터에서 거래 비용을 제외한 수익을 최대로 하는 임계값을 탐색합니다."""
-        cand = np.linspace(0.0, float(np.std(y_pred)) if np.std(y_pred) > 0 else 0.001, 40)
-        best_t = 0.0
-        best_profit = -np.inf
-        cost = 2.0 * (cost_bps_local / 10000.0)
-        for t in cand:
-            signal = np.where(y_pred > t, 1, np.where(y_pred < -t, -1, 0))
-            mask = signal != 0
-            if not np.any(mask): continue
-            profit = float(np.sum(signal[mask] * y_true[mask]) - (np.sum(mask) * cost))
-            if profit > best_profit:
-                best_profit = profit
-                best_t = float(t)
-        return best_t
 
-    scaler = RobustScaler()
-    x_train_raw = train_df[feature_cols].astype(float).to_numpy()
-    y_train = train_df["target_return"].astype(float).to_numpy()
-    x_test_raw = test_df[feature_cols].astype(float).to_numpy()
-
-    # --- Pretrained Model Use ---
-    if pretrained_artifact is not None and pretrained_artifact._runtime_models:
-        if pretrained_artifact.scaler_center and pretrained_artifact.scaler_scale:
-            center = np.array(pretrained_artifact.scaler_center, dtype=float)
-            scale = np.array(pretrained_artifact.scaler_scale, dtype=float)
-            safe_scale = np.where(np.abs(scale) > 1e-12, scale, 1.0)
-            x_train = (x_train_raw - center) / safe_scale
-            x_test = (x_test_raw - center) / safe_scale
-        else:
-            scaler.fit(x_train_raw)
-            x_train = scaler.transform(x_train_raw)
-            x_test = scaler.transform(x_test_raw)
-
-        weights = pretrained_artifact.ensemble_weights or {k: 1.0/len(pretrained_artifact._runtime_models) for k in pretrained_artifact._runtime_models}
-        pred = np.zeros(x_test.shape[0], dtype=float)
-        pred_train = np.zeros(x_train.shape[0], dtype=float)
-        for name, model in pretrained_artifact._runtime_models.items():
-            w = weights.get(name, 0.0)
-            p_test = _predict_safe(model, x_test, feature_cols)
-            p_train = _predict_safe(model, x_train, feature_cols)
-            pred += w * p_test
-            pred_train += w * p_train
-        
-        threshold = optimize_threshold_profitability(y_train, pred_train, cost_bps)
-        return pred, threshold
-
-    # --- Fold-specific Training ---
-    scaler.fit(x_train_raw)
-    x_train = scaler.transform(x_train_raw)
-    x_test = scaler.transform(x_test_raw)
-
-    if model_type == "linear":
-        x_train_aug = np.hstack([x_train, np.ones((x_train.shape[0], 1))])
-        coeffs_aug, *_ = np.linalg.lstsq(x_train_aug, y_train, rcond=None)
-        coeffs, intercept = coeffs_aug[:-1], float(coeffs_aug[-1])
-        pred = x_test @ coeffs + intercept
-        pred_train = x_train @ coeffs + intercept
-        threshold = optimize_threshold_profitability(y_train, pred_train, cost_bps)
-        return pred, threshold
-
-    # Ensemble Training
-    preds, tr_preds = {}, {}
-    # LightGBM
-    if LGBMRegressor is not None:
-        lgbm = LGBMRegressor(n_estimators=250, learning_rate=0.03, verbose=-1, random_state=42)
-        lgbm.fit(x_train, y_train)
-        preds["lightgbm"] = _predict_safe(lgbm, x_test, feature_cols)
-        tr_preds["lightgbm"] = _predict_safe(lgbm, x_train, feature_cols)
-    # XGBoost
-    if XGBRegressor is not None:
-        xgb = XGBRegressor(n_estimators=300, learning_rate=0.03, verbosity=0, random_state=42)
-        xgb.fit(x_train, y_train)
-        preds["xgboost"] = _predict_safe(xgb, x_test, feature_cols)
-        tr_preds["xgboost"] = _predict_safe(xgb, x_train, feature_cols)
-    # CatBoost
-    if CatBoostRegressor is not None:
-        cat = CatBoostRegressor(iterations=350, learning_rate=0.03, verbose=False, random_seed=42)
-        cat.fit(x_train, y_train)
-        preds["catboost"] = _predict_safe(cat, x_test, feature_cols)
-        tr_preds["catboost"] = _predict_safe(cat, x_train, feature_cols)
-
-    if not preds: # Fallback to linear
-        x_train_aug = np.hstack([x_train, np.ones((x_train.shape[0], 1))])
-        coeffs_aug, *_ = np.linalg.lstsq(x_train_aug, y_train, rcond=None)
-        pred = x_test @ coeffs_aug[:-1] + coeffs_aug[-1]
-        threshold = optimize_threshold_profitability(y_train, x_train @ coeffs_aug[:-1] + coeffs_aug[-1], cost_bps)
-        return pred, threshold
-
-    # Simple Ensemble Weights based on Train Accuracy
-    up_ratio = float(np.mean(y_train > 0))
-    baseline = max(up_ratio, 1.0 - up_ratio)
-    raw_scores = {}
-    for name, p in tr_preds.items():
-        dir_acc = float(np.mean(np.sign(p) == np.sign(y_train)))
-        raw_scores[name] = max(1e-6, 0.7*dir_acc + 0.3*max(dir_acc - baseline, 0))
-    
-    score_sum = sum(raw_scores.values())
-    pred = sum((raw_scores[name]/score_sum) * p for name, p in preds.items())
-    pred_train = sum((raw_scores[name]/score_sum) * p for name, p in tr_preds.items())
-    threshold = optimize_threshold_profitability(y_train, pred_train, cost_bps)
-    return pred, threshold
+    modeler = TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile)
+    return modeler.fit_predict_for_split(
+        train_df=train_df,
+        test_df=test_df,
+        feature_cols=feature_cols,
+        cost_bps=cost_bps,
+        pretrained_artifact=pretrained_artifact,
+    )
 
 
 # --- Iterative Backtest & Grid Logic ---
@@ -381,6 +261,7 @@ def run_walkforward_backtest(
     feat_df: pd.DataFrame,
     feature_cols: Optional[List[str]] = None,
     model_type: str = "ensemble",
+    feature_profile: str = "baseline",
     train_rows: int = 80_000,
     test_rows: int = 2_000,
     step_rows: int = 2_000,
@@ -393,8 +274,8 @@ def run_walkforward_backtest(
     """워크포워드(Rolling window) 방식의 백테스트를 수행합니다."""
     if feat_df.empty: raise ValueError("데이터가 없습니다.")
     
-    modeler = TimeSeriesModeler()
-    feature_cols = feature_cols or [c for c in modeler.DEFAULT_FEATURES if c in feat_df.columns]
+    modeler = TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile)
+    feature_cols = feature_cols or modeler.get_feature_columns(feat_df)
     
     cost_rate = cost_bps / 10_000.0
     periods_per_year = max(1, int((252 * 390) / max(1, hold_bars)))
@@ -406,7 +287,7 @@ def run_walkforward_backtest(
         train_df = feat_df.iloc[start : start + train_rows].copy()
         test_df = feat_df.iloc[start + train_rows : start + train_rows + test_rows].copy()
 
-        pred, threshold = _fit_predict_fold_model(train_df, test_df, feature_cols, model_type, cost_bps, pretrained_artifact)
+        pred, threshold = _fit_predict_fold_model(train_df, test_df, feature_cols, model_type, feature_profile, cost_bps, pretrained_artifact)
         if threshold_override is not None: threshold = float(threshold_override)
         
         out = test_df[["ts", "close", "target_return"]].copy().reset_index(drop=True)
@@ -456,7 +337,7 @@ def run_walkforward_backtest(
     all_signals = pd.concat(signal_frames, ignore_index=True)
     summary_bh = float(np.prod([1.0 + r for r in bh_returns]) - 1.0)
     summary = _calc_metrics(all_signals, detail[detail["is_trade"] == 1], periods_per_year, buy_hold_return=summary_bh)
-    summary.update({"fold_count": len(folds), "train_rows": train_rows, "test_rows": test_rows, "step_rows": step_rows, "cost_bps": cost_bps, "hold_bars": hold_bars, "dynamic_hold": int(dynamic_hold), "model_type": model_type})
+    summary.update({"fold_count": len(folds), "train_rows": train_rows, "test_rows": test_rows, "step_rows": step_rows, "cost_bps": cost_bps, "hold_bars": hold_bars, "dynamic_hold": int(dynamic_hold), "model_type": model_type, "feature_profile": feature_profile})
     
     return BacktestResult(summary=summary, folds=folds, detail=detail)
 
@@ -474,6 +355,7 @@ def run_parameter_optimization(
     feat_df: pd.DataFrame,
     feature_cols: Optional[List[str]] = None,
     model_type: str = "ensemble",
+    feature_profile: str = "baseline",
     train_rows: int = 80_000,
     test_rows: int = 2_000,
     step_rows: int = 2_000,
@@ -481,11 +363,16 @@ def run_parameter_optimization(
     pretrained_artifact: Optional[LinearModelArtifact] = None,
 ) -> pd.DataFrame:
     """그리드 서치를 통해 최적의 거래 파라미터를 탐색합니다."""
-    vol_multiplier_grid = np.array([0.15, 0.25, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0], dtype=float)
-    hold_bars_grid = [2, 3, 5, 7, 10, 15]
-    cost_bps_grid = [0.8, 1.0, 1.5, 2.0, 2.5, 3.0]
+    if _fast_optimization_mode():
+        vol_multiplier_grid = np.array([0.25, 0.6, 1.0], dtype=float)
+        hold_bars_grid = [5, 10]
+        cost_bps_grid = [0.8, 1.5]
+    else:
+        vol_multiplier_grid = np.array([0.15, 0.25, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0], dtype=float)
+        hold_bars_grid = [2, 3, 5, 7, 10, 15]
+        cost_bps_grid = [0.8, 1.0, 1.5, 2.0, 2.5, 3.0]
 
-    feature_cols = feature_cols or [c for c in TimeSeriesModeler().DEFAULT_FEATURES if c in feat_df.columns]
+    feature_cols = feature_cols or TimeSeriesModeler(model_type=model_type, feature_profile=feature_profile).get_feature_columns(feat_df)
     
     # 1. Fold Cache 준비 (모델 학습 1회)
     fold_cache = []
@@ -493,7 +380,7 @@ def run_parameter_optimization(
     while start + train_rows + test_rows <= n:
         train_df = feat_df.iloc[start : start + train_rows]
         test_df = feat_df.iloc[start + train_rows : start + train_rows + test_rows]
-        pred, _ = _fit_predict_fold_model(train_df, test_df, feature_cols, model_type, 1.0, pretrained_artifact)
+        pred, _ = _fit_predict_fold_model(train_df, test_df, feature_cols, model_type, feature_profile, 1.0, pretrained_artifact)
         
         target = test_df["target_return"].to_numpy()
         close = test_df["close"].to_numpy()
