@@ -9,7 +9,7 @@ export function StockHeader() {
     const plusSign = isPositive ? '+' : '';
 
     return (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center flex-wrap gap-4 lg:gap-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-8">
             <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shrink-0">
                     {stockName ? stockName.charAt(0) : 'S'}
@@ -20,7 +20,7 @@ export function StockHeader() {
                 </div>
             </div>
 
-            <div className="w-px h-8 bg-slate-200 hidden sm:block"></div>
+            <div className="w-px h-8 bg-slate-200 block"></div>
 
             <div className="flex flex-col">
                 <div className="flex items-baseline gap-2">
