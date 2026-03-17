@@ -49,6 +49,7 @@ class RebuttalAgent:
 2) quant_rebuttal: News 카드의 약점/모순 1문장
 3) 각 문장은 최대 25 토큰
 4) 공격적 표현 금지, 근거 기반만
+5) 반드시 한국어로 작성
 """,
                 ),
                 (

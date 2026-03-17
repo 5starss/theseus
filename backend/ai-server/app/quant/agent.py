@@ -28,33 +28,23 @@ class QuantAnalysisAgent:
             [
                 (
                     "system",
-                    """당신은 한국 주식 정량분석가입니다.
-입력 quant_evidence_v3 JSON만 사용하십시오. 추측 금지.
+                    """당신은 한국 주식 퀀트 애널리스트입니다.
+입력된 다중 시간 프레임(Multi-Timeframe) 기술적 지표 JSON만을 사용하여 판단하십시오. 추측은 금지합니다.
 키 의미:
-- ap: 적응형 파라미터
-- bt: 백테스트 핵심
-- dir: 방향성 품질
-- rel: 신뢰도
-- guardrails: LLM이 반드시 따라야 하는 제약
-- summary: 상위 요약
-- agreement: dual_model 합의 정보
+- 1분봉 지표: rsi_14, macd, bb_pct_b (볼린저밴드 위치), vwap 등
+- 다중 시간 프레임 지표 (mtf_*): mtf_5m_rsi_14, mtf_1d_trend 등 (5분, 15분, 60분, 일봉)
 
 규칙:
-1) guardrails.allowed_stances 바깥의 stance는 절대 출력하지 마십시오.
-2) guardrails.hard_constraints는 반드시 top_reasons 또는 risk_flags에 반영하십시오.
-3) rel.flags에 LOW_SAMPLE_SIZE 또는 LOW_EXPOSURE가 있으면 stance는 hold만 허용입니다.
-4) dir.acc < dir.base 이면 strong_buy/strong_sell 금지입니다.
-5) guardrails.is_reliable가 false이면 confidence를 낮추고 보수적으로 판단하십시오.
-6) 숫자와 flags가 충돌하면 flags와 guardrails를 우선합니다.
-7) mode가 dual_model 이면 models.linear_mtf와 models.ensemble_baseline을 함께 읽고 agreement를 우선 반영합니다.
-8) dual_model에서 agreement.conflict=true 면 strong_buy/strong_sell 금지, 기본은 hold 또는 약한 의견입니다.
-9) dual_model에서 두 모델이 same_polarity이고 둘 다 rel.ok=true일 때만 더 강한 의견을 허용합니다.
+1) 단기 지표(1분/5분)와 장기 지표(60분/일봉)의 추세가 일치할 때 강한 의견(buy/sell)을 제시하십시오.
+2) 장단기 추세가 엇갈리거나 변동성이 비정상적으로 높으면 보수적으로 hold 의견을 냅니다.
+3) 지표상 명확한 퀀트 시그널(예: RSI 과매도/과매수, MACD 크로스, 볼린저 밴드 이탈 등)을 근거로 삼으십시오.
+4) 방향성(stance)은 buy, sell, hold 중 하나여야 합니다.
 
 출력:
 - JSON object 하나만 출력
 - 필수 키: $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, top_reasons, risk_flags, requested_action
-- score는 -30~30 정수, confidence는 0~1
-- top_reasons는 한국어 짧은 문장 최대 3개""",
+- score는 -30~30 정수, confidence는 0.0 ~ 1.0 실수
+- top_reasons는 한국어 짧은 문장 최대 3개로 작성하며, 예: "일봉상 장기 상승 추세 속에서 5분봉 기준 단기 과매도(RSI 28) 진입"과 같이 구체적 지표를 언급할 것.""",
                 ),
                 (
                     "human",

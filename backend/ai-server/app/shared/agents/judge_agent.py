@@ -51,6 +51,8 @@ class JudgeAgent:
                     """당신은 한국 주식 매매 의사결정 에이전트(Judge)입니다.
 입력된 News/Quant 카드와 시장값만 사용하여 주문 결정을 생성하세요.
 반드시 JSON object 하나만 출력하세요.
+모든 설명 문자열은 한국어로 작성하세요.
+verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하세요.
 """,
                 ),
                 ("human", "[Input]\n{payload}"),
@@ -64,7 +66,7 @@ class JudgeAgent:
 
         card["$schema"] = "order_card_v1"
         card["ticker"] = str(card.get("ticker") or payload.get("ticker") or "000000")
-        card["timestamp"] = _to_kst_iso(card.get("timestamp"))
+        card["timestamp"] = _kst_now_iso()
         card["final_stance"] = str(card.get("final_stance") or "hold")
         card["final_score"] = int(max(-30, min(30, int(card.get("final_score", 0)))))
 
@@ -92,7 +94,11 @@ class JudgeAgent:
             "stop_loss_price": int(max(0, int(float(risk.get("stop_loss_price", 0))))),
             "take_profit_price": int(max(0, int(float(risk.get("take_profit_price", 0))))),
         }
-        card["verdict"] = str(card.get("verdict") or "")
+        card["verdict"] = str(card.get("verdict") or "").strip() or self._build_default_verdict(
+            final_stance=card["final_stance"],
+            final_score=card["final_score"],
+            action=card["order"]["action"],
+        )
 
         # 허용된 스키마 키만 남기고 나머지 top-level 키 제거
         allowed_keys = {
@@ -102,3 +108,13 @@ class JudgeAgent:
         card = {k: v for k, v in card.items() if k in allowed_keys}
 
         return card
+
+    @staticmethod
+    def _build_default_verdict(final_stance: str, final_score: int, action: str) -> str:
+        if action == "hold":
+            return f"뉴스와 퀀트 신호를 종합했을 때 확신이 부족해 관망이 적절합니다. (score={final_score})"
+        if action == "buy":
+            return f"뉴스와 퀀트 신호를 종합했을 때 매수 우위 판단입니다. (score={final_score})"
+        if action == "sell":
+            return f"뉴스와 퀀트 신호를 종합했을 때 매도 우위 판단입니다. (score={final_score})"
+        return f"종합 점수 기준 {final_stance} 판단입니다. (score={final_score})"
