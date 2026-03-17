@@ -6,7 +6,7 @@ from typing import Any, Dict
 from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
@@ -25,11 +25,15 @@ class RebuttalAgent:
     """News/Quant 카드 간 1회 반박 메시지를 생성합니다."""
 
     def __init__(self):
-        api_key = os.getenv("UPSTAGE_API_KEY")
+        api_key = os.getenv("GMS_API_KEY")
         if not api_key:
-            raise ValueError("UPSTAGE_API_KEY가 설정되어 있지 않습니다.")
+            raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
-        self.llm = ChatUpstage(model="solar-1-mini-chat")
+        self.llm = ChatOpenAI(
+            model="gpt-4.1-nano",
+            openai_api_key=api_key,
+            openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
+        )
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 (

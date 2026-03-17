@@ -3,7 +3,8 @@ from typing import Any, Dict, List
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_upstage import ChatUpstage
+from langchain_openai import ChatOpenAI
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,12 @@ class RAGEvaluator:
     """LLM-as-a-Judge 기반 RAG 답변 정량 평가기."""
 
     def __init__(self):
-        self.llm = ChatUpstage(model="solar-1-mini-chat")
+        api_key = os.getenv("GMS_API_KEY")
+        self.llm = ChatOpenAI(
+            model="gpt-5-nano",
+            openai_api_key=api_key,
+            openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
+        )
 
     def _robust_parse(self, result: Any) -> Dict[str, Any]:
         import json

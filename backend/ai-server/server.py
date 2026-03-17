@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +12,8 @@ from app.news.agent import NewsReporterAgent
 from app.news.eval import RAGEvaluator
 from app.quant.agent import QuantAnalysisAgent
 from app.quant.pipeline import (
+    compare_model_performance_for_universe,
+    compare_model_performance_for_ticker,
     extract_features_for_ticker,
     load_latest_global_model,
     resolve_tickers,
@@ -50,6 +53,14 @@ QUANT_ANALYZE_DEFAULTS: Dict[str, Any] = {
     "train_rows": 80000,
     "test_rows": 2000,
     "step_rows": 2000,
+}
+
+FAST_DEV_QUANT_DEFAULTS: Dict[str, Any] = {
+    "dynamic_hold": False,
+    "train_rows": 30000,
+    "test_rows": 1000,
+    "step_rows": 3000,
+    "use_llm_interpretation": False,
 }
 
 
@@ -173,6 +184,7 @@ def news_analysis_card(
                 "news_candidates": len(news_candidates),
                 "news_used": len(news_docs),
                 "community_used": len(community_docs),
+                "reranker_mode": "llm",
             },
             "generated_at": datetime.now().isoformat(),
         }
@@ -281,6 +293,13 @@ def quant_train_global(
     model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
 ) -> Dict[str, Any]:
     try:
+        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
+            fast_dev=fast_dev,
+            dynamic_hold=dynamic_hold,
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+        )
         ticker_list = resolve_tickers(tickers=tickers, data_dir=QUANT_DATA_DIR)
         if not ticker_list:
             raise ValueError("처리할 종목이 없습니다.")
@@ -361,14 +380,15 @@ def quant_adaptive_winrate(
                 if not train_global_if_missing:
                     raise ValueError("공통 모델이 없고 train_global_if_missing=false 입니다.")
                 logger.info("  [Global] %d종목 통합 공통 모델(Panel Model) 학습 시작...", len(ticker_list))
-                g_out = train_global_model(
-                    tickers=ticker_list,
-                    data_dir=QUANT_DATA_DIR,
-                    run_fetch=run_fetch,
-                    run_feature_extract=run_feature_extract,
-                    horizon_minutes=horizon_minutes,
-                    model_type=model_type,
-                )
+                with _quant_fast_optimization_context(enabled=fast_dev):
+                    g_out = train_global_model(
+                        tickers=ticker_list,
+                        data_dir=QUANT_DATA_DIR,
+                        run_fetch=run_fetch,
+                        run_feature_extract=run_feature_extract,
+                        horizon_minutes=horizon_minutes,
+                        model_type=model_type,
+                    )
                 global_artifact = g_out["artifact"]
                 global_model_path = g_out["model_path"]
                 global_training_info = {
@@ -382,24 +402,25 @@ def quant_adaptive_winrate(
 
         for ticker in ticker_list:
             try:
-                results.append(
-                    run_adaptive_winrate_for_ticker(
-                        ticker=ticker,
-                        data_dir=QUANT_DATA_DIR,
-                        run_fetch=run_fetch,
-                        run_feature_extract=run_feature_extract,
-                        run_train=run_train,
-                        use_pretrained=use_pretrained,
-                        model_type=model_type,
-                        dynamic_hold=dynamic_hold,
-                        train_rows=train_rows,
-                        test_rows=test_rows,
-                        step_rows=step_rows,
-                        horizon_minutes=horizon_minutes,
-                        global_artifact=global_artifact,
-                        global_model_path=global_model_path,
+                with _quant_fast_optimization_context(enabled=fast_dev):
+                    results.append(
+                        run_adaptive_winrate_for_ticker(
+                            ticker=ticker,
+                            data_dir=QUANT_DATA_DIR,
+                            run_fetch=run_fetch,
+                            run_feature_extract=run_feature_extract,
+                            run_train=run_train,
+                            use_pretrained=use_pretrained,
+                            model_type=model_type,
+                            dynamic_hold=dynamic_hold,
+                            train_rows=train_rows,
+                            test_rows=test_rows,
+                            step_rows=step_rows,
+                            horizon_minutes=horizon_minutes,
+                            global_artifact=global_artifact,
+                            global_model_path=global_model_path,
+                        )
                     )
-                )
             except Exception as ticker_exc:
                 logger.exception("Adaptive winrate 처리 실패: %s", ticker)
                 failures.append({"ticker": ticker, "error": str(ticker_exc)})
@@ -420,6 +441,91 @@ def quant_adaptive_winrate(
         raise HTTPException(status_code=500, detail=f"Quant adaptive winrate failed: {exc}") from exc
 
 
+@app.post("/v1/quant/compare-performance")
+def quant_compare_performance(
+    ticker: str = Query(..., pattern=TICKER_PATTERN),
+    run_fetch: bool = Query(False),
+    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
+    dynamic_hold: bool = Query(True),
+    train_rows: int = Query(80000, ge=1000),
+    test_rows: int = Query(2000, ge=200),
+    step_rows: int = Query(2000, ge=200),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
+) -> Dict[str, Any]:
+    try:
+        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
+            fast_dev=fast_dev,
+            dynamic_hold=dynamic_hold,
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+        )
+        with _quant_fast_optimization_context(enabled=fast_dev):
+            out = compare_model_performance_for_ticker(
+                ticker=ticker,
+                data_dir=QUANT_DATA_DIR,
+                run_fetch=run_fetch,
+                horizon_minutes=horizon_minutes,
+                model_type=model_type,
+                dynamic_hold=dynamic_hold,
+                train_rows=train_rows,
+                test_rows=test_rows,
+                step_rows=step_rows,
+            )
+        return {
+            "status": "ok",
+            "ticker": ticker,
+            "report_path": out["report_path"],
+            "best_variant": out["best_variant"],
+            "best_recent_variant": out["best_recent_variant"],
+            "variants": out["variants"],
+            "deltas": out["deltas"],
+        }
+    except Exception as exc:
+        logger.exception("Failed to compare quant performance for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Quant compare performance failed: {exc}") from exc
+
+
+@app.post("/v1/quant/compare-universe-performance")
+def quant_compare_universe_performance(
+    tickers: Optional[str] = Query(None, description="콤마 구분 종목코드. 미지정 시 data_dir 전체"),
+    run_fetch: bool = Query(False),
+    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
+    dynamic_hold: bool = Query(True),
+    train_rows: int = Query(80000, ge=1000),
+    test_rows: int = Query(2000, ge=200),
+    step_rows: int = Query(2000, ge=200),
+    horizon_minutes: int = Query(5, ge=1, le=120),
+    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
+) -> Dict[str, Any]:
+    try:
+        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
+            fast_dev=fast_dev,
+            dynamic_hold=dynamic_hold,
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+        )
+        ticker_list = resolve_tickers(tickers=tickers, data_dir=QUANT_DATA_DIR)
+        with _quant_fast_optimization_context(enabled=fast_dev):
+            out = compare_model_performance_for_universe(
+                tickers=ticker_list,
+                data_dir=QUANT_DATA_DIR,
+                run_fetch=run_fetch,
+                horizon_minutes=horizon_minutes,
+                model_type=model_type,
+                dynamic_hold=dynamic_hold,
+                train_rows=train_rows,
+                test_rows=test_rows,
+                step_rows=step_rows,
+            )
+        return {"status": "ok", **out}
+    except Exception as exc:
+        logger.exception("Failed to compare quant universe performance")
+        raise HTTPException(status_code=500, detail=f"Quant compare universe performance failed: {exc}") from exc
+
+
 @app.post("/v1/quant/analysis-card")
 def quant_analysis_card(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
@@ -430,7 +536,6 @@ def quant_analysis_card(
     use_panel_model: bool = Query(True),
     reuse_global_model: bool = Query(True),
     train_global_if_missing: bool = Query(True),
-    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
     dynamic_hold: bool = Query(True),
     train_rows: int = Query(80000, ge=1000),
     test_rows: int = Query(2000, ge=200),
@@ -438,12 +543,18 @@ def quant_analysis_card(
     horizon_minutes: int = Query(5, ge=1, le=120),
     use_llm_interpretation: bool = Query(True),
     debug: bool = Query(False, description="true면 quant_evidence/raw_result 포함"),
-    news_card_json: Optional[str] = Query(
-        None,
-        description="news analysis_card JSON 문자열(선택). 전달 시 quant LLM 해석에 함께 반영",
-    ),
+    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
 ) -> Dict[str, Any]:
     try:
+        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
+            fast_dev=fast_dev,
+            dynamic_hold=dynamic_hold,
+            train_rows=train_rows,
+            test_rows=test_rows,
+            step_rows=step_rows,
+        )
+        if fast_dev:
+            use_llm_interpretation = False
         global_artifact = None
         global_model_path: Optional[str] = None
         if use_panel_model:
@@ -459,47 +570,62 @@ def quant_analysis_card(
             if not reused:
                 if not train_global_if_missing:
                     raise ValueError("공통 모델이 없고 train_global_if_missing=false 입니다.")
-                g_out = train_global_model(
-                    tickers=resolve_tickers(tickers=None, data_dir=QUANT_DATA_DIR),
-                    data_dir=QUANT_DATA_DIR,
-                    run_fetch=run_fetch,
-                    run_feature_extract=run_feature_extract,
-                    horizon_minutes=horizon_minutes,
-                    model_type=model_type,
-                )
+                with _quant_fast_optimization_context(enabled=fast_dev):
+                    g_out = train_global_model(
+                        tickers=resolve_tickers(tickers=None, data_dir=QUANT_DATA_DIR),
+                        data_dir=QUANT_DATA_DIR,
+                        run_fetch=run_fetch,
+                        run_feature_extract=run_feature_extract,
+                        horizon_minutes=horizon_minutes,
+                        model_type="ensemble",
+                        feature_profile="baseline",
+                    )
                 global_artifact = g_out["artifact"]
                 global_model_path = g_out["model_path"]
 
-        result = run_adaptive_winrate_for_ticker(
-            ticker=ticker,
-            data_dir=QUANT_DATA_DIR,
-            run_fetch=run_fetch,
-            run_feature_extract=run_feature_extract,
-            run_train=run_train,
-            use_pretrained=use_pretrained,
-            model_type=model_type,
-            dynamic_hold=dynamic_hold,
-            train_rows=train_rows,
-            test_rows=test_rows,
-            step_rows=step_rows,
-            horizon_minutes=horizon_minutes,
-            global_artifact=global_artifact,
-            global_model_path=global_model_path,
-        )
+        with _quant_fast_optimization_context(enabled=fast_dev):
+            linear_result = run_adaptive_winrate_for_ticker(
+                ticker=ticker,
+                data_dir=QUANT_DATA_DIR,
+                run_fetch=run_fetch,
+                run_feature_extract=run_feature_extract,
+                run_train=run_train,
+                use_pretrained=False,
+                model_type="linear",
+                dynamic_hold=dynamic_hold,
+                train_rows=train_rows,
+                test_rows=test_rows,
+                step_rows=step_rows,
+                horizon_minutes=horizon_minutes,
+                feature_profile="mtf",
+                recent_window_days=365,
+            )
+            ensemble_result = run_adaptive_winrate_for_ticker(
+                ticker=ticker,
+                data_dir=QUANT_DATA_DIR,
+                run_fetch=run_fetch,
+                run_feature_extract=run_feature_extract,
+                run_train=run_train,
+                use_pretrained=use_pretrained,
+                model_type="ensemble",
+                dynamic_hold=dynamic_hold,
+                train_rows=train_rows,
+                test_rows=test_rows,
+                step_rows=step_rows,
+                horizon_minutes=horizon_minutes,
+                feature_profile="baseline",
+                recent_window_days=None,
+                global_artifact=global_artifact,
+                global_model_path=global_model_path,
+            )
+        result = _build_dual_quant_result(linear_result=linear_result, ensemble_result=ensemble_result)
         evidence = _build_quant_evidence(ticker=ticker, result=result)
         card = _build_quant_analysis_card(ticker=ticker, result=result)
         if use_llm_interpretation:
-            parsed_news: Optional[Dict[str, Any]] = None
-            if news_card_json:
-                try:
-                    parsed_news = json.loads(news_card_json)
-                except Exception:
-                    parsed_news = None
             try:
                 llm_card = QuantAnalysisAgent().generate_analysis_card(
                     ticker=ticker,
                     quant_evidence=evidence,
-                    news_card=parsed_news,
                 )
                 card = _apply_quant_card_guards(llm_card, result)
             except Exception:
@@ -517,11 +643,10 @@ def quant_analysis_card(
 @app.post("/v1/agents/quant/analyze")
 def agents_quant_analyze(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
-    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
     horizon_minutes: int = Query(5, ge=1, le=120),
     use_llm_interpretation: bool = Query(True),
     debug: bool = Query(False),
-    news_card_json: Optional[str] = Query(None),
+    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
 ) -> Dict[str, Any]:
     out = quant_analysis_card(
         ticker=ticker,
@@ -532,7 +657,6 @@ def agents_quant_analyze(
         use_panel_model=bool(QUANT_ANALYZE_DEFAULTS["use_panel_model"]),
         reuse_global_model=bool(QUANT_ANALYZE_DEFAULTS["reuse_global_model"]),
         train_global_if_missing=bool(QUANT_ANALYZE_DEFAULTS["train_global_if_missing"]),
-        model_type=model_type,
         dynamic_hold=bool(QUANT_ANALYZE_DEFAULTS["dynamic_hold"]),
         train_rows=int(QUANT_ANALYZE_DEFAULTS["train_rows"]),
         test_rows=int(QUANT_ANALYZE_DEFAULTS["test_rows"]),
@@ -540,7 +664,7 @@ def agents_quant_analyze(
         horizon_minutes=horizon_minutes,
         use_llm_interpretation=use_llm_interpretation,
         debug=debug,
-        news_card_json=news_card_json,
+        fast_dev=fast_dev,
     )
     meta = _build_quant_meta(out, debug=debug)
     normalized = _normalize_analysis_card(out.get("analysis_card", {}), agent="quant", ticker=ticker)
@@ -608,7 +732,6 @@ def agents_rebuttal_once(
 def agents_analyze_with_rebuttal(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
     query: str = Query(..., min_length=1),
-    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
     horizon_minutes: int = Query(5, ge=1, le=120),
     use_llm_interpretation: bool = Query(True),
     score_gap_threshold: int = Query(15, ge=1, le=60),
@@ -630,11 +753,9 @@ def agents_analyze_with_rebuttal(
 
         quant_out = agents_quant_analyze(
             ticker=ticker,
-            model_type=model_type,
             horizon_minutes=horizon_minutes,
             use_llm_interpretation=use_llm_interpretation,
             debug=debug,
-            news_card_json=json.dumps(news_card, ensure_ascii=False),
         )
         quant_card = quant_out.get("analysis_card", {})
 
@@ -696,7 +817,11 @@ def agents_judge_decide(
             logger.exception("Judge LLM failed, fallback to rule-based decision")
             order_card = _fallback_judge_order(input_payload)
 
-        return {"status": "ok", "order_card": order_card}
+        return {
+            "status": "ok",
+            "order_card": order_card,
+            "decision_summary": _summarize_order_card(order_card),
+        }
     except Exception as exc:
         logger.exception("Failed to run judge decision")
         raise HTTPException(status_code=500, detail=f"Judge decision failed: {exc}") from exc
@@ -744,12 +869,17 @@ def agents_full_decision(
             "rebuttal": rebuttal.get("rebuttal", {}),
         }
         judge_out = agents_judge_decide(judge_payload)
+        judge_core = {
+            "status": judge_out.get("status", "ok"),
+            "order_card": judge_out.get("order_card", {}),
+        }
 
         return {
             "status": "ok",
             "ticker": ticker,
             "analysis": analysis_out,
-            "judge": judge_out,
+            "judge": judge_core,
+            "decision_summary": judge_out.get("decision_summary", {}),
         }
     except Exception as exc:
         logger.exception("Failed to run full decision pipeline")
@@ -791,6 +921,7 @@ def _run_rag_chat_pipeline(
             "news_candidates": len(news_candidates),
             "news_used": len(news_docs),
             "community_used": len(community_docs),
+            "reranker_mode": "llm",
         },
         "answer": answer,
     }
@@ -818,7 +949,116 @@ def _score_to_stance(score: int) -> str:
     return "hold"
 
 
+def _result_signal_label(result: Dict[str, Any]) -> str:
+    win_rate = float(result.get("win_rate", 0.0))
+    dir_acc = float(result.get("directional_accuracy_all", 0.0))
+    dir_base = float(result.get("directional_baseline_all", 0.0))
+    if not result.get("is_reliable_for_llm", True):
+        return "NEUTRAL"
+    if win_rate >= 0.54 and dir_acc >= dir_base:
+        return "BULLISH"
+    if win_rate <= 0.46 and dir_acc >= dir_base:
+        return "BEARISH"
+    return "NEUTRAL"
+
+
+def _build_dual_quant_result(linear_result: Dict[str, Any], ensemble_result: Dict[str, Any]) -> Dict[str, Any]:
+    linear_signal = _result_signal_label(linear_result)
+    ensemble_signal = _result_signal_label(ensemble_result)
+    same_polarity = linear_signal == ensemble_signal and linear_signal != "NEUTRAL"
+    one_neutral = (
+        (linear_signal == "NEUTRAL" and ensemble_signal != "NEUTRAL")
+        or (ensemble_signal == "NEUTRAL" and linear_signal != "NEUTRAL")
+    )
+    conflict = (
+        linear_signal in {"BULLISH", "BEARISH"}
+        and ensemble_signal in {"BULLISH", "BEARISH"}
+        and linear_signal != ensemble_signal
+    )
+    linear_out = dict(linear_result)
+    ensemble_out = dict(ensemble_result)
+    linear_out["signal_label"] = linear_signal
+    ensemble_out["signal_label"] = ensemble_signal
+    return {
+        "ticker": linear_result.get("ticker") or ensemble_result.get("ticker"),
+        "models": {
+            "linear_mtf": linear_out,
+            "ensemble_baseline": ensemble_out,
+        },
+        "agreement": {
+            "linear_signal": linear_signal,
+            "ensemble_signal": ensemble_signal,
+            "same_polarity": same_polarity,
+            "one_neutral": one_neutral,
+            "conflict": conflict,
+            "both_reliable": bool(linear_result.get("is_reliable_for_llm", True) and ensemble_result.get("is_reliable_for_llm", True)),
+            "summary": (
+                "두 모델이 같은 방향을 가리킴" if same_polarity
+                else "한 모델만 방향성을 보이고 다른 모델은 중립" if one_neutral
+                else "두 모델의 방향성이 충돌함" if conflict
+                else "두 모델 모두 중립 또는 약한 신호"
+            ),
+        },
+    }
+
+
 def _build_quant_analysis_card(ticker: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    if "models" in result:
+        linear = result["models"].get("linear_mtf", {}) or {}
+        ensemble = result["models"].get("ensemble_baseline", {}) or {}
+        agreement = result.get("agreement", {}) or {}
+        linear_score = int(round((float(linear.get("win_rate", 0.0)) - 0.5) * 100))
+        ensemble_score = int(round((float(ensemble.get("win_rate", 0.0)) - 0.5) * 100))
+
+        if agreement.get("same_polarity"):
+            score = int(round(0.4 * linear_score + 0.6 * ensemble_score))
+            stance = _score_to_stance(score)
+            confidence = 0.72 if agreement.get("both_reliable") else 0.56
+        elif agreement.get("one_neutral"):
+            score = int(round(0.35 * linear_score + 0.65 * ensemble_score))
+            score = max(-8, min(8, score))
+            stance = _score_to_stance(score)
+            confidence = 0.48 if agreement.get("both_reliable") else 0.38
+        else:
+            score = 0
+            stance = "hold"
+            confidence = 0.3
+
+        reasons = [
+            f"linear_mtf {linear.get('signal_label', 'NEUTRAL')} / wr {float(linear.get('win_rate', 0.0)):.1%}",
+            f"ensemble_baseline {ensemble.get('signal_label', 'NEUTRAL')} / wr {float(ensemble.get('win_rate', 0.0)):.1%}",
+            agreement.get("summary") or "두 모델의 합의/충돌 여부를 함께 해석",
+        ]
+        risk_flags = list(dict.fromkeys((linear.get("quality_flags", []) or []) + (ensemble.get("quality_flags", []) or [])))
+        return {
+            "$schema": "analysis_card_v1",
+            "agent": "quant",
+            "ticker": ticker,
+            "timestamp": _kst_now_iso(),
+            "stance": stance,
+            "confidence": round(confidence, 2),
+            "score": max(-30, min(30, score)),
+            "signal_breakdown": {
+                "linear_signal": float(linear_score),
+                "ensemble_signal": float(ensemble_score),
+                "agreement_signal": 10.0 if agreement.get("same_polarity") else -10.0 if agreement.get("conflict") else 0.0,
+            },
+            "top_reasons": reasons[:3],
+            "risk_flags": risk_flags,
+            "requested_action": {
+                "preference": "dual_model_review",
+                "avoid_if": "model_conflict" if agreement.get("conflict") else "none",
+                "linear_profile": linear.get("feature_profile"),
+                "ensemble_profile": ensemble.get("feature_profile"),
+            },
+            "model_meta": {
+                "dual_model": True,
+                "agreement": agreement,
+                "linear_model_type": linear.get("model_type"),
+                "ensemble_model_type": ensemble.get("model_type"),
+            },
+        }
+
     win_rate = float(result.get("win_rate", 0.0))
     trade_count = int(result.get("trade_count", 0))
     sharpe = float(result.get("sharpe", 0.0))
@@ -914,40 +1154,185 @@ def _build_quant_analysis_card(ticker: str, result: Dict[str, Any]) -> Dict[str,
     }
 
 
-def _build_quant_evidence(ticker: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    best = result.get("best_params", {}) or {}
+def _round4(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return round(value, 4)
+    if isinstance(value, dict):
+        return {k: _round4(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_round4(v) for v in value]
+    return value
+
+
+def _build_quant_guardrails(result: Dict[str, Any]) -> Dict[str, Any]:
+    if "models" in result:
+        linear = result["models"].get("linear_mtf", {}) or {}
+        ensemble = result["models"].get("ensemble_baseline", {}) or {}
+        agreement = result.get("agreement", {}) or {}
+        combined_flags = list(dict.fromkeys((linear.get("quality_flags", []) or []) + (ensemble.get("quality_flags", []) or [])))
+        combined_reasons = list(dict.fromkeys((linear.get("reliability_reasons", []) or []) + (ensemble.get("reliability_reasons", []) or [])))
+        both_reliable = bool(linear.get("is_reliable_for_llm", True) and ensemble.get("is_reliable_for_llm", True))
+
+        allowed_stances = ["hold"]
+        blocked_stances = ["strong_buy", "strong_sell"]
+        hard_constraints: List[str] = []
+
+        if agreement.get("conflict"):
+            hard_constraints.append("두 모델 방향성이 충돌하면 강한 stance 금지")
+        if not both_reliable:
+            hard_constraints.append("두 모델 중 하나라도 저신뢰면 hold 또는 약한 의견만 허용")
+        if both_reliable and agreement.get("same_polarity"):
+            allowed_stances = ["hold", "buy", "sell", "strong_buy", "strong_sell"]
+            blocked_stances = []
+        elif agreement.get("one_neutral") and both_reliable:
+            allowed_stances = ["hold", "buy", "sell"]
+            blocked_stances = ["strong_buy", "strong_sell"]
+
+        return {
+            "is_reliable": both_reliable and not agreement.get("conflict", False),
+            "confidence_band": "high" if linear.get("confidence_band") == "high" and ensemble.get("confidence_band") == "high" else "medium",
+            "risk_flags": combined_flags,
+            "allowed_stances": allowed_stances,
+            "blocked_stances": blocked_stances,
+            "hard_constraints": hard_constraints,
+            "reason_summary": combined_reasons[:3] or [agreement.get("summary", "모델 합의 정보 확인 필요")],
+            "avoid_if": "model_conflict" if agreement.get("conflict") else ("low_reliability" if not both_reliable else "none"),
+        }
+
+    quality_flags = result.get("quality_flags", []) or []
+    reliability_reasons = result.get("reliability_reasons", []) or []
+    is_reliable = bool(result.get("is_reliable_for_llm", True))
+    trade_count = int(result.get("trade_count", 0))
+    dir_acc = float(result.get("directional_accuracy_all", 0.0))
+    dir_base = float(result.get("directional_baseline_all", 0.0))
+
+    allowed_stances = ["hold", "buy", "sell", "strong_buy", "strong_sell"]
+    blocked_stances: List[str] = []
+    hard_constraints: List[str] = []
+
+    if trade_count < 20 or not is_reliable:
+        allowed_stances = ["hold"]
+        blocked_stances = ["buy", "sell", "strong_buy", "strong_sell"]
+        hard_constraints.append("표본 부족 또는 저신뢰면 hold만 허용")
+    elif dir_acc < dir_base:
+        allowed_stances = ["hold", "buy", "sell"]
+        blocked_stances = ["strong_buy", "strong_sell"]
+        hard_constraints.append("방향성 정확도가 baseline 미만이면 강한 stance 금지")
+
     return {
-        "$schema": "quant_evidence_v1",
-        "ticker": ticker,
-        "as_of": _kst_now_iso(),
-        "adaptive_params": {
-            "threshold": float(best.get("threshold", 0.0)),
-            "hold_bars": int(best.get("hold_bars", 0)),
-            "cost_bps": float(best.get("cost_bps", 0.0)),
-            "vol_scale": float(best.get("vol_scale", 0.0)),
-            "baseline_vol": float(best.get("baseline_vol", 0.0)),
-        },
-        "backtest_core": {
-            "win_rate": float(result.get("win_rate", 0.0)),
-            "trade_count": int(result.get("trade_count", 0)),
-            "cum_return": float(result.get("cum_return", 0.0)),
-            "sharpe": float(result.get("sharpe", 0.0)),
-        },
-        "directional_quality": {
-            "directional_accuracy_all": float(result.get("directional_accuracy_all", 0.0)),
-            "directional_baseline_all": float(result.get("directional_baseline_all", 0.0)),
-        },
-        "reliability": {
-            "confidence_band": result.get("confidence_band"),
-            "is_reliable_for_llm": bool(result.get("is_reliable_for_llm", True)),
-            "quality_flags": result.get("quality_flags", []) or [],
-            "reliability_reasons": result.get("reliability_reasons", []) or [],
-        },
-        "model_meta": {"model_path": result.get("model_path")},
+        "is_reliable": is_reliable,
+        "confidence_band": result.get("confidence_band"),
+        "risk_flags": quality_flags,
+        "allowed_stances": allowed_stances,
+        "blocked_stances": blocked_stances,
+        "hard_constraints": hard_constraints,
+        "reason_summary": reliability_reasons[:3],
+        "avoid_if": "low_reliability" if not is_reliable else "none",
     }
 
 
+def _build_model_evidence(model_result: Dict[str, Any]) -> Dict[str, Any]:
+    best_params = model_result.get("best_params") or {}
+    return {
+        "profile": model_result.get("feature_profile"),
+        "model_type": model_result.get("model_type"),
+        "ap": {
+            "th": float(best_params.get("threshold", 0.0)),
+            "hb": int(best_params.get("hold_bars", 0)),
+            "cb": float(best_params.get("cost_bps", 0.0)),
+        },
+        "bt": {
+            "wr": float(model_result.get("win_rate", 0.0)),
+            "tc": int(model_result.get("trade_count", 0)),
+            "cr": float(model_result.get("cum_return", 0.0)),
+            "sh": float(model_result.get("sharpe", 0.0)),
+        },
+        "dir": {
+            "acc": float(model_result.get("directional_accuracy_all", 0.0)),
+            "base": float(model_result.get("directional_baseline_all", 0.0)),
+        },
+        "rel": {
+            "band": model_result.get("confidence_band"),
+            "ok": bool(model_result.get("is_reliable_for_llm", True)),
+            "flags": model_result.get("quality_flags", []) or [],
+            "reasons": model_result.get("reliability_reasons", []) or [],
+        },
+        "signal": model_result.get("signal_label"),
+    }
+
+
+def _build_quant_evidence(ticker: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    if "models" in result:
+        linear = result["models"].get("linear_mtf", {}) or {}
+        ensemble = result["models"].get("ensemble_baseline", {}) or {}
+        guardrails = _build_quant_guardrails(result)
+        evidence = {
+            "$schema": "quant_evidence_v3",
+            "schema_version": "v3",
+            "generated_at": _kst_now_iso(),
+            "ticker": ticker,
+            "mode": "dual_model",
+            "summary": {
+                "primary_signal": "aligned" if result.get("agreement", {}).get("same_polarity") else "mixed",
+                "agreement_summary": result.get("agreement", {}).get("summary"),
+                "confidence_band": guardrails.get("confidence_band"),
+            },
+            "guardrails": guardrails,
+            "models": {
+                "linear_mtf": _build_model_evidence(linear),
+                "ensemble_baseline": _build_model_evidence(ensemble),
+            },
+            "agreement": result.get("agreement", {}) or {},
+        }
+        return _round4(evidence)
+
+    best = result.get("best_params", {}) or {}
+    guardrails = _build_quant_guardrails(result)
+    evidence = {
+        "$schema": "quant_evidence_v3",
+        "schema_version": "v3",
+        "generated_at": _kst_now_iso(),
+        "ticker": ticker,
+        "mode": "single_model",
+        "summary": {
+            "primary_signal": result.get("signal_label", "UNKNOWN"),
+            "confidence_band": guardrails.get("confidence_band"),
+        },
+        "guardrails": guardrails,
+        "models": {
+            "primary": {
+                **_build_model_evidence(result),
+                "ap": {
+                    "th": float(best.get("threshold", 0.0)),
+                    "hb": int(best.get("hold_bars", 0)),
+                    "cb": float(best.get("cost_bps", 0.0)),
+                    "vs": float(best.get("vol_scale", 0.0)),
+                    "bv": float(best.get("baseline_vol", 0.0)),
+                },
+            }
+        },
+    }
+    return _round4(evidence)
+
+
 def _apply_quant_card_guards(card: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    if "models" in result:
+        linear = result["models"].get("linear_mtf", {}) or {}
+        ensemble = result["models"].get("ensemble_baseline", {}) or {}
+        combined = {
+            "ticker": result.get("ticker"),
+            "trade_count": min(int(linear.get("trade_count", 0)), int(ensemble.get("trade_count", 0))),
+            "is_reliable_for_llm": bool(linear.get("is_reliable_for_llm", True) and ensemble.get("is_reliable_for_llm", True)),
+            "quality_flags": list(dict.fromkeys((linear.get("quality_flags", []) or []) + (ensemble.get("quality_flags", []) or []))),
+            "directional_accuracy_all": max(float(linear.get("directional_accuracy_all", 0.0)), float(ensemble.get("directional_accuracy_all", 0.0))),
+            "directional_baseline_all": min(float(linear.get("directional_baseline_all", 1.0)), float(ensemble.get("directional_baseline_all", 1.0))),
+            "model_path": None,
+            "confidence_band": "high" if linear.get("confidence_band") == "high" and ensemble.get("confidence_band") == "high" else "medium",
+        }
+        result = combined
+
     trade_count = int(result.get("trade_count", 0))
     is_reliable = bool(result.get("is_reliable_for_llm", True))
     quality_flags = result.get("quality_flags", []) or []
@@ -1108,6 +1493,39 @@ def _build_quant_meta(out: Dict[str, Any], debug: bool) -> Dict[str, Any]:
     return meta
 
 
+def _apply_fast_dev_quant_params(
+    *,
+    fast_dev: bool,
+    dynamic_hold: bool,
+    train_rows: int,
+    test_rows: int,
+    step_rows: int,
+) -> tuple[bool, int, int, int]:
+    if not fast_dev:
+        return dynamic_hold, train_rows, test_rows, step_rows
+    return (
+        bool(FAST_DEV_QUANT_DEFAULTS["dynamic_hold"]),
+        int(FAST_DEV_QUANT_DEFAULTS["train_rows"]),
+        int(FAST_DEV_QUANT_DEFAULTS["test_rows"]),
+        int(FAST_DEV_QUANT_DEFAULTS["step_rows"]),
+    )
+
+
+@contextmanager
+def _quant_fast_optimization_context(*, enabled: bool):
+    previous = os.environ.get("QUANT_FAST_OPTIMIZATION")
+    if enabled:
+        os.environ["QUANT_FAST_OPTIMIZATION"] = "1"
+    try:
+        yield
+    finally:
+        if enabled:
+            if previous is None:
+                os.environ.pop("QUANT_FAST_OPTIMIZATION", None)
+            else:
+                os.environ["QUANT_FAST_OPTIMIZATION"] = previous
+
+
 def _fallback_judge_order(payload: Dict[str, Any]) -> Dict[str, Any]:
     ticker = str(payload.get("ticker", "000000"))
     price = int(float(payload.get("current_price", 0)))
@@ -1159,6 +1577,99 @@ def _fallback_judge_order(payload: Dict[str, Any]) -> Dict[str, Any]:
             "take_profit_price": take_profit,
         },
         "verdict": "News/Quant 점수 가중 합 기반 기본 의사결정",
+    }
+
+
+def _summarize_order_card(order_card: Dict[str, Any]) -> Dict[str, Any]:
+    order = order_card.get("order") if isinstance(order_card.get("order"), dict) else {}
+    action = str(order.get("action") or "hold")
+    order_type = str(order.get("order_type") or "limit")
+    price = int(float(order.get("price", 0) or 0))
+    quantity = int(float(order.get("quantity", 0) or 0))
+    ticker = str(order_card.get("ticker") or "000000")
+    risk = order_card.get("risk_management") if isinstance(order_card.get("risk_management"), dict) else {}
+
+    immediate_order = {
+        "ticker": ticker,
+        "action": action,
+        "when": "now" if action != "hold" and quantity > 0 else "no_immediate_order",
+        "order_type": order_type,
+        "price": price if order_type == "limit" else None,
+        "quantity": quantity,
+        "estimated_amount_krw": price * quantity if price > 0 and quantity > 0 else 0,
+        "stop_loss_price": int(float(risk.get("stop_loss_price", 0) or 0)),
+        "take_profit_price": int(float(risk.get("take_profit_price", 0) or 0)),
+    }
+
+    if action == "hold" or quantity == 0:
+        headline = "지금은 매매하지 않음"
+    elif order_type == "market":
+        headline = f"지금 {ticker} {quantity}주 시장가 {action}"
+    else:
+        headline = f"지금 {ticker} {price:,}원에 {quantity}주 {action}"
+
+    planned_entries = []
+    action_plan = order_card.get("action_plan") if isinstance(order_card.get("action_plan"), dict) else {}
+    tranches = action_plan.get("initial_tranches") if isinstance(action_plan.get("initial_tranches"), list) else []
+    for tranche in tranches:
+        if not isinstance(tranche, dict):
+            continue
+        planned_entries.append(
+            {
+                "tranche_id": str(tranche.get("tranche_id") or ""),
+                "action": str(tranche.get("type") or "buy"),
+                "when": "now" if str(tranche.get("order_subtype") or "limit") == "market" else "when_price_reaches_limit",
+                "order_type": str(tranche.get("order_subtype") or "limit"),
+                "price": int(float(tranche.get("limit_price", 0) or 0)) or None,
+                "quantity": int(float(tranche.get("quantity", 0) or 0)),
+                "stop_loss_price": int(float(tranche.get("stop_loss_price", 0) or 0)),
+            }
+        )
+
+    recommended_actions = order_card.get("recommended_actions") if isinstance(order_card.get("recommended_actions"), list) else []
+    for action_item in recommended_actions:
+        if not isinstance(action_item, dict):
+            continue
+        action_type = str(action_item.get("type") or "")
+        trigger_range = action_item.get("trigger_price_range")
+        trigger_price = action_item.get("trigger_price")
+        target_units = action_item.get("target_units_range")
+        planned_entries.append(
+            {
+                "action": action_type or "planned_action",
+                "when": (
+                    "when_price_enters_range"
+                    if isinstance(trigger_range, list) and len(trigger_range) == 2
+                    else "when_price_reaches_trigger"
+                    if trigger_price is not None
+                    else "manual_review"
+                ),
+                "price_range": trigger_range if isinstance(trigger_range, list) else None,
+                "price": int(float(trigger_price)) if trigger_price is not None else None,
+                "quantity_range": target_units if isinstance(target_units, list) else None,
+                "budget_krw": int(float(action_item.get("max_allocation_cash_krw", 0) or 0)) or None,
+                "description": str(action_item.get("description") or ""),
+            }
+        )
+
+    # Remove duplicate planned entries while preserving order.
+    deduped_entries = []
+    seen = set()
+    for entry in planned_entries:
+        key = json.dumps(entry, sort_keys=True, ensure_ascii=False)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_entries.append(entry)
+    planned_entries = deduped_entries
+
+    return {
+        "headline": headline,
+        "final_stance": str(order_card.get("final_stance") or "hold"),
+        "final_score": int(float(order_card.get("final_score", 0) or 0)),
+        "immediate_order": immediate_order,
+        "planned_entries": planned_entries,
+        "reason": str(order_card.get("verdict") or order_card.get("rationale") or order_card.get("notes") or ""),
     }
 
 

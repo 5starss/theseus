@@ -1,7 +1,7 @@
 import logging
 import numpy as np
 import pandas as pd
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -9,8 +9,15 @@ logger = logging.getLogger(__name__)
 class IntradayFeatureEngineer:
     """1분봉 OHLCV 데이터를 모델 학습용 기술적 지표 및 미세구조 피처로 변환합니다."""
 
-    def __init__(self, horizon_minutes: int = 5):
+    def __init__(
+        self,
+        horizon_minutes: int = 5,
+        feature_profile: str = "baseline",
+        recent_window_days: Optional[int] = None,
+    ):
         self.horizon_minutes = horizon_minutes
+        self.feature_profile = feature_profile
+        self.recent_window_days = recent_window_days
         self.required_cols = ["ts", "open", "high", "low", "close", "volume"]
 
     @staticmethod
@@ -94,16 +101,71 @@ class IntradayFeatureEngineer:
         df["is_market_close_30"] = ((df["minute_of_day"] >= 900) & (df["minute_of_day"] < 930)).astype(int)
         return df
 
+    def _slice_recent_window(self, df: pd.DataFrame) -> pd.DataFrame:
+        if self.recent_window_days is None or df.empty:
+            return df
+        cutoff = df["ts"].max() - pd.Timedelta(days=self.recent_window_days)
+        sliced = df[df["ts"] >= cutoff].copy()
+        return sliced.reset_index(drop=True)
+
+    def _resample_timeframe(self, df: pd.DataFrame, rule: str, prefix: str) -> pd.DataFrame:
+        base = (
+            df.set_index("ts")[["open", "high", "low", "close", "volume"]]
+            .resample(rule, label="right", closed="right")
+            .agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            })
+            .dropna()
+            .reset_index()
+        )
+        if base.empty:
+            return pd.DataFrame(columns=["ts"])
+
+        out = pd.DataFrame({"ts": base["ts"]})
+        out[f"{prefix}_rsi_14"] = self._calc_rsi(base["close"], 14)
+        out[f"{prefix}_trend"] = base["close"].ewm(span=12, adjust=False).mean() / base["close"].ewm(span=26, adjust=False).mean().replace(0, np.nan) - 1.0
+        out[f"{prefix}_vol_20"] = base["close"].pct_change().rolling(20).std()
+        out[f"{prefix}_dist_sma_20"] = base["close"] / base["close"].rolling(20).mean().replace(0, np.nan) - 1.0
+        return out
+
+    def _add_mtf_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        merged = df.copy()
+        frames: Dict[str, str] = {
+            "5min": "mtf_5m",
+            "15min": "mtf_15m",
+            "60min": "mtf_60m",
+            "1D": "mtf_1d",
+        }
+        for rule, prefix in frames.items():
+            higher = self._resample_timeframe(df, rule=rule, prefix=prefix)
+            if higher.empty:
+                continue
+            merged = pd.merge_asof(
+                merged.sort_values("ts"),
+                higher.sort_values("ts"),
+                on="ts",
+                direction="backward",
+                allow_exact_matches=True,
+            )
+        return merged
+
     def build(self, df: pd.DataFrame) -> pd.DataFrame:
         """모든 피처 생성 단계를 실행하고 타겟 변수를 생성합니다."""
         if df.empty: raise ValueError("데이터가 없습니다.")
         
         feat = df.copy().sort_values("ts").reset_index(drop=True)
+        feat = self._slice_recent_window(feat)
         
         feat = self._add_momentum_features(feat)
         feat = self._add_technical_indicators(feat)
         feat = self._add_volatility_and_volume_features(feat)
         feat = self._add_microstructure_and_time_features(feat)
+        if self.feature_profile in {"mtf", "enhanced"}:
+            feat = self._add_mtf_features(feat)
 
         # Interaction
         feat["mom_vol_interaction"] = feat["mom_5"] * feat["vol_5"]
