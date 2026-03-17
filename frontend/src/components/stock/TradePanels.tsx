@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { Button } from "@/components/ui/button";
 import { LoginGuardOverlay } from "./LoginGuardOverlay";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getTickSize } from "../../utils/priceUtils";
 
 export function OrderPanel() {
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
@@ -19,6 +20,7 @@ export function OrderPanel() {
     const currentPrice = useStockStore(state => state.currentPrice);
     const stockName = useStockStore(state => state.stockName);
     const stockCode = useStockStore(state => state.stockCode);
+    const selectedOrderPrice = useStockStore(state => state.selectedOrderPrice);
 
     const cashBalance = useAccountStore(state => state.cashBalance);
     const portfolio = useAccountStore(state => state.portfolio);
@@ -34,25 +36,34 @@ export function OrderPanel() {
     useEffect(() => {
         if (stockCode !== prevStockCode) {
             setPrevStockCode(stockCode);
-            setOrderPrice(currentPrice);
+            setOrderPrice(0);
             setQuantity(0);
         } else if (orderPrice === 0 && currentPrice > 0) {
             setOrderPrice(currentPrice);
         }
     }, [stockCode, currentPrice, prevStockCode, orderPrice]);
-    // 구매/판매 가능 수량 계산
-    const availableShares = portfolio.find(p => p.name === stockName)?.shares || 0;
 
+    // 호가창에서 가격을 클릭한 경우 주문 가격 업데이트
+    useEffect(() => {
+        if (selectedOrderPrice > 0) {
+            setOrderPrice(selectedOrderPrice);
+        }
+    }, [selectedOrderPrice]);
+
+    // 매도 가능 수량 계산
+    const selectedStock = portfolio.find(p => p.code === stockCode);
+    const availableSharesCount = selectedStock?.availableShares || 0;
 
     // 주문 총액 계산
     const totalAmount = orderPrice * quantity;
     const canTrade = quantity > 0 && orderPrice > 0;
 
+    // 구매/판매 최대 수량 계산
     const maxBuyQty = orderPrice > 0 ? Math.floor(cashBalance / orderPrice) : 0;
-    const maxSellQty = availableShares;
+    const maxSellQty = availableSharesCount;
 
     // 구매/판매 가능 수량 계산
-    const availableText = isBuy ? `${maxBuyQty.toLocaleString()}주` : `${availableShares.toLocaleString()}주`;
+    const availableText = isBuy ? `${maxBuyQty.toLocaleString()}주` : `${maxSellQty.toLocaleString()}주`;
 
     const handleQuantityChange = (delta: number) => {
         setQuantity(prev => {
@@ -132,7 +143,7 @@ export function OrderPanel() {
                     <div className="flex-1 flex items-center bg-slate-50 border border-slate-200 rounded-md p-1">
                         <Button
                             variant="ghost" size="icon"
-                            onClick={() => setOrderPrice(prev => Math.max(0, prev - 100))}
+                            onClick={() => setOrderPrice(prev => Math.max(0, prev - getTickSize(prev)))}
                             className="w-8 h-8 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors"
                         >-</Button>
                         <input
@@ -144,7 +155,7 @@ export function OrderPanel() {
                         />
                         <Button
                             variant="ghost" size="icon"
-                            onClick={() => setOrderPrice(prev => prev + 100)}
+                            onClick={() => setOrderPrice(prev => prev + getTickSize(prev))}
                             className="w-8 h-8 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors"
                         >+</Button>
                     </div>

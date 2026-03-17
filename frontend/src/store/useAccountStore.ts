@@ -8,6 +8,7 @@ export interface PortfolioItem {
     code: string;
     name: string;
     shares: number;
+    availableShares: number; // 매도 가능 수량 추가
     avgPrice: number;
     currentPrice: number; // 현재가 추가
 }
@@ -96,6 +97,8 @@ export const useAccountStore = create<AccountState>((set) => ({
 
             // 각 종목별 현재가 병렬 조회
             const portfolioWithPrices: PortfolioItem[] = await Promise.all(
+                // p = 종목 정보(positions)
+                // 보유 수량, 매도 가능 수량, 평균가, 현재가
                 positions.map(async (p) => {
                     let currentPrice = p.averagePrice; // 기본값은 매수가
                     try {
@@ -109,6 +112,7 @@ export const useAccountStore = create<AccountState>((set) => ({
                         code: p.ticker,
                         name: p.companyName,
                         shares: p.quantity,
+                        availableShares: p.availableQuantity,
                         avgPrice: p.averagePrice,
                         currentPrice: currentPrice
                     };
