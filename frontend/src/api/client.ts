@@ -9,6 +9,21 @@ export interface ApiResponse<T> {
     result: T;
 }
 
+/**
+ * 백엔드 커스텀 에러 정보를 처리하기 위한 클래스
+ */
+export class ApiError extends Error {
+    code: string;
+
+    constructor(code: string, message: string) {
+        super(message);
+        this.code = code;
+        this.name = 'ApiError';
+        // Ensure instanceof works
+        Object.setPrototypeOf(this, ApiError.prototype);
+    }
+}
+
 const client = axios.create({
     headers: {
         'Content-Type': 'application/json',
@@ -75,6 +90,12 @@ client.interceptors.response.use(
                 }
                 return Promise.reject(refreshError);
             }
+        }
+
+        // 백엔드에서 에러 코드와 메시지를 명시적으로 돌려준 경우 (400, 409 등 non-2xx)
+        if (error.response?.data && typeof error.response.data === 'object' && 'code' in error.response.data) {
+            const { code, message } = error.response.data;
+            return Promise.reject(new ApiError(code, message));
         }
 
         return Promise.reject(error);

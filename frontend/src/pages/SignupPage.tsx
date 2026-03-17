@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { EyeIcon, EyeOffIcon, ArrowLeftIcon, Loader2Icon, ChevronDownIcon } from "lucide-react";
 import { authApi } from "@/api/auth";
+import { getErrorMessage } from "@/utils/errorMessages";
 import {
     Popover,
     PopoverContent,
@@ -48,7 +49,11 @@ export default function SignupPage() {
             // 회원가입 성공
             navigate("/login");
         } catch (error: unknown) {
-            if (error instanceof Error) {
+            // 더 견고한 에러 체크: ApiError 혹은 code 프로퍼티가 있는 객체인 경우
+            if (error && typeof error === 'object' && 'code' in error && typeof (error as any).code === 'string') {
+                const fallbackMsg = (error as any).message;
+                setErrorMessage(getErrorMessage((error as any).code, fallbackMsg));
+            } else if (error instanceof Error) {
                 setErrorMessage(error.message);
             } else {
                 setErrorMessage("회원가입 중 오류가 발생했습니다.");

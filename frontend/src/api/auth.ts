@@ -1,4 +1,4 @@
-import api from './client';
+import api, { ApiError } from './client';
 import type { ApiResponse } from './client';
 
 // 백엔드 명세에 맞춤
@@ -32,7 +32,7 @@ export const authApi = {
         const response = await api.post<ApiResponse<SignupResponse>>('/api/v1/core/auth/signup', data);
 
         if (!response.data.isSuccess) {
-            throw new Error(response.data.message || '회원가입에 실패했습니다.');
+            throw new ApiError(response.data.code, response.data.message || '회원가입에 실패했습니다.');
         }
 
         return response.data.result;
@@ -42,7 +42,7 @@ export const authApi = {
         const response = await api.post<ApiResponse<LoginResponse>>('/api/v1/core/auth/login', data);
 
         if (!response.data.isSuccess) {
-            throw new Error(response.data.message || '로그인에 실패했습니다.');
+            throw new ApiError(response.data.code, response.data.message || '로그인에 실패했습니다.');
         }
 
         return response.data.result;

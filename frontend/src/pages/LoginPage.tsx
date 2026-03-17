@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EyeIcon, EyeOffIcon } from "lucide-react";
 
 import { authApi } from "../api/auth";
+import { getErrorMessage } from "../utils/errorMessages";
 
 export default function LoginPage() {
     const [email, setEmail] = useState("");
@@ -32,7 +33,11 @@ export default function LoginPage() {
                 const from = location.state?.from?.pathname || "/";
                 navigate(from, { replace: true });
             } catch (error: unknown) {
-                if (error instanceof Error) {
+                // 더 견고한 에러 체크: ApiError 혹은 code 프로퍼티가 있는 객체인 경우
+                if (error && typeof error === 'object' && 'code' in error && typeof (error as any).code === 'string') {
+                    const fallbackMsg = (error as any).message;
+                    setErrorMessage(getErrorMessage((error as any).code, fallbackMsg));
+                } else if (error instanceof Error) {
                     setErrorMessage(error.message);
                 } else {
                     setErrorMessage("로그인 중 오류가 발생했습니다.");
