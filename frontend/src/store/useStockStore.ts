@@ -19,6 +19,8 @@ interface StockState {
 
     prevClose: number; // 전일 종가
 
+    selectedOrderPrice: number; // 호가창에서 선택한 가격
+
     candles: any[]; // 캔들 데이터 배열
     candlesLoading: boolean;
 
@@ -26,6 +28,7 @@ interface StockState {
     setCandles: (candles: any[]) => void;
     appendHistoricalCandles: (historical: any[]) => void;
     setCurrentPrice: (price: number) => void;
+    setSelectedOrderPrice: (price: number) => void;
     updateOrderbook: (ask: { price: number; volume: number }, bid: { price: number; volume: number }) => void;
     connectStockStream: (code: string) => void;
     disconnectStockStream: () => void;
@@ -90,6 +93,8 @@ export const useStockStore = create<StockState>((set, get) => ({
     bidPrice: 0,
     bidVolume: 0,
 
+    selectedOrderPrice: 0,
+
     candles: [],
     candlesLoading: false,
 
@@ -107,9 +112,12 @@ export const useStockStore = create<StockState>((set, get) => ({
             askVolume: 0,
             bidPrice: 0,
             bidVolume: 0,
+            selectedOrderPrice: 0,
             candles: [],
             candlesLoading: false
         }),
+
+    setSelectedOrderPrice: (price) => set({ selectedOrderPrice: price }),
 
     setCandles: (candles) => set({ candles }),
 
@@ -195,8 +203,14 @@ export const useStockStore = create<StockState>((set, get) => ({
     },
 
     connectStockStream: (code) => {
-        // 즉시 stockCode 설정 (다른 컴포넌트 관찰용)
-        set({ stockCode: code });
+        // 즉시 stockCode와 주요 가격 정보를 초기화 (이전 종목 데이터 잔존 방지)
+        set({
+            stockCode: code,
+            currentPrice: 0,
+            priceChange: 0,
+            changeRate: 0,
+            prevClose: 0
+        });
         console.log(`Starting Dashboard Stream via Singleton [${code}]...`);
 
         // 1. 초기 데이터 스냅샷 로딩 (시세 + 호가 병렬 호출)

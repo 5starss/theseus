@@ -12,6 +12,7 @@ export const Orderbook = memo(function Orderbook() {
     const askVolume = useStockStore(state => state.askVolume);
     const bidPrice = useStockStore(state => state.bidPrice);
     const bidVolume = useStockStore(state => state.bidVolume);
+    const setSelectedOrderPrice = useStockStore(state => state.setSelectedOrderPrice);
 
     const isCurrentAsk = currentPrice === askPrice && currentPrice > 0;
     const isCurrentBid = currentPrice === bidPrice && currentPrice > 0;
@@ -40,7 +41,10 @@ export const Orderbook = memo(function Orderbook() {
 
                 <div className={`flex-1 flex flex-col h-full ${!isLoggedIn ? 'opacity-30 pointer-events-none blur-[2px]' : ''}`}>
                     <div className="flex-1 border-b border-slate-200 overflow-hidden">
-                        <div className="flex h-full w-full transition-colors cursor-pointer group relative">
+                        <div 
+                            className="flex h-full w-full transition-colors cursor-pointer group relative hover:bg-slate-100/50"
+                            onClick={() => setSelectedOrderPrice(askPrice)}
+                        >
                             <div className="w-1/3 flex items-center justify-between px-3 text-sm font-medium text-blue-600 relative overflow-hidden">
                                 <div className="absolute inset-0 bg-blue-50/50 opacity-0 group-hover:opacity-100 transition-opacity" />
                                 <div className="absolute inset-y-0 right-0 top-1/2 -translate-y-1/2 h-4/6 w-full bg-blue-50/10 transition-colors" />
@@ -59,7 +63,10 @@ export const Orderbook = memo(function Orderbook() {
                     </div>
 
                     <div className="flex-1 overflow-hidden">
-                        <div className="flex h-full w-full transition-colors cursor-pointer group relative">
+                        <div 
+                            className="flex h-full w-full transition-colors cursor-pointer group relative hover:bg-slate-100/50"
+                            onClick={() => setSelectedOrderPrice(bidPrice)}
+                        >
                             <div className="w-1/3"></div>
                             <div className="w-1/3 flex items-center justify-center font-bold border-l border-r border-slate-100 relative">
                                 <div className="absolute inset-0 bg-red-50/50 opacity-0 group-hover:opacity-100 transition-opacity" />
