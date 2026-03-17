@@ -10,11 +10,11 @@ from fastapi import Body, FastAPI, HTTPException, Query
 
 from app.news.agent import NewsReporterAgent
 from app.news.eval import RAGEvaluator
-from app.quant.agent import QuantAnalysisAgent
 from app.quant.pipeline import (
     compare_model_performance_for_universe,
     compare_model_performance_for_ticker,
     extract_features_for_ticker,
+    generate_quant_signal,
     load_latest_global_model,
     resolve_tickers,
     run_adaptive_winrate_for_ticker,
@@ -41,26 +41,11 @@ SOURCE_COMMUNITY = "TOSS_COMMUNITY"
 DEFAULT_QUANT_DATA_DIR = os.path.join(get_storage_dir("quant"), "data_cybos")
 QUANT_DATA_DIR = os.getenv("QUANT_DATA_DIR", DEFAULT_QUANT_DATA_DIR)
 
-QUANT_ANALYZE_DEFAULTS: Dict[str, Any] = {
-    "run_fetch": False,
-    "run_feature_extract": True,
-    "run_train": True,
-    "use_pretrained": True,
-    "use_panel_model": True,
-    "reuse_global_model": True,
-    "train_global_if_missing": True,
-    "dynamic_hold": True,
-    "train_rows": 80000,
-    "test_rows": 2000,
-    "step_rows": 2000,
-}
-
 FAST_DEV_QUANT_DEFAULTS: Dict[str, Any] = {
     "dynamic_hold": False,
     "train_rows": 30000,
     "test_rows": 1000,
     "step_rows": 3000,
-    "use_llm_interpretation": False,
 }
 
 
@@ -293,13 +278,6 @@ def quant_train_global(
     model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
 ) -> Dict[str, Any]:
     try:
-        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
-            fast_dev=fast_dev,
-            dynamic_hold=dynamic_hold,
-            train_rows=train_rows,
-            test_rows=test_rows,
-            step_rows=step_rows,
-        )
         ticker_list = resolve_tickers(tickers=tickers, data_dir=QUANT_DATA_DIR)
         if not ticker_list:
             raise ValueError("처리할 종목이 없습니다.")
@@ -530,110 +508,23 @@ def quant_compare_universe_performance(
 def quant_analysis_card(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
     run_fetch: bool = Query(False),
-    run_feature_extract: bool = Query(True),
-    run_train: bool = Query(True),
-    use_pretrained: bool = Query(True),
-    use_panel_model: bool = Query(True),
-    reuse_global_model: bool = Query(True),
-    train_global_if_missing: bool = Query(True),
-    dynamic_hold: bool = Query(True),
-    train_rows: int = Query(80000, ge=1000),
-    test_rows: int = Query(2000, ge=200),
-    step_rows: int = Query(2000, ge=200),
     horizon_minutes: int = Query(5, ge=1, le=120),
-    use_llm_interpretation: bool = Query(True),
     debug: bool = Query(False, description="true면 quant_evidence/raw_result 포함"),
-    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
 ) -> Dict[str, Any]:
     try:
-        dynamic_hold, train_rows, test_rows, step_rows = _apply_fast_dev_quant_params(
-            fast_dev=fast_dev,
-            dynamic_hold=dynamic_hold,
-            train_rows=train_rows,
-            test_rows=test_rows,
-            step_rows=step_rows,
+        out = generate_quant_signal(
+            ticker=ticker,
+            data_dir=QUANT_DATA_DIR,
+            run_fetch=run_fetch,
+            horizon_minutes=horizon_minutes,
         )
-        if fast_dev:
-            use_llm_interpretation = False
-        global_artifact = None
-        global_model_path: Optional[str] = None
-        if use_panel_model:
-            reused = False
-            if reuse_global_model:
-                try:
-                    g_latest = load_latest_global_model()
-                    global_artifact = g_latest["artifact"]
-                    global_model_path = g_latest["model_path"]
-                    reused = True
-                except Exception:
-                    logger.info("Quant analysis card: global model reuse miss, fallback train")
-            if not reused:
-                if not train_global_if_missing:
-                    raise ValueError("공통 모델이 없고 train_global_if_missing=false 입니다.")
-                with _quant_fast_optimization_context(enabled=fast_dev):
-                    g_out = train_global_model(
-                        tickers=resolve_tickers(tickers=None, data_dir=QUANT_DATA_DIR),
-                        data_dir=QUANT_DATA_DIR,
-                        run_fetch=run_fetch,
-                        run_feature_extract=run_feature_extract,
-                        horizon_minutes=horizon_minutes,
-                        model_type="ensemble",
-                        feature_profile="baseline",
-                    )
-                global_artifact = g_out["artifact"]
-                global_model_path = g_out["model_path"]
-
-        with _quant_fast_optimization_context(enabled=fast_dev):
-            linear_result = run_adaptive_winrate_for_ticker(
-                ticker=ticker,
-                data_dir=QUANT_DATA_DIR,
-                run_fetch=run_fetch,
-                run_feature_extract=run_feature_extract,
-                run_train=run_train,
-                use_pretrained=False,
-                model_type="linear",
-                dynamic_hold=dynamic_hold,
-                train_rows=train_rows,
-                test_rows=test_rows,
-                step_rows=step_rows,
-                horizon_minutes=horizon_minutes,
-                feature_profile="mtf",
-                recent_window_days=365,
-            )
-            ensemble_result = run_adaptive_winrate_for_ticker(
-                ticker=ticker,
-                data_dir=QUANT_DATA_DIR,
-                run_fetch=run_fetch,
-                run_feature_extract=run_feature_extract,
-                run_train=run_train,
-                use_pretrained=use_pretrained,
-                model_type="ensemble",
-                dynamic_hold=dynamic_hold,
-                train_rows=train_rows,
-                test_rows=test_rows,
-                step_rows=step_rows,
-                horizon_minutes=horizon_minutes,
-                feature_profile="baseline",
-                recent_window_days=None,
-                global_artifact=global_artifact,
-                global_model_path=global_model_path,
-            )
-        result = _build_dual_quant_result(linear_result=linear_result, ensemble_result=ensemble_result)
-        evidence = _build_quant_evidence(ticker=ticker, result=result)
-        card = _build_quant_analysis_card(ticker=ticker, result=result)
-        if use_llm_interpretation:
-            try:
-                llm_card = QuantAnalysisAgent().generate_analysis_card(
-                    ticker=ticker,
-                    quant_evidence=evidence,
-                )
-                card = _apply_quant_card_guards(llm_card, result)
-            except Exception:
-                logger.exception("Quant LLM interpretation failed, fallback to rule-based card")
-        response: Dict[str, Any] = {"status": "ok", "analysis_card": card}
+        response: Dict[str, Any] = {
+            "status": out.get("status", "ok"),
+            "analysis_card": out.get("analysis_card", {}),
+        }
         if debug:
-            response["quant_evidence"] = evidence
-            response["raw_result"] = result
+            response["quant_evidence"] = out.get("quant_evidence")
+            response["raw_result"] = out.get("raw_result")
         return response
     except Exception as exc:
         logger.exception("Failed to run quant analysis card for %s", ticker)
@@ -644,27 +535,13 @@ def quant_analysis_card(
 def agents_quant_analyze(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
     horizon_minutes: int = Query(5, ge=1, le=120),
-    use_llm_interpretation: bool = Query(True),
     debug: bool = Query(False),
-    fast_dev: bool = Query(False, description="개발용 빠른 실행 모드"),
 ) -> Dict[str, Any]:
     out = quant_analysis_card(
         ticker=ticker,
-        run_fetch=bool(QUANT_ANALYZE_DEFAULTS["run_fetch"]),
-        run_feature_extract=bool(QUANT_ANALYZE_DEFAULTS["run_feature_extract"]),
-        run_train=bool(QUANT_ANALYZE_DEFAULTS["run_train"]),
-        use_pretrained=bool(QUANT_ANALYZE_DEFAULTS["use_pretrained"]),
-        use_panel_model=bool(QUANT_ANALYZE_DEFAULTS["use_panel_model"]),
-        reuse_global_model=bool(QUANT_ANALYZE_DEFAULTS["reuse_global_model"]),
-        train_global_if_missing=bool(QUANT_ANALYZE_DEFAULTS["train_global_if_missing"]),
-        dynamic_hold=bool(QUANT_ANALYZE_DEFAULTS["dynamic_hold"]),
-        train_rows=int(QUANT_ANALYZE_DEFAULTS["train_rows"]),
-        test_rows=int(QUANT_ANALYZE_DEFAULTS["test_rows"]),
-        step_rows=int(QUANT_ANALYZE_DEFAULTS["step_rows"]),
+        run_fetch=False,
         horizon_minutes=horizon_minutes,
-        use_llm_interpretation=use_llm_interpretation,
         debug=debug,
-        fast_dev=fast_dev,
     )
     meta = _build_quant_meta(out, debug=debug)
     normalized = _normalize_analysis_card(out.get("analysis_card", {}), agent="quant", ticker=ticker)
@@ -733,7 +610,6 @@ def agents_analyze_with_rebuttal(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
     query: str = Query(..., min_length=1),
     horizon_minutes: int = Query(5, ge=1, le=120),
-    use_llm_interpretation: bool = Query(True),
     score_gap_threshold: int = Query(15, ge=1, le=60),
     rebuttal_enabled: bool = Query(True),
     debug: bool = Query(False),
@@ -754,7 +630,6 @@ def agents_analyze_with_rebuttal(
         quant_out = agents_quant_analyze(
             ticker=ticker,
             horizon_minutes=horizon_minutes,
-            use_llm_interpretation=use_llm_interpretation,
             debug=debug,
         )
         quant_card = quant_out.get("analysis_card", {})
@@ -816,6 +691,7 @@ def agents_judge_decide(
         except Exception:
             logger.exception("Judge LLM failed, fallback to rule-based decision")
             order_card = _fallback_judge_order(input_payload)
+        order_card = _normalize_judge_order_card(order_card, input_payload)
 
         return {
             "status": "ok",
@@ -834,9 +710,7 @@ def agents_full_decision(
     current_price: int = Query(..., gt=0),
     available_cash: int = Query(..., ge=0),
     risk_type: str = Query("moderate", pattern=r"^(conservative|moderate|aggressive)$"),
-    model_type: str = Query("ensemble", pattern=r"^(ensemble|linear)$"),
     horizon_minutes: int = Query(5, ge=1, le=120),
-    use_llm_interpretation: bool = Query(True),
     score_gap_threshold: int = Query(15, ge=1, le=60),
     rebuttal_enabled: bool = Query(True),
     debug: bool = Query(False),
@@ -848,9 +722,7 @@ def agents_full_decision(
         analysis_out = agents_analyze_with_rebuttal(
             ticker=ticker,
             query=query,
-            model_type=model_type,
             horizon_minutes=horizon_minutes,
-            use_llm_interpretation=use_llm_interpretation,
             score_gap_threshold=score_gap_threshold,
             rebuttal_enabled=rebuttal_enabled,
             debug=debug,
@@ -1425,7 +1297,7 @@ def _normalize_analysis_card(card: Dict[str, Any], agent: str, ticker: str) -> D
 
     stance = str(card.get("stance", "hold"))
     valid_stances = {"strong_buy", "buy", "hold", "sell", "strong_sell"}
-    if stance not in valid_stances:
+    if stance not in valid_stances or agent in {"news", "quant"}:
         stance = _score_to_stance(score)
 
     raw_breakdown = card.get("signal_breakdown")
@@ -1447,15 +1319,21 @@ def _normalize_analysis_card(card: Dict[str, Any], agent: str, ticker: str) -> D
         raw_flags = [str(raw_flags)]
     risk_flags = list(dict.fromkeys([str(x) for x in raw_flags]))
 
+    if agent == "news" and top_reasons and not any(_contains_hangul(x) for x in top_reasons):
+        top_reasons = _fallback_news_reasons(score=score, stance=stance)
+    if agent == "news" and risk_flags and not any(_contains_hangul(x) for x in risk_flags):
+        risk_flags = _fallback_news_risk_flags(score=score)
+
     requested_action = card.get("requested_action")
     if not isinstance(requested_action, dict):
         requested_action = {"preference": str(requested_action) if requested_action else "hold"}
+    requested_action = _normalize_requested_action(requested_action, stance=stance)
 
     normalized = {
         "$schema": "analysis_card_v1",
         "agent": agent,
         "ticker": ticker or str(card.get("ticker", "")),
-        "timestamp": _to_kst_iso(card.get("timestamp")),
+        "timestamp": _kst_now_iso(),
         "stance": stance,
         "confidence": confidence,
         "score": score,
@@ -1469,13 +1347,58 @@ def _normalize_analysis_card(card: Dict[str, Any], agent: str, ticker: str) -> D
     return normalized
 
 
+def _contains_hangul(text: str) -> bool:
+    return any("가" <= ch <= "힣" for ch in str(text))
+
+
+def _normalize_requested_action(requested_action: Dict[str, Any], *, stance: str) -> Dict[str, Any]:
+    normalized = dict(requested_action)
+    preference = (
+        normalized.get("preference")
+        or normalized.get("recommendation")
+        or normalized.get("action")
+        or stance
+    )
+    avoid_if = normalized.get("avoid_if") or "none"
+    return {"preference": str(preference), "avoid_if": str(avoid_if)}
+
+
+def _fallback_news_reasons(score: int, stance: str) -> List[str]:
+    if stance in {"strong_buy", "buy"} or score > 0:
+        return [
+            "주요 뉴스 흐름이 종목의 단기 상승 기대를 지지합니다.",
+            "핵심 이슈가 실적 또는 사업 모멘텀 측면에서 우호적으로 해석됩니다.",
+            "단기 변동성은 있으나 뉴스 심리는 전반적으로 긍정적입니다.",
+        ]
+    if stance in {"strong_sell", "sell"} or score < 0:
+        return [
+            "주요 뉴스 흐름이 종목의 단기 하방 리스크를 시사합니다.",
+            "핵심 이슈가 실적 또는 업황 측면에서 부담 요인으로 해석됩니다.",
+            "불확실성이 커져 보수적 대응이 필요합니다.",
+        ]
+    return [
+        "상반된 뉴스 요인이 혼재해 방향성이 뚜렷하지 않습니다.",
+        "추가 확인 전까지는 중립적 해석이 적절합니다.",
+        "단기 뉴스만으로 강한 매매 결론을 내리기 어렵습니다.",
+    ]
+
+
+def _fallback_news_risk_flags(score: int) -> List[str]:
+    base = ["뉴스 해석 불확실성", "단기 변동성 확대 가능성"]
+    if score > 0:
+        return base + ["긍정 심리 과열 가능성"]
+    if score < 0:
+        return base + ["악재 반영 확대 가능성"]
+    return base + ["방향성 부재"]
+
+
 def _ensure_rebuttal_text(rebuttal: Dict[str, str], news_card: Dict[str, Any], quant_card: Dict[str, Any]) -> Dict[str, str]:
     news_text = str(rebuttal.get("news_rebuttal", "")).strip()
     quant_text = str(rebuttal.get("quant_rebuttal", "")).strip()
-    if not news_text:
+    if not news_text or not _contains_hangul(news_text):
         q_flags = ",".join((quant_card.get("risk_flags") or [])[:2])
         news_text = f"Quant는 {q_flags or '리스크'}가 있어 보수 해석이 필요합니다."
-    if not quant_text:
+    if not quant_text or not _contains_hangul(quant_text):
         n_conf = float(news_card.get("confidence", 0.0))
         quant_text = (
             "News는 단기 모멘텀 반영이 커서 가격 신호 확인이 필요합니다."
@@ -1580,6 +1503,101 @@ def _fallback_judge_order(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _blend_agent_scores(news_card: Dict[str, Any], quant_card: Dict[str, Any]) -> int:
+    news_score = int(news_card.get("score", 0))
+    quant_score = int(quant_card.get("score", 0))
+    return int(round(0.5 * news_score + 0.5 * quant_score))
+
+
+def _judge_verdict_matches_action(verdict: str, action: str) -> bool:
+    text = str(verdict or "").strip()
+    if not text:
+        return False
+    if action == "hold":
+        return not any(token in text for token in ["매수", "매도", "buy", "sell"])
+    if action == "buy":
+        return ("매수" in text or "buy" in text.lower()) and ("매도" not in text)
+    if action == "sell":
+        return ("매도" in text or "sell" in text.lower()) and ("매수" not in text)
+    return False
+
+
+def _canonical_judge_state(final_score: int) -> tuple[str, str]:
+    if final_score >= 15:
+        return "buy", "strong_buy"
+    if final_score >= 8:
+        return "buy", "buy"
+    if final_score <= -15:
+        return "sell", "strong_sell"
+    if final_score <= -8:
+        return "sell", "sell"
+    return "hold", "hold"
+
+
+def _build_judge_verdict(action: str, final_score: int) -> str:
+    if action == "hold":
+        return f"뉴스와 퀀트 신호를 종합했을 때 확신이 부족해 관망이 적절합니다. (score={final_score})"
+    if action == "buy":
+        return f"뉴스와 퀀트 신호를 종합했을 때 매수 우위 판단입니다. (score={final_score})"
+    if action == "sell":
+        return f"뉴스와 퀀트 신호를 종합했을 때 매도 우위 판단입니다. (score={final_score})"
+    return f"종합 점수 기준 중립 판단입니다. (score={final_score})"
+
+
+def _normalize_judge_order_card(order_card: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(order_card)
+    order = normalized.get("order") if isinstance(normalized.get("order"), dict) else {}
+    action = str(order.get("action") or "hold")
+    final_score = int(float(normalized.get("final_score", 0) or 0))
+    blended_score = _blend_agent_scores(
+        payload.get("news_card") or {},
+        payload.get("quant_card") or {},
+    )
+
+    if final_score == 0 and blended_score != 0:
+        final_score = blended_score
+
+    final_score = int(max(-30, min(30, final_score)))
+    canonical_action, canonical_stance = _canonical_judge_state(final_score)
+    verdict = str(normalized.get("verdict") or "").strip()
+    quantity = int(float(order.get("quantity", 0) or 0))
+
+    # 구조 필드가 서로 충돌하면 부분 수정 대신 canonical state로 재정렬합니다.
+    inconsistent = False
+    if action not in {"buy", "sell", "hold"}:
+        inconsistent = True
+    if normalized.get("final_stance") != canonical_stance:
+        inconsistent = True
+    if action != canonical_action:
+        inconsistent = True
+    if canonical_action != "hold" and quantity <= 0:
+        inconsistent = True
+    if not _judge_verdict_matches_action(verdict, canonical_action):
+        inconsistent = True
+
+    if inconsistent:
+        fallback = _fallback_judge_order(payload)
+        if final_score != 0:
+            fallback["final_score"] = final_score
+            action2, stance2 = _canonical_judge_state(final_score)
+            fallback["final_stance"] = stance2
+            fallback_order = fallback.get("order") if isinstance(fallback.get("order"), dict) else {}
+            fallback_order["action"] = action2
+            if action2 == "hold":
+                fallback_order["quantity"] = 0
+            fallback["order"] = fallback_order
+            fallback["verdict"] = _build_judge_verdict(action2, final_score)
+        normalized = fallback
+        order = normalized.get("order") if isinstance(normalized.get("order"), dict) else {}
+
+    normalized["timestamp"] = _kst_now_iso()
+    normalized["verdict"] = _build_judge_verdict(
+        str(order.get("action") or "hold"),
+        int(float(normalized.get("final_score", 0) or 0)),
+    )
+    return normalized
+
+
 def _summarize_order_card(order_card: Dict[str, Any]) -> Dict[str, Any]:
     order = order_card.get("order") if isinstance(order_card.get("order"), dict) else {}
     action = str(order.get("action") or "hold")
@@ -1663,13 +1681,26 @@ def _summarize_order_card(order_card: Dict[str, Any]) -> Dict[str, Any]:
         deduped_entries.append(entry)
     planned_entries = deduped_entries
 
+    reason = str(order_card.get("verdict") or order_card.get("rationale") or order_card.get("notes") or "").strip()
+    if not reason:
+        stance = str(order_card.get("final_stance") or "hold")
+        score = int(float(order_card.get("final_score", 0) or 0))
+        if action == "hold" or quantity == 0:
+            reason = f"뉴스와 퀀트 신호를 종합했을 때 확신이 부족해 관망합니다. (score={score})"
+        elif action == "buy":
+            reason = f"뉴스와 퀀트 신호를 종합했을 때 매수 우위 판단입니다. (score={score})"
+        elif action == "sell":
+            reason = f"뉴스와 퀀트 신호를 종합했을 때 매도 우위 판단입니다. (score={score})"
+        else:
+            reason = f"종합 점수 기준 {stance} 판단입니다. (score={score})"
+
     return {
         "headline": headline,
         "final_stance": str(order_card.get("final_stance") or "hold"),
         "final_score": int(float(order_card.get("final_score", 0) or 0)),
         "immediate_order": immediate_order,
         "planned_entries": planned_entries,
-        "reason": str(order_card.get("verdict") or order_card.get("rationale") or order_card.get("notes") or ""),
+        "reason": reason,
     }
 
 

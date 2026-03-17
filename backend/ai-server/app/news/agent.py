@@ -1,5 +1,7 @@
 import os
 import json
+import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -10,6 +12,17 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+def _load_json_object(text: str) -> Dict[str, Any]:
+    try:
+        return json.loads(text)
+    except Exception:
+        m = re.search(r"\{[\s\S]*\}", text)
+        if not m:
+            raise
+        return json.loads(m.group(0))
 
 
 class NewsReporterAgent:
@@ -68,6 +81,8 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 - score는 -30~30 정수
 - top_reasons는 최대 3개
 - requested_action은 object
+- 모든 문자열 필드는 한국어로 작성
+- timestamp는 현재 시각 기준 ISO 형식
 """,
                 ),
                 (
@@ -200,8 +215,9 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
                     "context": context,
                 }
             )
-            card = json.loads(raw)
+            card = _load_json_object(raw)
         except Exception:
+            logger.warning("news analysis card parsing failed | raw=%s", str(raw)[:500] if "raw" in locals() else "")
             card = self._build_empty_analysis_card(
                 ticker=ticker,
                 reason="뉴스 에이전트 분석 응답 파싱 실패",

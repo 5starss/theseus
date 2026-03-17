@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from app.quant.agent import QuantAnalysisAgent
 from app.quant.backtest import recommend_parameters, run_parameter_optimization, run_walkforward_backtest
 from app.quant.feature_engineer import IntradayFeatureEngineer
 from app.quant.modeling import TimeSeriesModeler, load_model, save_model
@@ -48,7 +49,7 @@ def extract_features_for_ticker(
         recent_window_days=recent_window_days,
     )
     stamp = _timestamp()
-    feat_path = _save_feature_df(storage_dir=storage_dir, ticker=ticker, feat_df=feat_df)
+    feat_path = save_feature_df(storage_dir=storage_dir, ticker=ticker, feat_df=feat_df)
     meta_path = os.path.join(storage_dir, f"feature_extract_{ticker}_{stamp}.json")
     payload = {
         "ticker": ticker,
@@ -528,3 +529,99 @@ def compare_model_performance_for_universe(
         "failures": failures,
     }
 
+
+def _build_quant_evidence_payload(latest_row: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM에 전달할 핵심 MTF 지표만 남겨 페이로드를 축소합니다."""
+    allowed_keys = {
+        "ts",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "ret_1m",
+        "mom_5",
+        "mom_15",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "bb_width",
+        "bb_pct_b",
+        "rsi_14",
+        "vwap",
+        "dist_vwap",
+        "vol_5",
+        "vol_20",
+        "volume_z20",
+        "rv_30",
+        "skew_30",
+        "session_progress",
+        "close_high_ratio",
+        "close_low_ratio",
+        "price_accel",
+        "mom_vol_interaction",
+        "rsi_momentum_cross",
+    }
+    evidence: Dict[str, Any] = {}
+    for key, value in latest_row.items():
+        if key == "target_return":
+            continue
+        if key in allowed_keys or key.startswith("mtf_"):
+            if isinstance(value, pd.Timestamp):
+                evidence[key] = value.isoformat()
+            elif pd.isna(value):
+                evidence[key] = None
+            else:
+                evidence[key] = value
+    return evidence
+
+
+def generate_quant_signal(ticker: str, data_dir: str, run_fetch: bool = True, horizon_minutes: int = 5) -> Dict[str, Any]:
+    """MTF 기술적 지표를 기반으로 LLM이 분석한 퀀트 신호를 생성합니다."""
+    raw_path = resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
+    raw_df = quant_load_raw_from_storage(raw_path)
+
+    engineer = IntradayFeatureEngineer(
+        horizon_minutes=horizon_minutes,
+        feature_profile="mtf",
+        recent_window_days=None,
+    )
+
+    try:
+        feat_df = engineer.build(raw_df)
+    except Exception as exc:
+        card = QuantAnalysisAgent._fallback_card(ticker, f"피처 생성 실패: {str(exc)}")
+        return {
+            "status": "ok",
+            "analysis_card": card,
+            "quant_evidence": {"error": str(exc)},
+            "raw_result": {"mode": "mtf_llm_mvp", "raw_path": raw_path, "feature_profile": "mtf"},
+        }
+
+    if feat_df.empty:
+        card = QuantAnalysisAgent._fallback_card(ticker, "피처 생성 후 데이터 없음")
+        return {
+            "status": "ok",
+            "analysis_card": card,
+            "quant_evidence": {},
+            "raw_result": {"mode": "mtf_llm_mvp", "raw_path": raw_path, "feature_profile": "mtf"},
+        }
+
+    latest_row = feat_df.iloc[-1].to_dict()
+    clean_evidence = _build_quant_evidence_payload(latest_row)
+
+    agent = QuantAnalysisAgent()
+    card = agent.generate_analysis_card(ticker=ticker, quant_evidence=clean_evidence)
+    return {
+        "status": "ok",
+        "analysis_card": card,
+        "quant_evidence": clean_evidence,
+        "raw_result": {
+            "mode": "mtf_llm_mvp",
+            "raw_path": raw_path,
+            "feature_profile": "mtf",
+            "feature_rows": int(len(feat_df)),
+            "horizon_minutes": horizon_minutes,
+            "evidence_keys": list(clean_evidence.keys()),
+        },
+    }
