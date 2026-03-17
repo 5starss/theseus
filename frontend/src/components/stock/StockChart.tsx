@@ -312,15 +312,23 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
             }
         });
 
-        // 2. 리사이즈 핸들러
-        const handleResize = () => {
-            if (priceContainerRef.current) priceChart.applyOptions({ width: priceContainerRef.current.clientWidth });
-            if (volumeContainerRef.current) volumeChart.applyOptions({ width: volumeContainerRef.current.clientWidth });
-        };
-        window.addEventListener('resize', handleResize);
+        // 리사이즈 관찰자 설정 (사이드바 확장 등 컨테이너 크기 변화 대응)
+        const resizeObserver = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                if (entry.target === priceContainerRef.current) {
+                    priceChart.applyOptions({ width: entry.contentRect.width });
+                }
+                if (entry.target === volumeContainerRef.current) {
+                    volumeChart.applyOptions({ width: entry.contentRect.width });
+                }
+            }
+        });
+
+        if (priceContainerRef.current) resizeObserver.observe(priceContainerRef.current);
+        if (volumeContainerRef.current) resizeObserver.observe(volumeContainerRef.current);
 
         return () => {
-            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
             if (priceEl) priceEl.removeEventListener('mouseenter', onPriceEnter);
             if (volumeEl) volumeEl.removeEventListener('mouseenter', onVolumeEnter);
             priceChart.remove();

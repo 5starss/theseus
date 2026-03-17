@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 import Header from "./Header.tsx";
+import Sidebar from "./Sidebar.tsx";
 
 export default function Layout() {
     return (
@@ -7,10 +8,15 @@ export default function Layout() {
             {/* 내비게이션 바 */}
             <Header />
 
-            {/* 메인 컨텐츠(너비 최대로) */}
-            <main className="flex-1 w-full flex flex-col overflow-hidden min-h-0">
-                <Outlet />
-            </main>
+            <div className="flex-1 flex overflow-hidden min-h-0 relative">
+                {/* 메인 컨텐츠 */}
+                <main className="flex-1 flex flex-col overflow-auto min-h-0">
+                    <Outlet />
+                </main>
+
+                {/* 우측 사이드바 */}
+                <Sidebar />
+            </div>
         </div>
     );
 }
