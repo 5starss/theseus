@@ -20,3 +20,8 @@ text.md
 /backend/api-gateway/src/main/resources/application.yml
 /backend/core-api-server/src/main/resources/application.yml
 /backend/matcher-server/src/main/resources/application.yml
+
+/certbot/conf/*
+/certbot/www/*
+!/certbot/conf/.gitkeep
+!/certbot/www/.gitkeep

@@ -21,7 +21,7 @@ RUN apk add --no-cache tzdata && \
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 # 커스텀 Nginx 설정 파일 복사
-COPY nginx/nginx.conf /etc/nginx/nginx.conf
+COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
