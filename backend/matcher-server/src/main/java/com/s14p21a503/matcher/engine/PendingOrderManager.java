@@ -98,11 +98,26 @@ public class PendingOrderManager {
         try {
             List<ExecutionResult> trades = new ArrayList<>();
 
-            // 사용할 수 있는 시장 유동성 계산: tick.tradeVol * participationRate
+            // ==========================================================
+            // 1. 소외주 배려: 누적 거래량(accVol)이 10만주 미만인 경우, 지정된 participationRate(5%) 대신
+            //    50%의 높은 비율을 동적으로 적용하여 소형주/소외주의 체결 속도 저하를 방지합니다.
+            // ==========================================================
             long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
-            BigDecimal rawLiquidity = new BigDecimal(tradeVol)
-                    .multiply(participationRate)
-                    .add(liquidityRemainder);
+            BigDecimal dynamicRate = participationRate;
+            if (tick.getAccVol() != null) {
+                if (tick.getAccVol() < 100_000L) {
+                    dynamicRate = new BigDecimal("0.50");
+                }
+            }
+
+            // 2. 틱 거래량에 보정된 비율 곱셈
+            BigDecimal calculatedLiquidity = new BigDecimal(tradeVol).multiply(dynamicRate);
+            
+            // 3. 최소 보장 유동성 (Minimum Guarentee): 틱 단위 거래량이 극히 적더라도, 
+            //    유동성이 최소 5주는 시장에 풀리도록 하한선을 적용합니다. 
+            //    (이전 틱에서 잔여로 남은 소수점 누적치인 liquidityRemainder 합산)
+            BigDecimal minGuarantee = new BigDecimal("5");
+            BigDecimal rawLiquidity = calculatedLiquidity.max(minGuarantee).add(liquidityRemainder);
 
             // 정수 부분만 이번 유동성으로 사용
             long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
@@ -217,10 +232,23 @@ public class PendingOrderManager {
     public void updateLiquidityRemainderOnly(TickDataEvent tick) {
         lock.lock();
         try {
+            // ==========================================================
+            // [유동성 보정 로직 - 복구 모드 통일]
+            // matchWithTick과 동일하게 소외주(10만주 미만)는 비율을 50%로 상향하고,
+            // 최소 5주의 보장 유동성을 적용하여 잔여 스냅샷 데이터의 정합성을 유지합니다.
+            // ==========================================================
             long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
-            BigDecimal rawLiquidity = new BigDecimal(tradeVol)
-                    .multiply(participationRate)
-                    .add(liquidityRemainder);
+            BigDecimal dynamicRate = participationRate;
+            if (tick.getAccVol() != null) {
+                if (tick.getAccVol() < 100_000L) {
+                    dynamicRate = new BigDecimal("0.50");
+                }
+            }
+
+            BigDecimal calculatedLiquidity = new BigDecimal(tradeVol).multiply(dynamicRate);
+            BigDecimal minGuarantee = new BigDecimal("5");
+            BigDecimal rawLiquidity = calculatedLiquidity.max(minGuarantee).add(liquidityRemainder);
+
             long usableLiquidity = rawLiquidity.setScale(0, RoundingMode.DOWN).longValue();
             this.liquidityRemainder = rawLiquidity.subtract(new BigDecimal(usableLiquidity));
         } finally {
