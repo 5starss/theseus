@@ -28,7 +28,13 @@ func main() {
 	// 2. 설정 로드
 	cfg := config.Load()
 
-	// 2. 인프라 연결 초기화
+	if len(cfg.KIS) == 0 {
+		log.Fatalf("KIS API Key가 설정되지 않았습니다. .env에 KIS_APP_KEY_1, KIS_APP_SECRET_1 을 확인하세요.")
+	}
+	log.Printf("KIS API Key %d개 로드됨 (세션당 20종목, 최대 %d종목 커버 가능)",
+		len(cfg.KIS), len(cfg.KIS)*20)
+
+	// 3. 인프라 연결 초기화
 	redisClient, err := redis.NewClient(cfg.Redis)
 	if err != nil {
 		log.Fatalf("Failed to initialize Redis: %v", err)
@@ -37,40 +43,29 @@ func main() {
 
 	kafkaProducer := kafka.NewProducer(cfg.Kafka)
 
-	// 3. KIS WS 클라이언트 초기화
-	wsClient := kis.NewWSClient(cfg.KIS)
+	// 4. KIS WS Pool 초기화 (다중 세션)
+	pool := kis.NewWSPool(cfg.KIS)
 
 	// 서버 구동 시그널 수신용 컨텍스트 (Graceful Shutdown)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 4. OpenAPI WS Approval Key 발급
-	if err := wsClient.GetApprovalKey(ctx); err != nil {
-		log.Fatalf("Failed to get KIS WS Approval Key: %v", err)
+	// 5. 모든 WS 세션 연결 (ApprovalKey 발급 + Connect + Fan-in 시작)
+	if err := pool.ConnectAll(ctx); err != nil {
+		log.Fatalf("Failed to connect WSPool: %v", err)
 	}
 
-	// 5. WS 연결 시작
-	if err := wsClient.Connect(ctx); err != nil {
-		log.Fatalf("Failed to connect to KIS WS: %v", err)
+	// 6. 워커 초기화 및 구동 (종목 수 증가에 따라 워커 10개로 증설)
+	dataWorker := worker.NewMarketDataWorker(pool, kafkaProducer, redisClient)
+	workerCount := pool.ClientCount() * 2 // 세션당 2개 워커 (예: 3세션 = 6워커, 5세션 = 10워커)
+	if workerCount < 5 {
+		workerCount = 5 // 최소 5개 보장
 	}
+	dataWorker.Start(ctx, workerCount)
 
-	// 6. 워커 초기화 및 구동 (고루틴 5개 띄움)
-	dataWorker := worker.NewMarketDataWorker(wsClient, kafkaProducer, redisClient)
-	dataWorker.Start(ctx, 5)
-
-	// Streamer 구동 (Kafka -> WSHub 단건 브로드캐스트 전송)
-	// cmd/server/main.go 에는 WSHub가 없으므로 nil을 넘기거나, 테스트용 모의 WSHub를 넣어야 함.
-	// 실제 스트리밍 서빙은 API 게이트웨이(WSHub가 있는 곳)에서 이루어지기 때문에
-	// 여기서는 단순히 Pipeline 테스트용 Consumer만 돌려보거나 생략할 수 있음.
-	// (API 명세서의 목적대로 cmd/api 에만 집중하기 위해 cmd/server 에서는 Streamer 제외)
-
-	// 7. 실시간 데이터 구독 (Top 40 종목 동적 할당)
-	tickers := worker.GetTop40Tickers()
-	for _, t := range tickers {
-		if err := wsClient.Subscribe(ctx, t); err != nil {
-			log.Printf("Failed to subscribe %s: %v", t, err)
-		}
-	}
+	// 7. 실시간 데이터 구독 (100종목 → 세션당 20종목씩 자동 분배)
+	tickers := worker.GetTargetTickers()
+	pool.SubscribeAll(ctx, tickers)
 
 	// ---------------------------------------------------------------------- //
 	// Graceful Shutdown Sequence Block
@@ -85,25 +80,21 @@ func main() {
 	// 시스템 컨텍스트 취소
 	cancel()
 
-	// 1. Disconnect KIS WS (수신 루프 정지)
-	log.Println("Step 1: Closing KIS WebSocket Connection...")
-	wsClient.Close()
+	// 1. WSPool 종료 (소켓 닫기 → Fan-in 채널 닫기 → 공유 채널 닫기)
+	log.Println("Step 1: Closing WSPool (all WebSocket sessions)...")
+	pool.Close()
 	time.Sleep(100 * time.Millisecond) // 확실한 소켓 종료 위한 짧은 대기
 
-	// 2. Close MessageChan (수신 데이터 없음 알림)
-	log.Println("Step 2: Closing Message Channel...")
-	close(wsClient.MessageChan)
-
-	// 3. Drain Channel (Wait for Workers)
-	log.Println("Step 3: Waiting for Workers to drain remaining messages...")
+	// 2. Drain Channel (Wait for Workers)
+	log.Println("Step 2: Waiting for Workers to drain remaining messages...")
 	dataWorker.Wait()
 
-	// 4. Close Kafka Producer
-	log.Println("Step 4: Closing Kafka Producer connections...")
+	// 3. Close Kafka Producer
+	log.Println("Step 3: Closing Kafka Producer connections...")
 	if err := kafkaProducer.Close(); err != nil {
 		log.Printf("Kafka Close Error: %v", err)
 	}
 
-	// 5. Redis Client Close (defer로 상단에서 이미 지정되어 있음)
-	log.Println("Step 5: Closing Redis Pool... Server exiting.")
+	// 4. Redis Client Close (defer로 상단에서 이미 지정되어 있음)
+	log.Println("Step 4: Closing Redis Pool... Server exiting.")
 }

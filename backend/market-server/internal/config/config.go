@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
@@ -12,7 +13,7 @@ type RedisConfig struct {
 	Password string
 }
 
-// KISConfig 한국투자증권 OpenAPI 설정
+// KISConfig 한국투자증권 OpenAPI 설정 (단일 키 세트)
 type KISConfig struct {
 	AppKey    string
 	AppSecret string
@@ -44,7 +45,7 @@ type KafkaConfig struct {
 type Config struct {
 	MySQL  MySQLConfig
 	Redis  RedisConfig
-	KIS    KISConfig
+	KIS    []KISConfig // 다중 API Key 지원 (키 수만큼 WebSocket 세션 생성)
 	Server ServerConfig
 	Kafka  KafkaConfig
 }
@@ -64,12 +65,7 @@ func Load() *Config {
 			Port:     getEnvOrDefault("REDIS_PORT", "6379"),
 			Password: os.Getenv("REDIS_PASSWORD"),
 		},
-		KIS: KISConfig{
-			AppKey:    os.Getenv("KIS_APP_KEY"),
-			AppSecret: os.Getenv("KIS_APP_SECRET"),
-			BaseURL:   getEnvOrDefault("KIS_BASE_URL", "https://openapivts.koreainvestment.com:29443"),
-			WSURL:     getEnvOrDefault("KIS_WS_URL", "ws://ops.koreainvestment.com:31000/tryitout/H0STCNT0"),
-		},
+		KIS:    loadKISConfigs(),
 		Server: ServerConfig{
 			Port: getEnvOrDefault("SERVER_PORT", "8085"),
 		},
@@ -79,6 +75,47 @@ func Load() *Config {
 			OrderbookTopic: getEnvOrDefault("KAFKA_ORDERBOOK_TOPIC", "market.orderbook"),
 		},
 	}
+}
+
+// loadKISConfigs KIS_APP_KEY_1 ~ KIS_APP_KEY_N 환경변수를 순서대로 읽어 []KISConfig를 반환한다.
+// 번호가 빠진 시점에서 로딩을 중단한다 (예: 1,2,3 존재 시 3개 반환).
+// 하위호환: 번호 없는 KIS_APP_KEY도 단일 키로 지원한다.
+func loadKISConfigs() []KISConfig {
+	baseURL := getEnvOrDefault("KIS_BASE_URL", "https://openapivts.koreainvestment.com:29443")
+	wsURL := getEnvOrDefault("KIS_WS_URL", "ws://ops.koreainvestment.com:31000/tryitout/H0STCNT0")
+
+	var configs []KISConfig
+
+	// 번호 붙은 키 탐색 (KIS_APP_KEY_1, KIS_APP_KEY_2, ...)
+	for i := 1; i <= 10; i++ { // 최대 10개까지 탐색
+		key := os.Getenv(fmt.Sprintf("KIS_APP_KEY_%d", i))
+		secret := os.Getenv(fmt.Sprintf("KIS_APP_SECRET_%d", i))
+		if key == "" || secret == "" {
+			break // 연속된 번호가 끊기면 중단
+		}
+		configs = append(configs, KISConfig{
+			AppKey:    key,
+			AppSecret: secret,
+			BaseURL:   baseURL,
+			WSURL:     wsURL,
+		})
+	}
+
+	// 번호 붙은 키가 하나도 없으면 기존 KIS_APP_KEY / KIS_APP_SECRET 하위호환
+	if len(configs) == 0 {
+		key := os.Getenv("KIS_APP_KEY")
+		secret := os.Getenv("KIS_APP_SECRET")
+		if key != "" && secret != "" {
+			configs = append(configs, KISConfig{
+				AppKey:    key,
+				AppSecret: secret,
+				BaseURL:   baseURL,
+				WSURL:     wsURL,
+			})
+		}
+	}
+
+	return configs
 }
 
 // getEnvOrDefault 환경변수가 없으면 defaultVal을 반환한다.
