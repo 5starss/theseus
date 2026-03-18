@@ -349,16 +349,18 @@ export function MyOrderHistory() {
     const navigate = useNavigate();
     const [tab, setTab] = useState<"pending" | "completed">("completed");
 
-    const orders = useAccountStore(state => state.orders);
-    const fetchOrders = useAccountStore(state => state.fetchOrders);
+    const pendingOrders = useAccountStore(state => state.pendingOrders);
+    const completedOrders = useAccountStore(state => state.completedOrders);
+    const fetchPendingOrders = useAccountStore(state => state.fetchPendingOrders);
+    const fetchCompletedOrders = useAccountStore(state => state.fetchCompletedOrders);
     const stockCode = useStockStore(state => state.stockCode);
 
     // 현재 종목의 주문 내역만 필터링
-    const stockOrders = orders.filter(o => o.stockCode === stockCode);
+    const stockOrders = [...pendingOrders, ...completedOrders].filter((o: any) => o.stockCode === stockCode);
 
     const currentOrders = tab === "pending"
-        ? stockOrders.filter(o => o.status === 'pending')
-        : stockOrders.filter(o => o.status !== 'pending');
+        ? stockOrders.filter((o: any) => o.status === 'pending')
+        : stockOrders.filter((o: any) => o.status !== 'pending');
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 h-full flex flex-col relative overflow-hidden">
@@ -375,7 +377,8 @@ export function MyOrderHistory() {
                     value={tab}
                     onValueChange={(val) => {
                         setTab(val as "pending" | "completed");
-                        fetchOrders();
+                        if (val === "pending") fetchPendingOrders();
+                        else fetchCompletedOrders({ ticker: stockCode });
                     }}
                     className="mb-4"
                 >
@@ -410,7 +413,7 @@ export function MyOrderHistory() {
                             {currentOrders.length === 0 ? (
                                 <tr><td colSpan={tab === "pending" ? 4 : 4} className="py-4 text-center text-xs text-slate-400">내역이 없습니다.</td></tr>
                             ) : (
-                                currentOrders.map((order, idx) => (
+                                currentOrders.map((order: any, idx: number) => (
                                     <tr key={idx} className="border-b border-slate-50 last:border-none hover:bg-slate-50/50 transition-colors">
                                         {tab === "completed" && (
                                             <td className="py-2.5 text-xs font-medium text-slate-500 text-center">{order.date}</td>
