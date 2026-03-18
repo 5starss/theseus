@@ -90,6 +90,7 @@ func main() {
 	// 8-2. DailySyncWorker 구동 (비동기 과거 일봉 동기화)
 	dailySyncWorker := worker.NewDailySyncWorker(restKisClient, stockRepo)
 	go dailySyncWorker.SyncPastDailyCandles(ctx)
+	go dailySyncWorker.StartDailyCloseScheduler(ctx) // 장 마감(15:35 KST) 후 오늘자 일봉 확정 저장
 
 	// 8-3. CandleWorker 구동 (1분봉 생성 및 저장)
 	candleConsumer := kafka.NewConsumer(cfg.Kafka, "candle-worker-group")
