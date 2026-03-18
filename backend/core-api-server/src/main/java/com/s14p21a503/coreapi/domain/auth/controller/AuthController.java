@@ -33,7 +33,7 @@ public class AuthController {
     private final AuthService authService;
     @Value("${auth.refresh-cookie.name:refresh_token}")
     private String refreshCookieName;
-    @Value("${auth.refresh-cookie.path:/api/v1/auth/refresh}")
+    @Value("${auth.refresh-cookie.path:/api/v1/core/auth/refresh}")
     private String refreshCookiePath;
     @Value("${auth.refresh-cookie.domain:}")
     private String refreshCookieDomain;
