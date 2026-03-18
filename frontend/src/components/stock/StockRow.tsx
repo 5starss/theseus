@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
+import { StockLogo } from './StockLogo';
 
 export interface StockRowProps {
     ticker: string;
@@ -10,17 +11,7 @@ export interface StockRowProps {
     accVolume: number;
 }
 
-const getStockIcon = (name: string) => {
-    // 종목명 길이에 따라 아이콘 색상 결정 (간단한 해시 함수)
-    const colors = [
-        'bg-[#155dfc]',
-        'bg-[#fb2c36]',
-        'bg-[#2b7fff]',
-        'bg-[#101828]',
-        'bg-[#6a7282]',
-    ];
-    return colors[name.length % colors.length];
-};
+
 
 const formatTradeAmount = (value: number) => {
     if (value >= 1000000000000) {
@@ -56,7 +47,7 @@ const StockRow: React.FC<StockRowProps> = ({
 
             {/* Name and Icon */}
             <div className="flex items-center gap-[10px] w-[220px] shrink-0">
-                <div className={`rounded-full size-[26px] shrink-0 ${getStockIcon(name)}`}></div>
+                <StockLogo ticker={ticker} name={name} className="size-[30px] rounded-full" fallbackClassName="text-[11px] text-white font-bold" />
                 <span className="text-[16px] text-black font-normal truncate">{name}</span>
             </div>
 

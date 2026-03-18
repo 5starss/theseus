@@ -27,7 +27,7 @@ export interface AccountHistoryResponse {
         totalPages: number;
         totalElements: number;
         size: number;
-        number: number;
+        page: number;
     };
 }
 

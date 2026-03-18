@@ -51,13 +51,21 @@ interface AccountState {
 
     // History
     transactions: Transaction[];
-    orders: Order[];
+    transactionsPage: number;
+    transactionsTotalPages: number;
+    pendingOrders: Order[];
+    completedOrders: Order[];
+    pendingOrdersPage: number;
+    pendingOrdersTotalPages: number;
+    ordersPage: number;
+    ordersTotalPages: number;
 
     // Actions
     fetchBalance: () => Promise<void>;
     fetchPositions: () => Promise<void>;
     fetchTransactions: (params?: { year?: number; month?: number; page?: number; size?: number }) => Promise<void>;
-    fetchOrders: (params?: { page?: number; size?: number; status?: string; ticker?: string; yearMonth?: string }) => Promise<void>;
+    fetchPendingOrders: (params?: { page?: number; size?: number }) => Promise<void>;
+    fetchCompletedOrders: (params?: { page?: number; size?: number; ticker?: string; yearMonth?: string }) => Promise<void>;
     cancelOrder: (orderId: number | string) => Promise<void>;
     executeTrade: (trade: { stockName: string; stockCode: string; quantity: number; price: number; type: 'buy' | 'sell' }) => void;
 }
@@ -70,7 +78,14 @@ export const useAccountStore = create<AccountState>((set) => ({
     totalCash: 0,
     portfolio: [],
     transactions: [],
-    orders: [],
+    transactionsPage: 0,
+    transactionsTotalPages: 0,
+    pendingOrders: [],
+    completedOrders: [],
+    pendingOrdersPage: 0,
+    pendingOrdersTotalPages: 0,
+    ordersPage: 0,
+    ordersTotalPages: 0,
 
     // 총 예수금, 주문 가능 금액을 가져오는 함수
     fetchBalance: async () => {
@@ -169,17 +184,21 @@ export const useAccountStore = create<AccountState>((set) => ({
                 };
             });
 
-            set({ transactions: transformed });
+            set({ 
+                transactions: transformed,
+                transactionsPage: data.histories.page,
+                transactionsTotalPages: data.histories.totalPages
+            });
         } catch (error) {
             console.error('Failed to fetch transactions in store:', error);
         }
     },
 
-    // 미체결, 체결 및 취소된 주문 내역을 가져오는 함수
-    // params: { page?: number; size?: number; status?: string; ticker?: string; yearMonth?: string }
-    fetchOrders: async (params) => {
+    // 미체결 주문 내역을 가져오는 함수
+    fetchPendingOrders: async (params) => {
         try {
-            const data = await orderApi.getOrders(params);
+            // 대기 주문 페이징 처리 반영
+            const data = await orderApi.getOrders({ ...params, status: 'PENDING' });
 
             const transformDate = (isoDate: string) => {
                 const date = new Date(isoDate);
@@ -197,6 +216,26 @@ export const useAccountStore = create<AccountState>((set) => ({
                 price: po.totalPrice / po.unexecutedQuantity
             }));
 
+            set({ 
+                pendingOrders: transformedPending,
+                pendingOrdersPage: data.pending.page,
+                pendingOrdersTotalPages: data.pending.totalPages
+            });
+        } catch (error) {
+            console.error('Failed to fetch pending orders in store:', error);
+        }
+    },
+
+    // 체결 및 취소된 주문 내역을 가져오는 함수 (페이징 적용)
+    fetchCompletedOrders: async (params) => {
+        try {
+            const data = await orderApi.getOrders({ ...params, status: 'COMPLETED' });
+
+            const transformDate = (isoDate: string) => {
+                const date = new Date(isoDate);
+                return `${date.getMonth() + 1}.${date.getDate()}`;
+            };
+
             const transformedCompleted: Order[] = data.completed.content.map((oh: ApiOrderHistory) => ({
                 id: oh.historyId.toString(),
                 date: transformDate(oh.createdAt),
@@ -208,25 +247,27 @@ export const useAccountStore = create<AccountState>((set) => ({
                 price: oh.price
             }));
 
-            set({ orders: [...transformedPending, ...transformedCompleted] });
+            set({ 
+                completedOrders: transformedCompleted,
+                ordersPage: data.completed.page,
+                ordersTotalPages: data.completed.totalPages
+            });
         } catch (error) {
-            console.error('Failed to fetch orders in store:', error);
+            console.error('Failed to fetch completed orders in store:', error);
         }
     },
 
     // 주문을 취소하는 함수
     cancelOrder: async (orderId) => {
         try {
-            // Optimistic update(낙관적 업데이트): 취소 버튼 누르면 바로 취소된 주문으로 변경
+            // Optimistic update(낙관적 업데이트): 상태를 취소중으로 변경 (이 부분은 pending 목록 내에서 처리)
             set((state) => {
-                const now = new Date();
-                const today = `${now.getMonth() + 1}.${now.getDate()}`;
-                const newOrders = state.orders.map(o =>
+                const newPending = state.pendingOrders.map(o =>
                     o.id === String(orderId)
-                        ? { ...o, status: 'canceled' as const, date: today }
+                        ? { ...o, status: 'canceling' as const }
                         : o
                 );
-                return { orders: newOrders };
+                return { pendingOrders: newPending };
             });
 
             // API 호출
@@ -235,14 +276,16 @@ export const useAccountStore = create<AccountState>((set) => ({
             // 1초 후 백엔드와 동기화
             setTimeout(async () => {
                 const getBalance = useAccountStore.getState().fetchBalance;
-                const getOrders = useAccountStore.getState().fetchOrders;
-                await Promise.all([getBalance(), getOrders()]);
+                const getPending = useAccountStore.getState().fetchPendingOrders;
+                const getCompleted = useAccountStore.getState().fetchCompletedOrders;
+                await Promise.all([getBalance(), getPending(), getCompleted()]);
             }, 1000);
 
         } catch (error) {
             console.error('Failed to cancel order in store:', error);
             // 실패 시 optimistic update 되돌리기
-            await useAccountStore.getState().fetchOrders();
+            await useAccountStore.getState().fetchPendingOrders();
+            await useAccountStore.getState().fetchCompletedOrders();
         }
     },
 
@@ -260,11 +303,12 @@ export const useAccountStore = create<AccountState>((set) => ({
             });
 
             // 주문 생성 직후 백엔드와 동기화
-            const { fetchBalance, fetchPositions, fetchOrders } = useAccountStore.getState();
+            const { fetchBalance, fetchPositions, fetchPendingOrders, fetchCompletedOrders } = useAccountStore.getState();
             await Promise.all([
                 fetchBalance(),
                 fetchPositions(),
-                fetchOrders()
+                fetchPendingOrders(),
+                fetchCompletedOrders()
             ]);
 
             // 매칭 엔진 처리 시간 고려한 지연 호출 (1초, 2.5초)
@@ -272,14 +316,16 @@ export const useAccountStore = create<AccountState>((set) => ({
                 const state = useAccountStore.getState();
                 state.fetchBalance();
                 state.fetchPositions();
-                state.fetchOrders();
+                state.fetchPendingOrders();
+                state.fetchCompletedOrders();
             }, 1000);
 
             setTimeout(() => {
                 const state = useAccountStore.getState();
                 state.fetchBalance();
                 state.fetchPositions();
-                state.fetchOrders();
+                state.fetchPendingOrders();
+                state.fetchCompletedOrders();
             }, 2500);
 
         } catch (error) {
