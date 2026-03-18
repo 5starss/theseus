@@ -27,6 +27,8 @@ public class AccountHistoryResponseDto {
         private String stockName;
         private int quantity;
         private BigDecimal price;
+        private BigDecimal fee;
+        private BigDecimal tax;
         private BigDecimal amount;
         private BigDecimal balanceAfter;
 
@@ -39,6 +41,8 @@ public class AccountHistoryResponseDto {
                     .stockName(history.getStockName())
                     .quantity(history.getQuantity())
                     .price(history.getPrice())
+                    .fee(history.getFee())
+                    .tax(history.getTax())
                     .amount(history.getAmount())
                     .balanceAfter(history.getBalanceAfter())
                     .build();

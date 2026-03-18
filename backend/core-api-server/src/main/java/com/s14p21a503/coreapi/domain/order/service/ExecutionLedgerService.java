@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 
 @Slf4j
@@ -126,7 +127,7 @@ public class ExecutionLedgerService {
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         if (order.getOrderType() == OrderType.BUY) {
-            account.unlockBalance(order.getPrice().multiply(BigDecimal.valueOf(remainingQuantity)));
+            account.unlockBalance(order.getRemainingLock());
         } else {
             Position position = positionRepository
                     .findByAccountIdAndTickerForUpdate(order.getAccountId(), order.getTicker())
@@ -165,8 +166,7 @@ public class ExecutionLedgerService {
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         if (event.getOrderType() == OrderType.BUY) {
-            BigDecimal refundAmount = order.getPrice().multiply(BigDecimal.valueOf(remainingQuantity));
-            account.unlockBalance(refundAmount);
+            account.unlockBalance(order.getRemainingLock());
         } else {
             Position position = positionRepository
                     .findByAccountIdAndTickerForUpdate(event.getAccountId(), event.getTicker())
@@ -179,8 +179,23 @@ public class ExecutionLedgerService {
     }
 
     private void processBuy(ExecutionEventDto event, Account account, Order order, int quantity) {
-        // 계좌 정산 (lockedAmt 해제, dncaTotAmt 차감, 환급액 반환)
-        account.settleBuy(event.getMatchPrice(), quantity, order.getPrice());
+        BigDecimal executionAmount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
+        BigDecimal executionFee    = executionAmount.multiply(TradePolicy.FEE_RATE).setScale(0, RoundingMode.DOWN);
+
+        // FILLED: 잔여 잠금 전액 해제 → 주문가/체결가 차액 및 절사 잔여분 한 번에 환급
+        // PARTIAL: 실제 체결 비용만큼만 잠금 해제 → 주문 진행 중 잔고 변동 없음
+        BigDecimal lockedCostToRelease;
+        if (order.getStatus() == OrderStatus.FILLED) {
+            lockedCostToRelease = order.getRemainingLock();
+        } else {
+            lockedCostToRelease = executionAmount.add(executionFee);
+        }
+
+        BigDecimal actualCostWithFee = executionAmount.add(executionFee);
+
+        // 계좌 정산 (체결가 기반 실비용 차감, 잠금 해제, 초과분 환급)
+        account.settleBuy(actualCostWithFee, lockedCostToRelease);
+        order.releasePartialLock(lockedCostToRelease);
 
         // 포지션 업데이트 (없으면 신규 생성)
         Position position = positionRepository
@@ -201,9 +216,8 @@ public class ExecutionLedgerService {
 
         position.applyBuy(quantity, event.getMatchPrice());
 
-        // 원장 거래 내역 저장
+        // 원장 거래 내역 저장 (amount = 체결금액 + 수수료)
         String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
-        BigDecimal amount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
         accountHistoryRepository.save(AccountHistory.builder()
                 .userId(event.getUserId())
                 .transactionType(TransactionType.BUY)
@@ -211,15 +225,23 @@ public class ExecutionLedgerService {
                 .stockName(stockName)
                 .quantity(quantity)
                 .price(event.getMatchPrice())
-                .amount(amount)
+                .fee(executionFee)
+                .tax(BigDecimal.ZERO)
+                .amount(actualCostWithFee)
                 .balanceAfter(account.getDncaTotAmt())
                 .executedAt(event.getExecutedAt())
                 .build());
     }
 
     private void processSell(ExecutionEventDto event, Account account, Order order, int quantity) {
-        // 계좌 정산 (매도 대금 입금)
-        account.settleSell(event.getMatchPrice(), quantity);
+        BigDecimal grossAmount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
+        BigDecimal fee = grossAmount.multiply(TradePolicy.FEE_RATE).setScale(0, RoundingMode.DOWN);
+        BigDecimal tax = grossAmount.multiply(TradePolicy.TAX_RATE).setScale(0, RoundingMode.DOWN);
+
+        BigDecimal netProceeds = grossAmount.subtract(fee).subtract(tax);
+
+        // 계좌 정산 (매도 순수익 입금: 체결금액 - 수수료 - 매도세)
+        account.settleSell(netProceeds);
 
         // 포지션 업데이트
         Position position = positionRepository
@@ -233,9 +255,8 @@ public class ExecutionLedgerService {
             positionRepository.delete(position);
         }
 
-        // 원장 거래 내역 저장
+        // 원장 거래 내역 저장 (amount = 체결금액 - 수수료 - 매도세)
         String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
-        BigDecimal amount = event.getMatchPrice().multiply(BigDecimal.valueOf(quantity));
         accountHistoryRepository.save(AccountHistory.builder()
                 .userId(event.getUserId())
                 .transactionType(TransactionType.SELL)
@@ -243,7 +264,9 @@ public class ExecutionLedgerService {
                 .stockName(stockName)
                 .quantity(quantity)
                 .price(event.getMatchPrice())
-                .amount(amount)
+                .fee(fee)
+                .tax(tax)
+                .amount(netProceeds)
                 .balanceAfter(account.getDncaTotAmt())
                 .executedAt(event.getExecutedAt())
                 .build());

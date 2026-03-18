@@ -60,21 +60,17 @@ public class Account extends BaseEntity {
         this.availableAmt = this.availableAmt.add(amount);
     }
 
-    public void settleBuy(BigDecimal executionPrice, int quantity, BigDecimal orderedPrice) {
-        BigDecimal actualCost  = executionPrice.multiply(BigDecimal.valueOf(quantity));
-        BigDecimal orderedCost = orderedPrice.multiply(BigDecimal.valueOf(quantity));
-        BigDecimal refund      = orderedCost.subtract(actualCost); // 지정가 > 체결가일 때 환급
+    public void settleBuy(BigDecimal actualCostWithFee, BigDecimal lockedCostToRelease) {
+        BigDecimal refund = lockedCostToRelease.subtract(actualCostWithFee);
 
-        this.dncaTotAmt   = this.dncaTotAmt.subtract(actualCost);
-        this.lockedAmt    = this.lockedAmt.subtract(orderedCost);
+        this.dncaTotAmt   = this.dncaTotAmt.subtract(actualCostWithFee);
+        this.lockedAmt    = this.lockedAmt.subtract(lockedCostToRelease);
         this.availableAmt = this.availableAmt.add(refund);
     }
 
-    public void settleSell(BigDecimal executionPrice, int quantity) {
-        BigDecimal proceeds = executionPrice.multiply(BigDecimal.valueOf(quantity));
-
-        this.dncaTotAmt   = this.dncaTotAmt.add(proceeds);
-        this.availableAmt = this.availableAmt.add(proceeds);
+    public void settleSell(BigDecimal netProceeds) {
+        this.dncaTotAmt   = this.dncaTotAmt.add(netProceeds);
+        this.availableAmt = this.availableAmt.add(netProceeds);
         // lockedAmt 변동 없음 - 매도는 주식 수량만 잠금, 금액 잠금 없음
     }
 }
