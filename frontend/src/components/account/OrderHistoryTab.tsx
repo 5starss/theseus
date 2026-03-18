@@ -3,43 +3,48 @@ import { useAccountStore, type Order } from "../../store/useAccountStore";
 import { HistoryDetailModal } from "./HistoryDetailModal";
 import { OrderDetail } from "./OrderDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export function OrderHistoryTab() {
-    const { orders, fetchOrders, cancelOrder } = useAccountStore();
+    const { pendingOrders, completedOrders, fetchPendingOrders, fetchCompletedOrders, cancelOrder, ordersPage, ordersTotalPages, pendingOrdersPage, pendingOrdersTotalPages } = useAccountStore();
     const [selectedMonth, setSelectedMonth] = useState<string>('전체');
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [currentPage, setCurrentPage] = useState<number>(0);
+    const [currentPendingPage, setCurrentPendingPage] = useState<number>(0);
 
     useEffect(() => {
-        fetchOrders();
-    }, [fetchOrders]);
+        fetchPendingOrders({ page: currentPendingPage, size: 10 });
+    }, [fetchPendingOrders, currentPendingPage]);
+
+    useEffect(() => {
+        fetchCompletedOrders({ page: currentPage, size: 20 });
+    }, [fetchCompletedOrders, currentPage]);
 
     const availableMonths = useMemo(() => {
         const months = new Set<string>();
-        orders.forEach(o => {
+        completedOrders.forEach(o => {
             const m = o.date.split('.')[0];
             months.add(m);
         });
         const sorted = Array.from(months).sort((a, b) => parseInt(b) - parseInt(a));
         return ['전체', ...sorted];
-    }, [orders]);
+    }, [completedOrders]);
 
-    const filteredOrders = useMemo(() => {
-        if (selectedMonth === '전체') return orders;
-        return orders.filter(o => o.date.split('.')[0] === selectedMonth);
-    }, [orders, selectedMonth]);
+    const filteredCompleted = useMemo(() => {
+        if (selectedMonth === '전체') return completedOrders;
+        return completedOrders.filter(o => o.date.split('.')[0] === selectedMonth);
+    }, [completedOrders, selectedMonth]);
 
-    // Split into pending and completed/canceled
-    const pendingOrders = filteredOrders.filter(o => o.status === 'pending');
-    const historyOrders = filteredOrders.filter(o => o.status !== 'pending');
+    const historyOrders = filteredCompleted;
 
     // 일자별 그룹화 로직 (완료/취소된 주문만)
-    const groupedOrders = historyOrders.reduce((acc, order) => {
+    const groupedOrders = historyOrders.reduce((acc: Record<string, Order[]>, order) => {
         if (!acc[order.date]) {
             acc[order.date] = [];
         }
         acc[order.date].push(order);
         return acc;
-    }, {} as Record<string, typeof orders>);
+    }, {});
 
     const orderDates = Object.keys(groupedOrders).sort((a, b) => {
         const [monthA, dayA] = a.split('.').map(Number);
@@ -116,6 +121,48 @@ export function OrderHistoryTab() {
                                 </div>
                             ))}
                         </div>
+
+                        {/* Pending Pagination */}
+                        {pendingOrdersTotalPages > 1 && (
+                            <div className="flex justify-center items-center gap-2 mt-4 mb-4">
+                                <button
+                                    disabled={pendingOrdersPage === 0}
+                                    onClick={() => setCurrentPendingPage(prev => Math.max(0, prev - 1))}
+                                    className={`p-1.5 rounded-lg ${pendingOrdersPage === 0 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </button>
+
+                                {Array.from({ length: pendingOrdersTotalPages })
+                                    .map((_, i) => i)
+                                    .filter(i => {
+                                        const start = Math.max(0, Math.min(pendingOrdersPage - 2, pendingOrdersTotalPages - 5));
+                                        const end = Math.min(pendingOrdersTotalPages - 1, start + 4);
+                                        return i >= start && i <= end;
+                                    })
+                                    .map(i => (
+                                        <button
+                                            key={i}
+                                            onClick={() => setCurrentPendingPage(i)}
+                                            className={`w-7 h-7 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${
+                                                pendingOrdersPage === i
+                                                    ? 'bg-[#101828] text-white'
+                                                    : 'text-[#6a7282] hover:bg-slate-100'
+                                            }`}
+                                        >
+                                            {i + 1}
+                                        </button>
+                                    ))}
+
+                                <button
+                                    disabled={pendingOrdersPage >= pendingOrdersTotalPages - 1}
+                                    onClick={() => setCurrentPendingPage(prev => Math.min(pendingOrdersTotalPages - 1, prev + 1))}
+                                    className={`p-1.5 rounded-lg ${pendingOrdersPage >= pendingOrdersTotalPages - 1 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -201,6 +248,48 @@ export function OrderHistoryTab() {
                             </div>
                         ))}
                     </div>
+
+                    {/* Pagination */}
+                    {ordersTotalPages > 1 && (
+                        <div className="flex justify-center items-center gap-2 mt-6">
+                            <button
+                                disabled={ordersPage === 0}
+                                onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                                className={`p-2 rounded-lg ${ordersPage === 0 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                            >
+                                <ChevronLeft className="w-5 h-5" />
+                            </button>
+
+                            {Array.from({ length: ordersTotalPages })
+                                .map((_, i) => i)
+                                .filter(i => {
+                                    const start = Math.max(0, Math.min(ordersPage - 2, ordersTotalPages - 5));
+                                    const end = Math.min(ordersTotalPages - 1, start + 4);
+                                    return i >= start && i <= end;
+                                })
+                                .map(i => (
+                                    <button
+                                        key={i}
+                                        onClick={() => setCurrentPage(i)}
+                                        className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${
+                                            ordersPage === i
+                                                ? 'bg-[#101828] text-white'
+                                                : 'text-[#6a7282] hover:bg-slate-100'
+                                        }`}
+                                    >
+                                        {i + 1}
+                                    </button>
+                                ))}
+
+                            <button
+                                disabled={ordersPage >= ordersTotalPages - 1}
+                                onClick={() => setCurrentPage(prev => Math.min(ordersTotalPages - 1, prev + 1))}
+                                className={`p-2 rounded-lg ${ordersPage >= ordersTotalPages - 1 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                            >
+                                <ChevronRight className="w-5 h-5" />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 

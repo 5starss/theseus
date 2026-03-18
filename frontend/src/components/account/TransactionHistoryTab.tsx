@@ -3,15 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import { HistoryDetailModal } from "./HistoryDetailModal";
 import { TransactionDetail } from "./TransactionDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export const TransactionHistoryTab = () => {
-    const { cashBalance, transactions, fetchTransactions } = useAccountStore();
+    const { cashBalance, transactions, fetchTransactions, transactionsPage, transactionsTotalPages } = useAccountStore();
     const [selectedMonth, setSelectedMonth] = useState<string>('전체');
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+    const [currentPage, setCurrentPage] = useState<number>(0);
 
     useEffect(() => {
-        fetchTransactions();
-    }, [fetchTransactions]);
+        fetchTransactions({ page: currentPage, size: 20 });
+    }, [fetchTransactions, currentPage]);
 
     const availableMonths = useMemo(() => {
         const months = new Set<string>();
@@ -125,6 +127,48 @@ export const TransactionHistoryTab = () => {
                         </div>
                     ))}
                 </div>
+
+                {/* Pagination */}
+                {transactionsTotalPages > 0 && (
+                    <div className="flex justify-center items-center gap-2 mt-6">
+                        <button
+                            disabled={transactionsPage === 0}
+                            onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                            className={`p-2 rounded-lg ${transactionsPage === 0 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                        >
+                            <ChevronLeft className="w-5 h-5" />
+                        </button>
+
+                        {Array.from({ length: transactionsTotalPages })
+                            .map((_, i) => i)
+                            .filter(i => {
+                                const start = Math.max(0, Math.min(transactionsPage - 2, transactionsTotalPages - 5));
+                                const end = Math.min(transactionsTotalPages - 1, start + 4);
+                                return i >= start && i <= end;
+                            })
+                            .map(i => (
+                                <button
+                                    key={i}
+                                    onClick={() => setCurrentPage(i)}
+                                    className={`w-8 h-8 flex items-center justify-center rounded-lg font-bold text-sm transition-colors ${
+                                        transactionsPage === i
+                                            ? 'bg-[#101828] text-white'
+                                            : 'text-[#6a7282] hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {i + 1}
+                                </button>
+                            ))}
+
+                        <button
+                            disabled={transactionsPage >= transactionsTotalPages - 1}
+                            onClick={() => setCurrentPage(prev => Math.min(transactionsTotalPages - 1, prev + 1))}
+                            className={`p-2 rounded-lg ${transactionsPage >= transactionsTotalPages - 1 ? 'text-[#d1d5db] cursor-not-allowed' : 'text-[#6a7282] hover:bg-slate-100'}`}
+                        >
+                            <ChevronRight className="w-5 h-5" />
+                        </button>
+                    </div>
+                )}
 
             </div>
 
