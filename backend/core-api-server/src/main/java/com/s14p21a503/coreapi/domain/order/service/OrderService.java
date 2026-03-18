@@ -30,6 +30,8 @@ import java.util.List;
 
 import java.math.BigDecimal;
 import com.s14p21a503.coreapi.domain.order.entity.OrderType;
+import com.s14p21a503.coreapi.domain.order.entity.TradePolicy;
+import java.math.RoundingMode;
 
 import com.s14p21a503.coreapi.domain.outbox.entity.OutboxEvent;
 import com.s14p21a503.coreapi.domain.outbox.repository.OutboxEventRepository;
@@ -60,10 +62,12 @@ public class OrderService {
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         // 매수 주문 시 증거금 체크 및 잠금(Lock)
+        BigDecimal lockedAmount = BigDecimal.ZERO;
         if (requestDto.getOrderType() == OrderType.BUY) {
-            BigDecimal totalOrderAmount = requestDto.getPrice().multiply(new BigDecimal(requestDto.getQuantity()));
-            // 엔티티 내부에서 가용 잔고(availableAmt) 확인 후 잠금 처리 (부족 시 BaseException 발생)
-            account.lockBalance(totalOrderAmount);
+            BigDecimal tradeAmount = requestDto.getPrice().multiply(new BigDecimal(requestDto.getQuantity()));
+            BigDecimal fee = tradeAmount.multiply(TradePolicy.FEE_RATE).setScale(0, RoundingMode.DOWN);
+            lockedAmount = tradeAmount.add(fee);
+            account.lockBalance(lockedAmount);
         }
         // 매도 주문 시 보유 주식 체크 및 잠금(Lock)
         else if (requestDto.getOrderType() == OrderType.SELL) {
@@ -84,6 +88,7 @@ public class OrderService {
                 .priceType(requestDto.getPriceType())
                 .price(requestDto.getPrice())
                 .requestedQuantity(requestDto.getQuantity())
+                .lockedAmount(lockedAmount)
                 .build();
 
         // 데이터베이스에 저장

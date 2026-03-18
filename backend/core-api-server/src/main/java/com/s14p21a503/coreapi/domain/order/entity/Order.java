@@ -62,8 +62,14 @@ public class Order extends BaseEntity {
     @Column(name = "status", length = 20, nullable = false)
     private OrderStatus status; // OPEN, PARTIAL, FILLED, CANCELLED
 
+    @Column(name = "locked_amount", precision = 18, scale = 0, nullable = false)
+    private BigDecimal lockedAmount = BigDecimal.ZERO; // 주문 접수 시 잠근 총액 (체결금액 + 수수료)
+
+    @Column(name = "released_lock_amount", precision = 18, scale = 0, nullable = false)
+    private BigDecimal releasedLockAmount = BigDecimal.ZERO; // 부분 체결마다 누적 해제된 잠금액
+
     @Builder
-    public Order(Long accountId, Long userId, String ticker, OrderType orderType, PriceType priceType, BigDecimal price, Integer requestedQuantity) {
+    public Order(Long accountId, Long userId, String ticker, OrderType orderType, PriceType priceType, BigDecimal price, Integer requestedQuantity, BigDecimal lockedAmount) {
         this.accountId = accountId;
         this.userId = userId;
         this.ticker = ticker;
@@ -71,8 +77,18 @@ public class Order extends BaseEntity {
         this.priceType = priceType;
         this.price = price;
         this.requestedQuantity = requestedQuantity;
-        this.executedQuantity = 0; // 초기 체결 수량은 0
-        this.status = OrderStatus.OPEN; // 초기 상태는 OPEN(주문 접수)
+        this.executedQuantity = 0;
+        this.status = OrderStatus.OPEN;
+        this.lockedAmount = lockedAmount != null ? lockedAmount : BigDecimal.ZERO;
+        this.releasedLockAmount = BigDecimal.ZERO;
+    }
+
+    public void releasePartialLock(BigDecimal amount) {
+        this.releasedLockAmount = this.releasedLockAmount.add(amount);
+    }
+
+    public BigDecimal getRemainingLock() {
+        return this.lockedAmount.subtract(this.releasedLockAmount);
     }
 
     public void execute(int quantity) {
