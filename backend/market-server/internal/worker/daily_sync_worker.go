@@ -58,6 +58,68 @@ func (w *DailySyncWorker) SyncPastDailyCandles(ctx context.Context) {
 	log.Println("[DailySyncWorker] Past daily candles sync completed.")
 }
 
+// StartDailyCloseScheduler 매일 장 마감 후(15:35 KST) 오늘자 일봉을 재동기화하는 스케줄러를 시작한다.
+// KIS API에 종가가 확정 반영될 시간을 고려하여 15:30이 아닌 15:35에 트리거한다.
+func (w *DailySyncWorker) StartDailyCloseScheduler(ctx context.Context) {
+	const triggerHour = 15
+	const triggerMin = 35
+
+	kst, _ := time.LoadLocation("Asia/Seoul")
+
+	// 다음 트리거 시각을 계산한다.
+	calcNext := func() time.Time {
+		now := time.Now().In(kst)
+		next := time.Date(now.Year(), now.Month(), now.Day(), triggerHour, triggerMin, 0, 0, kst)
+		if now.After(next) {
+			next = next.AddDate(0, 0, 1) // 이미 지났으면 내일
+		}
+		return next
+	}
+
+	next := calcNext()
+	log.Printf("[DailySyncWorker] Daily close scheduler started, next trigger at %s", next.Format("2006-01-02 15:04:05"))
+
+	for {
+		select {
+		case <-time.After(time.Until(next)):
+			w.syncTodayDailyCandles(ctx)
+			next = calcNext()
+			log.Printf("[DailySyncWorker] Next daily close sync scheduled at %s", next.Format("2006-01-02 15:04:05"))
+		case <-ctx.Done():
+			log.Println("[DailySyncWorker] Daily close scheduler stopped.")
+			return
+		}
+	}
+}
+
+// syncTodayDailyCandles 오늘 날짜만을 대상으로 Top40 종목의 일봉을 KIS API에서 가져와 DB에 확정 저장한다.
+func (w *DailySyncWorker) syncTodayDailyCandles(ctx context.Context) {
+	log.Println("[DailySyncWorker] Starting today's daily candle sync (post-market close)...")
+
+	kst, _ := time.LoadLocation("Asia/Seoul")
+	today := time.Now().In(kst).Format("20060102")
+
+	for ticker, name := range Top40Stocks {
+		var err error
+		for attempt := 1; attempt <= 3; attempt++ {
+			err = w.syncTickerDaily(ctx, ticker, name, today, today)
+			if err == nil {
+				break
+			}
+			if attempt < 3 {
+				log.Printf("[DailySyncWorker] Retry %d/3 for %s (%s) [today sync]: %v", attempt, ticker, name, err)
+				time.Sleep(500 * time.Millisecond * time.Duration(attempt))
+			}
+		}
+		if err != nil {
+			log.Printf("[DailySyncWorker] Failed to sync today's candle for %s (%s): %v", ticker, name, err)
+		}
+		time.Sleep(200 * time.Millisecond) // KIS API Rate Limit
+	}
+
+	log.Println("[DailySyncWorker] Today's daily candle sync completed.")
+}
+
 type kisDailyChartResponse struct {
 	Output2 []struct {
 		StckBsopDate string `json:"stck_bsop_date"` // 영업일자
