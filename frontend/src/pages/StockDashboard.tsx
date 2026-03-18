@@ -17,7 +17,7 @@ export default function StockDashboard() {
     const { code } = useParams<{ code: string }>();
     const connectStockStream = useStockStore(state => state.connectStockStream);
     const disconnectStockStream = useStockStore(state => state.disconnectStockStream);
-    const { fetchBalance, fetchPositions, fetchOrders } = useAccountStore();
+    const { fetchBalance, fetchPositions, fetchPendingOrders, fetchCompletedOrders } = useAccountStore();
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const [timeframe, setTimeframeState] = useState<TimeframeType>(() => {
         const saved = localStorage.getItem('stock_chart_timeframe');
@@ -36,14 +36,15 @@ export default function StockDashboard() {
             if (isLoggedIn) {
                 fetchBalance();
                 fetchPositions();
-                fetchOrders({ ticker: code, size: 20 });
+                fetchPendingOrders();
+                fetchCompletedOrders({ ticker: code, size: 20 });
             }
         }
 
         return () => {
             disconnectStockStream();
         };
-    }, [code, connectStockStream, disconnectStockStream, isLoggedIn, fetchBalance, fetchPositions, fetchOrders]);
+    }, [code, connectStockStream, disconnectStockStream, isLoggedIn, fetchBalance, fetchPositions, fetchPendingOrders, fetchCompletedOrders]);
 
     return (
         <div className="w-full h-full flex flex-col p-4 gap-4 bg-slate-50 overflow-hidden">
