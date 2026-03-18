@@ -15,17 +15,17 @@ import (
 
 // MarketDataWorker WebSocket 파이프라인에서 데이터를 읽어 Kafka와 Redis에 적재한다.
 type MarketDataWorker struct {
-	wsClient *kis.WSClient
-	kafka    *kafka.Producer
-	redis    *redis.Client
-	wg       sync.WaitGroup
+	messageChan <-chan []byte // WSPool의 공유 Fan-in 채널을 읽기 전용으로 참조
+	kafka       *kafka.Producer
+	redis       *redis.Client
+	wg          sync.WaitGroup
 }
 
-func NewMarketDataWorker(ws *kis.WSClient, k *kafka.Producer, r *redis.Client) *MarketDataWorker {
+func NewMarketDataWorker(pool *kis.WSPool, k *kafka.Producer, r *redis.Client) *MarketDataWorker {
 	return &MarketDataWorker{
-		wsClient: ws,
-		kafka:    k,
-		redis:    r,
+		messageChan: pool.MessageChan, // WSPool의 Fan-in 채널
+		kafka:       k,
+		redis:       r,
 	}
 }
 
@@ -46,7 +46,7 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 	// 백그라운드 반복 루프
 	// context가 취소되더라도(chan <-ctx.Done), 채널에 남아있는(Drain) 메시지를 전부 처리하고 종료해야 한다.
 	// 따라서 for range 채널 방식을 사용하여 채널이 close 될 때까지 계속 읽도록 한다.
-	for msg := range w.wsClient.MessageChan {
+	for msg := range w.messageChan {
 		rawStr := string(msg)
 
 		// 1. 파싱

@@ -34,6 +34,12 @@ func main() {
 	// 2. 환경변수 기반 설정 로드
 	cfg := config.Load()
 
+	if len(cfg.KIS) == 0 {
+		log.Fatalf("KIS API Key가 설정되지 않았습니다. .env에 KIS_APP_KEY_1, KIS_APP_SECRET_1 을 확인하세요.")
+	}
+	log.Printf("KIS API Key %d개 로드됨 (세션당 20종목, 최대 %d종목 커버 가능)",
+		len(cfg.KIS), len(cfg.KIS)*20)
+
 	// 3. 인프라 클라이언트 초기화
 	rdb, err := redisClient.NewClient(cfg.Redis)
 	if err != nil {
@@ -54,37 +60,35 @@ func main() {
 
 	kafkaProducer := kafka.NewProducer(cfg.Kafka)
 
-	// 4. KIS WS 클라이언트 초기화 및 연결
-	wsClient := kisClient.NewWSClient(cfg.KIS)
-	if err := wsClient.GetApprovalKey(context.Background()); err != nil {
-		log.Fatalf("KIS WS Approval Key 발급 실패: %v", err)
-	}
+	// 4. KIS WS Pool 초기화 (다중 세션)
+	pool := kisClient.NewWSPool(cfg.KIS)
 
 	// 5. 취소 가능한 컨텍스트 생성 (모든 백그라운드 고루틴이 공유)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := wsClient.Connect(ctx); err != nil {
-		log.Fatalf("KIS WS 연결 실패: %v", err)
+	if err := pool.ConnectAll(ctx); err != nil {
+		log.Fatalf("KIS WSPool 연결 실패: %v", err)
 	}
 
 	// 6. MarketDataWorker 구동 (체결가/호가 → Kafka & Redis)
-	dataWorker := worker.NewMarketDataWorker(wsClient, kafkaProducer, rdb)
-	dataWorker.Start(ctx, 5)
-
-	// 7. Top 40 종목 구독
-	for _, ticker := range worker.GetTop40Tickers() {
-		if err := wsClient.Subscribe(ctx, ticker); err != nil {
-			log.Printf("KIS WS 구독 실패 (%s): %v", ticker, err)
-		}
+	dataWorker := worker.NewMarketDataWorker(pool, kafkaProducer, rdb)
+	workerCount := pool.ClientCount() * 2
+	if workerCount < 5 {
+		workerCount = 5
 	}
+	dataWorker.Start(ctx, workerCount)
+
+	// 7. 종목 구독 (세션당 20종목씩 자동 분배)
+	tickers := worker.GetTargetTickers()
+	pool.SubscribeAll(ctx, tickers)
 
 	// 8. 의존성 주입 (Repository → Service → Handler)
 	stockRepo := repository.NewStockRepository(rdb, db)
 	stockSvc := service.NewStockService(stockRepo)
 
-	// 8-1. KIS REST API 클라이언트 초기화 및 토큰 워커 시작 (과거 일봉 동기화 등)
-	restKisClient := kisClient.NewClient(cfg.KIS)
+	// 8-1. KIS REST API 클라이언트 초기화 및 토큰 워커 시작 (첫 번째 키 사용)
+	restKisClient := kisClient.NewClient(cfg.KIS[0])
 	go restKisClient.StartTokenWorker(ctx)
 
 	// 8-2. DailySyncWorker 구동 (비동기 과거 일봉 동기화)
@@ -140,10 +144,9 @@ func main() {
 			log.Fatalf("서버 강제 종료: %v", err)
 		}
 
-		// KIS WS 종료 → MessageChan 닫기 → Worker drain
-		wsClient.Close()
+		// WSPool 종료 (소켓 닫기 → Fan-in 종료 → 공유 채널 닫기)
+		pool.Close()
 		time.Sleep(100 * time.Millisecond)
-		close(wsClient.MessageChan)
 		dataWorker.Wait()
 
 		// Kafka Consumer (Streamer) 종료 대기

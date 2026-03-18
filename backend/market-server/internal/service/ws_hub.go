@@ -194,7 +194,7 @@ func (h *WSHub) broadcaster_HOME_40(ctx context.Context) {
 
 			// 부모 ctx를 전파하여 Hub 종료 시 Redis 조회도 함께 취소
 			bgCtx, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
-			stocks, err := h.stockSvc.GetTopStocks(bgCtx, 20, domain.RankTypeVolume)
+			stocks, err := h.stockSvc.GetTopStocks(bgCtx, 100, domain.RankTypeVolume)
 			cancel()
 
 			if err != nil {
