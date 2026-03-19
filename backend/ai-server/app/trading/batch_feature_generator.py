@@ -1,6 +1,7 @@
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.quant.sources import get_all_tickers_from_db
 from app.quant.preparation import prepare_feature_df
@@ -9,7 +10,7 @@ from app.shared.rag.ingest_pipeline import RAGIngestPipeline
 logger = logging.getLogger(__name__)
 
 def run_daily_batch_preparation(
-    data_dir: str, 
+    data_dir: Optional[str] = None,
     horizon_minutes: int = 5, 
     feature_profile: str = "mtf",
     days: int = 730
@@ -21,6 +22,9 @@ def run_daily_batch_preparation(
     를 수행합니다.
 
     """
+    if data_dir is None:
+        data_dir = os.getenv("QUANT_DATA_DIR", "storage/quant/data_cybos")
+
     try:
         tickers = get_all_tickers_from_db()
     except Exception as e:
