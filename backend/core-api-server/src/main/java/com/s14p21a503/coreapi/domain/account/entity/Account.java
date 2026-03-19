@@ -16,7 +16,12 @@ import java.math.BigDecimal;
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "accounts")
+@Table(name = "accounts",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_accounts_user_type",
+                columnNames = {"user_id", "account_type"}
+        )
+)
 public class Account extends BaseEntity {
 
     @Id
@@ -24,24 +29,29 @@ public class Account extends BaseEntity {
     @Column(name = "account_id")
     private Long id;
 
-    @Column(name = "user_id", nullable = false, unique = true)
+    @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "dnca_tot_amt", precision = 18, scale = 0, nullable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_type", nullable = false)
+    private AccountType accountType;
+
+    @Column(name = "dnca_tot_amt", precision = 18, scale = 0, nullable = false, columnDefinition = "DECIMAL(18,0) CHECK (dnca_tot_amt >= 0)")
     private BigDecimal dncaTotAmt;
 
     @Column(name = "locked_amt", precision = 18, scale = 0, nullable = false)
     private BigDecimal lockedAmt = BigDecimal.ZERO;
 
-    @Column(name = "available_amt", precision = 18, scale = 0, nullable = false)
+    @Column(name = "available_amt", precision = 18, scale = 0, nullable = false, columnDefinition = "DECIMAL(18,0) CHECK (available_amt >= 0)")
     private BigDecimal availableAmt;
 
     @Builder
-    public Account(Long userId, BigDecimal dncaTotAmt) {
+    public Account(Long userId, BigDecimal dncaTotAmt, AccountType accountType) {
         this.userId = userId;
         this.dncaTotAmt = dncaTotAmt != null ? dncaTotAmt : BigDecimal.ZERO;
         this.lockedAmt = BigDecimal.ZERO;
         this.availableAmt = this.dncaTotAmt;
+        this.accountType = accountType != null ? accountType : AccountType.USER;
     }
 
     public void lockBalance(BigDecimal amount) {
@@ -72,5 +82,18 @@ public class Account extends BaseEntity {
         this.dncaTotAmt   = this.dncaTotAmt.add(netProceeds);
         this.availableAmt = this.availableAmt.add(netProceeds);
         // lockedAmt 변동 없음 - 매도는 주식 수량만 잠금, 금액 잠금 없음
+    }
+
+    public void deposit(BigDecimal amount) {
+        this.dncaTotAmt = this.dncaTotAmt.add(amount);
+        this.availableAmt = this.availableAmt.add(amount);
+    }
+
+    public void withdraw(BigDecimal amount) {
+        if (this.availableAmt.compareTo(amount) < 0) {
+            throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
+        }
+        this.dncaTotAmt = this.dncaTotAmt.subtract(amount);
+        this.availableAmt = this.availableAmt.subtract(amount);
     }
 }

@@ -13,14 +13,17 @@ import java.time.LocalDateTime;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "order_history", indexes = {
-    @Index(name = "idx_orderHistory_user_created", columnList = "user_id, created_at DESC"),
-    @Index(name = "idx_orderHistory_user_ticker_created", columnList = "user_id, ticker, created_at DESC")
+    @Index(name = "idx_orderHistory_account_created", columnList = "account_id, created_at DESC"),
+    @Index(name = "idx_orderHistory_account_ticker_created", columnList = "account_id, ticker, created_at DESC")
 })
 public class OrderHistory {
     
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "history_id")
     private Long id;
+
+    @Column(name = "account_id", nullable = false)
+    private Long accountId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", nullable = false)
@@ -46,7 +49,8 @@ public class OrderHistory {
     private LocalDateTime createdAt;
 
     @Builder
-    public OrderHistory(Order order, Long userId, String ticker, HistoryType historyType, Integer quantity, BigDecimal price, LocalDateTime createdAt) {
+    public OrderHistory(Long accountId, Order order, Long userId, String ticker, HistoryType historyType, Integer quantity, BigDecimal price, LocalDateTime createdAt) {
+        this.accountId = accountId;
         this.order = order;
         this.userId = userId;
         this.ticker = ticker;

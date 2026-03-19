@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "account_histories", indexes = {
-    @Index(name = "idx_accountHistory_user_executed", columnList = "user_id, executed_at DESC")
+    @Index(name = "idx_accountHistory_account_executed", columnList = "account_id, executed_at DESC")
 })
 public class AccountHistory extends BaseEntity {
 
@@ -22,6 +22,9 @@ public class AccountHistory extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "history_id")
     private Long id;
+
+    @Column(name = "account_id", nullable = false)
+    private Long accountId;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;
@@ -58,9 +61,10 @@ public class AccountHistory extends BaseEntity {
     private LocalDateTime executedAt;
 
     @Builder
-    public AccountHistory(Long userId, TransactionType transactionType, String ticker, String stockName,
+    public AccountHistory(Long accountId, Long userId, TransactionType transactionType, String ticker, String stockName,
                           int quantity, BigDecimal price, BigDecimal fee, BigDecimal tax,
                           BigDecimal amount, BigDecimal balanceAfter, LocalDateTime executedAt) {
+        this.accountId = accountId;
         this.userId = userId;
         this.transactionType = transactionType;
         this.ticker = ticker;

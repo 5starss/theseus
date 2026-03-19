@@ -23,18 +23,22 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     Optional<Order> findByIdForUpdate(@Param("orderId") Long orderId);
 
     @Query(value = "SELECT o FROM Order o LEFT JOIN FETCH o.stock WHERE o.userId = :userId " +
+           "AND (:hasAccountId = false OR o.accountId = :accountId) " +
            "AND (:hasStatuses = false OR o.status IN :statuses) " +
            "AND (:ticker IS NULL OR o.ticker = :ticker) " +
            "AND (:startDate IS NULL OR o.createdAt >= :startDate) " +
            "AND (:endDate IS NULL OR o.createdAt < :endDate) " +
            "ORDER BY o.createdAt DESC",
            countQuery = "SELECT COUNT(o) FROM Order o WHERE o.userId = :userId " +
+           "AND (:hasAccountId = false OR o.accountId = :accountId) " +
            "AND (:hasStatuses = false OR o.status IN :statuses) " +
            "AND (:ticker IS NULL OR o.ticker = :ticker) " +
            "AND (:startDate IS NULL OR o.createdAt >= :startDate) " +
            "AND (:endDate IS NULL OR o.createdAt < :endDate)")
     Page<Order> searchOrdersByConditions(
             @Param("userId") Long userId,
+            @Param("hasAccountId") boolean hasAccountId,
+            @Param("accountId") Long accountId,
             @Param("hasStatuses") boolean hasStatuses,
             @Param("statuses") List<OrderStatus> statuses,
             @Param("ticker") String ticker,
