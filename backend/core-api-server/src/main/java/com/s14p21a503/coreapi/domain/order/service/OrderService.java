@@ -1,5 +1,6 @@
 package com.s14p21a503.coreapi.domain.order.service;
 
+import com.s14p21a503.coreapi.domain.account.entity.AccountType;
 import com.s14p21a503.coreapi.domain.market.annotation.CheckMarketOpen;
 import com.s14p21a503.coreapi.domain.market.service.MarketStateManager;
 import com.s14p21a503.coreapi.domain.order.dto.*;
@@ -62,7 +63,7 @@ public class OrderService {
     public OrderResponseDto createOrder(Long userId, OrderRequestDto requestDto) {
 
         // 비관적 락으로 계좌 정보를 조회 (트랜잭션 종료 시까지 락 유지)
-        Account account = accountRepository.findByUserIdForUpdate(userId)
+        Account account = accountRepository.findByUserIdAndAccountTypeForUpdate(userId, requestDto.getAccountType())
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         // 매수 주문 시 증거금 체크 및 잠금(Lock)
@@ -126,7 +127,17 @@ public class OrderService {
      */
     @Transactional(readOnly = true)
     public OrderHistoryResponseDto getOrders(
-            Long userId, String filter, String ticker, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
+            Long userId, AccountType accountType, String filter, String ticker, LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
+
+        // accountType이 있으면 해당 계좌 ID를 가져옵니다.
+        Long accountId = null;
+        boolean hasAccountId = false;
+        if (accountType != null) {
+            Account account = accountRepository.findByUserIdAndAccountType(userId, accountType)
+                    .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+            accountId = account.getId();
+            hasAccountId = true;
+        }
 
         // 프론트로 내려갈 두 가지 종류의 페이지 응답 객체입니다. (기본값 null)
         PageResponseDto<PendingOrderDto> pendingPage = null;
@@ -137,7 +148,7 @@ public class OrderService {
             // 대기 쿼리: Order 테이블 기준으로 OPEN, PARTIAL, PENDING_CANCEL 만 검색하고 과거순(최신 요청순)으로 뽑아옵니다.
             List<OrderStatus> statuses = Arrays.asList(OrderStatus.OPEN, OrderStatus.PARTIAL, OrderStatus.PENDING_CANCEL);
             Page<Order> orderPage = orderRepository.searchOrdersByConditions(
-                    userId, true, statuses, ticker, startDate, endDate, pageable);
+                    userId, hasAccountId, accountId, true, statuses, ticker, startDate, endDate, pageable);
             pendingPage = PageResponseDto.from(orderPage.map(PendingOrderDto::from));
         }
 
@@ -145,7 +156,7 @@ public class OrderService {
         if ("COMPLETED".equals(filter) || "ALL".equals(filter)) {
             // 완료 쿼리: OrderHistory 테이블(체결/취소 내역) 기준으로 무조건 타임라인 역순(최신순)으로 뽑아옵니다.
             Page<OrderHistory> historyPage = orderHistoryRepository.searchHistoryByConditions(
-                    userId, ticker, startDate, endDate, pageable);
+                    userId, hasAccountId, accountId, ticker, startDate, endDate, pageable);
             completedPage = PageResponseDto.from(historyPage.map(OrderHistoryDto::from));
         }
         

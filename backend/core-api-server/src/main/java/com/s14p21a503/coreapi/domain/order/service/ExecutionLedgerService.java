@@ -73,6 +73,7 @@ public class ExecutionLedgerService {
 
         // 6. 주문 히스토리 저장
         OrderHistory history = OrderHistory.builder()
+                .accountId(order.getAccountId())
                 .order(order)
                 .userId(event.getUserId())
                 .ticker(event.getTicker())
@@ -84,7 +85,7 @@ public class ExecutionLedgerService {
         orderHistoryRepository.save(history);
 
         // 7. 계좌 및 포지션 처리
-        Account account = accountRepository.findByUserIdForUpdate(event.getUserId())
+        Account account = accountRepository.findByIdForUpdate(order.getAccountId())
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         if (event.getOrderType() == OrderType.BUY) {
@@ -114,6 +115,7 @@ public class ExecutionLedgerService {
         order.cancel();
 
         OrderHistory history = OrderHistory.builder()
+                .accountId(order.getAccountId())
                 .order(order)
                 .userId(order.getUserId())
                 .ticker(order.getTicker())
@@ -124,7 +126,7 @@ public class ExecutionLedgerService {
                 .build();
         orderHistoryRepository.save(history);
 
-        Account account = accountRepository.findByUserIdForUpdate(order.getUserId())
+        Account account = accountRepository.findByIdForUpdate(order.getAccountId())
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         if (order.getOrderType() == OrderType.BUY) {
@@ -165,6 +167,7 @@ public class ExecutionLedgerService {
 
         // 주문 히스토리 저장
         OrderHistory history = OrderHistory.builder()
+                .accountId(order.getAccountId())
                 .order(order)
                 .userId(event.getUserId())
                 .ticker(event.getTicker())
@@ -176,7 +179,7 @@ public class ExecutionLedgerService {
         orderHistoryRepository.save(history);
 
         // 잠금 해제
-        Account account = accountRepository.findByUserIdForUpdate(event.getUserId())
+        Account account = accountRepository.findByIdForUpdate(order.getAccountId())
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         if (event.getOrderType() == OrderType.BUY) {
@@ -246,6 +249,7 @@ public class ExecutionLedgerService {
         // 원장 거래 내역 저장 (amount = 체결금액 + 수수료)
         String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
         accountHistoryRepository.save(AccountHistory.builder()
+                .accountId(account.getId())
                 .userId(event.getUserId())
                 .transactionType(TransactionType.BUY)
                 .ticker(event.getTicker())
@@ -254,7 +258,7 @@ public class ExecutionLedgerService {
                 .price(event.getMatchPrice())
                 .fee(executionFee)
                 .tax(BigDecimal.ZERO)
-                .amount(actualCostWithFee)
+                .amount(actualCostWithFee.negate())
                 .balanceAfter(account.getDncaTotAmt())
                 .executedAt(event.getExecutedAt())
                 .build());
@@ -285,6 +289,7 @@ public class ExecutionLedgerService {
         // 원장 거래 내역 저장 (amount = 체결금액 - 수수료 - 매도세)
         String stockName = order.getStock() != null ? order.getStock().getCompanyName() : null;
         accountHistoryRepository.save(AccountHistory.builder()
+                .accountId(account.getId())
                 .userId(event.getUserId())
                 .transactionType(TransactionType.SELL)
                 .ticker(event.getTicker())

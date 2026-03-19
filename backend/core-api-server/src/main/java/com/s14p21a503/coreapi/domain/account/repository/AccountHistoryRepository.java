@@ -12,11 +12,11 @@ import java.time.LocalDateTime;
 public interface AccountHistoryRepository extends JpaRepository<AccountHistory, Long> {
 
     // 전체 기간 조회 (최신순)
-    Page<AccountHistory> findAllByUserIdOrderByExecutedAtDesc(Long userId, Pageable pageable);
+    Page<AccountHistory> findAllByAccountIdOrderByExecutedAtDesc(Long accountId, Pageable pageable);
 
     // 특정 기간 조회 (최신순)
-    Page<AccountHistory> findAllByUserIdAndExecutedAtBetweenOrderByExecutedAtDesc(
-            Long userId, LocalDateTime start, LocalDateTime end, Pageable pageable);
+    Page<AccountHistory> findAllByAccountIdAndExecutedAtBetweenOrderByExecutedAtDesc(
+            Long accountId, LocalDateTime start, LocalDateTime end, Pageable pageable);
 
 
 }

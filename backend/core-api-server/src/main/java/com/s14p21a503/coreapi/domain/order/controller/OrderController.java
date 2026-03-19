@@ -2,6 +2,7 @@ package com.s14p21a503.coreapi.domain.order.controller;
 
 import com.s14p21a503.coreapi.common.response.ApiResponse;
 import com.s14p21a503.coreapi.common.response.status.SuccessCode;
+import com.s14p21a503.coreapi.domain.account.entity.AccountType;
 import com.s14p21a503.coreapi.domain.order.dto.OrderHistoryResponseDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderRequestDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderResponseDto;
@@ -44,6 +45,7 @@ public class OrderController {
     @GetMapping
     public ResponseEntity<ApiResponse<OrderHistoryResponseDto>> getOrders(
             @RequestHeader("X-User-Id") Long userId,
+            @RequestParam(value = "account_type", defaultValue = "USER") AccountType accountType,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size,
             @RequestParam(value = "status", required = false) String status,
@@ -68,7 +70,7 @@ public class OrderController {
         Pageable pageable = PageRequest.of(page, size);
 
         OrderHistoryResponseDto response = 
-            orderService.getOrders(userId, filter, parsedTicker, startDate, endDate, pageable);
+            orderService.getOrders(userId, accountType, filter, parsedTicker, startDate, endDate, pageable);
         
         return ApiResponse.onSuccess(SuccessCode.OK, response);
     }

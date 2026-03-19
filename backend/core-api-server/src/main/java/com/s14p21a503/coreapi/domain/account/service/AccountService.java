@@ -7,6 +7,8 @@ import com.s14p21a503.coreapi.domain.account.dto.*;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.common.infra.redis.RedisService;
 import com.s14p21a503.coreapi.domain.account.entity.AccountHistory;
+import com.s14p21a503.coreapi.domain.account.entity.TransactionType;
+import com.s14p21a503.coreapi.domain.account.entity.AccountType;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
 import com.s14p21a503.coreapi.domain.account.repository.AccountHistoryRepository;
 import com.s14p21a503.coreapi.domain.position.entity.Position;
@@ -40,17 +42,31 @@ public class AccountService {
 
     @Transactional
     public void createAccount(Long userId) {
-        Account account = Account.builder()
+        // USER 계좌 생성 (1억 원)
+        Account userAccount = Account.builder()
                 .userId(userId)
-                .dncaTotAmt(new BigDecimal("20000000"))
+                .accountType(AccountType.USER)
+                .dncaTotAmt(new BigDecimal("100000000"))
                 .build();
 
-        accountRepository.save(account);
-        log.info("새로운 계좌 생성 완료 - userId: {}, initialBalance: 20,000,000", userId);
+        // AI 계좌 생성 (0원)
+        Account aiAccount = Account.builder()
+                .userId(userId)
+                .accountType(AccountType.AI)
+                .dncaTotAmt(BigDecimal.ZERO)
+                .build();
+
+        accountRepository.save(userAccount);
+        accountRepository.save(aiAccount);
+        log.info("새로운 계좌 생성 완료 (USER: 1억, AI: 0) - userId: {}", userId);
     }
 
     @Transactional(readOnly = true)
-    public AccountHistoryResponseDto getHistories(Long userId, Integer year, Integer month, Pageable pageable) {
+    public AccountHistoryResponseDto getHistories(Long userId, AccountType accountType, Integer year, Integer month, Pageable pageable) {
+        AccountType type = accountType != null ? accountType : AccountType.USER;
+        Account account = accountRepository.findByUserIdAndAccountType(userId, type)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+
         Page<AccountHistory> historyPage;
 
         // 1) 연/월 필터링이 있는 경우
@@ -60,11 +76,11 @@ public class AccountService {
             LocalDateTime endOfMonth = yearMonth.atEndOfMonth().atTime(LocalTime.MAX);
 
             historyPage = accountHistoryRepository
-                    .findAllByUserIdAndExecutedAtBetweenOrderByExecutedAtDesc(userId, startOfMonth, endOfMonth, pageable);
+                    .findAllByAccountIdAndExecutedAtBetweenOrderByExecutedAtDesc(account.getId(), startOfMonth, endOfMonth, pageable);
         }
         // 2) 전체 기간 조회
         else {
-            historyPage = accountHistoryRepository.findAllByUserIdOrderByExecutedAtDesc(userId, pageable);
+            historyPage = accountHistoryRepository.findAllByAccountIdOrderByExecutedAtDesc(account.getId(), pageable);
         }
 
         return AccountHistoryResponseDto.builder()
@@ -75,15 +91,17 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    public AccountBalanceResponseDto getBalance(Long userId) {
-        Account account = accountRepository.findByUserId(userId)
+    public AccountBalanceResponseDto getBalance(Long userId, AccountType accountType) {
+        AccountType type = accountType != null ? accountType : AccountType.USER;
+        Account account = accountRepository.findByUserIdAndAccountType(userId, type)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
         return AccountBalanceResponseDto.from(account);
     }
 
     @Transactional(readOnly = true)
-    public AccountSummaryResponseDto getSummary(Long userId) {
-        Account account = accountRepository.findByUserId(userId)
+    public AccountSummaryResponseDto getSummary(Long userId, AccountType accountType) {
+        AccountType type = accountType != null ? accountType : AccountType.USER;
+        Account account = accountRepository.findByUserIdAndAccountType(userId, type)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
         List<Position> positions = positionRepository.findAllWithStockByUserId(userId);
@@ -178,5 +196,61 @@ public class AccountService {
             }
         }
         return priceMap;
+    }
+
+    @Transactional
+    public void transfer(Long userId, TransferRequestDto requestDto) {
+        if (requestDto.getFromType() == requestDto.getToType()) {
+            throw new CustomException(ErrorCode.INVALID_REQUEST);
+        }
+
+        BigDecimal amount = requestDto.getAmount();
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new CustomException(ErrorCode.INVALID_REQUEST);
+        }
+
+        List<Account> lockedAccounts = accountRepository.findAllByUserIdAndAccountTypesForUpdate(
+                userId, List.of(requestDto.getFromType(), requestDto.getToType()));
+
+        if (lockedAccounts.size() < 2) {
+            throw new CustomException(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
+
+        // 실제 송금에 필요한 from/to 계좌 매칭
+        Account fromAccount = lockedAccounts.stream()
+                .filter(a -> a.getAccountType() == requestDto.getFromType())
+                .findFirst().orElseThrow();
+        Account toAccount = lockedAccounts.stream()
+                .filter(a -> a.getAccountType() == requestDto.getToType())
+                .findFirst().orElseThrow();
+
+        // 출금 및 입금 실행
+        fromAccount.withdraw(amount);
+        toAccount.deposit(amount);
+
+        // 거래 내역 기록
+        AccountHistory fromHistory = AccountHistory.builder()
+                .accountId(fromAccount.getId())
+                .userId(userId)
+                .transactionType(TransactionType.WITHDRAWAL)
+                .amount(amount.negate())
+                .balanceAfter(fromAccount.getDncaTotAmt())
+                .executedAt(LocalDateTime.now())
+                .build();
+
+        AccountHistory toHistory = AccountHistory.builder()
+                .accountId(toAccount.getId())
+                .userId(userId)
+                .transactionType(TransactionType.DEPOSIT)
+                .amount(amount)
+                .balanceAfter(toAccount.getDncaTotAmt())
+                .executedAt(LocalDateTime.now())
+                .build();
+
+        accountHistoryRepository.save(fromHistory);
+        accountHistoryRepository.save(toHistory);
+
+        log.info("계좌 간 송금 완료 - userId: {}, from: {}, to: {}, amount: {}", 
+                userId, requestDto.getFromType(), requestDto.getToType(), amount);
     }
 }

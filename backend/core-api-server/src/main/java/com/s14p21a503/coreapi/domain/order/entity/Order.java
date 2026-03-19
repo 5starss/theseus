@@ -18,8 +18,8 @@ import java.util.List;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "orders", indexes = {
-    @Index(name = "idx_orders_user_created", columnList = "user_id, created_at DESC"),
-    @Index(name = "idx_orders_user_ticker_created", columnList = "user_id, ticker, created_at DESC")
+    @Index(name = "idx_orders_account_created", columnList = "account_id, created_at DESC"),
+    @Index(name = "idx_orders_account_ticker_created", columnList = "account_id, ticker, created_at DESC")
 })
 public class Order extends BaseEntity {
 
