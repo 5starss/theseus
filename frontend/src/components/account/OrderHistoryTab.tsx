@@ -110,17 +110,7 @@ export function OrderHistoryTab() {
                                                         e.stopPropagation();
                                                         if (window.confirm("정말 주문을 취소하시겠습니까?")) {
                                                             try {
-                                                                await cancelOrder(order.id);
-                                                                
-                                                                // 취소 신청 성공 알림
-                                                                useNotificationStore.getState().addNotification({
-                                                                    eventType: 'ORDER_CANCEL',
-                                                                    orderType: order.type.toUpperCase() as 'BUY' | 'SELL',
-                                                                    ticker: order.stockName,
-                                                                    matchPrice: order.price / order.quantity,
-                                                                    matchQuantity: order.quantity,
-                                                                    executedAt: new Date().toISOString()
-                                                                });
+                                                                 await cancelOrder(order.id);
                                                             } catch (error: any) {
                                                                 alert(error.message || "주문 취소에 실패했습니다.");
                                                             }

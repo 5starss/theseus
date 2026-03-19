@@ -23,7 +23,7 @@ function ToastItem({ notification }: { notification: Notification }) {
     const [isVisible, setIsVisible] = useState(false);
 
     // 종목 코드로 종목명 찾기 (스토어에 캐싱된 이름이 있으면 사용, 아니면 티커 표시)
-    const stockName = notification.ticker; // 실제로는 티커 대신 종목명이 오면 좋음
+    const stockName = notification.stockName || notification.ticker;
 
     useEffect(() => {
         // 애니메이션 효과를 위해 지연 실행

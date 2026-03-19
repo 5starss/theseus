@@ -94,7 +94,8 @@ public class ExecutionLedgerService {
         }
 
         // 8. 실시간 알림 전송 (트랜잭션 커밋 후 발송)
-        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), event));
+        String stockNameForNotif = order.getStock() != null ? order.getStock().getCompanyName() : event.getTicker();
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), stockNameForNotif, event));
     }
 
     @Transactional
@@ -136,7 +137,20 @@ public class ExecutionLedgerService {
         }
 
         // 실시간 알림 전송 (트랜잭션 커밋 후 발송)
-        eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), event));
+        String stockNameForNotif = order.getStock() != null ? order.getStock().getCompanyName() : event.getTicker();
+        ExecutionEventDto notificationDto = ExecutionEventDto.builder()
+                .executionId(event.getExecutionId())
+                .orderId(event.getOrderId())
+                .accountId(event.getAccountId())
+                .userId(order.getUserId())
+                .orderType(order.getOrderType())
+                .eventType(EventType.CANCELLED)
+                .ticker(order.getTicker())
+                .matchPrice(order.getPrice())
+                .matchQuantity((long) remainingQuantity)
+                .executedAt(LocalDateTime.now())
+                .build();
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), stockNameForNotif, notificationDto));
     }
 
     private void processCancel(ExecutionEventDto event, Order order) {
@@ -175,7 +189,20 @@ public class ExecutionLedgerService {
         }
 
         // 실시간 알림 전송 (트랜잭션 커밋 후 발송)
-        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), event));
+        String stockNameForNotif = order.getStock() != null ? order.getStock().getCompanyName() : event.getTicker();
+        ExecutionEventDto notificationDto = ExecutionEventDto.builder()
+                .executionId(event.getExecutionId())
+                .orderId(event.getOrderId())
+                .accountId(event.getAccountId())
+                .userId(event.getUserId())
+                .orderType(event.getOrderType())
+                .eventType(event.getEventType())
+                .ticker(event.getTicker())
+                .matchPrice(order.getPrice())
+                .matchQuantity((long) remainingQuantity)
+                .executedAt(event.getExecutedAt())
+                .build();
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), stockNameForNotif, notificationDto));
     }
 
     private void processBuy(ExecutionEventDto event, Account account, Order order, int quantity) {

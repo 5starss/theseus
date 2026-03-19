@@ -88,6 +88,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
                     eventType: data.eventType,
                     orderType: data.orderType,
                     ticker: data.ticker,
+                    stockName: data.stockName,
                     matchPrice: data.matchPrice,
                     matchQuantity: data.matchQuantity,
                     executedAt: data.executedAt,

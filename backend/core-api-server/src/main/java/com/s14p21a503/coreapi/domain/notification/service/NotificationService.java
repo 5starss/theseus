@@ -65,6 +65,7 @@ public class NotificationService {
                 dto.getEventType(),
                 dto.getOrderType(),
                 dto.getTicker(),
+                event.stockName(),
                 dto.getMatchPrice(),
                 dto.getMatchQuantity(),
                 dto.getExecutedAt()
