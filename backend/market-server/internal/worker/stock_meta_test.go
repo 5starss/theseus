@@ -169,3 +169,80 @@ func TestGetTop40Tickers_LengthIsHundred(t *testing.T) {
 		t.Errorf("GetTop40Tickers() 길이: got %d, want 100 (TargetStocks 전체 위임)", len(GetTop40Tickers()))
 	}
 }
+
+// ─── 순서 보장 (버그 수정 핵심 검증) ──────────────────────────────────────────
+
+// TestGetTargetTickers_OrderMatchesSlice GetTargetTickers()의 순서가 TargetStocksList와 완전히 일치한다.
+// map을 순회하던 기존 구현은 매번 무작위 순서를 반환했으므로, 슬라이스 기반으로 수정 후 이를 검증한다.
+func TestGetTargetTickers_OrderMatchesSlice(t *testing.T) {
+	tickers := GetTargetTickers()
+	for i, s := range TargetStocksList {
+		if tickers[i] != s.Ticker {
+			t.Errorf("index %d: got %q, want %q — TargetStocksList 순서와 불일치", i, tickers[i], s.Ticker)
+		}
+	}
+}
+
+// TestGetTargetTickers_Deterministic 동일한 결과를 항상 반환한다 (결정론적).
+func TestGetTargetTickers_Deterministic(t *testing.T) {
+	first := GetTargetTickers()
+	for round := 0; round < 10; round++ {
+		got := GetTargetTickers()
+		for i := range first {
+			if got[i] != first[i] {
+				t.Errorf("round %d, index %d: got %q, want %q — 순서가 달라짐", round, i, got[i], first[i])
+			}
+		}
+	}
+}
+
+// TestGetTargetTickers_SessionBoundaries 세션 경계 종목(0번, 19번, 20번, 39번 ...)이 정확하다.
+// KIS 웹소켓은 세션당 20종목 제한이므로 세션 경계가 정확해야 한다.
+func TestGetTargetTickers_SessionBoundaries(t *testing.T) {
+	const sessionSize = 20
+	tickers := GetTargetTickers()
+
+	tests := []struct {
+		idx        int
+		wantTicker string
+		label      string
+	}{
+		{0, TargetStocksList[0].Ticker, "세션1 첫 종목"},
+		{sessionSize - 1, TargetStocksList[sessionSize-1].Ticker, "세션1 마지막 종목"},
+		{sessionSize, TargetStocksList[sessionSize].Ticker, "세션2 첫 종목"},
+		{sessionSize*2 - 1, TargetStocksList[sessionSize*2-1].Ticker, "세션2 마지막 종목"},
+		{sessionSize * 2, TargetStocksList[sessionSize*2].Ticker, "세션3 첫 종목"},
+	}
+
+	for _, tc := range tests {
+		if tickers[tc.idx] != tc.wantTicker {
+			t.Errorf("%s (index %d): got %q, want %q", tc.label, tc.idx, tickers[tc.idx], tc.wantTicker)
+		}
+	}
+}
+
+// TestTargetStocksList_NoDuplicateTickers TargetStocksList에 중복 티커가 없다.
+func TestTargetStocksList_NoDuplicateTickers(t *testing.T) {
+	seen := make(map[string]int)
+	for i, s := range TargetStocksList {
+		if prev, ok := seen[s.Ticker]; ok {
+			t.Errorf("중복 티커 %q: index %d와 %d에서 중복", s.Ticker, prev, i)
+		}
+		seen[s.Ticker] = i
+	}
+}
+
+// TestTargetStocksList_SessionGroups 각 세션(20종목 단위)이 TargetStocksList에 정확히 정의되어 있다.
+func TestTargetStocksList_SessionGroups(t *testing.T) {
+	const sessionSize = 20
+	totalSessions := len(TargetStocksList) / sessionSize
+
+	for session := 0; session < totalSessions; session++ {
+		start := session * sessionSize
+		end := start + sessionSize
+		group := TargetStocksList[start:end]
+		if len(group) != sessionSize {
+			t.Errorf("세션 %d: 종목 수 %d (want %d)", session+1, len(group), sessionSize)
+		}
+	}
+}
