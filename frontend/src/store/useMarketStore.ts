@@ -60,9 +60,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         console.log('Connecting Market Stream via Singleton...');
         set({ isConnecting: true });
 
-        // 1. 초기 데이터 가져오기
+        // 1. 초기 데이터 가져오기 (백엔드 사양 상향에 맞춰 100개 요청)
         try {
-            const initialStocksList = await stockApi.getTopStocks(20, 'VOLUME');
+            const initialStocksList = await stockApi.getTopStocks(100, 'VOLUME');
             const initialStocksMap: Record<string, MarketStock> = {};
 
             initialStocksList.forEach((stock, index) => {
