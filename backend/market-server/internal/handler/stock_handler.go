@@ -21,7 +21,7 @@ func NewStockHandler(svc *service.StockService) *StockHandler {
 
 // GetStockList GET /api/v1/stocks
 // 쿼리 파라미터:
-//   - limit    : 조회 개수 (1~20, 기본값 20)
+//   - limit    : 조회 개수 (1~100, 기본값 100)
 //   - rankType : 순위 기준 (VOLUME, 기본값 VOLUME)
 func (h *StockHandler) GetStockList(c *gin.Context) {
 	limitStr := c.DefaultQuery("limit", "100")
@@ -66,7 +66,7 @@ func (h *StockHandler) GetCandles(c *gin.Context) {
 	}
 
 	intervalStr := c.DefaultQuery("interval", "D")
-	
+
 	// Normalize interval based on API_SPEC to internal domain format
 	var interval domain.Interval
 	switch intervalStr {
