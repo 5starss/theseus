@@ -87,8 +87,8 @@ export interface Candle {
 }
 
 export const stockApi = {
-    // 백엔드 명세: GET /api/v1/market/stocks?limit=40&rankType=VOLUME
-    getTopStocks: async (limit: number = 40, rankType: 'VOLUME' = 'VOLUME'): Promise<Stock[]> => {
+    // 백엔드 명세: GET /api/v1/market/stocks?limit=100&rankType=VOLUME
+    getTopStocks: async (limit: number = 100, rankType: 'VOLUME' = 'VOLUME'): Promise<Stock[]> => {
         try {
             const response = await api.get<ApiResponse<Stock[]>>(`/api/v1/market/stocks`, {
                 params: { limit, rankType }
