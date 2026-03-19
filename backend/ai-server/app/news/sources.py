@@ -6,6 +6,10 @@ from app.shared.schemas import Document as AppDocument
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import save_snapshot
 
+from app.shared.rag.vector_db import NewsVectorDB
+from app.shared.rag.reranker import SolarReranker
+from typing import List, Any
+
 
 def _format_publish_dt(data_dt: str, data_tm: str) -> str:
     if len(data_dt) == 8:
@@ -58,3 +62,36 @@ def load_news_documents_from_snapshot(path: str) -> List[AppDocument]:
     ticker = payload.get("ticker", "UNKNOWN")
     news_items = payload.get("sources", {}).get("news", [])
     return convert_news_items_to_documents(ticker=ticker, news_items=news_items)
+
+
+def retrieve_news(ticker: str, query: str = "이 종목의 향후 단기 주가 방향은 어떨까?", top_k: int = 5) -> List[Any]:
+    """
+    ChromaDB에서 뉴스 데이터를 검색하고 Rerank하여 반환합니다.
+    """
+    vdb = NewsVectorDB()
+    # KIS_NEWS 소스 필터 적용
+    search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="KIS_NEWS")
+    
+    if not search_results:
+        return []
+        
+    reranker = SolarReranker()
+    reranked_docs = reranker.rerank(query=query, documents=search_results, top_n=top_k)
+    return reranked_docs
+
+
+def retrieve_community_posts(ticker: str, query: str = "이 종목의 향후 단기 주가 방향은 어떨까?", top_k: int = 3) -> List[Any]:
+    """
+    ChromaDB에서 커뮤니티 데이터를 검색하고 Rerank하여 반환합니다.
+    """
+    vdb = NewsVectorDB()
+    # TOSS_COMMUNITY 소스 필터 적용
+    search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="TOSS_COMMUNITY")
+    
+    if not search_results:
+        return []
+        
+    reranker = SolarReranker()
+    reranked_docs = reranker.rerank(query=query, documents=search_results, top_n=top_k)
+    return reranked_docs
+
