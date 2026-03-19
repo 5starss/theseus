@@ -15,7 +15,7 @@ public class PendingOrderManagerHolder {
 
     private final ExecutionIdGenerator executionIdGenerator;
 
-    @Value("${matcher.participation-rate:0.05}")
+    @Value("${matcher.participation-rate:0.30}")
     private double participationRate;
 
     private final ConcurrentHashMap<String, PendingOrderManager> managers = new ConcurrentHashMap<>();
