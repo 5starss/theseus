@@ -20,7 +20,7 @@ logging:
 
 matcher:
   worker-id: ${MATCHER_WORKER_ID:0} # 분산 환경을 고려한 워커 id 설정
-  participation-rate: ${MATCHER_PARTICIPATION_RATE:0.05} # 시장 거래량 대비 서비스 체결 참여율
+  participation-rate: ${MATCHER_PARTICIPATION_RATE:0.30} # 시장 거래량 대비 서비스 체결 참여율
   journal:
     dir: ${MATCHER_JOURNAL_DIR:c:\MATERCHER-DATA} # 저널 및 스냅샷 저장 경로
     batch-delay-ms: ${MATCHER_JOURNAL_BATCH_DELAY:5}
