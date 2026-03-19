@@ -64,24 +64,12 @@ export default function StockDashboard() {
                                 className={`h-7 px-3 font-medium text-xs rounded-md transition-colors shadow-none ${timeframe === '1m' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-100'}`}>
                                 1분
                             </Button>
-                            <Button
-                                onClick={() => setTimeframe('1h')}
-                                variant={timeframe === '1h' ? 'default' : 'ghost'}
-                                className={`h-7 px-3 font-medium text-xs rounded-md transition-colors shadow-none ${timeframe === '1h' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-100'}`}>
-                                1시간
-                            </Button>
                             <div className="w-px h-4 bg-slate-300 mx-1"></div>
                             <Button
                                 onClick={() => setTimeframe('1d')}
                                 variant={timeframe === '1d' ? 'default' : 'ghost'}
                                 className={`h-7 px-3 font-medium text-xs rounded-md transition-colors shadow-none ${timeframe === '1d' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-100'}`}>
                                 일
-                            </Button>
-                            <Button
-                                onClick={() => setTimeframe('1w')}
-                                variant={timeframe === '1w' ? 'default' : 'ghost'}
-                                className={`h-7 px-3 font-medium text-xs rounded-md transition-colors shadow-none ${timeframe === '1w' ? 'bg-blue-50 text-blue-600 hover:bg-blue-100 hover:text-blue-700 font-bold' : 'text-slate-600 hover:bg-slate-100'}`}>
-                                주
                             </Button>
                         </div>
 
