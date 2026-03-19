@@ -104,7 +104,7 @@ public class AccountService {
         Account account = accountRepository.findByUserIdAndAccountType(userId, type)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
-        List<Position> positions = positionRepository.findAllWithStockByUserId(userId);
+        List<Position> positions = positionRepository.findAllWithStockByAccountId(account.getId());
 
         // 보유 종목 현재가 일괄 조회 (Pipeline)
         Map<String, BigDecimal> priceMap = getCurrentPrices(positions);
