@@ -4,7 +4,6 @@ import { HistoryDetailModal } from "./HistoryDetailModal";
 import { OrderDetail } from "./OrderDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useNotificationStore } from "../../store/useNotificationStore";
 
 export function OrderHistoryTab() {
     const { pendingOrders, completedOrders, fetchPendingOrders, fetchCompletedOrders, cancelOrder, ordersPage, ordersTotalPages, pendingOrdersPage, pendingOrdersTotalPages } = useAccountStore();
