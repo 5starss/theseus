@@ -11,6 +11,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
+from selenium.common.exceptions import StaleElementReferenceException
+
 logger = logging.getLogger(__name__)
 NOISE_TOKENS = {"주주", "팔로우", "공유하기 버튼", "더 보기"}
 
@@ -191,37 +193,50 @@ def _extract_comments_with_selenium(url: str, limit: int) -> List[Dict[str, Any]
         last_height = driver.execute_script("return document.body.scrollHeight")
 
         for _ in range(8):
-            blocks = driver.find_elements(By.CSS_SELECTOR, "div[data-section-name='커뮤니티__게시글']")
-            for block in blocks:
-                try:
-                    more_btn = block.find_element(By.XPATH, ".//button[contains(text(), '더 보기')]")
-                    driver.execute_script("arguments[0].click();", more_btn)
-                    time.sleep(0.1)
-                except Exception:
-                    pass
+            try:
+                blocks = driver.find_elements(By.CSS_SELECTOR, "div[data-section-name='커뮤니티__게시글']")
+                for block in blocks:
+                    try:
+                        # 더 보기 버튼 클릭 시도 (있는 경우)
+                        try:
+                            more_btn = block.find_element(By.XPATH, ".//button[contains(text(), '더 보기')]")
+                            driver.execute_script("arguments[0].click();", more_btn)
+                            time.sleep(0.1)
+                        except Exception:
+                            pass
 
-                raw_lines = [(line or "").strip() for line in (block.text or "").splitlines()]
-                lines = [line for line in raw_lines if not _is_noise(line)]
-                if len(lines) < 2:
-                    continue
+                        raw_lines = [(line or "").strip() for line in (block.text or "").splitlines()]
+                        lines = [line for line in raw_lines if not _is_noise(line)]
+                        if len(lines) < 2:
+                            continue
 
-                nickname = lines[0].strip()
-                body = " ".join([line.strip() for line in lines[1:] if not _is_noise(line)]).strip()
-                if not nickname or not body:
-                    continue
+                        nickname = lines[0].strip()
+                        body = " ".join([line.strip() for line in lines[1:] if not _is_noise(line)]).strip()
+                        if not nickname or not body:
+                            continue
 
-                dedup_key = f"{nickname}:{body}"
-                if dedup_key in seen:
-                    continue
-                seen.add(dedup_key)
-                comments.append(
-                    {
-                        "nickname": nickname,
-                        "body": body,
-                    }
-                )
-                if len(comments) >= limit:
-                    return comments
+                        dedup_key = f"{nickname}:{body}"
+                        if dedup_key in seen:
+                            continue
+                        seen.add(dedup_key)
+                        comments.append(
+                            {
+                                "nickname": nickname,
+                                "body": body,
+                            }
+                        )
+                        if len(comments) >= limit:
+                            return comments
+                    except StaleElementReferenceException:
+                        # 요소가 만료되면 건너뛰고 다음 스크롤 시 다시 수집
+                        continue
+                    except Exception as e:
+                        logger.debug("Block processing failed: %s", e)
+                        continue
+            except Exception as e:
+                logger.warning("Inner scroll loop failed: %s", e)
+                # 에러 발생 시 잠시 대기 후 다음 스크롤 시도
+                time.sleep(0.5)
 
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(1.0)

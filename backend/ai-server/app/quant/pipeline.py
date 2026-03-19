@@ -41,15 +41,16 @@ def extract_features_for_ticker(
     recent_window_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     storage_dir = get_storage_dir("quant")
-    raw_path = resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
-    feat_df = build_feature_df(
-        raw_path=raw_path,
+    raw_path, feat_path, feat_df = prepare_feature_df(
+        ticker=ticker,
+        data_dir=data_dir,
+        run_fetch=run_fetch,
+        run_feature_extract=True,
         horizon_minutes=horizon_minutes,
         feature_profile=feature_profile,
         recent_window_days=recent_window_days,
     )
     stamp = _timestamp()
-    feat_path = save_feature_df(storage_dir=storage_dir, ticker=ticker, feat_df=feat_df)
     meta_path = os.path.join(storage_dir, f"feature_extract_{ticker}_{stamp}.json")
     payload = {
         "ticker": ticker,
@@ -577,25 +578,28 @@ def _build_quant_evidence_payload(latest_row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def generate_quant_signal(ticker: str, data_dir: str, run_fetch: bool = True, horizon_minutes: int = 5) -> Dict[str, Any]:
-    """MTF 기술적 지표를 기반으로 LLM이 분석한 퀀트 신호를 생성합니다."""
-    raw_path = resolve_raw_path(ticker=ticker, data_dir=data_dir, run_fetch=run_fetch)
-    raw_df = quant_load_raw_from_storage(raw_path)
-
-    engineer = IntradayFeatureEngineer(
-        horizon_minutes=horizon_minutes,
-        feature_profile="mtf",
-        recent_window_days=None,
-    )
-
+    """MTF 기술적 지표를 기반으로 LLM이 분석한 퀀트 신호를 생성합니다.
+    S3 업로드를 지원하는 prepare_feature_df를 사용합니다.
+    """
     try:
-        feat_df = engineer.build(raw_df)
+        raw_path, feat_path, feat_df = prepare_feature_df(
+            ticker=ticker,
+            data_dir=data_dir,
+            run_fetch=run_fetch,
+            run_feature_extract=True,  # 실시간 호출 시에도 피처 추출 및 S3 업로드 수행
+            horizon_minutes=horizon_minutes,
+            feature_profile="mtf",
+            recent_window_days=None,
+        )
     except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("[%s] 피처 추출 실패: %s", ticker, exc)
         card = QuantAnalysisAgent._fallback_card(ticker, f"피처 생성 실패: {str(exc)}")
         return {
             "status": "ok",
             "analysis_card": card,
             "quant_evidence": {"error": str(exc)},
-            "raw_result": {"mode": "mtf_llm_mvp", "raw_path": raw_path, "feature_profile": "mtf"},
+            "raw_result": {"mode": "mtf_llm_mvp", "feature_profile": "mtf"},
         }
 
     if feat_df.empty:
