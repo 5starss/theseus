@@ -447,12 +447,6 @@ export function MyOrderHistory() {
                                                     ) : (
                                                         <>
                                                             <button
-                                                                onClick={(e) => { e.stopPropagation(); /* TODO: 수정 기능 */ }}
-                                                                className="bg-slate-100 text-slate-600 font-medium text-[10px] px-2 py-1 rounded hover:bg-slate-200 transition-colors"
-                                                            >
-                                                                수정
-                                                            </button>
-                                                            <button
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
                                                                     if (window.confirm("정말 주문을 취소하시겠습니까?")) {

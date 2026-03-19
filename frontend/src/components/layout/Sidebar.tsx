@@ -3,7 +3,6 @@ import { useAccountStore } from "../../store/useAccountStore";
 import { useAuthStore } from "../../store/useAuthStore";
 import type { SidebarMenu } from "./sidebar/types";
 import { HoldingsSection } from "./sidebar/HoldingsSection";
-import { AISection } from "./sidebar/AISection";
 import { IconBar } from "./sidebar/IconBar";
 
 export default function Sidebar() {
@@ -48,15 +47,15 @@ export default function Sidebar() {
             <div className="flex h-full w-full items-start justify-end overflow-visible">
                 {/* Content Area */}
                 <div className={`h-full bg-white border-l border-slate-100 transition-all duration-500 [transition-timing-function:cubic-bezier(0.4,0,0.2,1)] overflow-hidden
-                    ${isExpanded 
-                        ? 'opacity-100 w-[320px] pointer-events-auto' 
+                    ${isExpanded
+                        ? 'opacity-100 w-[320px] pointer-events-auto'
                         : 'opacity-0 w-0 pointer-events-none'}
                 `}>
                     {activeMenu === 'HOLDINGS' && <HoldingsSection />}
                 </div>
 
                 {/* Icon Bar */}
-                <IconBar 
+                <IconBar
                     isExpanded={isExpanded}
                     activeMenu={activeMenu}
                     toggleExpand={toggleExpand}
@@ -65,4 +64,4 @@ export default function Sidebar() {
             </div>
         </aside>
     );
-    }
+}
