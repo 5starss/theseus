@@ -26,6 +26,7 @@ from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.rag.reranker import SolarReranker
 from app.shared.rag.vector_db import NewsVectorDB
 from app.shared.agents.rebuttal_agent import RebuttalAgent
+from app.trading.scheduler import BatchScheduler
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import get_storage_dir, list_storage_files, save_snapshot
 from collector.toss_community import fetch_toss_community_comments
@@ -35,6 +36,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AI Server Infrastructure Base")
+scheduler = BatchScheduler()
+
+@app.on_event("startup")
+def startup_event():
+    logger.info("서버 시작: 정기 배치 스케줄러(08:00, 12:00) 가동")
+    scheduler.start()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    logger.info("서버 종료: 배치 스케줄러 중지")
+    scheduler.shutdown()
+
 TICKER_PATTERN = r"^\d{6}$"
 SOURCE_NEWS = "KIS_NEWS"
 SOURCE_COMMUNITY = "TOSS_COMMUNITY"
@@ -140,6 +153,7 @@ def rag_chat(
         raise HTTPException(status_code=500, detail=f"RAG chat failed: {exc}") from exc
 
 
+
 @app.post("/v1/news/analysis-card")
 def news_analysis_card(
     ticker: str = Query(..., pattern=TICKER_PATTERN),
@@ -231,6 +245,27 @@ def quant_feature_extract(
     except Exception as exc:
         logger.exception("Failed to run quant feature extraction for %s", ticker)
         raise HTTPException(status_code=500, detail=f"Quant feature extraction failed: {exc}") from exc
+
+
+@app.post("/v1/quant/batch-prepare-all")
+def quant_batch_prepare_all(
+    horizon_minutes: int = Query(5, ge=1, le=120),
+    feature_profile: str = Query("mtf"),
+    days: int = Query(730, ge=0, description="스캔할 기간(일). 0이면 오늘 데이터만 가져옵니다."),
+) -> Dict[str, Any]:
+    """DB의 모든 종목에 대해 피처를 일괄 생성하고 S3에 업로드합니다 (일자별 폴더 관리)."""
+    try:
+        from app.trading.batch_feature_generator import run_daily_batch_preparation
+        return run_daily_batch_preparation(
+            data_dir=QUANT_DATA_DIR,
+            horizon_minutes=horizon_minutes,
+            feature_profile=feature_profile,
+            days=days,
+        )
+
+    except Exception as exc:
+        logger.exception("Failed to run batch preparation all")
+        raise HTTPException(status_code=500, detail=f"Batch preparation failed: {exc}") from exc
 
 
 @app.post("/v1/quant/train")

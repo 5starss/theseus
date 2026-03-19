@@ -1,23 +1,26 @@
+from collector.storage import get_storage_dir
+
 import json
 import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-
 import requests
+from app.shared.infra.redis_client import redis_client
 
-from collector.storage import get_storage_dir
+import warnings
+from cryptography.utils import CryptographyDeprecationWarning
+warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 
 logger = logging.getLogger(__name__)
 
 KIS_DOMAIN = "https://openapi.koreainvestment.com:9443"
-TOKEN_FILE = ".kis_token.json"
+REDIS_TOKEN_KEY = "kis_access_token"
 
 _KIS_ACCESS_TOKEN: Optional[str] = None
 
 
-def _token_file_path() -> str:
-    return os.path.join(get_storage_dir(), TOKEN_FILE)
+
 
 
 def get_kis_access_token() -> str:
@@ -25,21 +28,18 @@ def get_kis_access_token() -> str:
     if _KIS_ACCESS_TOKEN:
         return _KIS_ACCESS_TOKEN
 
-    token_file = _token_file_path()
-    if os.path.exists(token_file):
-        try:
-            with open(token_file, "r", encoding="utf-8") as f:
-                token_data = json.load(f)
-            expired_str = token_data.get("access_token_token_expired", "")
-            if expired_str:
-                expired_at = datetime.strptime(expired_str, "%Y-%m-%d %H:%M:%S")
-                if datetime.now() < expired_at:
-                    _KIS_ACCESS_TOKEN = token_data.get("access_token", "")
-                    if _KIS_ACCESS_TOKEN:
-                        return _KIS_ACCESS_TOKEN
-        except Exception as exc:
-            logger.warning("Failed to reuse cached KIS token: %s", exc)
+    r = redis_client.get_client()
+    
+    # 1) Redis에서 먼저 조회
+    try:
+        cached_token = r.get(REDIS_TOKEN_KEY)
+        if cached_token:
+            _KIS_ACCESS_TOKEN = cached_token
+            return cached_token
+    except Exception as exc:
+        logger.warning("Failed to fetch token from Redis: %s", exc)
 
+    # 2) 신규 토큰 발급
     app_key = os.getenv("KIS_APP_KEY")
     app_secret = os.getenv("KIS_APP_SECRET")
     if not app_key or not app_secret:
@@ -55,12 +55,21 @@ def get_kis_access_token() -> str:
     response = requests.post(url, headers=headers, json=body, timeout=30)
     response.raise_for_status()
     data = response.json()
+    
     _KIS_ACCESS_TOKEN = data.get("access_token", "")
     if not _KIS_ACCESS_TOKEN:
         raise RuntimeError("Failed to issue KIS access token")
 
-    with open(token_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # 3) Redis에 저장 (만료 시간 설정)
+    try:
+        # KIS 만료 시간 보통 24시간 (86400초), 넉넉하게 23.5시간으로 설정
+        expires_in = int(data.get("expires_in", 86400))
+        ttl = max(60, expires_in - 1800) # 30분 마진
+        r.set(REDIS_TOKEN_KEY, _KIS_ACCESS_TOKEN, ex=ttl)
+        logger.info("KIS access token newly issued and cached in Redis (TTL: %d s)", ttl)
+    except Exception as exc:
+        logger.warning("Failed to cache token to Redis: %s", exc)
+
     return _KIS_ACCESS_TOKEN
 
 
@@ -90,7 +99,9 @@ def fetch_kis_news_title(ticker: str) -> List[Dict[str, Any]]:
         "FID_RANK_SORT_CLS_CODE": "",
         "FID_INPUT_SRNO": "",
     }
+    
     response = requests.get(url, headers=headers, params=params, timeout=30)
     response.raise_for_status()
     return response.json().get("output", [])
+
 

@@ -5,7 +5,6 @@ requests
 selenium
 python-dotenv
 langchain
-langchain-upstage
 langchain-chroma
 chromadb
 pandas
@@ -18,3 +17,10 @@ lightgbm
 xgboost
 catboost
 optuna
+pymysql
+cryptography
+sshtunnel>=0.4.0
+paramiko<3.0.0
+boto3
+apscheduler==3.10.4
+redis
