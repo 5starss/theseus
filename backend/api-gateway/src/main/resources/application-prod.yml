@@ -34,7 +34,7 @@ springdoc:
         url: /v3/api-docs/ai
 
 jwt:
-  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:public_key.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:classpath:keys/public_key.pem}
   whitelist:
     - /api/v1/core/auth/signup
     - /api/v1/core/auth/login
