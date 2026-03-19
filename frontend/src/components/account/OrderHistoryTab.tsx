@@ -99,12 +99,6 @@ export function OrderHistoryTab() {
                                         ) : (
                                             <>
                                                 <button
-                                                    onClick={(e) => { e.stopPropagation(); /* TODO: 수정 기능 */ }}
-                                                    className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"
-                                                >
-                                                    수정
-                                                </button>
-                                                <button
                                                     onClick={async (e) => {
                                                         e.stopPropagation();
                                                         if (window.confirm("정말 주문을 취소하시겠습니까?")) {
