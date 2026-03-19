@@ -61,13 +61,11 @@ pipeline {
             }
         }
     }
-
     post {
         success { echo '✅ [SUCCESS] CI/CD Pipeline completed!' }
         failure { echo '❌ [FAILURE] Pipeline failed. Check console output.' }
         always {
             echo '🧹 [Cleanup] Post-build operations...'
-            sh "rm -f ${COMPOSE_DIR}/.env || true"
             sh "docker image prune -f || true"
         }
     }
