@@ -10,6 +10,7 @@ public record NotificationResponseDto(
         EventType eventType,
         OrderType orderType,
         String ticker,
+        String stockName,
         BigDecimal matchPrice,
         Long matchQuantity,
         LocalDateTime executedAt

@@ -5,6 +5,7 @@ import com.s14p21a503.coreapi.domain.market.service.MarketStateManager;
 import com.s14p21a503.coreapi.domain.order.dto.*;
 import com.s14p21a503.coreapi.domain.account.entity.Account;
 import com.s14p21a503.coreapi.domain.account.repository.AccountRepository;
+import com.s14p21a503.coreapi.domain.order.entity.EventType;
 import com.s14p21a503.coreapi.domain.order.entity.Order;
 import com.s14p21a503.coreapi.domain.order.entity.OrderStatus;
 import com.s14p21a503.coreapi.domain.order.entity.HistoryType;
@@ -18,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.s14p21a503.coreapi.domain.order.repository.OrderHistoryRepository;
 import com.s14p21a503.coreapi.common.response.PageResponseDto;
 import com.s14p21a503.coreapi.domain.order.entity.OrderHistory;
+import com.s14p21a503.coreapi.domain.notification.event.ExecutionNotificationEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -52,6 +55,7 @@ public class OrderService {
     private final OutboxEventRepository outboxEventRepository;
     private final MarketStateManager marketStateManager;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     @CheckMarketOpen
     @Transactional
@@ -169,6 +173,22 @@ public class OrderService {
 
         // 1. 상태를 취소 대기(PENDING_CANCEL)로만 변경
         order.pendingCancel();
+
+        // 3. 실시간 알림 전송 (취소 신청 접수)
+        String stockName = order.getStock() != null ? order.getStock().getCompanyName() : order.getTicker();
+        ExecutionEventDto notificationDto = ExecutionEventDto.builder()
+                .executionId(null) // 매칭 전이므로 ID 없음
+                .orderId(order.getId())
+                .accountId(order.getAccountId())
+                .userId(order.getUserId())
+                .orderType(order.getOrderType())
+                .eventType(EventType.ORDER_CANCEL)
+                .ticker(order.getTicker())
+                .matchPrice(order.getPrice())
+                .matchQuantity((long) (order.getRequestedQuantity() - order.getExecutedQuantity()))
+                .executedAt(LocalDateTime.now())
+                .build();
+        eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), stockName, notificationDto));
 
         // 2. Outbox 이벤트 발행
         try {
