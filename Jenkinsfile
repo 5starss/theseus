@@ -51,7 +51,6 @@ pipeline {
                     echo "📝 Changed Files:\n${changedFiles}"
 
                     // 서비스별 변경 여부를 환경변수로 저장
-                    // contains() 오탐 방지를 위해 경로 구분자('/')를 포함해 매칭
                     env.CHANGED_API_GATEWAY     = changedFiles.contains('backend/api-gateway/')     ? 'true' : 'false'
                     env.CHANGED_CORE_API_SERVER = changedFiles.contains('backend/core-api-server/') ? 'true' : 'false'
                     env.CHANGED_MATCHER_SERVER  = changedFiles.contains('backend/matcher-server/')  ? 'true' : 'false'
@@ -63,19 +62,28 @@ pipeline {
         }
 
         // ════════════════════════════════════════════════════════════
-        // PREPARE KEYS (Build 전, 변경된 서비스가 있을 때만 실행)
-        // — Jenkins 자격증명에서 JWT PEM 파일을 src/main/resources/keys/ 에 주입
+        // PREPARE (Build 전 준비: .env + JWT PEM 파일 주입)
+        // — 무조건 실행되도록 when 블록 제거
+        // — Windows 줄바꿈(\r) 제거 로직 추가
         // ════════════════════════════════════════════════════════════
-        stage('Prepare Keys') {
-            when {
-                expression { env.CHANGED_CORE_API_SERVER == 'true' || env.CHANGED_API_GATEWAY == 'true' }
-            }
+        stage('Prepare') {
             steps {
-                echo '🔑 [Keys] Injecting JWT key files...'
+                echo '⚙️ [Prepare] Injecting .env and JWT key files before build...'
                 withCredentials([
+                    file(credentialsId: 'env-file',        variable: 'SECURE_ENV'),
                     file(credentialsId: 'jwt-public-pem',  variable: 'JWT_PUBLIC_PEM'),
                     file(credentialsId: 'jwt-private-pem', variable: 'JWT_PRIVATE_PEM')
                 ]) {
+                    // 1. .env 복사
+                    sh "cp \$SECURE_ENV .env"
+                    
+                    // 2. Windows식 줄바꿈(CRLF)을 Linux식(LF)으로 변환하여 오류 방지
+                    sh "sed -i 's/\\r\$//' .env" 
+                    
+                    // 3. 변환된 .env를 Deploy 단계에서 사용할 위치로 복사
+                    sh "cp .env ${COMPOSE_DIR}/.env"
+                    
+                    // 4. 필요한 서비스에만 JWT 키 복사
                     script {
                         if (env.CHANGED_CORE_API_SERVER == 'true') {
                             sh '''
@@ -97,13 +105,15 @@ pipeline {
 
         // ════════════════════════════════════════════════════════════
         // BUILD (Rule A + Rule B 공통 실행)
-        // — 변경된 서비스만 빌드
         // ════════════════════════════════════════════════════════════
         stage('Build: api-gateway') {
             when { expression { env.CHANGED_API_GATEWAY == 'true' } }
             steps {
                 echo '☕ [Build] Building api-gateway...'
-                sh 'cd backend/api-gateway && chmod +x ./gradlew && ./gradlew clean build'
+                sh '''
+                    set -a && . ${WORKSPACE}/.env && set +a
+                    cd backend/api-gateway && chmod +x ./gradlew && ./gradlew clean build
+                '''
             }
         }
 
@@ -111,7 +121,10 @@ pipeline {
             when { expression { env.CHANGED_CORE_API_SERVER == 'true' } }
             steps {
                 echo '☕ [Build] Building core-api-server...'
-                sh 'cd backend/core-api-server && chmod +x ./gradlew && ./gradlew clean build'
+                sh '''
+                    set -a && . ${WORKSPACE}/.env && set +a
+                    cd backend/core-api-server && chmod +x ./gradlew && ./gradlew clean build
+                '''
             }
         }
 
@@ -119,7 +132,10 @@ pipeline {
             when { expression { env.CHANGED_MATCHER_SERVER == 'true' } }
             steps {
                 echo '☕ [Build] Building matcher-server...'
-                sh 'cd backend/matcher-server && chmod +x ./gradlew && ./gradlew clean build'
+                sh '''
+                    set -a && . ${WORKSPACE}/.env && set +a
+                    cd backend/matcher-server && chmod +x ./gradlew && ./gradlew clean build
+                '''
             }
         }
 
@@ -146,10 +162,7 @@ pipeline {
 
         // ════════════════════════════════════════════════════════════
         // TEST (Rule A + Rule B 공통 실행)
-        // — 변경된 Java 서비스만 테스트
         // ════════════════════════════════════════════════════════════
-        // Build 스테이지에서 이미 테스트까지 실행됨 (gradlew clean build)
-        // 별도 Test 스테이지는 테스트 결과 리포트 수집용으로만 사용
         stage('Test: api-gateway') {
             when { expression { env.CHANGED_API_GATEWAY == 'true' } }
             steps {
@@ -175,68 +188,60 @@ pipeline {
         }
 
         // ════════════════════════════════════════════════════════════
-        // DEPLOY (Rule B 전용: dev 브랜치 Merge 완료 후에만 실행)
-        // — MR 단계(gitlabMergeRequestIid 존재 시)에는 절대 배포하지 않음
-        // — 변경된 서비스만 단독 갱신 (docker-compose down 금지)
+        // DEPLOY
         // ════════════════════════════════════════════════════════════
         stage('Deploy') {
             when {
                 allOf {
                     branch 'dev'
-                    // MR 빌드가 아닌 경우에만 배포 (MR 시에는 Build/Test만 수행)
                     expression { !env.gitlabMergeRequestIid && !env.CHANGE_ID }
                 }
             }
             steps {
                 echo '🚀 [CD] Deploying updated services...'
-                withCredentials([file(credentialsId: 'env-file', variable: 'SECURE_ENV')]) {
-                    sh "cp \$SECURE_ENV ${COMPOSE_DIR}/.env"
-                    script {
-                        // script {} 내에서는 env.* 로 명시적 접근
-                        def composeDir    = env.COMPOSE_DIR
-                        def serverCompose = env.SERVER_COMPOSE
-                        def webCompose    = env.WEB_COMPOSE
-                        def deployed      = false
+                script {
+                    def composeDir    = env.COMPOSE_DIR
+                    def serverCompose = env.SERVER_COMPOSE
+                    def webCompose    = env.WEB_COMPOSE
+                    def deployed      = false
 
-                        // 각 서비스 개별 배포 — 변경된 서비스만, 다른 서비스는 중단 없음
-                        if (env.CHANGED_API_GATEWAY == 'true') {
-                            echo '  → Deploying api-gateway'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway"
-                            deployed = true
-                        }
-                        if (env.CHANGED_CORE_API_SERVER == 'true') {
-                            echo '  → Deploying core-api-server'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server"
-                            deployed = true
-                        }
-                        if (env.CHANGED_MATCHER_SERVER == 'true') {
-                            echo '  → Deploying matcher-server'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server"
-                            deployed = true
-                        }
-                        if (env.CHANGED_MARKET_SERVER == 'true') {
-                            echo '  → Deploying market-server'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server"
-                            deployed = true
-                        }
-                        if (env.CHANGED_AI_SERVER == 'true') {
-                            echo '  → Deploying ai-server'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server"
-                            deployed = true
-                        }
-                        if (env.CHANGED_NGINX == 'true') {
-                            echo '  → Deploying nginx'
-                            sh "docker-compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx"
-                            deployed = true
-                        }
+                    if (env.CHANGED_API_GATEWAY == 'true') {
+                        echo '  → Deploying api-gateway'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway"
+                        deployed = true
+                    }
+                    if (env.CHANGED_CORE_API_SERVER == 'true') {
+                        echo '  → Deploying core-api-server'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server"
+                        deployed = true
+                    }
+                    if (env.CHANGED_MATCHER_SERVER == 'true') {
+                        echo '  → Deploying matcher-server'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server"
+                        deployed = true
+                    }
+                    if (env.CHANGED_MARKET_SERVER == 'true') {
+                        echo '  → Deploying market-server'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server"
+                        deployed = true
+                    }
+                    if (env.CHANGED_AI_SERVER == 'true') {
+                        echo '  → Deploying ai-server'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server"
+                        deployed = true
+                    }
+                    if (env.CHANGED_NGINX == 'true') {
+                        echo '  → Deploying nginx'
+                        sh "docker-compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx"
+                        deployed = true
+                    }
 
-                        if (deployed) {
-                            echo '📦 Deployment Status:'
-                            sh "docker-compose -f ${composeDir}/${serverCompose} ps || true"
-                            sh "docker-compose -f ${composeDir}/${webCompose} ps || true"
-                        } else {
-                            echo '⏭️ No services changed. Skipping deployment.'
-                        }
+                    if (deployed) {
+                        echo '📦 Deployment Status:'
+                        sh "docker-compose -f ${composeDir}/${serverCompose} ps || true"
+                        sh "docker-compose -f ${composeDir}/${webCompose} ps || true"
+                    } else {
+                        echo '⏭️ No services changed. Skipping deployment.'
                     }
                 }
             }
@@ -246,8 +251,8 @@ pipeline {
     post {
         always {
             echo '🧹 [Cleanup] Post-build cleanup...'
-            // 보안: 복사한 .env 및 PEM 키 파일 반드시 삭제
-            sh "rm -f ${COMPOSE_DIR}/.env || true"
+            // 작업이 끝난 후 보안을 위해 .env 및 key 파일들을 모두 삭제합니다.
+            sh "rm -f .env ${COMPOSE_DIR}/.env || true"
             sh '''
                 rm -f backend/core-api-server/src/main/resources/keys/public_key.pem  || true
                 rm -f backend/core-api-server/src/main/resources/keys/private_key.pem || true
