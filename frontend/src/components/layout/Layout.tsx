@@ -1,10 +1,11 @@
 import { Outlet } from "react-router-dom";
 import Header from "./Header.tsx";
 import Sidebar from "./Sidebar.tsx";
+import { NotificationToast } from "../notification/NotificationToast";
 
 export default function Layout() {
     return (
-        <div className="flex flex-col h-screen min-h-screen bg-slate-100 font-sans text-slate-900 overflow-hidden">
+        <div className="flex flex-col h-screen min-h-screen bg-slate-100 font-sans text-slate-900 overflow-hidden relative">
             {/* 내비게이션 바 */}
             <Header />
 
@@ -17,6 +18,9 @@ export default function Layout() {
                 {/* 우측 사이드바 */}
                 <Sidebar />
             </div>
+
+            {/* 실시간 알림 토스트 (전역) */}
+            <NotificationToast />
         </div>
     );
 }

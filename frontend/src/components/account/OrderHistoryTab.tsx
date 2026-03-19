@@ -4,6 +4,7 @@ import { HistoryDetailModal } from "./HistoryDetailModal";
 import { OrderDetail } from "./OrderDetail";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useNotificationStore } from "../../store/useNotificationStore";
 
 export function OrderHistoryTab() {
     const { pendingOrders, completedOrders, fetchPendingOrders, fetchCompletedOrders, cancelOrder, ordersPage, ordersTotalPages, pendingOrdersPage, pendingOrdersTotalPages } = useAccountStore();
@@ -105,10 +106,24 @@ export function OrderHistoryTab() {
                                                     수정
                                                 </button>
                                                 <button
-                                                    onClick={(e) => {
+                                                    onClick={async (e) => {
                                                         e.stopPropagation();
                                                         if (window.confirm("정말 주문을 취소하시겠습니까?")) {
-                                                            cancelOrder(order.id);
+                                                            try {
+                                                                await cancelOrder(order.id);
+                                                                
+                                                                // 취소 신청 성공 알림
+                                                                useNotificationStore.getState().addNotification({
+                                                                    eventType: 'ORDER_CANCEL',
+                                                                    orderType: order.type.toUpperCase() as 'BUY' | 'SELL',
+                                                                    ticker: order.stockName,
+                                                                    matchPrice: order.price / order.quantity,
+                                                                    matchQuantity: order.quantity,
+                                                                    executedAt: new Date().toISOString()
+                                                                });
+                                                            } catch (error: any) {
+                                                                alert(error.message || "주문 취소에 실패했습니다.");
+                                                            }
                                                         }
                                                     }}
                                                     className="bg-[#f9fafb] text-[#4a5565] font-bold text-sm px-4 py-2.5 rounded-lg hover:bg-slate-100 transition-colors"

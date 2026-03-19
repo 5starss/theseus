@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useStockStore } from "../../store/useStockStore";
 import { useAccountStore } from "../../store/useAccountStore";
 import { useAuthStore } from "../../store/useAuthStore";
+import { useNotificationStore } from "../../store/useNotificationStore";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { LoginGuardOverlay } from "./LoginGuardOverlay";
@@ -107,11 +108,22 @@ export function OrderPanel() {
                 price: orderPrice,
                 type: orderType
             });
+
+            // 주문 성공 알림 추가
+            useNotificationStore.getState().addNotification({
+                eventType: 'ORDER',
+                orderType: orderType.toUpperCase() as 'BUY' | 'SELL',
+                ticker: stockName,
+                matchPrice: orderPrice,
+                matchQuantity: quantity,
+                executedAt: new Date().toISOString()
+            });
+
             setIsConfirmModalOpen(false);
             setQuantity(0);
-        } catch (error) {
+        } catch (error: any) {
             console.error("Trade execution failed:", error);
-            alert("주문에 실패했습니다. 다시 시도해주세요.");
+            alert(error.message || "주문에 실패했습니다. 다시 시도해주세요.");
         }
     };
 
@@ -444,8 +456,12 @@ export function MyOrderHistory() {
                                                                 onClick={async (e) => {
                                                                     e.stopPropagation();
                                                                     if (window.confirm("정말 주문을 취소하시겠습니까?")) {
-                                                                        await useAccountStore.getState().cancelOrder(order.id);
-                                                                        setTab("completed");
+                                                                        try {
+                                                                            await useAccountStore.getState().cancelOrder(order.id);
+                                                                            setTab("completed");
+                                                                        } catch (error: any) {
+                                                                            alert(error.message || "주문 취소에 실패했습니다.");
+                                                                        }
                                                                     }
                                                                 }}
                                                                 className="bg-slate-100 text-slate-600 font-medium text-[10px] px-2 py-1 rounded hover:bg-slate-200 transition-colors"

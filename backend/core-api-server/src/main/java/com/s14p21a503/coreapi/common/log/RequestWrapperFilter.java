@@ -20,7 +20,14 @@ public class RequestWrapperFilter implements Filter {
             throws IOException, ServletException {
 
         if (request instanceof HttpServletRequest httpRequest && response instanceof HttpServletResponse httpResponse) {
+            String path = httpRequest.getRequestURI();
             String contentType = httpRequest.getContentType();
+
+            // SSE 구독 경로는 래핑 제외 (버퍼링 방지)
+            if (path.contains("/notifications/subscribe")) {
+                chain.doFilter(request, response);
+                return;
+            }
 
             if (contentType != null && contentType.toLowerCase().contains(MediaType.MULTIPART_FORM_DATA_VALUE)) {
                 chain.doFilter(request, response);

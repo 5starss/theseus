@@ -286,6 +286,7 @@ export const useAccountStore = create<AccountState>((set) => ({
             // 실패 시 optimistic update 되돌리기
             await useAccountStore.getState().fetchPendingOrders();
             await useAccountStore.getState().fetchCompletedOrders();
+            throw error;
         }
     },
 
