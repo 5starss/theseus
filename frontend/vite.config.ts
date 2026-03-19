@@ -16,6 +16,10 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        // SSE를 위한 추가 설정
+        headers: {
+          'Connection': 'keep-alive'
+        },
       },
       '/ws/v1/stocks': {
         target: 'http://localhost:8080',
