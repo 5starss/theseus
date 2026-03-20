@@ -61,19 +61,19 @@ client.interceptors.response.use(
 
             try {
                 // 리프레시 토큰(쿠키)을 통해 새로운 액세스 토큰 발급 요청
-                const refreshResponse = await axios.post<ApiResponse<{ accessToken: string, nickname: string }>>(
+                const refreshResponse = await axios.post<ApiResponse<{ userId: number, accessToken: string, nickname: string }>>(
                     '/api/v1/core/auth/refresh',
                     {},
                     { withCredentials: true }
                 );
 
                 if (refreshResponse.data.isSuccess) {
-                    const { accessToken: newAccessToken, nickname: newNickname } = refreshResponse.data.result;
+                    const { userId: newUserId, accessToken: newAccessToken, nickname: newNickname } = refreshResponse.data.result;
                     const user = useAuthStore.getState().user;
                     const email = user?.email || '';
 
                     // 스토어 업데이트 (신규 토큰 및 최신 닉네임 반영)
-                    useAuthStore.getState().login(email, newAccessToken, newNickname);
+                    useAuthStore.getState().login(newUserId, email, newAccessToken, newNickname);
 
                     // 원래 요청의 헤더를 새 토큰으로 교체하고 재요청
                     originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;

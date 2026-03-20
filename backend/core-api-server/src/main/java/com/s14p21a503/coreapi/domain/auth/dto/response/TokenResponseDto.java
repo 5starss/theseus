@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class TokenResponseDto {
 
+    private Long userId;
     private String tokenType;
     private String accessToken;
     private String nickname;

@@ -89,6 +89,7 @@ public class AuthController {
 
     private TokenResponseDto toAccessTokenResponse(AuthService.TokenPair tokenPair) {
         return TokenResponseDto.builder()
+                .userId(tokenPair.userId())
                 .tokenType(tokenPair.tokenType())
                 .accessToken(tokenPair.accessToken())
                 .nickname(tokenPair.nickname())

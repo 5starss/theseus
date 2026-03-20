@@ -49,6 +49,12 @@ export default function Header() {
                         주식
                     </p>
                     <Link
+                        to="/ranking"
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors text-sm ${isActive('/ranking') ? 'text-blue-600 bg-blue-50/50 font-semibold' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600 font-medium'}`}
+                    >
+                        랭킹
+                    </Link>
+                    <Link
                         to="/account"
                         className={`flex items-center gap-2 px-3 py-2 rounded-md transition-colors text-sm ${isActive('/account') ? 'text-blue-600 bg-blue-50/50 font-semibold' : 'text-slate-600 hover:bg-slate-50 hover:text-blue-600 font-medium'}`}
                     >

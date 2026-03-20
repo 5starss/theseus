@@ -12,6 +12,7 @@ import SignupPage from "./pages/SignupPage";
 import StockDashboard from "./pages/StockDashboard";
 import Account from "./pages/Account";
 import MyPage from "./pages/MyPage";
+import Ranking from "./pages/Ranking";
 import { AssetTab } from "./components/account/AssetTab";
 import { TransactionHistoryTab } from "./components/account/TransactionHistoryTab";
 import { OrderHistoryTab } from "./components/account/OrderHistoryTab";
@@ -47,6 +48,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="stock/:code" element={<StockDashboard />} />
+          <Route path="ranking" element={<Ranking />} />
 
           {/* 로그인 권한이 필요한 라우트 */}
           <Route element={<ProtectedRoute />}>

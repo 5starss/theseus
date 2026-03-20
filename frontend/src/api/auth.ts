@@ -19,6 +19,7 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
+    userId: number;
     tokenType: string;
     accessToken: string;
     nickname: string;
