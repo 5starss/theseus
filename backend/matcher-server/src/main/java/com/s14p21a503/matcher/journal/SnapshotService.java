@@ -65,14 +65,14 @@ public class SnapshotService {
 
             Files.move(tempPath, snapshotPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 
-            log.info("[{}] 스냅샷 저장 완료: seqNo={}, 경로={}", ticker, lastSeqNo, snapshotPath);
+            log.debug("[{}] 스냅샷 저장 완료: seqNo={}, 경로={}", ticker, lastSeqNo, snapshotPath);
             
             // 카프카 전송이 완료될 때까지 최대 500ms 대기 (Flush)
             // 성공한 경우에만 저널 로테이션(삭제)을 수행하여 유실 방지.
             boolean flushSuccess = publisherHolder.getPublisher(ticker).flush(500);
             if (flushSuccess) {
                 journalService.rotateJournal(ticker);
-                log.info("[{}] 카프카 전송 확인됨. 저널 파일 로테이트 수행 완료.", ticker);
+                log.debug("[{}] 카프카 전송 확인됨. 저널 파일 로테이트 수행 완료.", ticker);
             } else {
                 log.warn("[{}] 카프카 전송 확인 실패(타임아웃). 정합성을 위해 저널 파일을 유지합니다.", ticker);
             }
@@ -130,7 +130,7 @@ public class SnapshotService {
             if (snapshots.size() > snapshotRetention) {
                 for (int i = snapshotRetention; i < snapshots.size(); i++) {
                     Files.deleteIfExists(snapshots.get(i));
-                    log.info("[{}] 오래된 스냅샷 삭제됨: {}", tickerDir.getFileName(), snapshots.get(i).getFileName());
+                    log.debug("[{}] 오래된 스냅샷 삭제됨: {}", tickerDir.getFileName(), snapshots.get(i).getFileName());
                 }
             }
         } catch (IOException e) {

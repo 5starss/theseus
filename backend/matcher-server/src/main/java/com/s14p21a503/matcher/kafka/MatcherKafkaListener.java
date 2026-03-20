@@ -146,7 +146,7 @@ public class MatcherKafkaListener {
             return;
         }
 
-        log.info("Kafka 시세 데이터(OrderBook) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
+        log.debug("Kafka 시세 데이터(OrderBook) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
 
         try {
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);
@@ -195,7 +195,7 @@ public class MatcherKafkaListener {
             return;
         }
 
-        log.info("Kafka 체결 데이터(Tick) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
+        log.debug("Kafka 체결 데이터(Tick) 수신: {} (Partition: {}, Offset: {})", ticker, partition, offset);
 
         try {
             ExecutorService tickerExecutor = journalService.getExecutor(ticker);

@@ -16,7 +16,7 @@ spring:
 logging:
   level:
     root: info
-    com.s14p21a503.matcher: debug
+    com.s14p21a503.matcher: info
 
 matcher:
   worker-id: ${MATCHER_WORKER_ID:0} # 분산 환경을 고려한 워커 id 설정
