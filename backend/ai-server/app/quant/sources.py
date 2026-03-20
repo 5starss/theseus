@@ -49,6 +49,15 @@ _QUANT_CATEGORY = "quant"
 # ──────────────────────────────────────────────
 # 내부 헬퍼
 # ──────────────────────────────────────────────
+def _get_db_config() -> tuple[str, int, str, str, str]:
+    host = os.getenv("DB_HOST") or os.getenv("MYSQL_HOST") or "mysql"
+    port = int(os.getenv("DB_PORT") or os.getenv("MYSQL_PORT") or "3306")
+    user = os.getenv("DB_USER") or os.getenv("MYSQL_USER") or "root"
+    password = os.getenv("DB_PASSWORD") or os.getenv("MYSQL_PASSWORD") or ""
+    database = os.getenv("DB_DATABASE") or os.getenv("MYSQL_DATABASE") or "stock_db"
+    return host, port, user, password, database
+
+
 def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     """CSV/JSON 데이터를 표준 OHLCV 포맷으로 정규화합니다."""
     renamed = {col: col.strip().lower().replace("\ufeff", "") for col in df.columns}
@@ -115,11 +124,7 @@ def load_ohlcv_from_db(ticker: str, days: int = 730) -> pd.DataFrame:
     if not _PYMYSQL_AVAILABLE:
         raise RuntimeError("pymysql 패키지가 설치되어 있지 않습니다.")
 
-    host = os.getenv("MYSQL_HOST", "mysql")
-    port = int(os.getenv("MYSQL_PORT", "3306"))
-    user = os.getenv("MYSQL_USER", "root")
-    password = os.getenv("MYSQL_PASSWORD", "")
-    database = os.getenv("MYSQL_DATABASE", "stock_db")
+    host, port, user, password, database = _get_db_config()
 
     use_ssh = os.getenv("USE_SSH", "false").lower() == "true"
     
@@ -223,11 +228,7 @@ def get_all_tickers_from_db() -> List[str]:
     if not _PYMYSQL_AVAILABLE:
         raise RuntimeError("pymysql 패키지가 설치되어 있지 않습니다.")
 
-    host = os.getenv("MYSQL_HOST", "mysql")
-    port = int(os.getenv("MYSQL_PORT", "3306"))
-    user = os.getenv("MYSQL_USER", "root")
-    password = os.getenv("MYSQL_PASSWORD", "")
-    database = os.getenv("MYSQL_DATABASE", "stock_db")
+    host, port, user, password, database = _get_db_config()
 
     use_ssh = os.getenv("USE_SSH", "false").lower() == "true"
     

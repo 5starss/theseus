@@ -10,6 +10,14 @@ warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 
 logger = logging.getLogger(__name__)
 
+
+def _env_first(*keys: str, default: str = "") -> str:
+    for key in keys:
+        value = os.getenv(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return default
+
 class S3Client:
     """AWS S3 연동을 위한 싱글톤 클라이언트 유틸리티."""
     
@@ -25,11 +33,11 @@ class S3Client:
         if self._initialized:
             return
             
-        self.access_key = (os.getenv("AWS_ACCESS_KEY_ID") or "").strip()
-        self.secret_key = (os.getenv("AWS_SECRET_ACCESS_KEY") or "").strip()
-        self.region = (os.getenv("AWS_REGION") or "ap-northeast-2").strip()
-        self.bucket_name = (os.getenv("S3_BUCKET_NAME") or "").strip()
-        self.path_prefix = (os.getenv("S3_PATH_PREFIX") or "").strip("/")
+        self.access_key = _env_first("AWS_ACCESS_KEY_ID")
+        self.secret_key = _env_first("AWS_SECRET_ACCESS_KEY")
+        self.region = _env_first("S3_REGION", "AWS_REGION", default="ap-northeast-2")
+        self.bucket_name = _env_first("S3_BUCKET", "S3_BUCKET_NAME")
+        self.path_prefix = _env_first("S3_PREFIX", "S3_PATH_PREFIX").strip("/")
         
         
         if not self.access_key or not self.secret_key:

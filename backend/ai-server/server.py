@@ -38,7 +38,7 @@ def health_check() -> Dict[str, str]:
     return {"status": "healthy", "message": "AI Auto-Trading Server is running"}
 
 
-@app.get("/v1/quant/batch-prepare-all")
+@app.post("/v1/quant/batch-prepare-all")
 def trigger_batch_prepare_all(
     days: int = Query(730, description="수집된 데이터의 캔들 기간 (730=2년, 0=오늘)"),
     background_tasks: BackgroundTasks = None
