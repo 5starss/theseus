@@ -4,6 +4,7 @@ import { useStockStore } from "../../store/useStockStore";
 import { useAccountStore } from "../../store/useAccountStore";
 import { useAuthStore } from "../../store/useAuthStore";
 import { useNotificationStore } from "../../store/useNotificationStore";
+import { useConfigStore } from "../../store/useConfigStore";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { LoginGuardOverlay } from "./LoginGuardOverlay";
@@ -22,6 +23,9 @@ export function OrderPanel() {
     const stockName = useStockStore(state => state.stockName);
     const stockCode = useStockStore(state => state.stockCode);
     const selectedOrderPrice = useStockStore(state => state.selectedOrderPrice);
+
+    const feeRate = useConfigStore(state => state.feeRate);
+    const taxRate = useConfigStore(state => state.taxRate);
 
     const cashBalance = useAccountStore(state => state.cashBalance);
     const portfolio = useAccountStore(state => state.portfolio);
@@ -57,10 +61,18 @@ export function OrderPanel() {
 
     // 주문 총액 계산
     const totalAmount = orderPrice * quantity;
+    const fee = Math.floor(totalAmount * feeRate);
+    const tax = isBuy ? 0 : Math.floor(totalAmount * taxRate);
+    const totalWithFeeAndTax = isBuy ? totalAmount + fee : totalAmount - fee - tax;
     const canTrade = quantity > 0 && orderPrice > 0;
 
     // 구매/판매 최대 수량 계산
-    const maxBuyQty = orderPrice > 0 ? Math.floor(cashBalance / orderPrice) : 0;
+    const maxBuyQty = (() => {
+        if (orderPrice <= 0) return 0;
+        let n = Math.floor(cashBalance / orderPrice);
+        while (n > 0 && n * orderPrice + Math.floor(n * orderPrice * feeRate) > cashBalance) n--;
+        return n;
+    })();
     const maxSellQty = availableSharesCount;
 
     // 구매/판매 가능 수량 계산
@@ -249,18 +261,34 @@ export function OrderPanel() {
                             <span className="text-sm font-bold text-slate-800 pr-1">{quantity}주</span>
                         </div>
                         <div className="flex justify-between items-center">
-                            <span className="text-xs font-medium text-slate-500 pl-1">예상 수수료</span>
-                            <span className="text-sm font-bold text-slate-800 pr-1">0원</span>
+                            <span className="text-xs font-medium text-slate-500 pl-1">주문 금액</span>
+                            <span className="text-sm font-bold text-slate-800 pr-1">{totalAmount.toLocaleString()}원</span>
                         </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-xs font-medium text-slate-500 pl-1">
+                                수수료 <span className="text-[10px] text-slate-400">({(feeRate * 100).toFixed(3)}%)</span>
+                            </span>
+                            <span className="text-sm font-bold text-slate-800 pr-1">{fee.toLocaleString()}원</span>
+                        </div>
+                        {!isBuy && (
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs font-medium text-slate-500 pl-1">
+                                    증권거래세 <span className="text-[10px] text-slate-400">({(taxRate * 100).toFixed(2)}%)</span>
+                                </span>
+                                <span className="text-sm font-bold text-slate-800 pr-1">{tax.toLocaleString()}원</span>
+                            </div>
+                        )}
                         <div className="h-px bg-slate-100 my-1 w-full relative">
                             <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 bg-[#f8fafc] w-6 h-6 flex items-center justify-center rounded-full border border-slate-100">
                                 <span className="text-[16px] text-[#fb2c36] font-bold pb-1">=</span>
                             </div>
                         </div>
                         <div className="flex flex-col items-center mt-2 bg-[#f8fafc] p-4 rounded-xl border border-slate-100">
-                            <span className="text-[11px] font-semibold text-slate-500 mb-1">총 주문 금액</span>
+                            <span className="text-[11px] font-semibold text-slate-500 mb-1">
+                                {isBuy ? '실제 출금 금액' : '실제 입금 금액'}
+                            </span>
                             <span className={`text-xl font-bold ${isBuy ? 'text-[#ce242b]' : 'text-[#0e48c4]'}`}>
-                                {totalAmount.toLocaleString()}원
+                                {totalWithFeeAndTax.toLocaleString()}원
                             </span>
                         </div>
                     </div>

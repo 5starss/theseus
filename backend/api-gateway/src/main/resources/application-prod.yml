@@ -39,6 +39,7 @@ jwt:
     - /api/v1/core/auth/signup
     - /api/v1/core/auth/login
     - /api/v1/core/auth/refresh
+    - /api/v1/core/orders/trade-policy
     - /api/v1/market/stocks
     - /api/v1/market/stocks/*
     - /api/v1/market/stocks/*/candles

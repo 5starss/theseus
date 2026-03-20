@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useSocketStore } from "./store/useSocketStore";
 import { useNotificationStore } from "./store/useNotificationStore";
 import { useAuthStore } from "./store/useAuthStore";
+import { useConfigStore } from "./store/useConfigStore";
 import Layout from "./components/layout/Layout";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import Home from "./pages/Home";
@@ -20,20 +21,23 @@ function App() {
   const connectSSE = useNotificationStore(state => state.connectSSE);
   const disconnectSSE = useNotificationStore(state => state.disconnectSSE);
   const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+  const fetchTradePolicy = useConfigStore(state => state.fetchTradePolicy);
 
   useEffect(() => {
     connect();
-    
+    fetchTradePolicy();
+  }, [connect, fetchTradePolicy]);
+
+  useEffect(() => {
     if (isLoggedIn) {
       connectSSE();
     } else {
       disconnectSSE();
     }
-
     return () => {
       disconnectSSE();
     };
-  }, [connect, connectSSE, disconnectSSE, isLoggedIn]);
+  }, [isLoggedIn, connectSSE, disconnectSSE]);
 
   return (
     <BrowserRouter>
