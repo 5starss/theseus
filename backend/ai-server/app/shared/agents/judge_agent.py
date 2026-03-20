@@ -31,6 +31,17 @@ def _to_kst_iso(value: Any) -> str:
         return _kst_now_iso()
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str) and not value.strip():
+            return default
+        return int(float(value))
+    except Exception:
+        return default
+
+
 class JudgeAgent:
     """News/Quant 카드를 종합해 실행 가능한 주문 카드를 생성합니다."""
 
@@ -70,7 +81,7 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
         card["ticker"] = str(card.get("ticker") or payload.get("ticker") or "000000")
         card["timestamp"] = _kst_now_iso()
         card["final_stance"] = str(card.get("final_stance") or "hold")
-        card["final_score"] = int(max(-30, min(30, int(card.get("final_score", 0)))))
+        card["final_score"] = max(-30, min(30, _safe_int(card.get("final_score", 0))))
 
         order = card.get("order") if isinstance(card.get("order"), dict) else {}
         action = str(order.get("action", "hold"))
@@ -79,8 +90,8 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
         order_type = str(order.get("order_type", "limit"))
         if order_type not in {"market", "limit"}:
             order_type = "limit"
-        price = int(max(0, int(float(order.get("price", payload.get("current_price", 0))))))
-        quantity = int(max(0, int(float(order.get("quantity", 0)))))
+        price = max(0, _safe_int(order.get("price", payload.get("current_price", 0))))
+        quantity = max(0, _safe_int(order.get("quantity", 0)))
         if action == "hold":
             quantity = 0
         card["order"] = {
@@ -93,8 +104,8 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
 
         risk = card.get("risk_management") if isinstance(card.get("risk_management"), dict) else {}
         card["risk_management"] = {
-            "stop_loss_price": int(max(0, int(float(risk.get("stop_loss_price", 0))))),
-            "take_profit_price": int(max(0, int(float(risk.get("take_profit_price", 0))))),
+            "stop_loss_price": max(0, _safe_int(risk.get("stop_loss_price", 0))),
+            "take_profit_price": max(0, _safe_int(risk.get("take_profit_price", 0))),
         }
         card["verdict"] = str(card.get("verdict") or "").strip() or self._build_default_verdict(
             final_stance=card["final_stance"],

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api-server:8080/api/v1")
+CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api-server:8081/api/v1")
 AUTO_TRADE_USER_ID = os.getenv("AUTO_TRADE_USER_ID", "1") # Default bot user ID
 
 def _get_user_id(user_id: Optional[int] = None) -> str:

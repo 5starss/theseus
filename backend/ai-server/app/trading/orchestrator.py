@@ -3,14 +3,17 @@ import logging
 from typing import Any, Dict, Optional
 from decimal import Decimal
 import os
+from datetime import datetime
 
+import pandas as pd
 from collector.storage import get_storage_dir
 from app.news.agent import NewsReporterAgent
 from app.news.sources import retrieve_news, retrieve_community_posts
 from app.quant.agent import QuantAnalysisAgent
-from app.quant.sources import load_json_compressed
+from app.quant.pipeline import _build_quant_evidence_payload
 from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
+from app.shared.infra.s3_client import s3_client
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD
 from app.trading.core_api_client import get_trading_account_snapshot, execute_order, get_user_profile
 from app.trading.market_data import get_current_price
@@ -210,25 +213,40 @@ def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주
 
 def run_quant_agent(ticker: str) -> Dict[str, Any]:
     """
-    미리 계산되어 로컬(또는 S3)에 저장된 Quant Feature JSON을 읽어 QuantAnalysisAgent에게 넘깁니다.
+    S3에 저장된 최신 Quant 피처를 읽어 QuantAnalysisAgent에게 넘깁니다.
     """
     logger.info(f"[{ticker}] 2단계: Quant Data 로드 및 QuantAgent 실행")
-    
-    # 1. 퀀트 피처 파일 경로 찾기
-    features_dir = os.path.join(get_storage_dir(), "features")
-    json_path = os.path.join(features_dir, f"{ticker}_features.json")
-    
-    # 압축된 버전 확인
-    if not os.path.exists(json_path):
-        json_path = f"{json_path}.gz"
-        
-    if not os.path.exists(json_path):
-        logger.warning(f"[{ticker}] 피처 파일이 없습니다. Fallback 카드 생성.")
-        return QuantAnalysisAgent._fallback_card(ticker, "피처 데이터 없음")
-        
-    # 2. 데이터 로드 및 에이전트 호출
-    quant_evidence = load_json_compressed(json_path)
-    
+
+    today_str = get_current_kst_time().strftime("%Y%m%d")
+    s3_prefix = f"features/{today_str}/{ticker}/"
+    s3_files = s3_client.list_files(s3_prefix)
+    if not s3_files:
+        logger.warning(f"[{ticker}] S3 피처 파일이 없습니다. prefix={s3_prefix}")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 없음")
+
+    latest_s3_key = sorted(s3_files)[-1]
+    relative_key = latest_s3_key
+    if s3_client.path_prefix and latest_s3_key.startswith(s3_client.path_prefix):
+        relative_key = latest_s3_key[len(s3_client.path_prefix):].lstrip("/")
+
+    quant_storage_dir = get_storage_dir("quant")
+    local_path = os.path.join(quant_storage_dir, os.path.basename(latest_s3_key))
+    if not s3_client.download_file(relative_key, local_path):
+        logger.warning(f"[{ticker}] S3 피처 다운로드 실패: {relative_key}")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 다운로드 실패")
+
+    try:
+        feat_df = pd.read_csv(local_path, compression="gzip" if local_path.endswith(".gz") else "infer")
+    except Exception as exc:
+        logger.error(f"[{ticker}] S3 피처 파일 로드 실패: {exc}")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 로드 실패")
+
+    if feat_df.empty:
+        logger.warning(f"[{ticker}] S3 피처 데이터가 비어 있습니다.")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 비어 있음")
+
+    quant_evidence = _build_quant_evidence_payload(feat_df.iloc[-1].to_dict())
+
     agent = QuantAnalysisAgent()
     quant_card = agent.generate_analysis_card(
         ticker=ticker,
