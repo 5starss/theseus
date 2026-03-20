@@ -70,6 +70,7 @@ interface AccountState {
     fetchCompletedOrders: (params?: { page?: number; size?: number; ticker?: string; yearMonth?: string }) => Promise<void>;
     cancelOrder: (orderId: number | string) => Promise<void>;
     executeTrade: (trade: { stockName: string; stockCode: string; quantity: number; price: number; type: 'buy' | 'sell' }) => void;
+    transferFunds: (amount: number) => Promise<void>;
 }
 
 export const useAccountStore = create<AccountState>((set, get) => ({
@@ -350,6 +351,38 @@ export const useAccountStore = create<AccountState>((set, get) => ({
 
         } catch (error) {
             console.error('Failed to execute trade:', error);
+            throw error;
+        }
+    },
+
+    // 계좌 간 송금을 실행하는 함수
+    transferFunds: async (amount: number) => {
+        const { currentAccountType } = get();
+        const fromType = currentAccountType;
+        const toType = fromType === 'USER' ? 'AI' : 'USER';
+
+        try {
+            await accountApi.transfer({
+                from_type: fromType,
+                to_type: toType,
+                amount: amount
+            });
+
+            // 송금 성공 후 잔액 및 거래 내역 갱신
+            const { fetchBalance, fetchTransactions } = get();
+            await Promise.all([
+                fetchBalance(),
+                fetchTransactions({ size: 500 })
+            ]);
+
+            // 백엔드 처리 지연을 고려한 추가 갱신
+            setTimeout(() => {
+                get().fetchBalance();
+                get().fetchTransactions({ size: 500 });
+            }, 1000);
+
+        } catch (error) {
+            console.error('Failed to transfer funds:', error);
             throw error;
         }
     }

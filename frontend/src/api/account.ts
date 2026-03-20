@@ -73,5 +73,22 @@ export const accountApi = {
             console.error('Error fetching account history:', error);
             throw error;
         }
+    },
+
+    // 백엔드 명세: POST /api/v1/core/accounts/transfer
+    transfer: async (data: {
+        from_type: AccountType;
+        to_type: AccountType;
+        amount: number;
+    }): Promise<void> => {
+        try {
+            const response = await api.post<ApiResponse<void>>('/api/v1/core/accounts/transfer', data);
+            if (!response.data.isSuccess) {
+                throw new Error(response.data.message || 'Failed to transfer');
+            }
+        } catch (error) {
+            console.error('Error transferring funds:', error);
+            throw error;
+        }
     }
 };
