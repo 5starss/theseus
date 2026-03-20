@@ -1,19 +1,62 @@
 import { create } from 'zustand';
-
-export type InvestStyle = 'LONG' | 'SHORT'; // 장투 / 단타
+import { aiApi, type AutoTradeStyle } from '../api/ai';
+import type { AccountType } from '../api/account';
 
 interface AIState {
+    // Settings
     isAIOn: boolean;
-    investStyle: InvestStyle;
-    setAIOn: (isOn: boolean) => void;
-    setInvestStyle: (style: InvestStyle) => void;
-    toggleAI: () => void;
+    investStyle: AutoTradeStyle;
+    
+    // Status
+    isAnalyzing: boolean;
+    error: string | null;
+
+    // Actions
+    setInvestStyle: (style: AutoTradeStyle) => void;
+    toggleAutoTrade: (userId: number, accountType: AccountType) => Promise<void>;
+    fetchConfig: (userId: number) => Promise<void>;
 }
 
-export const useAIStore = create<AIState>((set) => ({
+export const useAIStore = create<AIState>((set, get) => ({
     isAIOn: false,
     investStyle: 'LONG',
-    setAIOn: (isOn) => set({ isAIOn: isOn }),
+    isAnalyzing: false,
+    error: null,
+
     setInvestStyle: (style) => set({ investStyle: style }),
-    toggleAI: () => set((state) => ({ isAIOn: !state.isAIOn })),
+
+    // 자동 매매 설정 업데이트
+    toggleAutoTrade: async (userId, accountType) => {
+        const nextState = !get().isAIOn;
+        set({ isAnalyzing: true, error: null });
+
+        try {
+            const response = await aiApi.updateAutoTradeConfig(userId, {
+                enabled: nextState,
+                invest_style: get().investStyle,
+                account_type: accountType,
+            });
+
+            set({ 
+                isAIOn: response.config.enabled,
+                isAnalyzing: false 
+            });
+        } catch (error) {
+            console.error('Failed to toggle auto trade:', error);
+            set({ error: '설정 반영에 실패했습니다.', isAnalyzing: false });
+        }
+    },
+
+    // 초기 설정 로드
+    fetchConfig: async (userId) => {
+        try {
+            const config = await aiApi.getAutoTradeConfig(userId);
+            set({ 
+                isAIOn: config.enabled,
+                investStyle: config.invest_style
+            });
+        } catch (error) {
+            console.error('Failed to fetch AI config:', error);
+        }
+    }
 }));
