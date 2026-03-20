@@ -33,6 +33,9 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     @Query("SELECT a FROM Account a WHERE a.id = :id")
     Optional<Account> findByIdForUpdate(@Param("id") Long id);
 
-    // 하위 호환성을 위해 유지하거나 모든 계좌를 찾는 용도로 변경 가능
+    // 모든 계좌를 사용자 닉네임과 함께 조회합니다.
+    @Query("SELECT a, u.nickname FROM Account a JOIN User u ON a.userId = u.id")
+    List<Object[]> findAllWithNickname();
+
     List<Account> findAllByUserId(Long userId);
 }

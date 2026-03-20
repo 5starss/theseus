@@ -115,6 +115,7 @@ public class AuthService {
         LocalDateTime now = LocalDateTime.now();
 
         return new TokenPair(
+                userId,
                 "Bearer",
                 accessToken,
                 refreshToken,
@@ -142,6 +143,7 @@ public class AuthService {
     }
 
     public record TokenPair(
+            Long userId,
             String tokenType,
             String accessToken,
             String refreshToken,
