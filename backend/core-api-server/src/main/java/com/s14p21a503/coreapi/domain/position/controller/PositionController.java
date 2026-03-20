@@ -21,7 +21,7 @@ public class PositionController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<PositionResponseDto>>> getPositions(
             @RequestHeader("X-User-Id") Long userId,
-            @RequestParam(required = false) AccountType accountType) {
+            @RequestParam(name = "account_type", required = false) AccountType accountType) {
         return ApiResponse.onSuccess(SuccessCode.OK, positionService.getPositions(userId, accountType));
     }
 }
