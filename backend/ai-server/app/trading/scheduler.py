@@ -18,7 +18,7 @@ class BatchScheduler:
         self.scheduler = BackgroundScheduler()
         self.data_dir = os.getenv("QUANT_DATA_DIR", "storage/quant/data_cybos")
         self.auto_trade_interval_minutes = max(1, int(os.getenv("AUTOTRADE_INTERVAL_MINUTES", "5")))
-        self.strategy_monitor_interval_minutes = max(1, int(os.getenv("AUTOTRADE_MONITOR_INTERVAL_MINUTES", "1")))
+        self.strategy_monitor_interval_seconds = max(15, int(os.getenv("AUTOTRADE_MONITOR_INTERVAL_SECONDS", "15")))
 
     def start(self):
         """스케줄러 시작"""
@@ -49,16 +49,16 @@ class BatchScheduler:
         self.scheduler.add_job(
             self._strategy_monitor_cycle,
             "interval",
-            minutes=self.strategy_monitor_interval_minutes,
+            seconds=self.strategy_monitor_interval_seconds,
             id="strategy_monitor_cycle",
             replace_existing=True,
         )
         
         self.scheduler.start()
         logger.info(
-            "APScheduler 시작 완료 (08:00 전체 배치, 12:00 부분 배치, 자동매매 %s분 간격, 전략 모니터링 %s분 간격)",
+            "APScheduler 시작 완료 (08:00 전체 배치, 12:00 부분 배치, 자동매매 %s분 간격, 전략 모니터링 %s초 간격)",
             self.auto_trade_interval_minutes,
-            self.strategy_monitor_interval_minutes,
+            self.strategy_monitor_interval_seconds,
         )
 
     def _morning_full_batch(self):

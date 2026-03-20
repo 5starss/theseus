@@ -20,6 +20,12 @@ REDIS_TOKEN_KEY = "kis_access_token"
 _KIS_ACCESS_TOKEN: Optional[str] = None
 
 
+def _get_kis_credentials() -> tuple[str, str]:
+    app_key = (os.getenv("AI_KIS_APP_KEY") or os.getenv("KIS_APP_KEY") or "").strip()
+    app_secret = (os.getenv("AI_KIS_APP_SECRET") or os.getenv("KIS_APP_SECRET") or "").strip()
+    return app_key, app_secret
+
+
 
 
 
@@ -40,10 +46,9 @@ def get_kis_access_token() -> str:
         logger.warning("Failed to fetch token from Redis: %s", exc)
 
     # 2) 신규 토큰 발급
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
+    app_key, app_secret = _get_kis_credentials()
     if not app_key or not app_secret:
-        raise RuntimeError("KIS_APP_KEY/KIS_APP_SECRET is not configured")
+        raise RuntimeError("AI_KIS_APP_KEY/AI_KIS_APP_SECRET is not configured")
 
     url = f"{KIS_DOMAIN}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
@@ -75,10 +80,9 @@ def get_kis_access_token() -> str:
 
 def fetch_kis_news_title(ticker: str) -> List[Dict[str, Any]]:
     token = get_kis_access_token()
-    app_key = os.getenv("KIS_APP_KEY")
-    app_secret = os.getenv("KIS_APP_SECRET")
+    app_key, app_secret = _get_kis_credentials()
     if not app_key or not app_secret:
-        raise RuntimeError("KIS_APP_KEY/KIS_APP_SECRET is not configured")
+        raise RuntimeError("AI_KIS_APP_KEY/AI_KIS_APP_SECRET is not configured")
 
     url = f"{KIS_DOMAIN}/uapi/domestic-stock/v1/quotations/news-title"
     headers = {
