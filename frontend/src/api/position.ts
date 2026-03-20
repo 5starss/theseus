@@ -1,5 +1,6 @@
 import api from './client';
 import type { ApiResponse } from './client';
+import type { AccountType } from './account';
 
 export interface PositionResponse {
     ticker: string;
@@ -12,10 +13,12 @@ export interface PositionResponse {
 }
 
 export const positionApi = {
-    // 백엔드 명세: GET /api/v1/core/positions
-    getPositions: async (): Promise<PositionResponse[]> => {
+    // 백엔드 명세: GET /api/v1/core/positions?account_type=USER
+    getPositions: async (accountType: AccountType = 'USER'): Promise<PositionResponse[]> => {
         try {
-            const response = await api.get<ApiResponse<PositionResponse[]>>('/api/v1/core/positions');
+            const response = await api.get<ApiResponse<PositionResponse[]>>('/api/v1/core/positions', {
+                params: { account_type: accountType }
+            });
             if (response.data.isSuccess && response.data.result) {
                 return response.data.result;
             }

@@ -1,5 +1,6 @@
 import api from './client';
 import type { ApiResponse } from './client';
+import type { AccountType } from './account';
 
 export interface PageResponse<T> {
     content: T[];
@@ -75,9 +76,13 @@ export const orderApi = {
         price_type: 'LIMIT' | 'MARKET';
         price: number;
         quantity: number;
+        account_type?: AccountType;
     }): Promise<void> => {
         try {
-            const response = await api.post<ApiResponse<any>>('/api/v1/core/orders', data);
+            const response = await api.post<ApiResponse<any>>('/api/v1/core/orders', {
+                account_type: 'USER', // 기본값
+                ...data
+            });
             if (!response.data.isSuccess) {
                 throw new Error(response.data.message || 'Failed to create order');
             }
@@ -87,16 +92,22 @@ export const orderApi = {
         }
     },
 
-    // 백엔드 명세: GET /api/v1/core/orders
+    // 백엔드 명세: GET /api/v1/core/orders?account_type=USER
     getOrders: async (params: {
         page?: number;
         size?: number;
         status?: string;
         ticker?: string;
-        yearMonth?: string
+        yearMonth?: string;
+        account_type?: AccountType;
     } = {}): Promise<OrderHistoryResponse> => {
         try {
-            const response = await api.get<ApiResponse<OrderHistoryResponse>>('/api/v1/core/orders', { params });
+            const response = await api.get<ApiResponse<OrderHistoryResponse>>('/api/v1/core/orders', { 
+                params: {
+                    account_type: 'USER', // 기본값
+                    ...params
+                } 
+            });
             if (response.data.isSuccess && response.data.result) {
                 return response.data.result;
             }

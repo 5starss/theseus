@@ -1,6 +1,8 @@
 import api from './client';
 import type { ApiResponse } from './client';
 
+export type AccountType = 'USER' | 'AI';
+
 export interface AccountBalance {
     dncaTotAmt: number;    // 총 예수금
     lockedAmt: number;     // 묶인 금액 (미체결 주문 등)
@@ -32,10 +34,12 @@ export interface AccountHistoryResponse {
 }
 
 export const accountApi = {
-    // 백엔드 명세: GET /api/v1/core/accounts/balance
-    getBalance: async (): Promise<AccountBalance> => {
+    // 백엔드 명세: GET /api/v1/core/accounts/balance?account_type=USER
+    getBalance: async (accountType: AccountType = 'USER'): Promise<AccountBalance> => {
         try {
-            const response = await api.get<ApiResponse<AccountBalance>>('/api/v1/core/accounts/balance');
+            const response = await api.get<ApiResponse<AccountBalance>>('/api/v1/core/accounts/balance', {
+                params: { account_type: accountType }
+            });
             if (response.data.isSuccess && response.data.result) {
                 return response.data.result;
             }
@@ -46,11 +50,20 @@ export const accountApi = {
         }
     },
 
-    // 백엔드 명세: GET /api/v1/core/accounts/history
-    getHistory: async (params?: { year?: number; month?: number; page?: number; size?: number }): Promise<AccountHistoryResponse> => {
+    // 백엔드 명세: GET /api/v1/core/accounts/history?account_type=USER
+    getHistory: async (params?: { 
+        year?: number; 
+        month?: number; 
+        page?: number; 
+        size?: number;
+        account_type?: AccountType;
+    }): Promise<AccountHistoryResponse> => {
         try {
             const response = await api.get<ApiResponse<AccountHistoryResponse>>('/api/v1/core/accounts/history', {
-                params
+                params: {
+                    account_type: 'USER', // 기본값
+                    ...params
+                }
             });
             if (response.data.isSuccess && response.data.result) {
                 return response.data.result;
