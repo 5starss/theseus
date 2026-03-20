@@ -84,7 +84,7 @@ public class MatcherKafkaPublisher {
         long limit = lastEnqueuedId.get();
         long startTime = System.currentTimeMillis();
 
-        log.info("Kafka 전송 Flush 시작 - 목표 ID: {}, 타임아웃: {}ms", limit, timeoutMs);
+        log.debug("Kafka 전송 Flush 시작 - 목표 ID: {}, 타임아웃: {}ms", limit, timeoutMs);
 
         while (lastPublishedId.get() < limit) {
             if (System.currentTimeMillis() - startTime > timeoutMs) {
@@ -98,7 +98,7 @@ public class MatcherKafkaPublisher {
                 return false;
             }
         }
-        log.info("Kafka 전송 Flush 완료 - 모든 데이터({}) 송출됨", limit);
+        log.debug("Kafka 전송 Flush 완료 - 모든 데이터({}) 송출됨", limit);
         return true;
     }
 
@@ -136,7 +136,7 @@ public class MatcherKafkaPublisher {
                         .get(10, TimeUnit.SECONDS);
                 
                 lastPublishedId.incrementAndGet(); // 발행 성공 시 ID 증가
-                log.debug("Kafka 체결 결과 전송 성공 - executionId: {}", result.getExecutionId());
+                log.info("Kafka 체결 결과 전송 성공 - executionId: {}", result.getExecutionId());
                 return; // 성공 시 탈출
             } catch (Exception e) {
                 log.warn("Kafka 전송 실패 - {}ms 후 재시도 예정. 데이터: {}, 에러: {}", 
