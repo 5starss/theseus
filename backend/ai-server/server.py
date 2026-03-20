@@ -9,6 +9,10 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from app.trading.scheduler import BatchScheduler
 from app.trading.orchestrator import orchestrate_trading
 from app.trading.batch_feature_generator import run_daily_batch_preparation
+from app.trading.auto_trade import (
+    AutoTradeConfigRequest,
+    auto_trade_service,
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -78,3 +82,34 @@ def orchestrate_trade_endpoint(
     except Exception as e:
         logger.error(f"[{ticker}] 오케스트레이터 수행 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/trade/auto/config")
+def get_auto_trade_config(
+    user_id: int = Query(..., description="자동매매 대상 사용자 ID"),
+) -> Dict[str, Any]:
+    return {"status": "ok", "config": auto_trade_service.get_config(user_id).model_dump()}
+
+
+@app.get("/v1/trade/auto/configs")
+def list_auto_trade_configs() -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "configs": [config.model_dump() for config in auto_trade_service.list_configs()],
+    }
+
+
+@app.post("/v1/trade/auto/config")
+def upsert_auto_trade_config(
+    request: AutoTradeConfigRequest,
+    user_id: int = Query(..., description="자동매매 대상 사용자 ID"),
+) -> Dict[str, Any]:
+    return auto_trade_service.enable_and_prepare(user_id, request)
+
+
+@app.post("/v1/trade/auto/run")
+def run_auto_trade_now(
+    user_id: int = Query(..., description="자동매매 대상 사용자 ID"),
+    force: bool = Query(True, description="시장 시간 외에도 강제 실행할지 여부"),
+) -> Dict[str, Any]:
+    return auto_trade_service.run_user_cycle(user_id, force=force)

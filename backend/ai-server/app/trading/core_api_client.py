@@ -69,11 +69,27 @@ def get_account_summary(user_id: Optional[int] = None, account_type: str = "USER
     )
 
 
-def get_positions(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+def get_user_profile(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Core API Server에서 사용자 프로필(투자 성향 포함)을 조회합니다.
+    """
+    return _request(
+        "GET",
+        "/users/me",
+        user_id=user_id,
+    )
+
+
+def get_positions(user_id: Optional[int] = None, account_type: str = "USER") -> List[Dict[str, Any]]:
     """
     Core API Server에서 보유 종목 목록을 조회합니다.
     """
-    result = _request("GET", "/positions", user_id=user_id)
+    result = _request(
+        "GET",
+        "/positions",
+        user_id=user_id,
+        params={"accountType": account_type},
+    )
     return result if isinstance(result, list) else []
 
 
@@ -82,7 +98,7 @@ def get_trading_account_snapshot(user_id: Optional[int] = None, account_type: st
     자동매매에 필요한 계좌 요약과 보유 종목 정보를 한 번에 정규화합니다.
     """
     summary = get_account_summary(user_id=user_id, account_type=account_type)
-    positions = get_positions(user_id=user_id)
+    positions = get_positions(user_id=user_id, account_type=account_type)
 
     quantity_map = {
         str(pos.get("ticker")): {
