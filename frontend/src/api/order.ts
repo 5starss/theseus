@@ -68,7 +68,26 @@ export interface OrderHistoryDetailResponse {
     createdAt: string; // 체결 또는 취소 시각
 }
 
+export interface TradePolicyResponse {
+    feeRate: number;
+    taxRate: number;
+}
+
 export const orderApi = {
+    // 백엔드 명세: GET /api/v1/core/orders/trade-policy (인증 불필요)
+    getTradePolicy: async (): Promise<TradePolicyResponse> => {
+        try {
+            const response = await api.get<ApiResponse<TradePolicyResponse>>('/api/v1/core/orders/trade-policy');
+            if (response.data.isSuccess && response.data.result) {
+                return response.data.result;
+            }
+            throw new Error(response.data.message || 'Failed to fetch trade policy');
+        } catch (error) {
+            console.error('Error fetching trade policy:', error);
+            throw error;
+        }
+    },
+
     // 백엔드 명세: POST /api/v1/core/orders
     createOrder: async (data: {
         ticker: string;

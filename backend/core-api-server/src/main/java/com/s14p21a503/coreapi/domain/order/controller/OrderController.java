@@ -8,6 +8,7 @@ import com.s14p21a503.coreapi.domain.order.dto.OrderRequestDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderResponseDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderHistoryDetailResponseDto;
 import com.s14p21a503.coreapi.domain.order.dto.OrderDetailResponseDto;
+import com.s14p21a503.coreapi.domain.order.dto.TradePolicyResponseDto;
 import com.s14p21a503.coreapi.domain.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -82,6 +83,11 @@ public class OrderController {
 
         OrderHistoryDetailResponseDto response = orderService.getHistoryDetail(userId, historyId);
         return ApiResponse.onSuccess(SuccessCode.OK, response);
+    }
+
+    @GetMapping("/trade-policy")
+    public ResponseEntity<ApiResponse<TradePolicyResponseDto>> getTradePolicy() {
+        return ApiResponse.onSuccess(SuccessCode.OK, TradePolicyResponseDto.of());
     }
 
     @GetMapping("/pending/{orderId}")
