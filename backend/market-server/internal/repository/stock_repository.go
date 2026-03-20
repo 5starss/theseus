@@ -74,6 +74,50 @@ func (r *StockRepository) GetTopByVolume(ctx context.Context, limit int64) ([]*d
 	return stocks, nil
 }
 
+// GetAllStocks Redis Sorted Set에서 거래량을 기준으로 모든 종목 정보를 조회한다 (In-Memory 캐시용).
+func (r *StockRepository) GetAllStocks(ctx context.Context) ([]*domain.Stock, error) {
+	// 1단계: Sorted Set에서 전체 종목코드 목록 조회 (내림차순, -1은 전체를 의미)
+	tickers, err := r.rdb.ZRevRange(ctx, rankVolumeKey, 0, -1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("GetAllStocks zrevrange failed: %w", err)
+	}
+	if len(tickers) == 0 {
+		return []*domain.Stock{}, nil
+	}
+
+	// 2단계: Pipeline으로 종목 상세정보 일괄 조회 (HGETALL)
+	pipe := r.rdb.Pipeline()
+	cmds := make([]*redis.MapStringStringCmd, len(tickers))
+	for i, ticker := range tickers {
+		cmds[i] = pipe.HGetAll(ctx, fmt.Sprintf(stockInfoKeyFmt, ticker))
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("GetAllStocks pipeline exec failed: %w", err)
+	}
+
+	stocks := make([]*domain.Stock, 0, len(tickers))
+	for _, cmd := range cmds {
+		val, err := cmd.Result()
+		if err != nil || len(val) == 0 {
+			continue
+		}
+		
+		currentPrice, _ := strconv.ParseInt(val["currentPrice"], 10, 64)
+		changeRate, _ := strconv.ParseFloat(val["changeRate"], 64)
+		accVolume, _ := strconv.ParseInt(val["accVolume"], 10, 64)
+
+		stocks = append(stocks, &domain.Stock{
+			Ticker:       val["ticker"],
+			Name:         val["name"],
+			CurrentPrice: currentPrice,
+			ChangeRate:   changeRate,
+			AccVolume:    accVolume,
+		})
+	}
+
+	return stocks, nil
+}
+
 // BulkUpsertStocks Pipeline으로 종목 정보와 거래량 순위를 일괄 저장한다.
 // stocks:info:{ticker} ← Hash, stocks:rank:volume ← ZADD score=거래량
 func (r *StockRepository) BulkUpsertStocks(ctx context.Context, stocks []*domain.Stock) error {
