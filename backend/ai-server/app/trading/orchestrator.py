@@ -2,21 +2,74 @@ import copy
 import logging
 from typing import Any, Dict, Optional
 from decimal import Decimal
-
-from app.news.agent import NewsReporterAgent
-from app.news.sources import retrieve_news
-from app.news.sources_community import retrieve_community_posts
-
-from app.quant.agent import QuantAnalysisAgent
-from app.quant.sources import load_json_compressed
-from collector.storage import get_storage_dir
 import os
 
+from collector.storage import get_storage_dir
+from app.news.agent import NewsReporterAgent
+from app.news.sources import retrieve_news, retrieve_community_posts
+from app.quant.agent import QuantAnalysisAgent
+from app.quant.sources import load_json_compressed
 from app.shared.agents.judge_agent import JudgeAgent
-from app.trading.monitoring import get_current_price
-from app.trading.core_api_client import get_trading_account_snapshot, execute_order
+from app.shared.agents.rebuttal_agent import RebuttalAgent
+from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD
+from app.trading.core_api_client import get_trading_account_snapshot, execute_order, get_user_profile
+from app.trading.market_data import get_current_price
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_strategy_slot(strategy_slot: Optional[str] = None) -> str:
+    if strategy_slot in {"morning", "afternoon"}:
+        return str(strategy_slot)
+    return "morning" if get_current_kst_time().hour < 12 else "afternoon"
+
+
+def get_current_kst_time():
+    from datetime import datetime
+
+    from app.trading.constants import KST
+
+    return datetime.now(KST)
+
+
+def _build_signal_weights(strategy_slot: str) -> Dict[str, int]:
+    if strategy_slot == "afternoon":
+        return {"news_weight": 40, "quant_weight": 60}
+    return {"news_weight": 60, "quant_weight": 40}
+
+
+def _build_strategy_profile(invest_style: str, user_investment_style: str = "GROWTH") -> Dict[str, str]:
+    direction = str(invest_style or "LONG").upper()
+    risk_pref = str(user_investment_style or "GROWTH").upper()
+
+    risk_map = {
+        "BALANCED": "conservative",
+        "GROWTH": "moderate",
+        "AGGRESSIVE": "aggressive",
+    }
+    risk_type = risk_map.get(risk_pref, "moderate")
+
+    if direction == "SHORT":
+        return {
+            "invest_style": "SHORT",
+            "user_investment_style": risk_pref,
+            "news_question": "이 종목의 당일~향후 1~3거래일 단기 주가 방향과 모멘텀은 어떨까?",
+            "risk_type": risk_type,
+            "strategy_prompt": (
+                f"사용자 투자 성향은 {risk_pref}이며, AI에게 원하는 투자 방향은 단타입니다. "
+                "단기 모멘텀과 변동성을 우선 고려하되 사용자 리스크 성향에 맞는 공격성으로 판단하세요."
+            ),
+        }
+    return {
+        "invest_style": "LONG",
+        "user_investment_style": risk_pref,
+        "news_question": "이 종목의 향후 수주~수개월 관점에서 중기 추세와 투자 매력은 어떨까?",
+        "risk_type": risk_type,
+        "strategy_prompt": (
+            f"사용자 투자 성향은 {risk_pref}이며, AI에게 원하는 투자 방향은 장기 투자입니다. "
+            "원금 손실 허용 범위는 사용자 성향에 맞추고 중기 추세와 지속 가능성을 우선 고려하세요."
+        ),
+    }
 
 
 def _extract_holding(account_snapshot: Dict[str, Any], ticker: str) -> Dict[str, Any]:
@@ -186,21 +239,90 @@ def run_quant_agent(ticker: str) -> Dict[str, Any]:
     return quant_card
 
 
-def run_judge_agent(ticker: str, news_card: Dict[str, Any], quant_card: Dict[str, Any], current_price: Decimal, available_cash: int, current_holding: Dict[str, Any] = None) -> Dict[str, Any]:
+def _safe_score(card: Dict[str, Any]) -> int:
+    try:
+        return int(card.get("score", 0))
+    except Exception:
+        return 0
+
+
+def run_rebuttal_agent(
+    ticker: str,
+    news_card: Dict[str, Any],
+    quant_card: Dict[str, Any],
+    *,
+    score_gap_threshold: int = DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD,
+) -> Dict[str, Any]:
+    logger.info(f"[{ticker}] 2.5단계: Rebuttal 조건 확인")
+
+    news_score = _safe_score(news_card)
+    quant_score = _safe_score(quant_card)
+    score_gap = abs(news_score - quant_score)
+    triggered = score_gap >= score_gap_threshold
+
+    rebuttal_result: Dict[str, Any] = {
+        "triggered": triggered,
+        "rebuttal_round": 0,
+        "score_gap": score_gap,
+        "score_gap_threshold": score_gap_threshold,
+        "news_score": news_score,
+        "quant_score": quant_score,
+    }
+
+    if not triggered:
+        logger.info(f"[{ticker}] Rebuttal 생략 (score_gap=%s, threshold=%s)", score_gap, score_gap_threshold)
+        return rebuttal_result
+
+    try:
+        agent = RebuttalAgent()
+        rebuttal = agent.generate_rebuttal(news_card, quant_card)
+        rebuttal_result["triggered"] = True
+        rebuttal_result["rebuttal_round"] = 1
+        rebuttal_result["rebuttal"] = rebuttal
+        logger.info(f"[{ticker}] Rebuttal 생성 완료")
+    except Exception as e:
+        logger.error(f"[{ticker}] RebuttalAgent 실행 실패: {e}")
+        rebuttal_result["triggered"] = False
+        rebuttal_result["error"] = str(e)
+
+    return rebuttal_result
+
+
+def run_judge_agent(
+    ticker: str,
+    news_card: Dict[str, Any],
+    quant_card: Dict[str, Any],
+    current_price: Decimal,
+    available_cash: int,
+    current_holding: Dict[str, Any] = None,
+    risk_type: str = "moderate",
+    invest_style: str = "LONG",
+    user_investment_style: str = "GROWTH",
+    strategy_prompt: str = "",
+    rebuttal_result: Optional[Dict[str, Any]] = None,
+    strategy_slot: str = "morning",
+) -> Dict[str, Any]:
     """
     News 카드와 Quant 카드, 그리고 시장 데이터(현재가, 예수금 등)를 종합하여 
     최종 Order Card(매수/매도/보유 등)를 JudgeAgent를 통해 결정합니다.
     """
     logger.info(f"[{ticker}] 3단계: JudgeAgent 최종 주문 결정")
     
+    signal_weights = _build_signal_weights(strategy_slot)
     input_payload = {
         "ticker": ticker,
         "current_price": int(current_price),
         "available_cash": available_cash,
         "current_holding": current_holding or {"quantity": 0, "average_price": 0},
-        "risk_type": "moderate", # TODO: 나중에 사용자 설정으로 뺄 수 있음
+        "risk_type": risk_type,
+        "invest_style": invest_style,
+        "user_investment_style": user_investment_style,
+        "strategy_prompt": strategy_prompt,
+        "strategy_slot": strategy_slot,
+        "signal_weights": signal_weights,
         "news_card": news_card,
         "quant_card": quant_card,
+        "rebuttal": rebuttal_result or {"triggered": False, "rebuttal_round": 0},
     }
     
     agent = JudgeAgent()
@@ -219,9 +341,17 @@ def orchestrate_trading(
     available_cash: int = 5000000,
     user_id: Optional[int] = None,
     account_type: str = "USER",
+    invest_style: str = "LONG",
+    execute_immediately: bool = True,
+    score_gap_threshold: int = DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD,
+    strategy_slot: Optional[str] = None,
 ) -> Dict[str, Any]:
     """전체 에이전트 파이프라인(News -> Quant -> Judge)을 실행합니다."""
     logger.info(f"== [{ticker}] Orchestrator 자동 매매 판단 시작 ==")
+    user_profile = get_user_profile(user_id=user_id) if user_id is not None else {}
+    user_investment_style = str(user_profile.get("investmentStyle") or "GROWTH").upper()
+    strategy_profile = _build_strategy_profile(invest_style, user_investment_style)
+    resolved_strategy_slot = _resolve_strategy_slot(strategy_slot)
     
     # 0단계: 계좌 정보 조회
     account_info = get_trading_account_snapshot(user_id=user_id, account_type=account_type)
@@ -231,8 +361,14 @@ def orchestrate_trading(
     current_holding = _extract_holding(account_info, ticker)
 
     # 1/2단계 병렬 실행 대신 일단 순차 실행 (안정성)
-    news_card = run_news_agent(ticker)
+    news_card = run_news_agent(ticker, question=strategy_profile["news_question"])
     quant_card = run_quant_agent(ticker)
+    rebuttal_result = run_rebuttal_agent(
+        ticker,
+        news_card,
+        quant_card,
+        score_gap_threshold=score_gap_threshold,
+    )
     
     # 실시간 현재가 확인 (Redis)
     curr_price = get_current_price(ticker)
@@ -247,7 +383,13 @@ def orchestrate_trading(
         quant_card=quant_card,
         current_price=curr_price,
         available_cash=available_cash,
-        current_holding=current_holding
+        current_holding=current_holding,
+        risk_type=strategy_profile["risk_type"],
+        invest_style=strategy_profile["invest_style"],
+        user_investment_style=strategy_profile["user_investment_style"],
+        strategy_prompt=strategy_profile["strategy_prompt"],
+        rebuttal_result=rebuttal_result,
+        strategy_slot=resolved_strategy_slot,
     )
     order_card = apply_account_constraints(
         order_card,
@@ -260,11 +402,27 @@ def orchestrate_trading(
         "holding": current_holding,
         "account_type": account_type,
         "user_id": user_id,
+        "invest_style": strategy_profile["invest_style"],
+        "user_investment_style": strategy_profile["user_investment_style"],
+        "risk_type": strategy_profile["risk_type"],
+        "strategy_slot": resolved_strategy_slot,
+        "signal_weights": _build_signal_weights(resolved_strategy_slot),
     }
+    order_card["rebuttal"] = rebuttal_result
+    order_card["execution_mode"] = "immediate" if execute_immediately else "deferred"
     
     # 4단계: 주문 실행
     order = order_card.get("order", {})
     action = order.get("action", "hold").lower()
+
+    if not execute_immediately:
+        if action in ["buy", "sell"] and int(order.get("quantity", 0)) > 0:
+            logger.info(f"[{ticker}] 판정 결과를 저장하고 주문 실행은 모니터링 단계로 이관합니다.")
+            order_card["execution_status"] = "planned"
+        else:
+            order_card["execution_status"] = "hold"
+        logger.info(f"== [{ticker}] Orchestrator 자동 매매 판단 종료 ==")
+        return order_card
     
     if action in ["buy", "sell"]:
         quantity = order.get("quantity", 0)
