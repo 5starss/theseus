@@ -142,3 +142,42 @@ func (h *StockHandler) GetTickSnapshot(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response.OK(snap))
 }
+
+// SearchStocks GET /api/v1/stocks/search
+// 쿼리 파라미터:
+//   - q     : 검색어 (필수)
+//   - limit : 최대 노출 개수 (기본값 10)
+func (h *StockHandler) SearchStocks(c *gin.Context) {
+	q := c.Query("q")
+	if q == "" {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "검색어(q) 파라미터가 필요합니다."))
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "10")
+	limit, err := strconv.ParseInt(limitStr, 10, 64)
+	if err != nil || limit < 1 || limit > 50 {
+		c.JSON(http.StatusBadRequest, response.Fail("STOCK-400", "limit은 1~50 사이의 정수여야 합니다."))
+		return
+	}
+
+	stocks, err := h.svc.SearchStocks(c.Request.Context(), q, int(limit))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, response.Fail("STOCK-500", "종목 자동완성 검색 중 오류가 발생했습니다."))
+		return
+	}
+
+	if len(stocks) == 0 {
+		// 검색 결과가 없어도 에러가 아닌 빈 배열 반환
+		c.JSON(http.StatusOK, response.OK([]domain.Stock{}))
+		return
+	}
+
+	// []*domain.Stock → []domain.Stock 변환
+	result := make([]domain.Stock, 0, len(stocks))
+	for _, s := range stocks {
+		result = append(result, *s)
+	}
+
+	c.JSON(http.StatusOK, response.OK(result))
+}
