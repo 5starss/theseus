@@ -35,7 +35,7 @@ def run_daily_batch_preparation(
         logger.warning("배치 처리할 종목이 DB에 없습니다.")
         return {"status": "ok", "message": "No tickers found", "success_count": 0}
         
-    logger.info("일일 통합 배치(RAG + Quant) 시작: %d 종목", len(tickers))
+    logger.debug("일일 통합 배치(RAG + Quant) 시작: %d 종목", len(tickers))
     
     success_count = 0
     failures = []
@@ -43,14 +43,14 @@ def run_daily_batch_preparation(
     rag_pipeline = RAGIngestPipeline()
     
     for idx, ticker in enumerate(tickers):
-        logger.info("[%d/%d] %s 통합 배치 처리 중...", idx + 1, len(tickers), ticker)
+        logger.debug("[%d/%d] %s 통합 배치 처리 중...", idx + 1, len(tickers), ticker)
         try:
             # 1) News RAG Ingest (기존 컬렉션 유지하며 추가 데이터 색인)
-            logger.info("  -> [News RAG] 수집 및 색인 중...")
+            logger.debug("  -> [News RAG] 수집 및 색인 중...")
             rag_pipeline.run(ticker=ticker, reset_collection=(idx == 0)) # 첫 종목일 때만 초기화
             
             # 2) Quant Feature Generation
-            logger.info("  -> [Quant] 피처 생성 및 S3 업로드 중...")
+            logger.debug("  -> [Quant] 피처 생성 및 S3 업로드 중...")
             raw_path, feat_path, feat_df = prepare_feature_df(
                 ticker=ticker,
                 data_dir=data_dir,
@@ -62,7 +62,7 @@ def run_daily_batch_preparation(
                 days=days,
             )
             success_count += 1
-            logger.info("  -> %s 처리 성공", ticker)
+            logger.debug("  -> %s 처리 성공", ticker)
         except Exception as e:
             logger.error("  -> %s 처리 실패: %s", ticker, str(e))
             failures.append({"ticker": ticker, "error": str(e)})
@@ -75,5 +75,5 @@ def run_daily_batch_preparation(
         "failures": failures,
         "completed_at": datetime.now().isoformat()
     }
-    logger.info("일일 배치 피처 생성 완료: %d 성공, %d 실패", success_count, len(failures))
+    logger.debug("일일 배치 피처 생성 완료: %d 성공, %d 실패", success_count, len(failures))
     return result

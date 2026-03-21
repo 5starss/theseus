@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any
 from decimal import Decimal
+from datetime import datetime
 
 from app.shared.infra.redis_client import redis_client
 from app.shared.infra.s3_client import s3_client
@@ -24,12 +25,12 @@ def monitor_tickers(tickers: Dict[str, Dict[str, Decimal]]):
     현재는 시세 조회 기능 위주로 구현되어 있으며, 
     추후 주문 로직(Orchestrator 연동)이 추가될 예정입니다.
     """
-    logger.info(f"실시간 모니터링 시작: {list(tickers.keys())}")
+    logger.debug(f"실시간 모니터링 시작: {list(tickers.keys())}")
     
     for ticker, strategy in tickers.items():
         current_price = get_current_price(ticker)
         if current_price:
-            logger.info(f"[{ticker}] 현재가: {current_price:,} | 전략: {strategy}")
+            logger.debug(f"[{ticker}] 현재가: {current_price:,} | 전략: {strategy}")
             
             # TODO: 전략 매칭 및 주문 로직 구현 (Phase 4 후반부)
         else:

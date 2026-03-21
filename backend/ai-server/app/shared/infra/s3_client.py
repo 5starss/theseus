@@ -52,7 +52,7 @@ class S3Client:
                     region_name=self.region,
                 )
                 self._initialized = True
-                logger.info("S3Client 초기화 완료 (Bucket: %s)", self.bucket_name)
+                logger.debug("S3Client 초기화 완료 (Bucket: %s)", self.bucket_name)
             except Exception as e:
                 logger.error("S3Client 초기화 실패: %s", str(e))
                 self.client = None
@@ -73,7 +73,7 @@ class S3Client:
         
         try:
             self.client.upload_file(local_path, self.bucket_name, full_key)
-            logger.info("S3 업로드 성공: %s -> s3://%s/%s", local_path, self.bucket_name, full_key)
+            logger.debug("S3 업로드 성공: %s -> s3://%s/%s", local_path, self.bucket_name, full_key)
             return True
         except ClientError as e:
             logger.error("S3 업로드 실패: %s", e)
@@ -88,7 +88,7 @@ class S3Client:
         
         try:
             self.client.download_file(self.bucket_name, full_key, local_path)
-            logger.info("S3 다운로드 성공: s3://%s/%s -> %s", self.bucket_name, full_key, local_path)
+            logger.debug("S3 다운로드 성공: s3://%s/%s -> %s", self.bucket_name, full_key, local_path)
             return True
         except ClientError as e:
             logger.error("S3 다운로드 실패: %s", e)
