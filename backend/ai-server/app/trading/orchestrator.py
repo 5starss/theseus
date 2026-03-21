@@ -1,9 +1,8 @@
 import copy
 import logging
-from typing import Any, Dict, Optional
-from decimal import Decimal
 import os
-from datetime import datetime
+from decimal import Decimal
+from typing import Any, Dict, Optional
 
 import pandas as pd
 from collector.storage import get_storage_dir
@@ -33,6 +32,62 @@ def get_current_kst_time():
     from app.trading.constants import KST
 
     return datetime.now(KST)
+
+
+def _latest_feature_s3_key(ticker: str) -> str | None:
+    today_str = get_current_kst_time().strftime("%Y%m%d")
+    s3_prefix = f"features/{today_str}/{ticker}/"
+    s3_files = s3_client.list_files(s3_prefix)
+    if not s3_files:
+        logger.warning(f"[{ticker}] S3 피처 파일이 없습니다. prefix={s3_prefix}")
+        return None
+    return sorted(s3_files)[-1]
+
+
+def _download_feature_frame(ticker: str, s3_key: str) -> pd.DataFrame | None:
+    relative_key = s3_key
+    if s3_client.path_prefix and s3_key.startswith(s3_client.path_prefix):
+        relative_key = s3_key[len(s3_client.path_prefix):].lstrip("/")
+
+    quant_storage_dir = get_storage_dir("quant")
+    local_path = os.path.join(quant_storage_dir, os.path.basename(s3_key))
+    if not s3_client.download_file(relative_key, local_path):
+        logger.warning(f"[{ticker}] S3 피처 다운로드 실패: {relative_key}")
+        return None
+
+    try:
+        feat_df = pd.read_csv(local_path, compression="gzip" if local_path.endswith(".gz") else "infer")
+    except Exception as exc:
+        logger.error(f"[{ticker}] S3 피처 파일 로드 실패: {exc}")
+        return None
+
+    if feat_df.empty:
+        logger.warning(f"[{ticker}] S3 피처 데이터가 비어 있습니다.")
+        return None
+
+    return feat_df
+
+
+def _build_account_snapshot(
+    *,
+    available_cash: int,
+    current_holding: Dict[str, Any],
+    account_type: str,
+    user_id: Optional[int],
+    strategy_profile: Dict[str, str],
+    strategy_slot: str,
+) -> Dict[str, Any]:
+    return {
+        "available_cash": available_cash,
+        "holding": current_holding,
+        "account_type": account_type,
+        "user_id": user_id,
+        "invest_style": strategy_profile["invest_style"],
+        "user_investment_style": strategy_profile["user_investment_style"],
+        "risk_type": strategy_profile["risk_type"],
+        "strategy_slot": strategy_slot,
+        "signal_weights": _build_signal_weights(strategy_slot),
+    }
 
 
 def _build_signal_weights(strategy_slot: str) -> Dict[str, int]:
@@ -192,7 +247,7 @@ def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주
     """
     RAG(ChromaDB)를 통해 뉴스와 커뮤니티 글을 가져와 NewsReporterAgent에게 넘깁니다.
     """
-    logger.info(f"[{ticker}] 1단계: News/Community 데이터 수집 및 NewsAgent 실행")
+    logger.debug(f"[{ticker}] 1단계: News/Community 데이터 수집 및 NewsAgent 실행")
     
     # 1. 문서 검색 (최근 7일 등 기준)
     news_docs = retrieve_news(ticker, query=question, top_k=5)
@@ -207,7 +262,7 @@ def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주
         community_docs=comm_docs
     )
     
-    logger.info(f"[{ticker}] News Card 생성 완료 (Stance: {news_card.get('stance')}, Score: {news_card.get('score')})")
+    logger.debug(f"[{ticker}] News Card 생성 완료 (Stance: {news_card.get('stance')}, Score: {news_card.get('score')})")
     return news_card
 
 
@@ -215,35 +270,15 @@ def run_quant_agent(ticker: str) -> Dict[str, Any]:
     """
     S3에 저장된 최신 Quant 피처를 읽어 QuantAnalysisAgent에게 넘깁니다.
     """
-    logger.info(f"[{ticker}] 2단계: Quant Data 로드 및 QuantAgent 실행")
+    logger.debug(f"[{ticker}] 2단계: Quant Data 로드 및 QuantAgent 실행")
 
-    today_str = get_current_kst_time().strftime("%Y%m%d")
-    s3_prefix = f"features/{today_str}/{ticker}/"
-    s3_files = s3_client.list_files(s3_prefix)
-    if not s3_files:
-        logger.warning(f"[{ticker}] S3 피처 파일이 없습니다. prefix={s3_prefix}")
+    latest_s3_key = _latest_feature_s3_key(ticker)
+    if latest_s3_key is None:
         return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 없음")
 
-    latest_s3_key = sorted(s3_files)[-1]
-    relative_key = latest_s3_key
-    if s3_client.path_prefix and latest_s3_key.startswith(s3_client.path_prefix):
-        relative_key = latest_s3_key[len(s3_client.path_prefix):].lstrip("/")
-
-    quant_storage_dir = get_storage_dir("quant")
-    local_path = os.path.join(quant_storage_dir, os.path.basename(latest_s3_key))
-    if not s3_client.download_file(relative_key, local_path):
-        logger.warning(f"[{ticker}] S3 피처 다운로드 실패: {relative_key}")
+    feat_df = _download_feature_frame(ticker, latest_s3_key)
+    if feat_df is None:
         return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 다운로드 실패")
-
-    try:
-        feat_df = pd.read_csv(local_path, compression="gzip" if local_path.endswith(".gz") else "infer")
-    except Exception as exc:
-        logger.error(f"[{ticker}] S3 피처 파일 로드 실패: {exc}")
-        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 로드 실패")
-
-    if feat_df.empty:
-        logger.warning(f"[{ticker}] S3 피처 데이터가 비어 있습니다.")
-        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 비어 있음")
 
     quant_evidence = _build_quant_evidence_payload(feat_df.iloc[-1].to_dict())
 
@@ -253,7 +288,7 @@ def run_quant_agent(ticker: str) -> Dict[str, Any]:
         quant_evidence=quant_evidence
     )
     
-    logger.info(f"[{ticker}] Quant Card 생성 완료 (Stance: {quant_card.get('stance')}, Score: {quant_card.get('score')})")
+    logger.debug(f"[{ticker}] Quant Card 생성 완료 (Stance: {quant_card.get('stance')}, Score: {quant_card.get('score')})")
     return quant_card
 
 
@@ -271,7 +306,7 @@ def run_rebuttal_agent(
     *,
     score_gap_threshold: int = DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD,
 ) -> Dict[str, Any]:
-    logger.info(f"[{ticker}] 2.5단계: Rebuttal 조건 확인")
+    logger.debug(f"[{ticker}] 2.5단계: Rebuttal 조건 확인")
 
     news_score = _safe_score(news_card)
     quant_score = _safe_score(quant_card)
@@ -288,7 +323,7 @@ def run_rebuttal_agent(
     }
 
     if not triggered:
-        logger.info(f"[{ticker}] Rebuttal 생략 (score_gap=%s, threshold=%s)", score_gap, score_gap_threshold)
+        logger.debug(f"[{ticker}] Rebuttal 생략 (score_gap=%s, threshold=%s)", score_gap, score_gap_threshold)
         return rebuttal_result
 
     try:
@@ -297,7 +332,7 @@ def run_rebuttal_agent(
         rebuttal_result["triggered"] = True
         rebuttal_result["rebuttal_round"] = 1
         rebuttal_result["rebuttal"] = rebuttal
-        logger.info(f"[{ticker}] Rebuttal 생성 완료")
+        logger.debug(f"[{ticker}] Rebuttal 생성 완료")
     except Exception as e:
         logger.error(f"[{ticker}] RebuttalAgent 실행 실패: {e}")
         rebuttal_result["triggered"] = False
@@ -324,7 +359,7 @@ def run_judge_agent(
     News 카드와 Quant 카드, 그리고 시장 데이터(현재가, 예수금 등)를 종합하여 
     최종 Order Card(매수/매도/보유 등)를 JudgeAgent를 통해 결정합니다.
     """
-    logger.info(f"[{ticker}] 3단계: JudgeAgent 최종 주문 결정")
+    logger.debug(f"[{ticker}] 3단계: JudgeAgent 최종 주문 결정")
     
     signal_weights = _build_signal_weights(strategy_slot)
     input_payload = {
@@ -350,7 +385,7 @@ def run_judge_agent(
         logger.error(f"[{ticker}] JudgeAgent 실행 실패: {e}")
         order_card = {"final_stance": "hold", "order": {"action": "hold"}, "error": str(e)}
         
-    logger.info(f"[{ticker}] Order Card 생성 완료 (Action: {order_card.get('order', {}).get('action')}, Verdict: {order_card.get('verdict')})")
+    logger.debug(f"[{ticker}] Order Card 생성 완료 (Action: {order_card.get('order', {}).get('action')}, Verdict: {order_card.get('verdict')})")
     return order_card
 
 
@@ -365,7 +400,7 @@ def orchestrate_trading(
     strategy_slot: Optional[str] = None,
 ) -> Dict[str, Any]:
     """전체 에이전트 파이프라인(News -> Quant -> Judge)을 실행합니다."""
-    logger.info(f"== [{ticker}] Orchestrator 자동 매매 판단 시작 ==")
+    logger.debug(f"== [{ticker}] Orchestrator 자동 매매 판단 시작 ==")
     user_profile = get_user_profile(user_id=user_id) if user_id is not None else {}
     user_investment_style = str(user_profile.get("investmentStyle") or "GROWTH").upper()
     strategy_profile = _build_strategy_profile(invest_style, user_investment_style)
@@ -415,17 +450,14 @@ def orchestrate_trading(
         current_holding=current_holding,
         current_price=curr_price,
     )
-    order_card["account_snapshot"] = {
-        "available_cash": available_cash,
-        "holding": current_holding,
-        "account_type": account_type,
-        "user_id": user_id,
-        "invest_style": strategy_profile["invest_style"],
-        "user_investment_style": strategy_profile["user_investment_style"],
-        "risk_type": strategy_profile["risk_type"],
-        "strategy_slot": resolved_strategy_slot,
-        "signal_weights": _build_signal_weights(resolved_strategy_slot),
-    }
+    order_card["account_snapshot"] = _build_account_snapshot(
+        available_cash=available_cash,
+        current_holding=current_holding,
+        account_type=account_type,
+        user_id=user_id,
+        strategy_profile=strategy_profile,
+        strategy_slot=resolved_strategy_slot,
+    )
     order_card["rebuttal"] = rebuttal_result
     order_card["execution_mode"] = "immediate" if execute_immediately else "deferred"
     
@@ -435,11 +467,11 @@ def orchestrate_trading(
 
     if not execute_immediately:
         if action in ["buy", "sell"] and int(order.get("quantity", 0)) > 0:
-            logger.info(f"[{ticker}] 판정 결과를 저장하고 주문 실행은 모니터링 단계로 이관합니다.")
+            logger.debug(f"[{ticker}] 판정 결과를 저장하고 주문 실행은 모니터링 단계로 이관합니다.")
             order_card["execution_status"] = "planned"
         else:
             order_card["execution_status"] = "hold"
-        logger.info(f"== [{ticker}] Orchestrator 자동 매매 판단 종료 ==")
+        logger.debug(f"== [{ticker}] Orchestrator 자동 매매 판단 종료 ==")
         return order_card
     
     if action in ["buy", "sell"]:
@@ -447,7 +479,7 @@ def orchestrate_trading(
         price = order.get("price", int(curr_price))
         
         if quantity > 0:
-            logger.info(f"[{ticker}] {action.upper()} 주문 실행 요청: {quantity}주 @ {price}원")
+            logger.debug(f"[{ticker}] {action.upper()} 주문 실행 요청: {quantity}주 @ {price}원")
             success = execute_order(
                 ticker,
                 action,
@@ -458,7 +490,7 @@ def orchestrate_trading(
             )
             if success:
                 order_card["execution_status"] = "success"
-                logger.info(f"[{ticker}] 주문 실행 성공")
+                logger.debug(f"[{ticker}] 주문 실행 성공")
             else:
                 order_card["execution_status"] = "failed"
                 logger.error(f"[{ticker}] 주문 실행 실패")
@@ -466,10 +498,10 @@ def orchestrate_trading(
             logger.warning(f"[{ticker}] 주문 수량이 0 주이므로 생략합니다.")
             order_card["execution_status"] = "skipped (zero quantity)"
     else:
-        logger.info(f"[{ticker}] 판정 결과가 HOLD이므로 주문을 실행하지 않습니다.")
+        logger.debug(f"[{ticker}] 판정 결과가 HOLD이므로 주문을 실행하지 않습니다.")
         order_card["execution_status"] = "hold"
         
-    logger.info(f"== [{ticker}] Orchestrator 자동 매매 판단 종료 ==")
+    logger.debug(f"== [{ticker}] Orchestrator 자동 매매 판단 종료 ==")
     return order_card
 
 if __name__ == "__main__":

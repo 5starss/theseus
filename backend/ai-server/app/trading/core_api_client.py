@@ -270,5 +270,5 @@ def execute_order(
     result = _request("POST", "/orders", user_id=user_id, json=payload)
     success = bool(result)
     if success:
-        logger.info("주문 실행 성공: %s %s %s주 @ %s원", ticker, order_type, quantity, price)
+        logger.debug("주문 실행 성공: %s %s %s주 @ %s원", ticker, order_type, quantity, price)
     return success

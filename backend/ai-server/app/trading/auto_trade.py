@@ -9,6 +9,11 @@ from pydantic import BaseModel, Field
 from collector.storage import get_storage_dir
 from app.trading.orchestrator import orchestrate_trading
 from app.shared.infra.s3_client import s3_client
+from app.trading.autotrade_config_store import (
+    list_config_payloads,
+    load_config_payload,
+    save_config_payload,
+)
 from app.trading.constants import KST
 from app.trading.strategy_store import (
     build_strategy_archive_paths,
@@ -51,6 +56,7 @@ class AutoTradeService:
         config = AutoTradeConfig(user_id=user_id, **request.model_dump())
         with self._lock:
             self._configs[user_id] = config
+        save_config_payload(config.user_id, config.model_dump())
         logger.info(
             "자동매매 설정 저장 - user_id=%s enabled=%s style=%s account_type=%s tickers=%s",
             user_id,
@@ -84,11 +90,32 @@ class AutoTradeService:
             existing = self._configs.get(user_id)
         if existing:
             return existing
+
+        persisted = load_config_payload(user_id)
+        if persisted is not None:
+            config = AutoTradeConfig(**persisted)
+            with self._lock:
+                self._configs[user_id] = config
+            return config
+
         return AutoTradeConfig(user_id=user_id)
 
     def list_configs(self) -> List[AutoTradeConfig]:
-        with self._lock:
-            return list(self._configs.values())
+        configs: List[AutoTradeConfig] = []
+        restored: Dict[int, AutoTradeConfig] = {}
+        for payload in list_config_payloads():
+            try:
+                config = AutoTradeConfig(**payload)
+            except Exception as exc:
+                logger.error("자동매매 설정 복원 실패 - payload=%s error=%s", payload, exc)
+                continue
+            configs.append(config)
+            restored[config.user_id] = config
+
+        if restored:
+            with self._lock:
+                self._configs.update(restored)
+        return configs
 
     def _default_tickers_for_style(self, style: AutoTradeStyle) -> List[str]:
         env_key = "AUTOTRADE_LONG_TICKERS" if style == "LONG" else "AUTOTRADE_SHORT_TICKERS"
@@ -114,6 +141,9 @@ class AutoTradeService:
             return False
         current_time = now.time()
         return time(9, 0) <= current_time <= time(15, 30)
+
+    def is_market_session_open(self) -> bool:
+        return self._is_market_session_open()
 
     def _persist_cycle_decision(
         self,
