@@ -346,24 +346,6 @@ def get_latest_feature_path(ticker: str) -> str:
     return _find_latest_path(ticker, "feat", [".csv", ".csv.gz"])
 
 
-def get_latest_model_path(ticker: str) -> str:
-    regex = rf"^model_{re.escape(ticker)}_\d{{8}}_\d{{6}}\.json$"
-    return _find_latest_path(ticker, "model", [".json"], regex_pattern=regex)
-
-
-def get_latest_global_model_path() -> str:
-    storage_dir = get_storage_dir(_QUANT_CATEGORY)
-    pattern = os.path.join(storage_dir, "model_global_*.json")
-    files = sorted(glob.glob(pattern))
-    if not files:
-        raise FileNotFoundError("global model 데이터를 찾을 수 없습니다.")
-    return files[-1]
-
-
-def get_latest_optimal_path(ticker: str) -> str:
-    return _find_latest_path(ticker, "optimal_params", [".json"])
-
-
 def load_raw_from_storage(raw_path: str) -> pd.DataFrame:
     payload = load_json_compressed(raw_path)
     df = pd.DataFrame(payload.get("data", []))

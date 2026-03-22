@@ -63,6 +63,13 @@ class JudgeAgent:
 입력된 News/Quant 카드와 시장값만 사용하여 주문 결정을 생성하세요.
 signal_weights를 반드시 반영하세요. 예를 들어 news_weight=60, quant_weight=40이면 뉴스 판단을 더 강하게, news_weight=40, quant_weight=60이면 퀀트 판단을 더 강하게 반영하세요.
 strategy_slot이 morning이면 뉴스 비중이 더 높고, afternoon이면 퀀트 비중이 더 높아야 합니다.
+
+quant_state_summary가 포함되어 있으면 반드시 참조하세요.
+이 필드에는 market_state, multi_timeframe, symbol_profile, risk_context, supporting_metrics가 있습니다.
+- QuantAgent의 quant_card는 1차 해석 결과입니다.
+- quant_state_summary는 해석 전 원본 상태이므로, QuantAgent 판단이 맞는지 교차 검증에 활용하세요.
+- 특히 risk_context.entry_risk, risk_context.signal_confidence, multi_timeframe.alignment_score를 주문 결정에 반영하세요.
+
 반드시 JSON object 하나만 출력하세요.
 모든 설명 문자열은 한국어로 작성하세요.
 verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하세요.
