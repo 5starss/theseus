@@ -9,7 +9,7 @@ from collector.storage import get_storage_dir
 from app.news.agent import NewsReporterAgent
 from app.news.sources import retrieve_news, retrieve_community_posts
 from app.quant.agent import QuantAnalysisAgent
-from app.quant.pipeline import _build_quant_evidence_payload
+from app.quant.pipeline import build_state_from_feature_row
 from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
 from app.shared.infra.s3_client import s3_client
@@ -266,30 +266,38 @@ def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주
     return news_card
 
 
-def run_quant_agent(ticker: str) -> Dict[str, Any]:
+def run_quant_agent(ticker: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """
-    S3에 저장된 최신 Quant 피처를 읽어 QuantAnalysisAgent에게 넘깁니다.
+    S3에 저장된 최신 Quant 피처를 읽어 상태 스키마로 변환한 뒤
+    QuantAnalysisAgent에게 넘깁니다.
+
+    Returns
+    -------
+    tuple[dict, dict]
+        (quant_card, quant_state)  quant_state는 5-블록 상태 스키마
     """
     logger.debug(f"[{ticker}] 2단계: Quant Data 로드 및 QuantAgent 실행")
 
     latest_s3_key = _latest_feature_s3_key(ticker)
     if latest_s3_key is None:
-        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 없음")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 데이터 없음"), {}
 
     feat_df = _download_feature_frame(ticker, latest_s3_key)
     if feat_df is None:
-        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 다운로드 실패")
+        return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 다운로드 실패"), {}
 
-    quant_evidence = _build_quant_evidence_payload(feat_df.iloc[-1].to_dict())
+    # raw feature -> 상태 스키마 변환
+    feature_row = feat_df.iloc[-1].to_dict()
+    quant_state = build_state_from_feature_row(feature_row, ticker=ticker)
 
     agent = QuantAnalysisAgent()
     quant_card = agent.generate_analysis_card(
         ticker=ticker,
-        quant_evidence=quant_evidence
+        quant_evidence=quant_state
     )
     
     logger.debug(f"[{ticker}] Quant Card 생성 완료 (Stance: {quant_card.get('stance')}, Score: {quant_card.get('score')})")
-    return quant_card
+    return quant_card, quant_state
 
 
 def _safe_score(card: Dict[str, Any]) -> int:
@@ -354,6 +362,7 @@ def run_judge_agent(
     strategy_prompt: str = "",
     rebuttal_result: Optional[Dict[str, Any]] = None,
     strategy_slot: str = "morning",
+    quant_state_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     News 카드와 Quant 카드, 그리고 시장 데이터(현재가, 예수금 등)를 종합하여 
@@ -375,6 +384,7 @@ def run_judge_agent(
         "signal_weights": signal_weights,
         "news_card": news_card,
         "quant_card": quant_card,
+        "quant_state_summary": quant_state_summary or {},
         "rebuttal": rebuttal_result or {"triggered": False, "rebuttal_round": 0},
     }
     
@@ -415,7 +425,7 @@ def orchestrate_trading(
 
     # 1/2단계 병렬 실행 대신 일단 순차 실행 (안정성)
     news_card = run_news_agent(ticker, question=strategy_profile["news_question"])
-    quant_card = run_quant_agent(ticker)
+    quant_card, quant_state = run_quant_agent(ticker)
     rebuttal_result = run_rebuttal_agent(
         ticker,
         news_card,
@@ -443,6 +453,7 @@ def orchestrate_trading(
         strategy_prompt=strategy_profile["strategy_prompt"],
         rebuttal_result=rebuttal_result,
         strategy_slot=resolved_strategy_slot,
+        quant_state_summary=quant_state,
     )
     order_card = apply_account_constraints(
         order_card,
