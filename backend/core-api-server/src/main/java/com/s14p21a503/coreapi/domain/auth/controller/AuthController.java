@@ -33,13 +33,13 @@ public class AuthController {
     private final AuthService authService;
     @Value("${auth.refresh-cookie.name:refresh_token}")
     private String refreshCookieName;
-    @Value("${auth.refresh-cookie.path:/api/v1/core/auth/refresh}")
+    @Value("${auth.refresh-cookie.path:/}")
     private String refreshCookiePath;
     @Value("${auth.refresh-cookie.domain:}")
     private String refreshCookieDomain;
     @Value("${auth.refresh-cookie.secure:true}")
     private boolean refreshCookieSecure;
-    @Value("${auth.refresh-cookie.same-site:Lax}")
+    @Value("${auth.refresh-cookie.same-site:None}")
     private String refreshCookieSameSite;
     @Value("${auth.refresh-cookie.max-age-millis:${JWT_REFRESH_EXPIRATION:1209600000}}")
     private long refreshCookieMaxAgeMillis;

@@ -40,10 +40,10 @@ jwt:
 auth:
   refresh-cookie:
     name: ${AUTH_REFRESH_COOKIE_NAME:refresh_token}
-    path: ${AUTH_REFRESH_COOKIE_PATH:/api/v1/core/auth/refresh}
+    path: ${AUTH_REFRESH_COOKIE_PATH:/}
     domain: ${AUTH_REFRESH_COOKIE_DOMAIN:}
     secure: ${AUTH_REFRESH_COOKIE_SECURE:true}
-    same-site: ${AUTH_REFRESH_COOKIE_SAME_SITE:Lax}
+    same-site: ${AUTH_REFRESH_COOKIE_SAME_SITE:None}
     max-age-millis: ${AUTH_REFRESH_COOKIE_MAX_AGE_MILLIS:${JWT_REFRESH_EXPIRATION:1209600000}}
   csrf:
     enforce-origin-check: ${AUTH_CSRF_ENFORCE_ORIGIN_CHECK:false}
