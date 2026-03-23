@@ -23,14 +23,20 @@ public class RankingResponseDto {
         private String nickname;
         private BigDecimal roi;
         private LocalDate rankDate;
+        private Double percentile;
 
-        public static RankingDto from(DailyRanking dailyRanking) {
+        public static RankingDto from(DailyRanking dailyRanking, long totalCount) {
+            double calcPercentile = totalCount > 0 
+                ? (double) dailyRanking.getRankOrder() / totalCount * 100 
+                : 0.0;
+            
             return RankingDto.builder()
                     .userId(dailyRanking.getUserId())
                     .rank(dailyRanking.getRankOrder())
                     .nickname(dailyRanking.getNickname())
                     .roi(dailyRanking.getRoi())
                     .rankDate(dailyRanking.getRankDate())
+                    .percentile(Math.round(calcPercentile * 10.0) / 10.0) // 소수점 첫째자리 반올림
                     .build();
         }
     }

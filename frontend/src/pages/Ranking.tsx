@@ -104,9 +104,7 @@ export default function Ranking() {
                             <div className="flex flex-col items-center justify-center">
                                 <span className="text-[12px] font-bold text-[#99a1af] mb-1.5">상위 퍼센트</span>
                                 <span className="text-base font-bold text-[#101828]">
-                                    {myRank && data?.rankings.totalElements 
-                                        ? `${((myRank.rank / data.rankings.totalElements) * 100).toFixed(1)}%` 
-                                        : "-"}
+                                    {myRank ? `${myRank.percentile}%` : "-"}
                                 </span>
                             </div>
                         </div>

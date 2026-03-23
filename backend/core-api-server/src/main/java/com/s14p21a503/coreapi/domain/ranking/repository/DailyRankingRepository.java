@@ -16,6 +16,8 @@ import java.util.Optional;
 public interface DailyRankingRepository extends JpaRepository<DailyRanking, Long> {
     
     Optional<DailyRanking> findTopByOrderByRankDateDesc();
+    
+    long countByRankDate(LocalDate rankDate);
 
     Page<DailyRanking> findAllByRankDateOrderByRankOrderAsc(LocalDate rankDate, Pageable pageable);
 

@@ -7,6 +7,7 @@ export interface RankingDto {
     nickname: string;
     roi: number;
     rankDate: string;
+    percentile: number;
 }
 
 export interface PageResponse<T> {
