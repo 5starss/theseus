@@ -30,7 +30,9 @@ public enum ErrorCode {
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH007", "유효하지 않은 리프레시 토큰입니다."),
 
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USR001", "해당 유저를 찾을 수 없습니다."),
-
+    STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "STK001", "Stock not found."),
+    WATCHLIST_ALREADY_EXISTS(HttpStatus.CONFLICT, "WAT001", "Watchlist item already exists."),
+    WATCHLIST_NOT_FOUND(HttpStatus.NOT_FOUND, "WAT002", "Watchlist item not found."),
     // --- 주문 / 계좌 / 포지션 관련 에러 코드 ---
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "ACC001", "해당 유저의 계좌 정보를 찾을 수 없습니다."),
     POSITION_NOT_FOUND(HttpStatus.BAD_REQUEST, "POS001", "해당 종목의 보유 주식이 없습니다."),
