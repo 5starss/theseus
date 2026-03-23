@@ -15,6 +15,7 @@ from app.trading.autotrade_config_store import (
     save_config_payload,
 )
 from app.trading.constants import KST
+from app.trading.core_api_client import get_watchlists
 from app.trading.strategy_store import (
     build_strategy_archive_paths,
     get_strategy_key_for_slot,
@@ -125,14 +126,40 @@ class AutoTradeService:
 
         return DEFAULT_AUTOTRADE_TICKERS.copy()
 
-    def resolve_tickers(self, config: AutoTradeConfig) -> List[str]:
-        tickers = config.tickers or self._default_tickers_for_style(config.invest_style)
+    @staticmethod
+    def _sanitize_tickers(tickers: List[str], *, limit: int) -> List[str]:
         sanitized = []
         for ticker in tickers:
             ticker = str(ticker).strip()
             if len(ticker) == 6 and ticker.isdigit() and ticker not in sanitized:
                 sanitized.append(ticker)
-        return sanitized[: config.max_tickers_per_cycle]
+            if len(sanitized) >= limit:
+                break
+        return sanitized
+
+    def _watchlist_tickers(self, user_id: int, *, limit: int) -> List[str]:
+        try:
+            watchlists = get_watchlists(user_id=user_id)
+        except Exception as exc:
+            logger.error("관심종목 조회 실패 - user_id=%s error=%s", user_id, exc)
+            return []
+
+        tickers = [str(item.get("ticker") or "").strip() for item in watchlists if isinstance(item, dict)]
+        return self._sanitize_tickers(tickers, limit=limit)
+
+    def resolve_tickers(self, config: AutoTradeConfig) -> List[str]:
+        explicit = self._sanitize_tickers(config.tickers, limit=config.max_tickers_per_cycle)
+        if explicit:
+            return explicit
+
+        watchlist_tickers = self._watchlist_tickers(config.user_id, limit=config.max_tickers_per_cycle)
+        if watchlist_tickers:
+            return watchlist_tickers
+
+        return self._sanitize_tickers(
+            self._default_tickers_for_style(config.invest_style),
+            limit=config.max_tickers_per_cycle,
+        )
 
     @staticmethod
     def _is_market_session_open() -> bool:

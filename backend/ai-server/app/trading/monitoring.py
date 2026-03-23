@@ -4,15 +4,14 @@ from decimal import Decimal
 from datetime import datetime
 
 from app.shared.infra.redis_client import redis_client
-from app.shared.infra.s3_client import s3_client
 from app.trading.core_api_client import execute_order
 from app.trading.constants import KST
 from app.trading.market_data import get_current_price
 from app.trading.strategy_store import (
     load_strategy_payload,
-    resolve_strategy_s3_key,
     save_strategy_payload,
     strategy_index_key_for_today,
+    write_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,10 +110,13 @@ def process_saved_strategy(redis_key: str) -> Dict[str, Any]:
             processed.append({"ticker": ticker, "status": "failed", "price": int(current_price)})
 
     if changed:
+        archive = payload.setdefault("archive", {})
+        archive["s3_uploaded"] = False
+        archive["s3_sync_pending"] = True
         save_strategy_payload(redis_key, payload)
         local_path = payload.get("archive", {}).get("local_path")
         if local_path:
-            s3_client.upload_file(local_path, resolve_strategy_s3_key(payload))
+            write_json(local_path, payload)
 
     return {
         "redis_key": redis_key,
