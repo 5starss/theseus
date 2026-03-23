@@ -64,13 +64,8 @@ export function WatchlistSection() {
                                     const color = isPositive ? 'text-red-500' : item.changeRate < 0 ? 'text-blue-500' : 'text-slate-500';
 
                                     return (
-<<<<<<< frontend/src/components/layout/sidebar/WatchlistSection.tsx
                                         <div
                                             key={item.ticker}
-=======
-                                        <div 
-                                            key={item.ticker} 
->>>>>>> frontend/src/components/layout/sidebar/WatchlistSection.tsx
                                             onClick={() => navigate(`/stock/${item.ticker}`)}
                                             className="px-4 py-3.5 hover:bg-slate-50 transition-all cursor-pointer group border-b border-transparent hover:border-slate-100"
                                         >
@@ -93,11 +88,7 @@ export function WatchlistSection() {
                                                     </div>
                                                 </div>
                                             </div>
-<<<<<<< frontend/src/components/layout/sidebar/WatchlistSection.tsx
                                         </div>);
-=======
-                                        </div>                                    );
->>>>>>> frontend/src/components/layout/sidebar/WatchlistSection.tsx
                                 })
                             )}
                         </div>
