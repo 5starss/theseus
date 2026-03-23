@@ -10,6 +10,8 @@ import java.util.Optional;
 
 public interface WatchlistRepository extends JpaRepository<Watchlist, Long> {
 
+    long countByUserId(Long userId);
+
     boolean existsByUserIdAndTicker(Long userId, String ticker);
 
     Optional<Watchlist> findByUserIdAndTicker(Long userId, String ticker);
