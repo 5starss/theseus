@@ -6,16 +6,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.shared.infra.redis_client import redis_client
-from app.trading.batch_feature_generator import run_daily_batch_preparation
+from app.trading.batch_feature_generator import run_daily_batch_preparation, run_news_rag_batch, run_quant_feature_batch
 from app.trading.auto_trade import auto_trade_service
 from app.trading.constants import KST, REDIS_BATCH_READY_PREFIX, STRATEGY_CACHE_TTL_SECONDS
-from app.trading.monitoring import process_saved_strategies
+from app.trading.monitoring import process_saved_strategies, sync_pending_strategy_archives
 
 logger = logging.getLogger(__name__)
 
 class BatchScheduler:
     """
-    정기 배치 작업(뉴스 수집 및 퀀트 피처 생성)만 자동화하는 스케줄러.
+    정기 배치 작업(퀀트 feature, 뉴스/RAG, 자동매매)을 자동화하는 스케줄러.
     """
     
     def __init__(self):
@@ -25,45 +25,75 @@ class BatchScheduler:
         self.strategy_monitor_interval_seconds = max(15, int(os.getenv("AUTOTRADE_MONITOR_INTERVAL_SECONDS", "15")))
 
     @staticmethod
-    def _batch_ready_key(base_time: datetime | None = None) -> str:
+    def _batch_ready_key(batch_type: str, base_time: datetime | None = None) -> str:
         day_str = (base_time or datetime.now(KST)).astimezone(KST).strftime("%Y%m%d")
-        return f"{REDIS_BATCH_READY_PREFIX}:{day_str}:morning"
+        return f"{REDIS_BATCH_READY_PREFIX}:{day_str}:{batch_type}"
 
-    def mark_today_batch_ready(self) -> None:
+    def mark_today_batch_ready(self, batch_type: str) -> None:
         r = redis_client.get_client()
-        key = self._batch_ready_key()
+        key = self._batch_ready_key(batch_type)
         r.set(key, "1")
         r.expire(key, STRATEGY_CACHE_TTL_SECONDS)
-        logger.debug("[Job] 자동매매 배치 준비 완료 플래그 설정: %s", key)
+        logger.info("[Job] 배치 준비 완료 플래그 설정 (%s): %s", batch_type, key)
 
-    def is_today_batch_ready(self) -> bool:
+    def is_today_batch_ready(self, batch_type: str) -> bool:
         try:
-            return bool(redis_client.get_client().get(self._batch_ready_key()))
+            return bool(redis_client.get_client().get(self._batch_ready_key(batch_type)))
         except Exception as exc:
-            logger.error("[Job] 배치 준비 상태 조회 실패: %s", exc)
+            logger.error("[Job] 배치 준비 상태 조회 실패 (%s): %s", batch_type, exc)
             return False
+
+    def is_today_quant_ready(self) -> bool:
+        return self.is_today_batch_ready("quant")
+
+    def is_today_news_ready(self) -> bool:
+        return self.is_today_batch_ready("news")
+
+    def is_today_strategy_ready(self) -> bool:
+        return self.is_today_quant_ready() and self.is_today_news_ready()
 
     def run_batch_prepare(self, *, days: int) -> dict:
         result = run_daily_batch_preparation(data_dir=self.data_dir, days=days)
         if result.get("status") == "ok":
-            self.mark_today_batch_ready()
+            self.mark_today_batch_ready("quant")
+            self.mark_today_batch_ready("news")
+        return result
+
+    def run_news_batch_prepare(self) -> dict:
+        result = run_news_rag_batch()
+        if result.get("status") == "ok":
+            self.mark_today_batch_ready("news")
+        return result
+
+    def run_quant_batch_prepare(self, *, days: int) -> dict:
+        result = run_quant_feature_batch(data_dir=self.data_dir, days=days)
+        if result.get("status") == "ok":
+            self.mark_today_batch_ready("quant")
         return result
 
     def start(self):
         """스케줄러 시작"""
-        # 1. 아침 전체 배치 (08:00) - 2년치(730일) 데이터 로드 및 뉴스 수집
+        # 1. 장 마감 후 퀀트 feature 배치 (17:00)
         self.scheduler.add_job(
-            self._morning_full_batch,
-            CronTrigger(hour=8, minute=0),
-            id="morning_full_batch",
+            self._evening_quant_batch,
+            CronTrigger(hour=17, minute=0),
+            id="evening_quant_batch",
             replace_existing=True
         )
-        
-        # 2. 오후 부분 배치 (12:00) - 금일(09시~) 데이터만 갱신 및 뉴스 갱신
+
+        # 2. 익일 장전 뉴스/RAG 배치 (08:00)
         self.scheduler.add_job(
-            self._afternoon_partial_batch,
-            CronTrigger(hour=12, minute=0),
-            id="afternoon_partial_batch",
+            self._morning_news_batch,
+            CronTrigger(hour=8, minute=0),
+            id="morning_news_batch",
+            replace_existing=True
+        )
+
+        # 3. 08:20에 미완료 뉴스 배치 재시도
+        self.scheduler.add_job(
+            self._morning_retry_batch,
+            CronTrigger(hour=8, minute=20),
+            id="morning_retry_batch",
             replace_existing=True
         )
 
@@ -85,39 +115,74 @@ class BatchScheduler:
         
         self.scheduler.start()
         logger.debug(
-            "APScheduler 시작 완료 (08:00 전체 배치, 12:00 부분 배치, 자동매매 %s분 간격, 전략 모니터링 %s초 간격)",
+            "APScheduler 시작 완료 (17:00 퀀트 배치, 08:00 뉴스 배치, 08:20 뉴스 재시도, 자동매매 %s분 간격, 전략 모니터링 %s초 간격)",
             self.auto_trade_interval_minutes,
             self.strategy_monitor_interval_seconds,
         )
 
-    def _morning_full_batch(self):
-        logger.debug("[Job] 오전 08:00 전체 배치(RAG + Quant 2yr) 시작...")
+    def _evening_quant_batch(self):
+        logger.info("[Job] 오후 17:00 퀀트 feature 배치 시작...")
         try:
-            self.run_batch_prepare(days=730)
-            logger.debug("[Job] 오전 배치 작업 성공적으로 완료")
+            self.run_quant_batch_prepare(days=730)
+            logger.info("[Job] 퀀트 feature 배치 작업 성공적으로 완료")
         except Exception as e:
-            logger.error("[Job] 오전 배치 실패: %s", e)
+            logger.error("[Job] 퀀트 feature 배치 실패: %s", e)
 
-    def _afternoon_partial_batch(self):
-        logger.debug("[Job] 오후 12:00 부분 배치(RAG + Quant Today) 시작...")
+    def _morning_news_batch(self):
+        logger.info("[Job] 오전 08:00 뉴스/RAG 배치 시작...")
         try:
-            self.run_batch_prepare(days=0)
-            logger.debug("[Job] 오후 부분 배치 작업 성공적으로 완료")
+            self.run_news_batch_prepare()
+            logger.info("[Job] 뉴스/RAG 배치 작업 성공적으로 완료")
         except Exception as e:
-            logger.error("[Job] 오후 배치 실패: %s", e)
+            logger.error("[Job] 뉴스/RAG 배치 실패: %s", e)
+
+    def _morning_retry_batch(self):
+        quant_ready = self.is_today_quant_ready()
+        news_ready = self.is_today_news_ready()
+        if quant_ready and news_ready:
+            logger.info("[Job] 오전 08:20 재시도 스킵: 뉴스/퀀트 배치가 모두 완료되었습니다.")
+            return
+        logger.warning(
+            "[Job] 오전 08:20 재시도: 미완료 배치를 재시도합니다. (quant_ready=%s, news_ready=%s)",
+            quant_ready,
+            news_ready,
+        )
+        if not quant_ready:
+            try:
+                self.run_quant_batch_prepare(days=730)
+                logger.info("[Job] 오전 08:20 퀀트 feature 재시도 완료")
+            except Exception as e:
+                logger.error("[Job] 오전 08:20 퀀트 feature 재시도 실패: %s", e)
+        if not news_ready:
+            try:
+                self.run_news_batch_prepare()
+                logger.info("[Job] 오전 08:20 뉴스/RAG 재시도 완료")
+            except Exception as e:
+                logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
 
     def _auto_trade_cycle(self):
         try:
             if not auto_trade_service.is_market_session_open():
                 logger.debug("[Job] 장 마감 상태라 자동매매 전략 생성을 건너뜁니다.")
                 return
-            if not self.is_today_batch_ready():
-                logger.debug("[Job] 오전 데이터 배치가 아직 끝나지 않아 자동매매 전략 생성을 건너뜁니다.")
+            if not self.is_today_strategy_ready():
+                logger.info(
+                    "[Job] 자동매매 전략 생성을 건너뜁니다. (quant_ready=%s, news_ready=%s)",
+                    self.is_today_quant_ready(),
+                    self.is_today_news_ready(),
+                )
                 return
             result = auto_trade_service.run_enabled_users_cycle()
             if result.get("message") == "no_enabled_users":
                 logger.debug("[Job] 자동매매 활성 사용자 없음")
                 return
+            sync_result = sync_pending_strategy_archives()
+            if sync_result.get("synced_count"):
+                logger.info(
+                    "[Job] 전략 아카이브 S3 동기화 완료: synced=%s failed=%s",
+                    sync_result.get("synced_count"),
+                    sync_result.get("failure_count"),
+                )
             logger.debug("[Job] 자동매매 주기 실행 완료: %s", result)
         except Exception as e:
             logger.error("[Job] 자동매매 주기 실행 실패: %s", e)
@@ -127,8 +192,12 @@ class BatchScheduler:
             if not auto_trade_service.is_market_session_open():
                 logger.debug("[Job] 장 마감 상태라 전략 모니터링을 건너뜁니다.")
                 return
-            if not self.is_today_batch_ready():
-                logger.debug("[Job] 오전 데이터 배치가 아직 끝나지 않아 전략 모니터링을 건너뜁니다.")
+            if not self.is_today_strategy_ready():
+                logger.debug(
+                    "[Job] 배치 미완료로 전략 모니터링을 건너뜁니다. (quant_ready=%s, news_ready=%s)",
+                    self.is_today_quant_ready(),
+                    self.is_today_news_ready(),
+                )
                 return
             result = process_saved_strategies()
             if result.get("message") == "no_strategy_files":

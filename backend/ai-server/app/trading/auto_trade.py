@@ -1,12 +1,14 @@
 import logging
 import os
 import threading
+import json
 from datetime import datetime, time
 from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, Field
 
 from collector.storage import get_storage_dir
+from app.shared.infra.redis_client import redis_client
 from app.trading.orchestrator import orchestrate_trading
 from app.shared.infra.s3_client import s3_client
 from app.trading.autotrade_config_store import (
@@ -14,7 +16,11 @@ from app.trading.autotrade_config_store import (
     load_config_payload,
     save_config_payload,
 )
-from app.trading.constants import KST
+from app.trading.constants import (
+    KST,
+    REDIS_AUTOTRADE_TICKER_SNAPSHOT_PREFIX,
+    STRATEGY_CACHE_TTL_SECONDS,
+)
 from app.trading.core_api_client import get_watchlists
 from app.trading.strategy_store import (
     build_strategy_archive_paths,
@@ -147,19 +153,73 @@ class AutoTradeService:
         tickers = [str(item.get("ticker") or "").strip() for item in watchlists if isinstance(item, dict)]
         return self._sanitize_tickers(tickers, limit=limit)
 
-    def resolve_tickers(self, config: AutoTradeConfig) -> List[str]:
+    @staticmethod
+    def _daily_ticker_snapshot_key(user_id: int, *, base_time: datetime | None = None) -> str:
+        day_str = (base_time or datetime.now(KST)).astimezone(KST).strftime("%Y%m%d")
+        return f"{REDIS_AUTOTRADE_TICKER_SNAPSHOT_PREFIX}:{day_str}:user_{user_id}"
+
+    def _load_daily_ticker_snapshot(self, user_id: int, *, limit: int) -> List[str] | None:
+        raw = redis_client.get_client().get(self._daily_ticker_snapshot_key(user_id))
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except Exception as exc:
+            logger.error("자동매매 종목 스냅샷 파싱 실패 - user_id=%s error=%s", user_id, exc)
+            return None
+
+        tickers = payload.get("tickers")
+        if not isinstance(tickers, list):
+            return None
+        return self._sanitize_tickers(tickers, limit=limit)
+
+    def _save_daily_ticker_snapshot(self, user_id: int, tickers: List[str], *, source: str) -> None:
+        payload = {
+            "user_id": user_id,
+            "date": datetime.now(KST).strftime("%Y-%m-%d"),
+            "source": source,
+            "tickers": tickers,
+            "saved_at": datetime.now(KST).isoformat(),
+        }
+        client = redis_client.get_client()
+        key = self._daily_ticker_snapshot_key(user_id)
+        client.set(key, json.dumps(payload, ensure_ascii=False))
+        client.expire(key, STRATEGY_CACHE_TTL_SECONDS)
+
+    def _resolve_current_tickers(self, config: AutoTradeConfig) -> tuple[List[str], str]:
         explicit = self._sanitize_tickers(config.tickers, limit=config.max_tickers_per_cycle)
         if explicit:
-            return explicit
+            return explicit, "config"
 
         watchlist_tickers = self._watchlist_tickers(config.user_id, limit=config.max_tickers_per_cycle)
         if watchlist_tickers:
-            return watchlist_tickers
+            return watchlist_tickers, "watchlist"
 
-        return self._sanitize_tickers(
+        fallback = self._sanitize_tickers(
             self._default_tickers_for_style(config.invest_style),
             limit=config.max_tickers_per_cycle,
         )
+        return fallback, "default"
+
+    def resolve_tickers(self, config: AutoTradeConfig) -> List[str]:
+        frozen = self._load_daily_ticker_snapshot(config.user_id, limit=config.max_tickers_per_cycle)
+        if frozen:
+            logger.info(
+                "자동매매 대상 종목 결정 - user_id=%s source=daily_snapshot tickers=%s",
+                config.user_id,
+                frozen,
+            )
+            return frozen
+
+        resolved, source = self._resolve_current_tickers(config)
+        self._save_daily_ticker_snapshot(config.user_id, resolved, source=source)
+        logger.info(
+            "자동매매 대상 종목 결정 - user_id=%s source=%s tickers=%s",
+            config.user_id,
+            source,
+            resolved,
+        )
+        return resolved
 
     @staticmethod
     def _is_market_session_open() -> bool:
@@ -250,6 +310,14 @@ class AutoTradeService:
         if not tickers:
             return {"status": "skipped", "reason": "no_tickers", "user_id": user_id}
 
+        logger.info(
+            "자동매매 전략 생성 시작 - user_id=%s strategy_slot=%s tickers=%s invest_style=%s",
+            user_id,
+            strategy_slot,
+            tickers,
+            config.invest_style,
+        )
+
         results = []
         decision_records = []
         for ticker in tickers:
@@ -308,7 +376,11 @@ class AutoTradeService:
         config = self.upsert_config(user_id, request)
         response: Dict[str, Any] = {"status": "ok", "config": config.model_dump()}
         if config.enabled:
-            response["bootstrap"] = self.run_user_cycle(user_id, force=True)
+            response["bootstrap"] = {
+                "status": "skipped",
+                "reason": "deferred_until_scheduled_cycle",
+                "message": "당일 첫 전략 생성 시점에 자동매매 대상 종목 스냅샷을 확정합니다.",
+            }
         return response
 
     def run_enabled_users_cycle(self) -> Dict[str, Any]:
@@ -317,6 +389,7 @@ class AutoTradeService:
             return {"status": "ok", "message": "no_enabled_users", "run_count": 0}
 
         results = [self.run_user_cycle(config.user_id) for config in configs]
+        logger.info("자동매매 주기 실행 완료 - enabled_users=%s", len(results))
         return {"status": "ok", "run_count": len(results), "results": results}
 
 
