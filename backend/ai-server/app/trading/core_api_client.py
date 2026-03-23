@@ -193,6 +193,16 @@ def get_positions(user_id: Optional[int] = None, account_type: str = "USER") -> 
     return positions
 
 
+def get_watchlists(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Core API Server에서 사용자의 관심 종목 목록을 조회합니다.
+    """
+    result = _request("GET", "/watchlists", user_id=user_id)
+    if isinstance(result, list):
+        return result
+    return []
+
+
 def get_trading_account_snapshot(user_id: Optional[int] = None, account_type: str = "USER") -> Dict[str, Any]:
     """
     자동매매에 필요한 계좌 요약과 보유 종목 정보를 한 번에 정규화합니다.
