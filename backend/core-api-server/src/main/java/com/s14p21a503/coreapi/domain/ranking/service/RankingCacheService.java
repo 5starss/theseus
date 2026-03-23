@@ -47,4 +47,12 @@ public class RankingCacheService {
             return dailyRankingRepository.findAllByRankDateOrderByRankOrderAsc(date, pageable);
         }
     }
+
+    /**
+     * 특정 날짜의 전체 랭킹 유저 수를 조회하여 캐싱합니다.
+     */
+    @Cacheable(value = "total_ranking_count", key = "#date.toString()")
+    public long getTotalCount(LocalDate date) {
+        return dailyRankingRepository.countByRankDate(date);
+    }
 }

@@ -133,17 +133,20 @@ public class RankingService {
         // 2. 전체 페이징 목록 조회 (순위순, 닉네임 필터 적용 가능) - 로컬 캐싱 적용
         Page<DailyRanking> page = rankingCacheService.getRankingPage(latestDate, nickname, pageable);
         
-        // 3. 현재 요청한 유저의 개인 랭킹 정보 조회 (로그인 시에만)
+        // 3. 전체 유저 수 조회 (퍼센트 계산용)
+        long totalCount = rankingCacheService.getTotalCount(latestDate);
+
+        // 4. 현재 요청한 유저의 개인 랭킹 정보 조회 (로그인 시에만)
         RankingResponseDto.RankingDto myRankingDto = null;
         if (userId != null) {
             myRankingDto = rankingCacheService.getUserRanking(latestDate, userId)
-                    .map(RankingResponseDto.RankingDto::from)
+                    .map(r -> RankingResponseDto.RankingDto.from(r, totalCount))
                     .orElse(null);
         }
 
         return RankingResponseDto.builder()
                 .myRanking(myRankingDto)
-                .rankings(PageResponseDto.from(page.map(RankingResponseDto.RankingDto::from)))
+                .rankings(PageResponseDto.from(page.map(r -> RankingResponseDto.RankingDto.from(r, totalCount))))
                 .build();
     }
 
