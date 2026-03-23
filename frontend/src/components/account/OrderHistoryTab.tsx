@@ -85,7 +85,7 @@ export function OrderHistoryTab() {
                                             </div>
                                             <div className="flex items-center gap-2 mt-0.5">
                                                 <p className="text-[#6a7282] text-sm font-medium">
-                                                    {order.quantity}주 · {Math.round(order.price / order.quantity).toLocaleString()}원
+                                                    {order.quantity}주 · {Math.round(order.price).toLocaleString()}원
                                                 </p>
                                             </div>
                                         </div>

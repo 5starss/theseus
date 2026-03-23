@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,6 +43,7 @@ func newTestComponents(t *testing.T) (*StockHandler, *repository.StockRepository
 func newRouter(h *StockHandler) *gin.Engine {
 	r := gin.New()
 	r.GET("/api/v1/stocks", h.GetStockList)
+	r.GET("/api/v1/stocks/search", h.SearchStocks)
 	r.GET("/api/v1/stocks/:ticker/candles", h.GetCandles)
 	return r
 }
@@ -238,13 +240,13 @@ func TestGetStockList_InvalidLimit_Zero(t *testing.T) {
 	}
 }
 
-func TestGetStockList_InvalidLimit_Over20(t *testing.T) {
+func TestGetStockList_InvalidLimit_Over100(t *testing.T) {
 	h, _, mr := newTestComponents(t)
 	defer mr.Close()
 
 	r := newRouter(h)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks?limit=21", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks?limit=101", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -461,3 +463,327 @@ func TestGetTickSnapshot_NotFound(t *testing.T) {
 	}
 }
 
+// ─── SearchStocks 핸들러 테스트 ──────────────────────────────────────────────
+
+// seedSearchStocks miniredis에 종목 정보와 거래량 랭킹을 적재한다.
+func seedSearchStocks(t *testing.T, repo *repository.StockRepository, stocks []*domain.Stock) {
+	t.Helper()
+	if err := repo.BulkUpsertStocks(context.Background(), stocks); err != nil {
+		t.Fatalf("seedSearchStocks failed: %v", err)
+	}
+}
+
+// TestSearchStocks_MissingQ 검색어(q) 파라미터 없이 호출하면 400을 반환한다.
+func TestSearchStocks_MissingQ(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp apiResp
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.IsSuccess {
+		t.Error("expected isSuccess=false")
+	}
+}
+
+// TestSearchStocks_EmptyQ 빈 검색어로 호출하면 400을 반환한다.
+func TestSearchStocks_EmptyQ(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestSearchStocks_InvalidLimit_Zero limit=0은 400을 반환한다.
+func TestSearchStocks_InvalidLimit_Zero(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성&limit=0", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestSearchStocks_InvalidLimit_Over50 limit=51은 400을 반환한다. (최대 50)
+func TestSearchStocks_InvalidLimit_Over50(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성&limit=51", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestSearchStocks_InvalidLimit_NotANumber limit=abc는 400을 반환한다.
+func TestSearchStocks_InvalidLimit_NotANumber(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성&limit=abc", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+// TestSearchStocks_ValidBoundaryLimits limit=1과 limit=50은 정상 처리된다.
+func TestSearchStocks_ValidBoundaryLimits(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	for _, limit := range []string{"1", "50"} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성&limit="+limit, nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("limit=%s: expected 200, got %d", limit, w.Code)
+		}
+	}
+}
+
+// TestSearchStocks_EmptyRedis Redis가 비어있으면 200과 빈 배열을 반환한다.
+func TestSearchStocks_EmptyRedis(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !resp.IsSuccess {
+		t.Error("expected isSuccess=true")
+	}
+
+	var result []domain.Stock
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("parse result error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty array, got %d items", len(result))
+	}
+}
+
+// TestSearchStocks_ExactNameMatch 종목명 부분 일치 검색이 정상 동작한다.
+func TestSearchStocks_ExactNameMatch(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	seedSearchStocks(t, repo, []*domain.Stock{
+		{Ticker: "005930", Name: "삼성전자", AccVolume: 3000000},
+		{Ticker: "000660", Name: "SK하이닉스", AccVolume: 5000000},
+	})
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	var result []domain.Stock
+	json.Unmarshal(resp.Result, &result)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	if result[0].Ticker != "005930" {
+		t.Errorf("expected 005930, got %s", result[0].Ticker)
+	}
+}
+
+// TestSearchStocks_NoMatch 매칭 결과가 없으면 200과 빈 배열을 반환한다.
+func TestSearchStocks_NoMatch(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	seedSearchStocks(t, repo, []*domain.Stock{
+		{Ticker: "005930", Name: "삼성전자", AccVolume: 3000000},
+	})
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=XYZABC", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if !resp.IsSuccess {
+		t.Error("expected isSuccess=true for empty search result")
+	}
+
+	var result []domain.Stock
+	json.Unmarshal(resp.Result, &result)
+	if len(result) != 0 {
+		t.Errorf("expected empty array, got %d", len(result))
+	}
+}
+
+// TestSearchStocks_LimitRespected limit보다 많은 후보가 있어도 limit 개수만 반환한다.
+func TestSearchStocks_LimitRespected(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	stocks := []*domain.Stock{
+		{Ticker: "069500", Name: "KODEX 200", AccVolume: 1000},
+		{Ticker: "122900", Name: "TIGER 200", AccVolume: 2000},
+		{Ticker: "278540", Name: "KODEX MSCI 200", AccVolume: 3000},
+	}
+	seedSearchStocks(t, repo, stocks)
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=200&limit=2", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	var result []domain.Stock
+	json.Unmarshal(resp.Result, &result)
+
+	if len(result) != 2 {
+		t.Errorf("expected 2 results (limit), got %d", len(result))
+	}
+}
+
+// TestSearchStocks_TickerMatch 티커 부분 일치로 종목을 찾는다.
+func TestSearchStocks_TickerMatch(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	seedSearchStocks(t, repo, []*domain.Stock{
+		{Ticker: "005930", Name: "삼성전자", AccVolume: 3000000},
+		{Ticker: "000660", Name: "SK하이닉스", AccVolume: 5000000},
+	})
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	// "005"는 이름에 없고 티커(005930)에만 있다
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=005", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	var result []domain.Stock
+	json.Unmarshal(resp.Result, &result)
+
+	if len(result) == 0 {
+		t.Fatal("expected at least 1 result from ticker match")
+	}
+	if result[0].Ticker != "005930" {
+		t.Errorf("expected 005930 from ticker match, got %s", result[0].Ticker)
+	}
+}
+
+// TestSearchStocks_DefaultLimit limit 미지정 시 기본값 10이 적용된다.
+func TestSearchStocks_DefaultLimit(t *testing.T) {
+	h, repo, mr := newTestComponents(t)
+	defer mr.Close()
+
+	// 20개 등록 → 기본 limit 10으로 잘려야 함
+	stocks := make([]*domain.Stock, 20)
+	for i := 0; i < 20; i++ {
+		stocks[i] = &domain.Stock{
+			Ticker:    fmt.Sprintf("%06d", i),
+			Name:      fmt.Sprintf("테스트종목%02d", i),
+			AccVolume: int64(i * 100),
+		}
+	}
+	seedSearchStocks(t, repo, stocks)
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=테스트", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp apiResp
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	var result []domain.Stock
+	json.Unmarshal(resp.Result, &result)
+
+	if len(result) != 10 {
+		t.Errorf("expected default limit of 10, got %d", len(result))
+	}
+}
+
+// TestSearchStocks_ResponseStructure 응답이 isSuccess/code/result 구조를 갖는지 확인한다.
+func TestSearchStocks_ResponseStructure(t *testing.T) {
+	h, _, mr := newTestComponents(t)
+	defer mr.Close()
+
+	r := newRouter(h)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/stocks/search?q=삼성", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp apiResp
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if !resp.IsSuccess {
+		t.Error("isSuccess should be true")
+	}
+	if resp.Result == nil {
+		t.Error("result field should not be nil")
+	}
+}

@@ -4,18 +4,126 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
+	"sync"
 	"time"
 
 	"market-server/internal/domain"
 	"market-server/internal/repository"
+	"market-server/pkg/search"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type StockService struct {
 	repo *repository.StockRepository
+
+	// In-memory cache for fast searching
+	stockCache     []*domain.Stock
+	stockCacheLock sync.RWMutex
+	lastCacheTime  time.Time
+	
+	// singleflight group to prevent thundering herd when cache expires
+	sfGroup singleflight.Group
 }
 
 func NewStockService(repo *repository.StockRepository) *StockService {
-	return &StockService{repo: repo}
+	return &StockService{
+		repo:       repo,
+		stockCache: make([]*domain.Stock, 0),
+	}
+}
+
+// loadStockCache Redis에서 전체 종목을 가져와 인메모리 캐시를 갱신한다. (1시간 주기 캐싱)
+func (s *StockService) loadStockCache(ctx context.Context) {
+	s.stockCacheLock.RLock()
+	isFresh := time.Since(s.lastCacheTime) < time.Hour && len(s.stockCache) > 0
+	s.stockCacheLock.RUnlock()
+
+	if isFresh {
+		return
+	}
+
+	// 썬더링 허드 패턴(Thundering Herd Problem) 방지:
+	// 캐시 만료 시점에 대규모 요청이 몰리더라도 단 한 번의 조회가 일어나도록 singleflight 패턴 적용
+	_, err, _ := s.sfGroup.Do("loadStockCache", func() (interface{}, error) {
+		// context.Background() 사용: 개별 요청의 ctx 취소가 캐시 로드에 영향을 주지 않도록 분리.
+		// 최초 호출자의 ctx 가 취소되어도 대기 중인 다른 고루틴까지 실패하는 것을 방지.
+		stocks, err := s.repo.GetAllStocks(context.Background())
+		if err != nil {
+			return nil, err
+		}
+
+		s.stockCacheLock.Lock()
+		s.stockCache = stocks
+		s.lastCacheTime = time.Now()
+		s.stockCacheLock.Unlock()
+
+		return nil, nil
+	})
+
+	if err != nil {
+		log.Printf("[StockService] Failed to load all stocks for cache: %v", err)
+	}
+}
+
+// SearchStocks 주어진 키워드로 종목명/티커 검색 및 자동완성을 수행한다.
+func (s *StockService) SearchStocks(ctx context.Context, keyword string, limit int) ([]*domain.Stock, error) {
+	s.loadStockCache(ctx)
+
+	s.stockCacheLock.RLock()
+	defer s.stockCacheLock.RUnlock()
+
+	if len(s.stockCache) == 0 {
+		return nil, nil
+	}
+
+	// 쿼리를 정규화 (공백 등 제거)
+	normQuery := search.Normalize(keyword)
+	if len(normQuery) == 0 {
+		return nil, nil
+	}
+
+	var results []search.SearchResult
+	for i, stock := range s.stockCache {
+		match := search.EvaluateMatch(normQuery, stock.Name, stock.Ticker, i)
+		if match.Rank != search.RankNone {
+			results = append(results, match)
+		}
+	}
+
+	// 정렬 기준
+	// 1. Rank 우선 (Exact Name > Exact Ticker > Fuzzy Name)
+	// 2. Rank가 같고 Fuzzy 매칭인 경우, 편집 거리가 짧은 순
+	// 3. 그다음 거래량(인기도) 순 (내림차순)
+	sort.Slice(results, func(i, j int) bool {
+		r1 := results[i]
+		r2 := results[j]
+
+		if r1.Rank != r2.Rank {
+			return r1.Rank < r2.Rank
+		}
+
+		if r1.Rank == search.RankFuzzyName && r1.Distance != r2.Distance {
+			return r1.Distance < r2.Distance
+		}
+
+		stock1 := s.stockCache[r1.Index]
+		stock2 := s.stockCache[r2.Index]
+		return stock1.AccVolume > stock2.AccVolume
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	finalStocks := make([]*domain.Stock, 0, len(results))
+	for _, res := range results {
+		// 원본 객체 복사가 필요하다면 여기서 수행
+		finalStocks = append(finalStocks, s.stockCache[res.Index])
+	}
+
+	return finalStocks, nil
 }
 
 // GetTopStocks rankType 기준 상위 limit개 종목을 Redis에서 조회한다.
