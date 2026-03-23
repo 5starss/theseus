@@ -105,6 +105,25 @@ export const stockApi = {
         }
     },
 
+    // 백엔드 명세: GET /api/v1/market/stocks/search?q=...&limit=10
+    searchStocks: async (q: string, limit: number = 10): Promise<Stock[]> => {
+        if (!q || q.trim().length === 0) return [];
+        try {
+            const response = await api.get<ApiResponse<Stock[]>>(`/api/v1/market/stocks/search`, {
+                params: { q, limit }
+            });
+
+            if (response.data.isSuccess && response.data.result) {
+                return response.data.result;
+            }
+            return [];
+        } catch (error) {
+            console.error("Failed to search stocks:", error);
+            // 검색 결과가 없을 때는 빈 배열 반환 (더미 데이터 사용 안 함 - 검색 정확도 중요)
+            return [];
+        }
+    },
+
     // 백엔드 명세: GET /api/v1/market/stocks/:ticker/candles
     getCandles: async (ticker: string, interval: string = 'D', limit: number = 50, endTime?: string): Promise<Candle[]> => {
         if (!ticker) return [];
