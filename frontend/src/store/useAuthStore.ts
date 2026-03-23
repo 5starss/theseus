@@ -10,10 +10,10 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
     isLoggedIn: !!localStorage.getItem('accessToken'),
-    user: localStorage.getItem('userEmail') ? {
+    user: localStorage.getItem('userEmail') ? { 
         id: Number(localStorage.getItem('userId')),
-        name: localStorage.getItem('userNickname') || '회원',
-        email: localStorage.getItem('userEmail')!
+        name: localStorage.getItem('userNickname') || '회원', 
+        email: localStorage.getItem('userEmail')! 
     } : null,
     token: localStorage.getItem('accessToken'),
     login: (id, email, token, nickname) => {

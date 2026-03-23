@@ -286,14 +286,13 @@ def run_quant_agent(ticker: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
     if feat_df is None:
         return QuantAnalysisAgent._fallback_card(ticker, "S3 피처 다운로드 실패"), {}
 
-    # raw feature -> 상태 스키마 변환
     feature_row = feat_df.iloc[-1].to_dict()
     quant_state = build_state_from_feature_row(feature_row, ticker=ticker)
 
     agent = QuantAnalysisAgent()
     quant_card = agent.generate_analysis_card(
         ticker=ticker,
-        quant_evidence=quant_state
+        quant_evidence=quant_state,
     )
     
     logger.debug(f"[{ticker}] Quant Card 생성 완료 (Stance: {quant_card.get('stance')}, Score: {quant_card.get('score')})")
