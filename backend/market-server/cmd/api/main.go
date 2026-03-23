@@ -119,7 +119,6 @@ func main() {
 
 	stockHandler := handler.NewStockHandler(stockSvc)
 	r.GET("/api/v1/stocks", stockHandler.GetStockList)
-	r.GET("/api/v1/stocks/search", stockHandler.SearchStocks) // 경로 충돌 방지를 위해 :ticker 이전에 선언
 	r.GET("/api/v1/stocks/:ticker", stockHandler.GetTickSnapshot)
 	r.GET("/api/v1/stocks/:ticker/candles", stockHandler.GetCandles)
 	r.GET("/api/v1/stocks/:ticker/orderbook", stockHandler.GetOrderbook)

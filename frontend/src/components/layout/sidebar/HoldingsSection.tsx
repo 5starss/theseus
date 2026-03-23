@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useAccountStore } from "../../../store/useAccountStore";
 import { useAuthStore } from "../../../store/useAuthStore";
 import { ScrollArea } from "../../ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { AccountType } from "../../../api/account";
 
 export function HoldingsSection() {
     const navigate = useNavigate();
@@ -14,8 +12,6 @@ export function HoldingsSection() {
         totalInvested,
         totalEvaluated,
         portfolio,
-        currentAccountType,
-        setAccountType
     } = useAccountStore();
 
     const totalProfit = totalEvaluated - totalInvested;
@@ -25,28 +21,7 @@ export function HoldingsSection() {
     return (
         <div className="flex flex-col h-full w-[320px] min-w-[320px]">
             <div className="p-6 border-b border-slate-100">
-                <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-lg font-bold text-slate-800">내 주식</h2>
-                    {isLoggedIn && (
-                        <Select
-                            value={currentAccountType}
-                            onValueChange={(val) => setAccountType(val as AccountType)}
-                        >
-                            <SelectTrigger className="w-fit h-8 border-none bg-slate-100/50 hover:bg-slate-100 rounded-lg font-bold text-xs text-slate-600 gap-1 px-2.5 transition-all focus:ring-0 shadow-none">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent
-                                align="end"
-                                position="popper"
-                                sideOffset={4}
-                                className="rounded-xl border-slate-100 shadow-xl overflow-hidden min-w-[140px] z-50"
-                            >
-                                <SelectItem value="USER" className="text-xs font-bold py-2.5 cursor-pointer rounded-lg my-1">기본계좌</SelectItem>
-                                <SelectItem value="AI" className="text-xs font-bold py-2.5 cursor-pointer rounded-lg my-1">AI계좌</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    )}
-                </div>
+                <h2 className="text-lg font-bold text-slate-800 mb-6">내 주식</h2>
 
                 {!isLoggedIn ? (
                     <div className="py-10 text-center">
@@ -84,12 +59,12 @@ export function HoldingsSection() {
                         ) : (
                             portfolio.map((item) => {
                                 const profit = (item.currentPrice - item.avgPrice) * item.shares;
-                                const rate = item.avgPrice > 0 ? ((item.currentPrice - item.avgPrice) / item.avgPrice) * 100 : 0;
+                                const rate = ((item.currentPrice - item.avgPrice) / item.avgPrice) * 100;
                                 const color = profit > 0 ? 'text-red-500' : profit < 0 ? 'text-blue-500' : 'text-slate-500';
 
                                 return (
-                                    <div
-                                        key={item.code}
+                                    <div 
+                                        key={item.code} 
                                         onClick={() => navigate(`/stock/${item.code}`)}
                                         className="px-6 py-3 hover:bg-slate-50 transition-all cursor-pointer group border-b border-transparent hover:border-slate-100"
                                     >

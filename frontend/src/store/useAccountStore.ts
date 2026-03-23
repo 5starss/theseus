@@ -167,9 +167,9 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     fetchTransactions: async (params) => {
         try {
             const { currentAccountType } = get();
-            const data = await accountApi.getHistory({
-                ...params,
-                account_type: currentAccountType
+            const data = await accountApi.getHistory({ 
+                ...params, 
+                account_type: currentAccountType 
             });
 
             const transformed: Transaction[] = data.histories.content.map(item => {
@@ -201,7 +201,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
                 };
             });
 
-            set({
+            set({ 
                 transactions: transformed,
                 transactionsPage: data.histories.page,
                 transactionsTotalPages: data.histories.totalPages
@@ -215,8 +215,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     fetchPendingOrders: async (params) => {
         try {
             const { currentAccountType } = get();
-            const data = await orderApi.getOrders({
-                ...params,
+            const data = await orderApi.getOrders({ 
+                ...params, 
                 status: 'PENDING',
                 account_type: currentAccountType
             });
@@ -234,10 +234,10 @@ export const useAccountStore = create<AccountState>((set, get) => ({
                 type: po.orderType.toLowerCase() as 'buy' | 'sell',
                 status: po.status === 'PENDING_CANCEL' ? 'canceling' : 'pending',
                 quantity: po.unexecutedQuantity,
-                price: po.unexecutedQuantity > 0 ? Math.round(po.totalPrice / po.unexecutedQuantity) : 0
+                price: po.totalPrice / po.unexecutedQuantity
             }));
 
-            set({
+            set({ 
                 pendingOrders: transformedPending,
                 pendingOrdersPage: data.pending.page,
                 pendingOrdersTotalPages: data.pending.totalPages
@@ -251,8 +251,8 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     fetchCompletedOrders: async (params) => {
         try {
             const { currentAccountType } = get();
-            const data = await orderApi.getOrders({
-                ...params,
+            const data = await orderApi.getOrders({ 
+                ...params, 
                 status: 'COMPLETED',
                 account_type: currentAccountType
             });
@@ -273,7 +273,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
                 price: oh.price
             }));
 
-            set({
+            set({ 
                 completedOrders: transformedCompleted,
                 ordersPage: data.completed.page,
                 ordersTotalPages: data.completed.totalPages
