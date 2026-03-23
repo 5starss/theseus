@@ -12,6 +12,7 @@ interface AIState {
     error: string | null;
 
     // Actions
+    setError: (error: string | null) => void;
     setInvestStyle: (style: AutoTradeStyle) => void;
     toggleAutoTrade: (userId: number, accountType: AccountType) => Promise<void>;
     fetchConfig: (userId: number) => Promise<void>;
@@ -22,6 +23,8 @@ export const useAIStore = create<AIState>((set, get) => ({
     investStyle: 'LONG',
     isAnalyzing: false,
     error: null,
+
+    setError: (error) => set({ error }),
 
     setInvestStyle: (style) => set({ investStyle: style }),
 
