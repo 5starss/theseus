@@ -9,10 +9,12 @@ from app.trading.constants import KST
 from app.trading.market_data import get_current_price
 from app.trading.strategy_store import (
     load_strategy_payload,
+    resolve_strategy_s3_key,
     save_strategy_payload,
     strategy_index_key_for_today,
     write_json,
 )
+from app.shared.infra.s3_client import s3_client
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,48 @@ def process_saved_strategies() -> Dict[str, Any]:
 
     results = [process_saved_strategy(redis_key) for redis_key in strategy_keys]
     return {"status": "ok", "file_count": len(strategy_keys), "results": results}
+
+
+def sync_pending_strategy_archives() -> Dict[str, Any]:
+    strategy_keys = sorted(redis_client.get_client().smembers(strategy_index_key_for_today()))
+    if not strategy_keys:
+        return {"status": "ok", "message": "no_strategy_files", "synced_count": 0}
+
+    synced_count = 0
+    failed = []
+
+    for redis_key in strategy_keys:
+        try:
+            payload = load_strategy_payload(redis_key)
+        except FileNotFoundError:
+            continue
+
+        archive = payload.get("archive", {})
+        if not archive.get("s3_sync_pending"):
+            continue
+
+        local_path = archive.get("local_path")
+        if not local_path:
+            failed.append({"redis_key": redis_key, "reason": "missing_local_path"})
+            continue
+
+        uploaded = s3_client.upload_file(local_path, resolve_strategy_s3_key(payload))
+        if not uploaded:
+            failed.append({"redis_key": redis_key, "reason": "upload_failed"})
+            continue
+
+        archive["s3_uploaded"] = True
+        archive["s3_sync_pending"] = False
+        save_strategy_payload(redis_key, payload)
+        write_json(local_path, payload)
+        synced_count += 1
+
+    return {
+        "status": "ok",
+        "synced_count": synced_count,
+        "failure_count": len(failed),
+        "failures": failed,
+    }
 
 if __name__ == "__main__":
     # 테스트용 코드 (로컬 실행 시)
