@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class WatchlistService {
+    private static final long MAX_WATCHLIST_SIZE = 3L;
 
     private final WatchlistRepository watchlistRepository;
     private final StockRepository stockRepository;
@@ -44,6 +45,10 @@ public class WatchlistService {
 
         if (watchlistRepository.existsByUserIdAndTicker(userId, ticker)) {
             throw new CustomException(ErrorCode.WATCHLIST_ALREADY_EXISTS);
+        }
+
+        if (watchlistRepository.countByUserId(userId) >= MAX_WATCHLIST_SIZE) {
+            throw new CustomException(ErrorCode.WATCHLIST_LIMIT_EXCEEDED);
         }
 
         watchlistRepository.save(
