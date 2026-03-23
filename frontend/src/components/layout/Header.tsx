@@ -1,5 +1,5 @@
 import { SearchIcon, LogOutIcon, UserIcon } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../../store/useAuthStore";
 import { authApi } from "../../api/auth";
 import {
@@ -10,12 +10,58 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { useState, useEffect, useRef } from "react";
+import { stockApi, type Stock } from "../../api/stock";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Header() {
     const location = useLocation();
+    const navigate = useNavigate();
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const user = useAuthStore(state => state.user);
     const logout = useAuthStore(state => state.logout);
+
+    // 검색 관련 상태
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState<Stock[]>([]);
+    const [showResults, setShowResults] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const searchRef = useRef<HTMLDivElement>(null);
+
+    // 검색 로직 (Debounce)
+    useEffect(() => {
+        if (searchQuery.trim().length === 0) {
+            setSearchResults([]);
+            setShowResults(false);
+            setIsLoading(false);
+            return;
+        }
+
+        setIsLoading(true);
+        setShowResults(true);
+
+        const timer = setTimeout(async () => {
+            try {
+                const results = await stockApi.searchStocks(searchQuery);
+                setSearchResults(results);
+            } finally {
+                setIsLoading(false);
+            }
+        }, 150); // 300ms -> 150ms로 단축
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // 외부 클릭 시 검색 결과 닫기
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+                setShowResults(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
     // 네비게이션 활성화 도우미 (단순한 문자열 포함 검사)
     const isActive = (path: string) => {
@@ -24,8 +70,14 @@ export default function Header() {
         return false;
     };
 
+    const handleResultClick = (ticker: string) => {
+        navigate(`/stock/${ticker}`);
+        setSearchQuery("");
+        setShowResults(false);
+    };
+
     return (
-        <header className="h-14 w-full bg-white border-b border-slate-200 flex items-center px-4 shrink-0 shadow-sm z-10">
+        <header className="h-14 w-full bg-white border-b border-slate-200 flex items-center px-4 shrink-0 shadow-sm z-50">
 
             {/* 왼쪽: 로고, 내비게이션 */}
             <div className="flex items-center h-full mr-4">
@@ -67,13 +119,88 @@ export default function Header() {
 
             {/* 오른쪽: 검색, 로그인 */}
             <div className="flex items-center ml-auto gap-4">
-                <div className="relative hidden md:block">
+                <div className="relative hidden md:block" ref={searchRef}>
                     <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
                         type="text"
-                        placeholder="메뉴, 종목 검색"
+                        placeholder="종목 검색"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onFocus={() => searchQuery.length > 0 && setShowResults(true)}
                         className="h-8 pl-9 pr-4 w-52 bg-slate-100 rounded-full text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all"
                     />
+
+                    {/* 검색 결과 드롭다운 */}
+                    {showResults && (
+                        <div className="absolute top-full mt-2 left-0 w-64 bg-white border border-slate-100 rounded-xl shadow-2xl py-2 overflow-hidden z-50">
+                            {isLoading ? (
+                                <div className="px-1 py-1 flex flex-col gap-1">
+                                    <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">검색 결과</p>
+                                    {[1, 2, 3].map((i) => (
+                                        <div key={i} className="px-4 py-2.5 flex justify-between items-center">
+                                            <div className="flex items-center gap-3">
+                                                <Skeleton className="w-8 h-8 rounded-full" />
+                                                <div className="flex flex-col gap-1.5">
+                                                    <Skeleton className="w-20 h-3.5" />
+                                                    <Skeleton className="w-12 h-2.5" />
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1.5">
+                                                <Skeleton className="w-16 h-3" />
+                                                <Skeleton className="w-10 h-2.5" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : searchResults.length > 0 ? (
+                                <div className="max-h-[320px] overflow-y-auto">
+                                    <p className="px-4 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">검색 결과</p>
+                                    {searchResults.map((stock) => (
+                                        <div
+                                            key={stock.ticker}
+                                            onClick={() => handleResultClick(stock.ticker)}
+                                            className="px-4 py-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors group"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                {/* 종목 로고 */}
+                                                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border border-slate-50">
+                                                    <img 
+                                                        src={`/icons/stocks/${stock.ticker}.png`}
+                                                        alt={stock.name}
+                                                        className="w-full h-full object-cover"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLImageElement).style.display = 'none';
+                                                            const parent = (e.target as HTMLImageElement).parentElement;
+                                                            if (parent && !parent.querySelector('.fallback-text')) {
+                                                                const span = document.createElement('span');
+                                                                span.className = 'fallback-text text-[10px] font-bold text-slate-400';
+                                                                span.innerText = stock.name.charAt(0);
+                                                                parent.appendChild(span);
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className="text-sm font-bold text-slate-700 group-hover:text-blue-600">{stock.name}</span>
+                                                    <span className="text-[11px] text-slate-400 font-medium tracking-tight">{stock.ticker}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col items-end">
+                                                <span className="text-xs font-bold text-slate-700">{stock.currentPrice.toLocaleString()}원</span>
+                                                <span className={`text-[10px] font-bold ${stock.changeRate >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                                                    {stock.changeRate >= 0 ? '+' : ''}{stock.changeRate}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="px-4 py-6 text-center">
+                                    <p className="text-sm text-slate-400 font-medium">검색 결과가 없습니다.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
                 <div className="w-px h-6 bg-slate-300 mx-2 hidden md:block"></div>
 
