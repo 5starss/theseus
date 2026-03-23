@@ -3,6 +3,7 @@ import { useAccountStore } from "../../store/useAccountStore";
 import { useAuthStore } from "../../store/useAuthStore";
 import type { SidebarMenu } from "./sidebar/types";
 import { HoldingsSection } from "./sidebar/HoldingsSection";
+import { WatchlistSection } from "./sidebar/WatchlistSection";
 import { IconBar } from "./sidebar/IconBar";
 
 export default function Sidebar() {
@@ -26,8 +27,6 @@ export default function Sidebar() {
     };
 
     const handleMenuClick = (menu: SidebarMenu) => {
-        // AI는 이제 Popover로 동작하므로 사이드바 확장에서 제외
-        if (menu === 'AI') return;
 
         if (activeMenu === menu && isExpanded) {
             setIsExpanded(false);
@@ -52,6 +51,7 @@ export default function Sidebar() {
                         : 'opacity-0 w-0 pointer-events-none'}
                 `}>
                     {activeMenu === 'HOLDINGS' && <HoldingsSection />}
+                    {activeMenu === 'WATCHLIST' && <WatchlistSection />}
                 </div>
 
                 {/* Icon Bar */}

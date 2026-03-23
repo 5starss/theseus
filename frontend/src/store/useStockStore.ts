@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { stockApi } from '../api/stock';
+import { watchlistApi } from '../api/watchlist';
 import { useSocketStore } from './useSocketStore';
+import { useAuthStore } from './useAuthStore';
 
 // 주식 호가 및 거래 관련 전역 상태 타입
 interface StockState {
@@ -24,6 +26,10 @@ interface StockState {
     candles: any[]; // 캔들 데이터 배열
     candlesLoading: boolean;
 
+    // 관심 종목 (Watchlist)
+    watchlist: Set<string>;
+    watchlistLoading: boolean;
+
     setStock: (code: string) => void;
     setCandles: (candles: any[]) => void;
     appendHistoricalCandles: (historical: any[]) => void;
@@ -33,6 +39,10 @@ interface StockState {
     connectStockStream: (code: string) => void;
     disconnectStockStream: () => void;
     handleWsMessage: (event: CustomEvent) => void;
+
+    // 관심 종목 액션
+    fetchWatchlist: () => Promise<void>;
+    toggleWatchlist: (ticker: string) => Promise<void>;
 }
 
 // Mock database
@@ -97,6 +107,9 @@ export const useStockStore = create<StockState>((set, get) => ({
 
     candles: [],
     candlesLoading: false,
+
+    watchlist: new Set(),
+    watchlistLoading: false,
 
     // 주식 코드로 초기 데이터 설정
     setStock: (code) =>
@@ -202,6 +215,7 @@ export const useStockStore = create<StockState>((set, get) => ({
         }
     },
 
+    // 주식 스트림 연결
     connectStockStream: (code) => {
         // 즉시 stockCode와 주요 가격 정보를 초기화 (이전 종목 데이터 잔존 방지)
         set({
@@ -253,14 +267,58 @@ export const useStockStore = create<StockState>((set, get) => ({
         window.addEventListener('ws-message' as any, get().handleWsMessage);
     },
 
+    // 주식 스트림 연결 해제
     disconnectStockStream: () => {
         const code = get().stockCode;
-        console.log(`Cleaning up Dashboard Stream [${code}]...`);
-
         useSocketStore.getState().unsubscribe('TICK', code);
         useSocketStore.getState().unsubscribe('ORDERBOOK', code);
-
         window.removeEventListener('ws-message' as any, get().handleWsMessage);
+    },
+
+    // 관심종목 목록 조회
+    fetchWatchlist: async () => {
+        if (!useAuthStore.getState().isLoggedIn) return;
+        set({ watchlistLoading: true });
+        try {
+            const list = await watchlistApi.getWatchlists();
+            // 백엔드에서 최신순으로 올 경우, '먼저 추가한 순'으로 보여주기 위해 리스트를 뒤집습니다.
+            const orderedTickers = list.map(item => item.ticker).reverse();
+            set({ watchlist: new Set(orderedTickers) });
+        } catch (error) {
+            console.error('Failed to fetch watchlist:', error);
+        } finally {
+            set({ watchlistLoading: false });
+        }
+    },
+
+    // 관심종목 토글
+    toggleWatchlist: async (ticker) => {
+        if (!useAuthStore.getState().isLoggedIn) return;
+
+        const isCurrentlyIn = get().watchlist.has(ticker);
+        const newWatchlist = new Set(get().watchlist);
+
+        // Optimistic UI Update
+        if (isCurrentlyIn) {
+            newWatchlist.delete(ticker);
+        } else {
+            newWatchlist.add(ticker);
+        }
+        set({ watchlist: newWatchlist });
+
+        try {
+            if (isCurrentlyIn) {
+                await watchlistApi.removeWatchlist(ticker);
+            } else {
+                await watchlistApi.addWatchlist(ticker);
+            }
+        } catch (error) {
+            // Revert on error
+            console.error('Failed to toggle watchlist:', error);
+            const reverted = new Set(get().watchlist);
+            if (isCurrentlyIn) reverted.add(ticker);
+            else reverted.delete(ticker);
+            set({ watchlist: reverted });
+        }
     }
 }));
-

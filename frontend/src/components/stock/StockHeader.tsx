@@ -1,13 +1,26 @@
 import { useStockStore } from "../../store/useStockStore";
+import { useAuthStore } from "../../store/useAuthStore";
 import { StockLogo } from "./StockLogo";
+import { Heart } from "lucide-react";
 
 export function StockHeader() {
-    const { stockCode, stockName, currentPrice, priceChange, changeRate } = useStockStore();
+    const { stockCode, stockName, currentPrice, priceChange, changeRate, watchlist, toggleWatchlist } = useStockStore();
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+    const isFavorite = watchlist.has(stockCode);
+
     const isPositive = priceChange > 0;
     const isNegative = priceChange < 0;
     const colorClass = isPositive ? 'text-red-500' : isNegative ? 'text-blue-500' : 'text-slate-800';
     const sign = isPositive ? '▲' : isNegative ? '▼' : '-';
     const plusSign = isPositive ? '+' : '';
+
+    const handleHeartClick = () => {
+        if (isLoggedIn) {
+            toggleWatchlist(stockCode);
+        } else {
+            alert('로그인이 필요한 기능입니다.');
+        }
+    };
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex items-center gap-8">
@@ -31,6 +44,18 @@ export function StockHeader() {
                     </span>
                 </div>
             </div>
+
+            {/* 관심 종목 하트 버튼 */}
+            <button
+                onClick={handleHeartClick}
+                className={`ml-auto p-2.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center ${
+                    isFavorite 
+                    ? 'bg-red-50 border-red-100 text-red-500 hover:bg-red-100' 
+                    : 'bg-slate-50 border-slate-100 text-slate-300 hover:bg-slate-100 hover:text-red-400'
+                }`}
+            >
+                <Heart size={22} fill="currentColor" strokeWidth={0} />
+            </button>
         </div>
     );
 }

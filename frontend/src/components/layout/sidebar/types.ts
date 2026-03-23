@@ -1,1 +1,1 @@
-export type SidebarMenu = 'HOLDINGS' | 'AI' | null;
+export type SidebarMenu = 'NONE' | 'HOLDINGS' | 'WATCHLIST';
