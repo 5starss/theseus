@@ -1,6 +1,9 @@
 import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { StockLogo } from './StockLogo';
+import { Heart } from 'lucide-react';
+import { useStockStore } from '../../store/useStockStore';
+import { useAuthStore } from '../../store/useAuthStore';
 
 export interface StockRowProps {
     ticker: string;
@@ -10,8 +13,6 @@ export interface StockRowProps {
     changeRate: number;
     accVolume: number;
 }
-
-
 
 const formatTradeAmount = (value: number) => {
     if (value >= 1000000000000) {
@@ -38,10 +39,30 @@ const StockRow: React.FC<StockRowProps> = ({
     const changeColor = isPositive ? 'text-[#e84c3d]' : 'text-[#2b7fff]';
     const changeSign = isPositive ? '+' : '';
 
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+    const isFavorite = useStockStore(state => state.watchlist.has(ticker));
+    const toggleWatchlist = useStockStore(state => state.toggleWatchlist);
+
+    const handleHeartClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isLoggedIn) {
+            toggleWatchlist(ticker);
+        } else {
+            alert('로그인이 필요한 기능입니다.');
+        }
+    };
+
     return (
         <Link to={`/stock/${ticker}`} className="bg-transparent flex h-[55px] items-center px-[18px] w-full min-w-[776px]">
-            {/* Rank */}
-            <div className="w-[60px] shrink-0">
+            {/* Watchlist & Rank */}
+            <div className="w-[60px] shrink-0 flex items-center gap-5 mr-2">
+                <button
+                    onClick={handleHeartClick}
+                    className={`transition-colors hover:scale-110 active:scale-95 ${isFavorite ? 'text-red-500' : 'text-slate-200 hover:text-red-400'}`}
+                >
+                    <Heart size={16} fill="currentColor" strokeWidth={0} />
+                </button>
                 <span className="text-[16px] text-black font-normal">{rank}</span>
             </div>
 

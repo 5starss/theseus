@@ -2,6 +2,8 @@ import React from 'react';
 import StockRow from './StockRow';
 
 import { useMarketStore } from '../../store/useMarketStore';
+import { useAuthStore } from '../../store/useAuthStore';
+import { useStockStore } from '../../store/useStockStore';
 
 const tabs = ['거래대금', '현재가', '등락률', '종목명', '거래량'];
 
@@ -13,11 +15,17 @@ const StockList: React.FC = () => {
     const connectMarketStream = useMarketStore(state => state.connectMarketStream);
     const disconnectMarketStream = useMarketStore(state => state.disconnectMarketStream);
 
+    const isLoggedIn = useAuthStore(state => state.isLoggedIn);
+    const fetchWatchlist = useStockStore(state => state.fetchWatchlist);
+
     // 컴포넌트가 마운트될 때 스트림을 연결하고, 언마운트될 때 스트림을 정리하는 useEffect
     React.useEffect(() => {
         connectMarketStream();
+        if (isLoggedIn) {
+            fetchWatchlist();
+        }
         return () => disconnectMarketStream();
-    }, [connectMarketStream, disconnectMarketStream]);
+    }, [connectMarketStream, disconnectMarketStream, isLoggedIn, fetchWatchlist]);
 
     // activeTab에 따라 stocksMap을 배열로 변환한 후 정렬하여 sortedStocks를 생성.
     const [currentTime, setCurrentTime] = React.useState('');
@@ -88,11 +96,12 @@ const StockList: React.FC = () => {
                             <div className="sticky top-0 z-10 bg-white border-b border-[#f3f4f6] mt-[12px] py-[12px] shrink-0">
                                 <div className="mx-[12px]">
                                     <div className="flex items-center px-[18px] text-[#888] text-[13px] font-normal w-full min-w-[776px]">
+                                        <div className="flex-1 min-w-[10px] max-w-[20px]"></div>
                                         <div className="w-[60px] shrink-0">순위</div>
                                         <div className="w-[220px] shrink-0">{currentTime}</div>
 
                                         {/* Flexible shrinking spacer */}
-                                        <div className="flex-1 min-w-[10px] max-w-[120px]"></div>
+                                        <div className="flex-1 min-w-[10px] max-w-[100px]"></div>
 
                                         <div className="w-[110px] text-right shrink-0">현재가</div>
 
