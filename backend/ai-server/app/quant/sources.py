@@ -54,7 +54,12 @@ def _get_db_config() -> tuple[str, int, str, str, str]:
     port = int(os.getenv("DB_PORT") or os.getenv("MYSQL_PORT") or "3306")
     user = os.getenv("DB_USER") or os.getenv("MYSQL_USER") or "root"
     password = os.getenv("DB_PASSWORD") or os.getenv("MYSQL_PASSWORD") or ""
-    database = os.getenv("DB_DATABASE") or os.getenv("MYSQL_DATABASE") or "stock_db"
+    database = (
+        os.getenv("DB_NAME")
+        or os.getenv("DB_DATABASE")
+        or os.getenv("MYSQL_DATABASE")
+        or "stock_db"
+    )
     return host, port, user, password, database
 
 
