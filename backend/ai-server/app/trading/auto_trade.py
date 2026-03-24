@@ -88,9 +88,57 @@ class AutoTradeService:
         if not redis_key:
             return None
         try:
-            return load_strategy_payload(redis_key)
+            payload = load_strategy_payload(redis_key)
         except FileNotFoundError:
             return None
+
+        generated_at_raw = payload.get("generated_at")
+        payload_slot = str(payload.get("strategy_slot") or "").strip()
+        payload_user_id = payload.get("user_id")
+        decisions = payload.get("decisions")
+
+        try:
+            generated_at = datetime.fromisoformat(str(generated_at_raw)).astimezone(KST)
+        except Exception:
+            logger.warning(
+                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=invalid_generated_at redis_key=%s",
+                user_id,
+                strategy_slot,
+                redis_key,
+            )
+            return None
+
+        if generated_at.date() != datetime.now(KST).date():
+            logger.warning(
+                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=stale_date redis_key=%s generated_at=%s",
+                user_id,
+                strategy_slot,
+                redis_key,
+                generated_at.isoformat(),
+            )
+            return None
+
+        if payload_slot != strategy_slot or payload_user_id != user_id:
+            logger.warning(
+                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=payload_mismatch redis_key=%s payload_slot=%s payload_user_id=%s",
+                user_id,
+                strategy_slot,
+                redis_key,
+                payload_slot,
+                payload_user_id,
+            )
+            return None
+
+        if not isinstance(decisions, list) or not decisions:
+            logger.warning(
+                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=empty_decisions redis_key=%s",
+                user_id,
+                strategy_slot,
+                redis_key,
+            )
+            return None
+
+        return payload
 
     def get_config(self, user_id: int) -> AutoTradeConfig:
         with self._lock:
@@ -293,6 +341,12 @@ class AutoTradeService:
             existing_payload = self._get_existing_slot_strategy(user_id=user_id, strategy_slot=strategy_slot)
             if existing_payload is not None:
                 archive = existing_payload.get("archive", {})
+                logger.info(
+                    "자동매매 전략 재사용 - user_id=%s strategy_slot=%s redis_key=%s",
+                    user_id,
+                    strategy_slot,
+                    archive.get("redis_key"),
+                )
                 return {
                     "status": "ok",
                     "message": "strategy_already_exists",
@@ -322,6 +376,12 @@ class AutoTradeService:
         decision_records = []
         for ticker in tickers:
             try:
+                logger.info(
+                    "자동매매 종목 전략 생성 시작 - user_id=%s ticker=%s strategy_slot=%s",
+                    user_id,
+                    ticker,
+                    strategy_slot,
+                )
                 order_card = orchestrate_trading(
                     ticker=ticker,
                     user_id=user_id,
@@ -337,6 +397,14 @@ class AutoTradeService:
                         "action": order_card.get("order", {}).get("action"),
                         "quantity": order_card.get("order", {}).get("quantity"),
                     }
+                )
+                logger.info(
+                    "자동매매 종목 전략 생성 완료 - user_id=%s ticker=%s action=%s quantity=%s execution_status=%s",
+                    user_id,
+                    ticker,
+                    order_card.get("order", {}).get("action"),
+                    order_card.get("order", {}).get("quantity"),
+                    order_card.get("execution_status"),
                 )
                 decision_records.append(
                     {
@@ -358,6 +426,14 @@ class AutoTradeService:
             config=config,
             tickers=tickers,
             decisions=decision_records,
+        )
+        logger.info(
+            "자동매매 전략 저장 완료 - user_id=%s strategy_slot=%s tickers=%s redis_key=%s s3_uploaded=%s",
+            user_id,
+            strategy_slot,
+            tickers,
+            persistence.get("redis_key"),
+            persistence.get("s3_uploaded"),
         )
 
         return {
