@@ -262,32 +262,35 @@ public class PendingOrderManager {
     public ExecutionResult cancelOrder(Long orderId, long currentSeqNo) {
         lock.lock();
         try {
+            // 1. 캐시에서 먼저 제거 시도
             OrderRequest orderToCancel = orderCache.remove(orderId);
             if (orderToCancel == null) {
+                log.debug("[{}] 취소 실패: 대기열에 없는 주문입니다 (OrderID: {})", ticker, orderId);
                 return null;
             }
 
             BigDecimal price = orderToCancel.getPrice();
-            if (orderToCancel.getOrderType() == OrderType.BUY) {
-                Queue<OrderRequest> queue = pendingBids.get(price);
-                if (queue != null) {
-                    queue.remove(orderToCancel);
-                    if (queue.isEmpty()) {
-                        pendingBids.remove(price);
-                    }
-                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null, 0L, currentSeqNo, 0);
+            Queue<OrderRequest> queue = (orderToCancel.getOrderType() == OrderType.BUY) 
+                    ? pendingBids.get(price) 
+                    : pendingAsks.get(price);
+
+            // 2. 큐에서 제거 시도
+            if (queue != null && queue.remove(orderToCancel)) {
+                // 제거 성공 시: 큐가 비었다면 트리맵에서도 제거
+                if (queue.isEmpty()) {
+                    if (orderToCancel.getOrderType() == OrderType.BUY) pendingBids.remove(price);
+                    else pendingAsks.remove(price);
                 }
-            } else {
-                Queue<OrderRequest> queue = pendingAsks.get(price);
-                if (queue != null) {
-                    queue.remove(orderToCancel);
-                    if (queue.isEmpty()) {
-                        pendingAsks.remove(price);
-                    }
-                    return createExecutionResult(orderToCancel, EventType.CANCELLED, null, 0L, currentSeqNo, 0);
-                }
+                
+                // 실제 취소 시점의 잔량(remainingQuantity)을 결과에 실어서 반환
+                long cancelledQty = orderToCancel.getRemainingQuantity();
+                log.info("[{}] 주문 취소 완료 (OrderID: {}, 취소수량: {})", ticker, orderId, cancelledQty);
+                return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, currentSeqNo, 0);
+                // 3. 큐에서 제거 실패 시: 캐시 복구 (Rollback) 및 거절(REJECTED) 응답 반환
+                orderCache.put(orderId, orderToCancel);
+                log.warn("[{}] 취소 거절: 캐시에는 있으나 큐에서 주문을 찾지 못함. 캐시를 복구하고 거절 응답을 보냅니다 (OrderID: {})", ticker, orderId);
+                return createExecutionResult(orderToCancel, EventType.CANCEL_REJECTED, null, 0L, currentSeqNo, 0);
             }
-            return null;
         } finally {
             lock.unlock();
         }

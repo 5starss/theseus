@@ -114,4 +114,11 @@ public class Order extends BaseEntity {
     public void pendingCancel() {
         this.status = OrderStatus.PENDING_CANCEL;
     }
+
+    public void revertCancel() {
+        if (this.status != OrderStatus.PENDING_CANCEL) {
+            return;
+        }
+        this.status = (this.executedQuantity > 0) ? OrderStatus.PARTIAL : OrderStatus.OPEN;
+    }
 }

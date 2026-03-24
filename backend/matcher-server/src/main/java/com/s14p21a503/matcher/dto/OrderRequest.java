@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @Builder
 @ToString
+@lombok.EqualsAndHashCode(of = "orderId")
 public class OrderRequest implements Serializable {
     private static final long serialVersionUID = 1L;
     private String action; // "CREATE" or "CANCEL"
