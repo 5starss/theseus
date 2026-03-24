@@ -16,6 +16,7 @@ import Ranking from "./pages/Ranking";
 import { AssetTab } from "./components/account/AssetTab";
 import { TransactionHistoryTab } from "./components/account/TransactionHistoryTab";
 import { OrderHistoryTab } from "./components/account/OrderHistoryTab";
+import { Toaster } from "sonner";
 
 function App() {
   const connect = useSocketStore(state => state.connect);
@@ -42,6 +43,7 @@ function App() {
 
   return (
     <BrowserRouter>
+      <Toaster richColors position="top-center" />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
