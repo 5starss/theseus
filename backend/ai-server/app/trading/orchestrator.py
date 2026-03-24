@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, time
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
@@ -7,6 +8,7 @@ from app.news.sources import retrieve_news, retrieve_community_posts
 from app.quant.agent import QuantAnalysisAgent
 from app.quant.data_loader import get_latest_feature_s3_key, download_and_load_feature_df
 from app.quant.pipeline import build_state_from_feature_row
+from app.quant.sources import load_ohlcv_from_db
 from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
 from app.trading.account_service import (
@@ -24,6 +26,56 @@ from app.trading.strategy_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _build_today_intraday_context(ticker: str) -> Dict[str, Any]:
+    try:
+        intraday_df = load_ohlcv_from_db(ticker, days=0)
+    except Exception as exc:
+        logger.warning("[%s] 당일 장중 데이터 로드 실패: %s", ticker, exc)
+        return {}
+
+    if intraday_df.empty:
+        return {}
+
+    intraday_df["ts"] = intraday_df["ts"].apply(lambda value: value.to_pydatetime() if hasattr(value, "to_pydatetime") else value)
+    intraday_df = intraday_df.sort_values("ts").reset_index(drop=True)
+    intraday_df = intraday_df[
+        intraday_df["ts"].apply(lambda ts: time(9, 0) <= ts.astimezone(KST).time() <= time(12, 0))
+    ].copy()
+    if intraday_df.empty:
+        return {}
+
+    first_row = intraday_df.iloc[0]
+    last_row = intraday_df.iloc[-1]
+    open_price = float(first_row["open"])
+    last_price = float(last_row["close"])
+    high_price = float(intraday_df["high"].max())
+    low_price = float(intraday_df["low"].min())
+    total_volume = float(intraday_df["volume"].sum())
+    change_pct = ((last_price / open_price) - 1.0) if open_price > 0 else 0.0
+    range_pct = ((high_price / low_price) - 1.0) if low_price > 0 else 0.0
+
+    if change_pct >= 0.005:
+        trend = "up"
+    elif change_pct <= -0.005:
+        trend = "down"
+    else:
+        trend = "neutral"
+
+    return {
+        "window": "09:00-12:00",
+        "bars": int(len(intraday_df)),
+        "open_price": round(open_price, 2),
+        "last_price": round(last_price, 2),
+        "high_price": round(high_price, 2),
+        "low_price": round(low_price, 2),
+        "change_pct": round(change_pct, 4),
+        "range_pct": round(range_pct, 4),
+        "total_volume": int(total_volume),
+        "trend": trend,
+        "as_of": last_row["ts"].astimezone(KST).isoformat() if hasattr(last_row["ts"], "astimezone") else str(last_row["ts"]),
+    }
 
 
 def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주가 방향은 어떨까?") -> Dict[str, Any]:
@@ -60,6 +112,9 @@ def run_quant_agent(ticker: str) -> tuple[Dict[str, Any], Dict[str, Any]]:
 
     feature_row = feat_df.iloc[-1].to_dict()
     quant_state = build_state_from_feature_row(feature_row, ticker=ticker)
+    today_intraday_context = _build_today_intraday_context(ticker)
+    if today_intraday_context:
+        quant_state["today_intraday_context"] = today_intraday_context
 
     agent = QuantAnalysisAgent()
     quant_card = agent.generate_analysis_card(ticker=ticker, quant_evidence=quant_state)
