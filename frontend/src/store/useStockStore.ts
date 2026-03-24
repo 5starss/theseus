@@ -3,6 +3,7 @@ import { stockApi } from '../api/stock';
 import { watchlistApi } from '../api/watchlist';
 import { useSocketStore } from './useSocketStore';
 import { useAuthStore } from './useAuthStore';
+import { toast } from 'sonner';
 
 // 주식 호가 및 거래 관련 전역 상태 타입
 interface StockState {
@@ -296,6 +297,13 @@ export const useStockStore = create<StockState>((set, get) => ({
         if (!useAuthStore.getState().isLoggedIn) return;
 
         const isCurrentlyIn = get().watchlist.has(ticker);
+        
+        // 갯수 제한: 3개 초과 불가 (추가할 때만 체크)
+        if (!isCurrentlyIn && get().watchlist.size >= 3) {
+            toast.error('관심종목은 최대 3개까지만 등록 가능합니다.');
+            return;
+        }
+
         const newWatchlist = new Set(get().watchlist);
 
         // Optimistic UI Update

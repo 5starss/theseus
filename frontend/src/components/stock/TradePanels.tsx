@@ -293,11 +293,6 @@ export function OrderPanel() {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 mb-6 ml-1">
-                        <div className="w-4 h-4 rounded border border-slate-300"></div>
-                        <span className="text-[11px] text-slate-500 font-medium">다음부터 확인창 없이 거래하기</span>
-                    </div>
-
                     <div className="flex gap-2">
                         <Button
                             variant="outline"
