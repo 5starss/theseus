@@ -76,11 +76,16 @@ def _latest_snapshot_path(prefix: str, ticker: str) -> str | None:
     return files[-1]
 
 
-def retrieve_news(ticker: str, query: str = "이 종목의 향후 단기 주가 방향은 어떨까?", top_k: int = 5) -> List[Any]:
+def retrieve_news(
+    ticker: str,
+    query: str = "이 종목의 향후 단기 주가 방향은 어떨까?",
+    top_k: int = 5,
+    collection_name: str | None = None,
+) -> List[Any]:
     """
     ChromaDB에서 뉴스 데이터를 검색하고 Rerank하여 반환합니다.
     """
-    vdb = NewsVectorDB()
+    vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
     # KIS_NEWS 소스 필터 적용
     search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="KIS_NEWS")
     
@@ -95,11 +100,16 @@ def retrieve_news(ticker: str, query: str = "이 종목의 향후 단기 주가 
     return reranked_docs
 
 
-def retrieve_community_posts(ticker: str, query: str = "이 종목의 향후 단기 주가 방향은 어떨까?", top_k: int = 3) -> List[Any]:
+def retrieve_community_posts(
+    ticker: str,
+    query: str = "이 종목의 향후 단기 주가 방향은 어떨까?",
+    top_k: int = 3,
+    collection_name: str | None = None,
+) -> List[Any]:
     """
     ChromaDB에서 커뮤니티 데이터를 검색하고 Rerank하여 반환합니다.
     """
-    vdb = NewsVectorDB()
+    vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
     # TOSS_COMMUNITY 소스 필터 적용
     search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="TOSS_COMMUNITY")
     

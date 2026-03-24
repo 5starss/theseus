@@ -91,6 +91,29 @@ def _build_today_intraday_context(ticker: str) -> Dict[str, Any]:
     }
 
 
+def _resolve_signal_confidence(
+    news_card: Dict[str, Any],
+    quant_card: Dict[str, Any],
+    quant_state: Dict[str, Any],
+) -> Any:
+    quant_risk_context = quant_state.get("risk_context") if isinstance(quant_state, dict) else {}
+    quant_signal_confidence = (
+        quant_risk_context.get("signal_confidence") if isinstance(quant_risk_context, dict) else None
+    )
+    if quant_signal_confidence:
+        return quant_signal_confidence
+
+    confidences = []
+    for card in (news_card, quant_card):
+        try:
+            confidences.append(float(card.get("confidence")))
+        except Exception:
+            continue
+    if not confidences:
+        return None
+    return sum(confidences) / len(confidences)
+
+
 def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주가 방향은 어떨까?") -> Dict[str, Any]:
     """
     RAG(ChromaDB)를 통해 뉴스와 커뮤니티 글을 검색하여 분석을 수행합니다.
@@ -242,6 +265,8 @@ def orchestrate_trading(
         available_cash=available_cash,
         current_holding=current_holding,
         current_price=curr_price,
+        user_investment_style=user_investment_style,
+        signal_confidence=_resolve_signal_confidence(news_card, quant_card, quant_state),
     )
     
     # 7. 메타데이터 후처리

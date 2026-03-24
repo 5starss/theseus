@@ -2,8 +2,9 @@ import logging
 import os
 import threading
 import json
-from datetime import datetime, time
-from typing import Any, Dict, List, Literal
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, time, timedelta
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,6 +59,9 @@ class AutoTradeService:
     def __init__(self):
         self._lock = threading.Lock()
         self._configs: Dict[int, AutoTradeConfig] = {}
+        self._configs_loaded = False
+        self._user_run_locks: Dict[int, threading.Lock] = {}
+        self._max_parallel_users = max(1, int(os.getenv("AUTOTRADE_MAX_PARALLEL_USERS", "4")))
 
     def upsert_config(self, user_id: int, request: AutoTradeConfigRequest) -> AutoTradeConfig:
         config = AutoTradeConfig(user_id=user_id, **request.model_dump())
@@ -89,7 +93,7 @@ class AutoTradeService:
             return None
         try:
             payload = load_strategy_payload(redis_key)
-        except FileNotFoundError:
+        except Exception:
             return None
 
         generated_at_raw = payload.get("generated_at")
@@ -100,42 +104,15 @@ class AutoTradeService:
         try:
             generated_at = datetime.fromisoformat(str(generated_at_raw)).astimezone(KST)
         except Exception:
-            logger.warning(
-                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=invalid_generated_at redis_key=%s",
-                user_id,
-                strategy_slot,
-                redis_key,
-            )
             return None
 
         if generated_at.date() != datetime.now(KST).date():
-            logger.warning(
-                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=stale_date redis_key=%s generated_at=%s",
-                user_id,
-                strategy_slot,
-                redis_key,
-                generated_at.isoformat(),
-            )
             return None
 
         if payload_slot != strategy_slot or payload_user_id != user_id:
-            logger.warning(
-                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=payload_mismatch redis_key=%s payload_slot=%s payload_user_id=%s",
-                user_id,
-                strategy_slot,
-                redis_key,
-                payload_slot,
-                payload_user_id,
-            )
             return None
 
         if not isinstance(decisions, list) or not decisions:
-            logger.warning(
-                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=empty_decisions redis_key=%s",
-                user_id,
-                strategy_slot,
-                redis_key,
-            )
             return None
 
         valid_decisions = [
@@ -143,12 +120,6 @@ class AutoTradeService:
             if isinstance(decision, dict) and isinstance(decision.get("judge_decision"), dict)
         ]
         if not valid_decisions:
-            logger.warning(
-                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=no_valid_judge_decision redis_key=%s",
-                user_id,
-                strategy_slot,
-                redis_key,
-            )
             return None
 
         return payload
@@ -168,29 +139,39 @@ class AutoTradeService:
 
         return AutoTradeConfig(user_id=user_id)
 
+    def _get_user_run_lock(self, user_id: int) -> threading.Lock:
+        with self._lock:
+            existing = self._user_run_locks.get(user_id)
+            if existing is not None:
+                return existing
+            lock = threading.Lock()
+            self._user_run_locks[user_id] = lock
+            return lock
+
     def list_configs(self) -> List[AutoTradeConfig]:
-        configs: List[AutoTradeConfig] = []
-        restored: Dict[int, AutoTradeConfig] = {}
-        for payload in list_config_payloads():
+        with self._lock:
+            if self._configs_loaded:
+                return list(self._configs.values())
+        
+        configs_from_store = list_config_payloads()
+        new_configs = {}
+        for payload in configs_from_store:
             try:
                 config = AutoTradeConfig(**payload)
+                new_configs[config.user_id] = config
             except Exception as exc:
-                logger.error("자동매매 설정 복원 실패 - payload=%s error=%s", payload, exc)
-                continue
-            configs.append(config)
-            restored[config.user_id] = config
+                logger.error("설정 파싱 실패: %s", exc)
 
-        if restored:
-            with self._lock:
-                self._configs.update(restored)
-        return configs
+        with self._lock:
+            self._configs.update(new_configs)
+            self._configs_loaded = True
+            return list(self._configs.values())
 
     def _default_tickers_for_style(self, style: AutoTradeStyle) -> List[str]:
         env_key = "AUTOTRADE_LONG_TICKERS" if style == "LONG" else "AUTOTRADE_SHORT_TICKERS"
         raw = os.getenv(env_key, "").strip()
         if raw:
             return [ticker.strip() for ticker in raw.split(",") if ticker.strip()]
-
         return DEFAULT_AUTOTRADE_TICKERS.copy()
 
     @staticmethod
@@ -207,12 +188,11 @@ class AutoTradeService:
     def _watchlist_tickers(self, user_id: int, *, limit: int) -> List[str]:
         try:
             watchlists = get_watchlists(user_id=user_id)
+            tickers = [str(item.get("ticker") or "").strip() for item in watchlists if isinstance(item, dict)]
+            return self._sanitize_tickers(tickers, limit=limit)
         except Exception as exc:
             logger.error("관심종목 조회 실패 - user_id=%s error=%s", user_id, exc)
             return []
-
-        tickers = [str(item.get("ticker") or "").strip() for item in watchlists if isinstance(item, dict)]
-        return self._sanitize_tickers(tickers, limit=limit)
 
     @staticmethod
     def _daily_ticker_snapshot_key(user_id: int, *, base_time: datetime | None = None) -> str:
@@ -225,14 +205,11 @@ class AutoTradeService:
             return None
         try:
             payload = json.loads(raw)
-        except Exception as exc:
-            logger.error("자동매매 종목 스냅샷 파싱 실패 - user_id=%s error=%s", user_id, exc)
+            tickers = payload.get("tickers")
+            if not isinstance(tickers, list): return None
+            return self._sanitize_tickers(tickers, limit=limit)
+        except Exception:
             return None
-
-        tickers = payload.get("tickers")
-        if not isinstance(tickers, list):
-            return None
-        return self._sanitize_tickers(tickers, limit=limit)
 
     def _save_daily_ticker_snapshot(self, user_id: int, tickers: List[str], *, source: str) -> None:
         payload = {
@@ -242,70 +219,40 @@ class AutoTradeService:
             "tickers": tickers,
             "saved_at": datetime.now(KST).isoformat(),
         }
-        client = redis_client.get_client()
         key = self._daily_ticker_snapshot_key(user_id)
-        client.set(key, json.dumps(payload, ensure_ascii=False))
-        client.expire(key, STRATEGY_CACHE_TTL_SECONDS)
+        redis_client.get_client().set(key, json.dumps(payload, ensure_ascii=False))
+        redis_client.get_client().expire(key, STRATEGY_CACHE_TTL_SECONDS)
 
     def _resolve_current_tickers(self, config: AutoTradeConfig) -> tuple[List[str], str]:
         explicit = self._sanitize_tickers(config.tickers, limit=config.max_tickers_per_cycle)
-        if explicit:
-            return explicit, "config"
-
+        if explicit: return explicit, "config"
         watchlist_tickers = self._watchlist_tickers(config.user_id, limit=config.max_tickers_per_cycle)
-        if watchlist_tickers:
-            return watchlist_tickers, "watchlist"
-
-        fallback = self._sanitize_tickers(
-            self._default_tickers_for_style(config.invest_style),
-            limit=config.max_tickers_per_cycle,
-        )
+        if watchlist_tickers: return watchlist_tickers, "watchlist"
+        fallback = self._sanitize_tickers(self._default_tickers_for_style(config.invest_style), limit=config.max_tickers_per_cycle)
         return fallback, "default"
 
     def resolve_tickers(self, config: AutoTradeConfig) -> List[str]:
         frozen = self._load_daily_ticker_snapshot(config.user_id, limit=config.max_tickers_per_cycle)
-        if frozen:
-            logger.info(
-                "자동매매 대상 종목 결정 - user_id=%s source=daily_snapshot tickers=%s",
-                config.user_id,
-                frozen,
-            )
-            return frozen
-
+        if frozen: return frozen
         resolved, source = self._resolve_current_tickers(config)
         self._save_daily_ticker_snapshot(config.user_id, resolved, source=source)
-        logger.info(
-            "자동매매 대상 종목 결정 - user_id=%s source=%s tickers=%s",
-            config.user_id,
-            source,
-            resolved,
-        )
         return resolved
 
     @staticmethod
     def _is_market_session_open() -> bool:
         now = datetime.now(KST)
-        if now.weekday() >= 5:
-            return False
+        if now.weekday() >= 5: return False
         current_time = now.time()
         return time(9, 0) <= current_time <= time(15, 30)
 
     def is_market_session_open(self) -> bool:
         return self._is_market_session_open()
 
-    def _persist_cycle_decision(
-        self,
-        *,
-        config: AutoTradeConfig,
-        tickers: List[str],
-        decisions: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+    def _persist_cycle_decision(self, *, config: AutoTradeConfig, tickers: List[str], decisions: List[Dict[str, Any]]) -> Dict[str, Any]:
         now = datetime.now(KST)
         trade_storage_dir = get_storage_dir("trade")
         archive_paths = build_strategy_archive_paths(user_id=config.user_id, generated_at=now)
-        filename = archive_paths["filename"]
-        local_path = os.path.join(trade_storage_dir, filename)
-
+        local_path = os.path.join(trade_storage_dir, archive_paths["filename"])
         payload = {
             "schema": "judge_cycle_v1",
             "generated_at": now.isoformat(),
@@ -323,185 +270,88 @@ class AutoTradeService:
                 "redis_key": archive_paths["redis_key"],
             },
         }
-
         write_json(local_path, payload)
         uploaded = s3_client.upload_file(local_path, archive_paths["s3_key"])
         payload["archive"]["s3_uploaded"] = uploaded
         write_json(local_path, payload)
-
         try:
             save_strategy_payload(archive_paths["redis_key"], payload, keep_index=True)
         except Exception as exc:
-            logger.error("자동매매 전략 Redis 캐시 저장 실패: %s", exc)
-
-        return {
-            "local_path": local_path,
-            "s3_key": archive_paths["s3_key"],
-            "s3_uploaded": uploaded,
-            "redis_key": archive_paths["redis_key"],
-        }
+            logger.error("Redis 저장 실패: %s", exc)
+        return payload["archive"]
 
     def run_user_cycle(self, user_id: int, *, force: bool = False, force_refresh: bool = False) -> Dict[str, Any]:
-        config = self.get_config(user_id)
-        if not config.enabled and not force:
-            return {"status": "skipped", "reason": "autotrade_disabled", "user_id": user_id}
-
-        if not force and not self._is_market_session_open():
-            return {"status": "skipped", "reason": "market_closed", "user_id": user_id}
-
-        strategy_slot = self._current_strategy_slot()
-        if not force_refresh:
-            existing_payload = self._get_existing_slot_strategy(user_id=user_id, strategy_slot=strategy_slot)
-            if existing_payload is not None:
-                archive = existing_payload.get("archive", {})
-                logger.info(
-                    "자동매매 전략 재사용 - user_id=%s strategy_slot=%s redis_key=%s",
-                    user_id,
-                    strategy_slot,
-                    archive.get("redis_key"),
-                )
-                return {
-                    "status": "ok",
-                    "message": "strategy_already_exists",
-                    "user_id": user_id,
-                    "strategy_slot": strategy_slot,
-                    "decision_archive": {
-                        "local_path": archive.get("local_path"),
-                        "s3_key": archive.get("s3_key"),
-                        "s3_uploaded": archive.get("s3_uploaded"),
-                        "redis_key": archive.get("redis_key"),
-                    },
-                }
-
-        tickers = self.resolve_tickers(config)
-        if not tickers:
-            return {"status": "skipped", "reason": "no_tickers", "user_id": user_id}
-
-        logger.info(
-            "자동매매 전략 생성 시작 - user_id=%s strategy_slot=%s tickers=%s invest_style=%s",
-            user_id,
-            strategy_slot,
-            tickers,
-            config.invest_style,
-        )
-
-        results = []
-        decision_records = []
-        for ticker in tickers:
+        user_lock = self._get_user_run_lock(user_id)
+        if not user_lock.acquire(blocking=False):
+            return {"status": "skipped", "reason": "user_cycle_in_progress", "user_id": user_id}
+        try:
+            config = self.get_config(user_id)
+            if not config.enabled and not force:
+                return {"status": "skipped", "reason": "autotrade_disabled", "user_id": user_id}
+            if not force and not self._is_market_session_open():
+                return {"status": "skipped", "reason": "market_closed", "user_id": user_id}
+            strategy_slot = self._current_strategy_slot()
+            if not force_refresh:
+                existing = self._get_existing_slot_strategy(user_id=user_id, strategy_slot=strategy_slot)
+                if existing:
+                    return {"status": "ok", "message": "strategy_already_exists", "user_id": user_id, "strategy_slot": strategy_slot, "decision_archive": existing.get("archive")}
+            tickers = self.resolve_tickers(config)
+            if not tickers:
+                return {"status": "skipped", "reason": "no_tickers", "user_id": user_id}
+            
+            results = []
+            decision_records = []
+            for ticker in tickers:
+                try:
+                    order_card = orchestrate_trading(ticker=ticker, user_id=user_id, account_type=config.account_type, invest_style=config.invest_style, execute_immediately=False, strategy_slot=strategy_slot)
+                    results.append({"ticker": ticker, "action": order_card.get("order", {}).get("action"), "quantity": order_card.get("order", {}).get("quantity")})
+                    decision_records.append({"ticker": ticker, "judge_decision": order_card})
+                except Exception as exc:
+                    logger.error("[%s] 실패: %s", ticker, exc)
+                    results.append({"ticker": ticker, "status": "failed", "error": str(exc)})
+            
+            if not any("judge_decision" in d for d in decision_records):
+                try:
+                    from app.trading.scheduler_instance import scheduler
+                    scheduler.schedule_user_generation(user_id, delay_minutes=5)
+                except: pass
+                return {"status": "failed", "reason": "no_valid_decisions", "results": results}
+            
+            archive = self._persist_cycle_decision(config=config, tickers=tickers, decisions=decision_records)
+            return {"status": "ok", "user_id": user_id, "strategy_slot": strategy_slot, "decision_archive": archive, "results": results}
+        except Exception as exc:
+            logger.error("run_user_cycle 에러: %s", exc)
             try:
-                logger.info(
-                    "자동매매 종목 전략 생성 시작 - user_id=%s ticker=%s strategy_slot=%s",
-                    user_id,
-                    ticker,
-                    strategy_slot,
-                )
-                order_card = orchestrate_trading(
-                    ticker=ticker,
-                    user_id=user_id,
-                    account_type=config.account_type,
-                    invest_style=config.invest_style,
-                    execute_immediately=False,
-                    strategy_slot=strategy_slot,
-                )
-                results.append(
-                    {
-                        "ticker": ticker,
-                        "execution_status": order_card.get("execution_status"),
-                        "action": order_card.get("order", {}).get("action"),
-                        "quantity": order_card.get("order", {}).get("quantity"),
-                    }
-                )
-                logger.info(
-                    "자동매매 종목 전략 생성 완료 - user_id=%s ticker=%s action=%s quantity=%s execution_status=%s",
-                    user_id,
-                    ticker,
-                    order_card.get("order", {}).get("action"),
-                    order_card.get("order", {}).get("quantity"),
-                    order_card.get("execution_status"),
-                )
-                decision_records.append(
-                    {
-                        "ticker": ticker,
-                        "judge_decision": order_card,
-                    }
-                )
-            except Exception as exc:
-                logger.error("자동매매 실행 실패 - user_id=%s ticker=%s error=%s", user_id, ticker, exc)
-                results.append({"ticker": ticker, "status": "failed", "error": str(exc)})
-                decision_records.append(
-                    {
-                        "ticker": ticker,
-                        "error": str(exc),
-                    }
-                )
-
-        valid_decision_count = sum(
-            1
-            for decision in decision_records
-            if isinstance(decision, dict) and isinstance(decision.get("judge_decision"), dict)
-        )
-        if valid_decision_count == 0:
-            logger.error(
-                "자동매매 전략 저장 중단 - user_id=%s strategy_slot=%s reason=no_valid_judge_decision",
-                user_id,
-                strategy_slot,
-            )
-            return {
-                "status": "failed",
-                "user_id": user_id,
-                "strategy_slot": strategy_slot,
-                "enabled": config.enabled,
-                "invest_style": config.invest_style,
-                "account_type": config.account_type,
-                "tickers": tickers,
-                "results": results,
-                "reason": "no_valid_judge_decision",
-            }
-        persistence = self._persist_cycle_decision(
-            config=config,
-            tickers=tickers,
-            decisions=decision_records,
-        )
-        logger.info(
-            "자동매매 전략 저장 완료 - user_id=%s strategy_slot=%s tickers=%s redis_key=%s s3_uploaded=%s",
-            user_id,
-            strategy_slot,
-            tickers,
-            persistence.get("redis_key"),
-            persistence.get("s3_uploaded"),
-        )
-
-        return {
-            "status": "ok",
-            "user_id": user_id,
-            "strategy_slot": strategy_slot,
-            "enabled": config.enabled,
-            "invest_style": config.invest_style,
-            "account_type": config.account_type,
-            "tickers": tickers,
-            "results": results,
-            "decision_archive": persistence,
-        }
+                from app.trading.scheduler_instance import scheduler
+                scheduler.schedule_user_generation(user_id, delay_minutes=5)
+            except: pass
+            raise
+        finally:
+            user_lock.release()
 
     def enable_and_prepare(self, user_id: int, request: AutoTradeConfigRequest) -> Dict[str, Any]:
         config = self.upsert_config(user_id, request)
         response: Dict[str, Any] = {"status": "ok", "config": config.model_dump()}
         if config.enabled:
-            response["bootstrap"] = {
-                "status": "skipped",
-                "reason": "deferred_until_scheduled_cycle",
-                "message": "당일 첫 전략 생성 시점에 자동매매 대상 종목 스냅샷을 확정합니다.",
-            }
+            try:
+                from app.trading.scheduler_instance import scheduler
+                if scheduler.is_today_strategy_ready():
+                    scheduler.schedule_user_generation(user_id, delay_minutes=0)
+                    response["bootstrap"] = {"status": "scheduled", "message": "즉시 전략 생성 스케줄러를 등록했습니다."}
+            except Exception as e:
+                logger.error("스케줄러 등록 실패: %s", e)
         return response
 
     def run_enabled_users_cycle(self) -> Dict[str, Any]:
-        configs = [config for config in self.list_configs() if config.enabled]
-        if not configs:
-            return {"status": "ok", "message": "no_enabled_users", "run_count": 0}
-
-        results = [self.run_user_cycle(config.user_id) for config in configs]
-        logger.info("자동매매 주기 실행 완료 - enabled_users=%s", len(results))
-        return {"status": "ok", "run_count": len(results), "results": results}
-
+        configs = [c for c in self.list_configs() if c.enabled]
+        if not configs: return {"status": "ok", "message": "no_enabled_users"}
+        max_workers = min(self._max_parallel_users, len(configs))
+        results = []
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="autotrade") as executor:
+            futures = {executor.submit(self.run_user_cycle, c.user_id): c.user_id for c in configs}
+            for future in as_completed(futures):
+                try: results.append(future.result())
+                except Exception as e: results.append({"status": "failed", "error": str(e)})
+        return {"status": "ok", "results": results}
 
 auto_trade_service = AutoTradeService()
