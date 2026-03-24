@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -29,12 +29,15 @@ class BatchScheduler:
         day_str = (base_time or datetime.now(KST)).astimezone(KST).strftime("%Y%m%d")
         return f"{REDIS_BATCH_READY_PREFIX}:{day_str}:{batch_type}"
 
-    def mark_today_batch_ready(self, batch_type: str) -> None:
+    def mark_batch_ready(self, batch_type: str, *, base_time: datetime | None = None) -> None:
         r = redis_client.get_client()
-        key = self._batch_ready_key(batch_type)
+        key = self._batch_ready_key(batch_type, base_time=base_time)
         r.set(key, "1")
         r.expire(key, STRATEGY_CACHE_TTL_SECONDS)
         logger.info("[Job] 배치 준비 완료 플래그 설정 (%s): %s", batch_type, key)
+
+    def mark_today_batch_ready(self, batch_type: str) -> None:
+        self.mark_batch_ready(batch_type)
 
     def is_today_batch_ready(self, batch_type: str) -> bool:
         try:
@@ -65,10 +68,10 @@ class BatchScheduler:
             self.mark_today_batch_ready("news")
         return result
 
-    def run_quant_batch_prepare(self, *, days: int) -> dict:
+    def run_quant_batch_prepare(self, *, days: int, ready_for_time: datetime | None = None) -> dict:
         result = run_quant_feature_batch(data_dir=self.data_dir, days=days)
         if result.get("status") == "ok":
-            self.mark_today_batch_ready("quant")
+            self.mark_batch_ready("quant", base_time=ready_for_time)
         return result
 
     def start(self):
@@ -97,6 +100,14 @@ class BatchScheduler:
             replace_existing=True
         )
 
+        # 4. 장중 신규 뉴스 반영용 정오 뉴스/RAG 배치 (12:00)
+        self.scheduler.add_job(
+            self._midday_news_batch,
+            CronTrigger(hour=12, minute=0),
+            id="midday_news_batch",
+            replace_existing=True
+        )
+
         self.scheduler.add_job(
             self._auto_trade_cycle,
             "interval",
@@ -115,7 +126,7 @@ class BatchScheduler:
         
         self.scheduler.start()
         logger.debug(
-            "APScheduler 시작 완료 (17:00 퀀트 배치, 08:00 뉴스 배치, 08:20 뉴스 재시도, 자동매매 %s분 간격, 전략 모니터링 %s초 간격)",
+            "APScheduler 시작 완료 (17:00 퀀트 배치, 08:00 뉴스 배치, 08:20 뉴스 재시도, 12:00 뉴스 재배치, 자동매매 %s분 간격, 전략 모니터링 %s초 간격)",
             self.auto_trade_interval_minutes,
             self.strategy_monitor_interval_seconds,
         )
@@ -123,7 +134,8 @@ class BatchScheduler:
     def _evening_quant_batch(self):
         logger.info("[Job] 오후 17:00 퀀트 feature 배치 시작...")
         try:
-            self.run_quant_batch_prepare(days=730)
+            next_day = datetime.now(KST) + timedelta(days=1)
+            self.run_quant_batch_prepare(days=730, ready_for_time=next_day)
             logger.info("[Job] 퀀트 feature 배치 작업 성공적으로 완료")
         except Exception as e:
             logger.error("[Job] 퀀트 feature 배치 실패: %s", e)
@@ -159,6 +171,17 @@ class BatchScheduler:
                 logger.info("[Job] 오전 08:20 뉴스/RAG 재시도 완료")
             except Exception as e:
                 logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
+
+    def _midday_news_batch(self):
+        logger.info("[Job] 오후 12:00 뉴스/RAG 배치 시작...")
+        try:
+            result = self.run_news_batch_prepare()
+            logger.info("[Job] 오후 12:00 뉴스/RAG 배치 작업 성공적으로 완료")
+            if result.get("status") == "ok":
+                auto_trade_result = auto_trade_service.run_enabled_users_cycle()
+                logger.info("[Job] 오후 12:00 뉴스 배치 후 자동매매 전략 재생성 완료: %s", auto_trade_result)
+        except Exception as e:
+            logger.error("[Job] 오후 12:00 뉴스/RAG 배치 실패: %s", e)
 
     def _auto_trade_cycle(self):
         try:

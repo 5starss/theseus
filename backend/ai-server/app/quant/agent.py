@@ -51,12 +51,18 @@ class QuantAnalysisAgent:
 
 5. supporting_metrics: 참조용 핵심 수치 (mom_5, rsi_14, dist_vwap, volume_z20, mtf_15m_trend)
 
+6. today_intraday_context: 선택적 오전장 보조 문맥
+   - window, bars, open_price, last_price, high_price, low_price
+   - change_pct, range_pct, total_volume, trend, as_of
+   - 값이 있으면 당일 09:00~12:00 흐름을 보조적으로 반영하세요.
+
 판단 규칙:
 1) alignment_score가 높고 signal_confidence가 high이면 강한 의견(buy 또는 sell).
 2) entry_risk가 high이면 보수적으로 hold 의견을 내세요.
 3) intraday_trend와 상위 타임프레임(h1, d1)의 방향이 일치할 때 확신도를 높이세요.
 4) reward_risk_quality가 poor이면 진입을 피하세요.
 5) stance는 buy, sell, hold 중 하나여야 합니다.
+6) today_intraday_context.trend와 change_pct가 뚜렷하면 당일 단기 흐름 확인용 보조 근거로 사용하세요. 단, alignment_score와 signal_confidence를 뒤집을 정도로 과대평가하지 마세요.
 
 출력:
 - JSON object 하나만 출력
