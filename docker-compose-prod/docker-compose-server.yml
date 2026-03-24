@@ -67,6 +67,11 @@ services:
     container_name: ai-server
     restart: unless-stopped
     env_file: .env
+    environment:
+      - AI_SERVER_CHROMA_DIR=/app/chroma_db
+    volumes:
+      - /home/ubuntu/ai-server-data/chroma_db:/app/chroma_db
+
     ports:
       - "8086:8086"
     networks:
