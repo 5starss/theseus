@@ -28,6 +28,18 @@ from app.trading.strategy_service import (
 logger = logging.getLogger(__name__)
 
 
+def _ensure_kst_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=KST)
+    return value.astimezone(KST)
+
+
 def _build_today_intraday_context(ticker: str) -> Dict[str, Any]:
     try:
         intraday_df = load_ohlcv_from_db(ticker, days=0)
@@ -38,10 +50,11 @@ def _build_today_intraday_context(ticker: str) -> Dict[str, Any]:
     if intraday_df.empty:
         return {}
 
-    intraday_df["ts"] = intraday_df["ts"].apply(lambda value: value.to_pydatetime() if hasattr(value, "to_pydatetime") else value)
+    intraday_df["ts"] = intraday_df["ts"].apply(_ensure_kst_datetime)
+    intraday_df = intraday_df.dropna(subset=["ts"])
     intraday_df = intraday_df.sort_values("ts").reset_index(drop=True)
     intraday_df = intraday_df[
-        intraday_df["ts"].apply(lambda ts: time(9, 0) <= ts.astimezone(KST).time() <= time(12, 0))
+        intraday_df["ts"].apply(lambda ts: time(9, 0) <= ts.time() <= time(12, 0))
     ].copy()
     if intraday_df.empty:
         return {}
@@ -74,7 +87,7 @@ def _build_today_intraday_context(ticker: str) -> Dict[str, Any]:
         "range_pct": round(range_pct, 4),
         "total_volume": int(total_volume),
         "trend": trend,
-        "as_of": last_row["ts"].astimezone(KST).isoformat() if hasattr(last_row["ts"], "astimezone") else str(last_row["ts"]),
+        "as_of": last_row["ts"].isoformat() if hasattr(last_row["ts"], "isoformat") else str(last_row["ts"]),
     }
 
 
