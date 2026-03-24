@@ -286,6 +286,7 @@ public class PendingOrderManager {
                 long cancelledQty = orderToCancel.getRemainingQuantity();
                 log.info("[{}] 주문 취소 완료 (OrderID: {}, 취소수량: {})", ticker, orderId, cancelledQty);
                 return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, currentSeqNo, 0);
+            } else {
                 // 3. 큐에서 제거 실패 시: 캐시 복구 (Rollback) 및 거절(REJECTED) 응답 반환
                 orderCache.put(orderId, orderToCancel);
                 log.warn("[{}] 취소 거절: 캐시에는 있으나 큐에서 주문을 찾지 못함. 캐시를 복구하고 거절 응답을 보냅니다 (OrderID: {})", ticker, orderId);
