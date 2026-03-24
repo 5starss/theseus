@@ -9,6 +9,8 @@ venv
 .venv
 
 agent/
+storage/
+chroma_db/
 
 *.pem
 

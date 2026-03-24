@@ -73,6 +73,18 @@ quant_state_summary가 포함되어 있으면 반드시 참조하세요.
 반드시 JSON object 하나만 출력하세요.
 모든 설명 문자열은 한국어로 작성하세요.
 verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하세요.
+출력은 아래 최소 스키마만 사용하세요.
+{{
+  "ticker": "종목코드",
+  "order": {{
+    "action": "buy|sell|hold",
+    "order_type": "market|limit",
+    "quantity": 정수,
+    "price": 정수 또는 null
+  }},
+  "verdict": "최종 판단 이유"
+}}
+analysis_context, cross_validation, signal_weights 같은 부가 필드는 출력하지 마세요.
 """,
                 ),
                 ("human", "[Input]\n{payload}"),
@@ -90,17 +102,29 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
         card["final_stance"] = str(card.get("final_stance") or "hold")
         card["final_score"] = max(-30, min(30, _safe_int(card.get("final_score", 0))))
 
-        order = card.get("order") if isinstance(card.get("order"), dict) else {}
-        action = str(order.get("action", "hold"))
+        raw_order = card.get("order") if isinstance(card.get("order"), dict) else {}
+        if not raw_order and isinstance(card.get("action"), dict):
+            action_payload = card.get("action") or {}
+            raw_order = {
+                "action": action_payload.get("type"),
+                "order_type": action_payload.get("order_type"),
+                "price": action_payload.get("price"),
+                "quantity": action_payload.get("quantity"),
+            }
+
+        action = str(raw_order.get("action", "hold")).lower()
+        action = {"buy": "buy", "sell": "sell", "hold": "hold"}.get(action, action)
         if action not in {"buy", "sell", "hold"}:
             action = "hold"
-        order_type = str(order.get("order_type", "limit"))
+        order_type = str(raw_order.get("order_type", "limit")).lower()
         if order_type not in {"market", "limit"}:
             order_type = "limit"
-        price = max(0, _safe_int(order.get("price", payload.get("current_price", 0))))
-        quantity = max(0, _safe_int(order.get("quantity", 0)))
+        raw_price = raw_order.get("price")
+        price = 0 if raw_price is None else max(0, _safe_int(raw_price, payload.get("current_price", 0)))
+        quantity = max(0, _safe_int(raw_order.get("quantity", 0)))
         if action == "hold":
             quantity = 0
+            price = 0
         card["order"] = {
             "action": action,
             "order_type": order_type,
@@ -121,10 +145,7 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
         )
 
         # 허용된 스키마 키만 남기고 나머지 top-level 키 제거
-        allowed_keys = {
-            "$schema", "ticker", "timestamp", "final_stance", "final_score",
-            "order", "risk_management", "verdict"
-        }
+        allowed_keys = {"$schema", "ticker", "timestamp", "final_stance", "final_score", "order", "risk_management", "verdict"}
         card = {k: v for k, v in card.items() if k in allowed_keys}
 
         return card

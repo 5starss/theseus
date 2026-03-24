@@ -57,22 +57,35 @@ class BatchScheduler:
 
     def run_batch_prepare(self, *, days: int) -> dict:
         result = run_daily_batch_preparation(data_dir=self.data_dir, days=days)
-        if result.get("status") == "ok":
+        if result.get("status") in ("ok", "partial"):
             self.mark_today_batch_ready("quant")
             self.mark_today_batch_ready("news")
         return result
 
     def run_news_batch_prepare(self) -> dict:
         result = run_news_rag_batch()
-        if result.get("status") == "ok":
+        if result.get("status") in ("ok", "partial"):
             self.mark_today_batch_ready("news")
         return result
 
     def run_quant_batch_prepare(self, *, days: int, ready_for_time: datetime | None = None) -> dict:
         result = run_quant_feature_batch(data_dir=self.data_dir, days=days)
-        if result.get("status") == "ok":
+        if result.get("status") in ("ok", "partial"):
             self.mark_batch_ready("quant", base_time=ready_for_time)
         return result
+
+    def schedule_user_generation(self, user_id: int, delay_minutes: int = 0):
+        """특정 사용자의 전략 생성을 APScheduler를 통해 예약합니다."""
+        run_date = datetime.now() + timedelta(minutes=delay_minutes)
+        self.scheduler.add_job(
+            auto_trade_service.run_user_cycle,
+            trigger='date',
+            run_date=run_date,
+            args=[user_id],
+            id=f"strategy_gen_user_{user_id}_{int(run_date.timestamp())}",
+            replace_existing=True
+        )
+        logger.info("[Job] 사용자 %s의 전략 생성 작업을 %s 분 뒤(%s)에 예약했습니다.", user_id, delay_minutes, run_date)
 
     def start(self):
         """스케줄러 시작"""
@@ -143,8 +156,15 @@ class BatchScheduler:
     def _morning_news_batch(self):
         logger.info("[Job] 오전 08:00 뉴스/RAG 배치 시작...")
         try:
-            self.run_news_batch_prepare()
-            logger.info("[Job] 뉴스/RAG 배치 작업 성공적으로 완료")
+            result = self.run_news_batch_prepare()
+            logger.info("[Job] 뉴스/RAG 배치 완료 (status=%s)", result.get("status"))
+            if self.is_today_strategy_ready():
+                logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
+                self.scheduler.add_job(
+                    auto_trade_service.run_enabled_users_cycle,
+                    id="post_morning_batch_generation",
+                    replace_existing=True
+                )
         except Exception as e:
             logger.error("[Job] 뉴스/RAG 배치 실패: %s", e)
 
@@ -167,8 +187,15 @@ class BatchScheduler:
                 logger.error("[Job] 오전 08:20 퀀트 feature 재시도 실패: %s", e)
         if not news_ready:
             try:
-                self.run_news_batch_prepare()
+                result = self.run_news_batch_prepare()
                 logger.info("[Job] 오전 08:20 뉴스/RAG 재시도 완료")
+                if self.is_today_strategy_ready():
+                    logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
+                    self.scheduler.add_job(
+                        auto_trade_service.run_enabled_users_cycle,
+                        id="post_retry_batch_generation",
+                        replace_existing=True
+                    )
             except Exception as e:
                 logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
 
@@ -177,28 +204,19 @@ class BatchScheduler:
         try:
             result = self.run_news_batch_prepare()
             logger.info("[Job] 오후 12:00 뉴스/RAG 배치 작업 성공적으로 완료")
-            if result.get("status") == "ok":
-                auto_trade_result = auto_trade_service.run_enabled_users_cycle()
-                logger.info("[Job] 오후 12:00 뉴스 배치 후 자동매매 전략 재생성 완료: %s", auto_trade_result)
+            if self.is_today_strategy_ready():
+                logger.info("[Job] 12:00 뉴스 배치 완료로 활성 사용자 전역 전략 생성을 예약합니다.")
+                self.scheduler.add_job(
+                    auto_trade_service.run_enabled_users_cycle,
+                    id="post_midday_batch_generation",
+                    replace_existing=True
+                )
         except Exception as e:
             logger.error("[Job] 오후 12:00 뉴스/RAG 배치 실패: %s", e)
 
     def _auto_trade_cycle(self):
+        # 5분 주기 로직: 전략 생성은 제거하고 아카이브 S3 동기화 등 보조 작업만 유지
         try:
-            if not auto_trade_service.is_market_session_open():
-                logger.debug("[Job] 장 마감 상태라 자동매매 전략 생성을 건너뜁니다.")
-                return
-            if not self.is_today_strategy_ready():
-                logger.info(
-                    "[Job] 자동매매 전략 생성을 건너뜁니다. (quant_ready=%s, news_ready=%s)",
-                    self.is_today_quant_ready(),
-                    self.is_today_news_ready(),
-                )
-                return
-            result = auto_trade_service.run_enabled_users_cycle()
-            if result.get("message") == "no_enabled_users":
-                logger.debug("[Job] 자동매매 활성 사용자 없음")
-                return
             sync_result = sync_pending_strategy_archives()
             if sync_result.get("synced_count"):
                 logger.info(
@@ -206,9 +224,9 @@ class BatchScheduler:
                     sync_result.get("synced_count"),
                     sync_result.get("failure_count"),
                 )
-            logger.debug("[Job] 자동매매 주기 실행 완료: %s", result)
+            logger.debug("[Job] 주기적 백그라운드 작업 완료 (Sync)")
         except Exception as e:
-            logger.error("[Job] 자동매매 주기 실행 실패: %s", e)
+            logger.error("[Job] 자동매매 주기적 보조 작업(S3 Sync) 실패: %s", e)
 
     def _strategy_monitor_cycle(self):
         try:

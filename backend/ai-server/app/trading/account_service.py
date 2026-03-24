@@ -6,6 +6,35 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _position_sizing_policy(user_investment_style: str) -> tuple[float, float]:
+    style = str(user_investment_style or "GROWTH").upper()
+    if style == "BALANCED":
+        return 0.15, 0.20
+    if style == "AGGRESSIVE":
+        return 0.40, 0.50
+    return 0.25, 0.35
+
+
+def _confidence_multiplier(signal_confidence: Any) -> float:
+    if isinstance(signal_confidence, str):
+        normalized = signal_confidence.strip().lower()
+        if normalized == "high":
+            return 1.0
+        if normalized == "medium":
+            return 0.75
+        if normalized == "low":
+            return 0.5
+    try:
+        confidence_value = float(signal_confidence)
+    except Exception:
+        return 0.75
+    if confidence_value < 0.5:
+        return 0.5
+    if confidence_value < 0.75:
+        return 0.75
+    return 1.0
+
+
 def extract_holding_from_snapshot(account_snapshot: Dict[str, Any], ticker: str) -> Dict[str, Any]:
     """
     Account Snapshot에서 특정 종목의 보유 정보를 추출합니다.
@@ -38,6 +67,8 @@ def apply_account_constraints(
     available_cash: int,
     current_holding: Dict[str, Any],
     current_price: Decimal,
+    user_investment_style: str = "GROWTH",
+    signal_confidence: Any = None,
 ) -> Dict[str, Any]:
     """
     사용자의 실제 가용 현금 및 보유 수량을 바탕으로 주문 수량을 조정하거나 보류합니다.
@@ -70,11 +101,24 @@ def apply_account_constraints(
         )
 
     if action == "buy":
-        max_qty = available_cash // effective_price if effective_price > 0 else 0
+        order_ratio, position_ratio = _position_sizing_policy(user_investment_style)
+        confidence_ratio = _confidence_multiplier(signal_confidence)
+        total_asset_value = available_cash + int(current_holding.get("quantity") or 0) * effective_price
+        current_position_value = int(current_holding.get("quantity") or 0) * effective_price
+        order_budget = int(available_cash * order_ratio * confidence_ratio)
+        position_budget = max(0, int(total_asset_value * position_ratio) - current_position_value)
+        max_qty_by_cash = available_cash // effective_price if effective_price > 0 else 0
+        max_qty_by_order_budget = order_budget // effective_price if effective_price > 0 else 0
+        max_qty_by_position_budget = position_budget // effective_price if effective_price > 0 else 0
+        max_qty = min(max_qty_by_cash, max_qty_by_order_budget, max_qty_by_position_budget)
         if max_qty <= 0:
             return _build_hold_order_card(
                 adjusted,
-                f"주문 가능 금액이 부족해 매수할 수 없습니다. (available_cash={available_cash}, price={effective_price})",
+                (
+                    "투자 성향/신호 확신도 기준 주문 가능 한도가 부족해 매수할 수 없습니다. "
+                    f"(available_cash={available_cash}, price={effective_price}, "
+                    f"order_ratio={order_ratio}, position_ratio={position_ratio}, confidence_ratio={confidence_ratio})"
+                ),
                 requested_order,
             )
         adjusted_qty = min(requested_qty, max_qty)
@@ -82,9 +126,12 @@ def apply_account_constraints(
         adjusted["order"]["quantity"] = adjusted_qty
         adjusted["adjusted_by_account_state"] = adjusted_qty != requested_qty
         adjusted["adjustment_reason"] = (
-            f"주문 가능 금액 기준 최대 {max_qty}주까지만 매수 가능해 수량을 조정했습니다."
+            (
+                f"투자 성향({user_investment_style})과 신호 확신도 기준으로 최대 {max_qty}주까지만 매수 가능해 수량을 조정했습니다. "
+                f"(1회 주문 한도={order_budget:,}원, 종목 잔여 한도={position_budget:,}원)"
+            )
             if adjusted_qty != requested_qty else
-            "주문 가능 금액 범위 내 주문입니다."
+            "투자 성향 및 신호 확신도 한도 범위 내 주문입니다."
         )
         adjusted["requested_order"] = requested_order
         return adjusted
