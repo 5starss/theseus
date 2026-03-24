@@ -200,7 +200,34 @@ def get_watchlists(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     result = _request("GET", "/watchlists", user_id=user_id)
     if isinstance(result, list):
         return result
-    return []
+
+    resolved_user_id = _get_user_id(user_id)
+    query = """
+        SELECT
+            w.ticker,
+            COALESCE(s.company_name, w.ticker) AS companyName
+        FROM watchlists w
+        LEFT JOIN stocks s
+          ON s.ticker = w.ticker
+        WHERE w.user_id = %s
+        ORDER BY w.watchlist_id ASC
+    """
+    try:
+        with _get_db_conn() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query, (resolved_user_id,))
+                rows = cursor.fetchall() or []
+        return [
+            {
+                "ticker": str(row.get("ticker") or ""),
+                "companyName": row.get("companyName") or str(row.get("ticker") or ""),
+            }
+            for row in rows
+            if row.get("ticker")
+        ]
+    except Exception as exc:
+        logger.error("관심종목 DB fallback 조회 실패 - user_id=%s error=%s", resolved_user_id, exc)
+        return []
 
 
 def get_trading_account_snapshot(user_id: Optional[int] = None, account_type: str = "USER") -> Dict[str, Any]:
