@@ -50,9 +50,15 @@ public class ExecutionLedgerService {
             return;
         }
 
-        // 3. 취소 이벤트 처리
+        // 3. 이벤트 타입별 처리
         if (event.getEventType() == EventType.CANCELLED) {
             processCancel(event, order);
+            return;
+        }
+
+        if (event.getEventType() == EventType.CANCEL_REJECTED) {
+            log.info("취소 거절 이벤트 수신 - 상태 복구 수행 (OrderID: {})", event.getOrderId());
+            order.revertCancel();
             return;
         }
 
