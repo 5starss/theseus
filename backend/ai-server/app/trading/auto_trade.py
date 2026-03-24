@@ -138,6 +138,19 @@ class AutoTradeService:
             )
             return None
 
+        valid_decisions = [
+            decision for decision in decisions
+            if isinstance(decision, dict) and isinstance(decision.get("judge_decision"), dict)
+        ]
+        if not valid_decisions:
+            logger.warning(
+                "기존 슬롯 전략 무효 처리 - user_id=%s strategy_slot=%s reason=no_valid_judge_decision redis_key=%s",
+                user_id,
+                strategy_slot,
+                redis_key,
+            )
+            return None
+
         return payload
 
     def get_config(self, user_id: int) -> AutoTradeConfig:
@@ -422,6 +435,28 @@ class AutoTradeService:
                     }
                 )
 
+        valid_decision_count = sum(
+            1
+            for decision in decision_records
+            if isinstance(decision, dict) and isinstance(decision.get("judge_decision"), dict)
+        )
+        if valid_decision_count == 0:
+            logger.error(
+                "자동매매 전략 저장 중단 - user_id=%s strategy_slot=%s reason=no_valid_judge_decision",
+                user_id,
+                strategy_slot,
+            )
+            return {
+                "status": "failed",
+                "user_id": user_id,
+                "strategy_slot": strategy_slot,
+                "enabled": config.enabled,
+                "invest_style": config.invest_style,
+                "account_type": config.account_type,
+                "tickers": tickers,
+                "results": results,
+                "reason": "no_valid_judge_decision",
+            }
         persistence = self._persist_cycle_decision(
             config=config,
             tickers=tickers,
