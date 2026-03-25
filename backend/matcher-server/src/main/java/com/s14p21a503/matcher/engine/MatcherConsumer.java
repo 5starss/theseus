@@ -71,8 +71,14 @@ public class MatcherConsumer {
                 long cmdSeqNo = journaledEvent.getSeqNo();
                 long startTime = System.currentTimeMillis();
                 
-                log.info("[{}] [DEQUEUE] 이벤트 처리 시작 - Seq: {}, Type: {}", 
-                        ticker, cmdSeqNo, event.getClass().getSimpleName());
+                if (event instanceof TickDataEvent || event instanceof MarketDataEvent) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("[{}] [DEQUEUE] 시세/틱 처리 - Seq: {}", ticker, cmdSeqNo);
+                    }
+                } else {
+                    log.info("[{}] [PROCESS_START] 주문/제어 처리 시작 - Seq: {}, Type: {}", 
+                            ticker, cmdSeqNo, event.getClass().getSimpleName());
+                }
                 
                 PendingOrderManager orderManager = orderManagerHolder.getManager(ticker);
                 UnifiedJournaler journaler = journalService.getJournaler(ticker);
@@ -153,7 +159,11 @@ public class MatcherConsumer {
                 }
 
                 long duration = System.currentTimeMillis() - startTime;
-                log.info("[{}] [PROCESS_END] 이벤트 처리 완료 - Seq: {}, Duration: {}ms", ticker, cmdSeqNo, duration);
+                if (!(event instanceof TickDataEvent || event instanceof MarketDataEvent)) {
+                    log.info("[{}] [PROCESS_END] 처리 완료 - Seq: {}, Duration: {}ms", ticker, cmdSeqNo, duration);
+                } else if (log.isDebugEnabled()) {
+                    log.debug("[{}] [PROCESS_END] 시세/틱 처리 완료 - Seq: {}, Duration: {}ms", ticker, cmdSeqNo, duration);
+                }
 
                 // 3. [Snapshot] 주기적으로 덤프를 생성하여 장애 복구 시 리플레이 시간을 단축합니다.
                 long currentCount = processedCountMap.getOrDefault(ticker, 0L) + 1;
