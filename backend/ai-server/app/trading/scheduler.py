@@ -76,16 +76,27 @@ class BatchScheduler:
 
     def schedule_user_generation(self, user_id: int, delay_minutes: int = 0):
         """특정 사용자의 전략 생성을 APScheduler를 통해 예약합니다."""
-        run_date = datetime.now() + timedelta(minutes=delay_minutes)
+        run_date = datetime.now(KST) + timedelta(minutes=delay_minutes)
         self.scheduler.add_job(
             auto_trade_service.run_user_cycle,
-            trigger='date',
+            trigger="date",
             run_date=run_date,
             args=[user_id],
             id=f"strategy_gen_user_{user_id}_{int(run_date.timestamp())}",
             replace_existing=True
         )
         logger.info("[Job] 사용자 %s의 전략 생성 작업을 %s 분 뒤(%s)에 예약했습니다.", user_id, delay_minutes, run_date)
+
+    def schedule_global_generation(self, job_id: str, *, delay_seconds: int = 0) -> None:
+        run_date = datetime.now(KST) + timedelta(seconds=delay_seconds)
+        self.scheduler.add_job(
+            auto_trade_service.run_enabled_users_cycle,
+            trigger="date",
+            run_date=run_date,
+            id=job_id,
+            replace_existing=True,
+        )
+        logger.info("[Job] 활성 사용자 전역 전략 생성 작업을 예약했습니다. (job_id=%s, run_date=%s)", job_id, run_date)
 
     def start(self):
         """스케줄러 시작"""
@@ -160,11 +171,7 @@ class BatchScheduler:
             logger.info("[Job] 뉴스/RAG 배치 완료 (status=%s)", result.get("status"))
             if self.is_today_strategy_ready():
                 logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
-                self.scheduler.add_job(
-                    auto_trade_service.run_enabled_users_cycle,
-                    id="post_morning_batch_generation",
-                    replace_existing=True
-                )
+                self.schedule_global_generation("post_morning_batch_generation")
         except Exception as e:
             logger.error("[Job] 뉴스/RAG 배치 실패: %s", e)
 
@@ -191,11 +198,7 @@ class BatchScheduler:
                 logger.info("[Job] 오전 08:20 뉴스/RAG 재시도 완료")
                 if self.is_today_strategy_ready():
                     logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
-                    self.scheduler.add_job(
-                        auto_trade_service.run_enabled_users_cycle,
-                        id="post_retry_batch_generation",
-                        replace_existing=True
-                    )
+                    self.schedule_global_generation("post_retry_batch_generation")
             except Exception as e:
                 logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
 
@@ -206,11 +209,7 @@ class BatchScheduler:
             logger.info("[Job] 오후 12:00 뉴스/RAG 배치 작업 성공적으로 완료")
             if self.is_today_strategy_ready():
                 logger.info("[Job] 12:00 뉴스 배치 완료로 활성 사용자 전역 전략 생성을 예약합니다.")
-                self.scheduler.add_job(
-                    auto_trade_service.run_enabled_users_cycle,
-                    id="post_midday_batch_generation",
-                    replace_existing=True
-                )
+                self.schedule_global_generation("post_midday_batch_generation")
         except Exception as e:
             logger.error("[Job] 오후 12:00 뉴스/RAG 배치 실패: %s", e)
 

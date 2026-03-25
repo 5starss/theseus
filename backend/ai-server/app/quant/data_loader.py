@@ -5,21 +5,28 @@ from typing import Optional
 import pandas as pd
 from collector.storage import get_storage_dir
 from app.shared.infra.s3_client import s3_client
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.trading.constants import KST
 
 logger = logging.getLogger(__name__)
 
 
 def get_latest_feature_s3_key(ticker: str) -> Optional[str]:
-    """S3에서 당일 해당 종목의 가장 최신 피처 파일 키를 조회합니다."""
-    today_str = datetime.now(KST).strftime("%Y%m%d")
-    s3_prefix = f"features/{today_str}/{ticker}/"
-    s3_files = s3_client.list_files(s3_prefix)
-    if not s3_files:
-        logger.warning(f"[{ticker}] S3 피처 파일이 없습니다. prefix={s3_prefix}")
-        return None
-    return sorted(s3_files)[-1]
+    """S3에서 전일 우선, 없으면 당일 순으로 해당 종목의 최신 피처 파일 키를 조회합니다."""
+    candidate_days = [
+        (datetime.now(KST) - timedelta(days=1)).strftime("%Y%m%d"),
+        datetime.now(KST).strftime("%Y%m%d"),
+    ]
+    for day_str in candidate_days:
+        s3_prefix = f"features/{day_str}/{ticker}/"
+        s3_files = s3_client.list_files(s3_prefix)
+        if s3_files:
+            latest_key = sorted(s3_files)[-1]
+            logger.info("[%s] S3 피처 파일 선택: %s", ticker, latest_key)
+            return latest_key
+
+    logger.warning(f"[{ticker}] S3 피처 파일이 없습니다. checked_prefixes={candidate_days}")
+    return None
 
 
 def download_and_load_feature_df(ticker: str, s3_key: str) -> Optional[pd.DataFrame]:
