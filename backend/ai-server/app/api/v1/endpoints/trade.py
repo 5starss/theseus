@@ -5,6 +5,7 @@ from app.trading.auto_trade import (
     AutoTradeConfigRequest,
     auto_trade_service,
 )
+from app.trading.agent_response_store import list_agent_response_statuses
 
 router = APIRouter()
 
@@ -62,3 +63,14 @@ async def run_auto_trade_now(
     force: bool = Query(True, description="시장 시간 외에도 강제 실행할지 여부"),
 ) -> Dict[str, Any]:
     return auto_trade_service.run_user_cycle(user_id, force=force)
+
+
+@router.get("/auto/agent-status", response_model=Dict[str, Any])
+async def get_agent_response_status(
+    user_id: Optional[int] = Query(None, description="조회할 사용자 ID"),
+    trade_date: Optional[str] = Query(None, description="조회 기준일 (YYYY-MM-DD)"),
+) -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "items": list_agent_response_statuses(user_id=user_id, trade_date=trade_date),
+    }
