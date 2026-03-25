@@ -134,11 +134,11 @@ public class PendingOrderManager {
                 return trades;
             }
 
+            int fillIndex = 0;
             // 1. 대기 매수 주문 검사 (매수 주문 vs 시장 매도 틱)
             // 매수 조건: bestAsk <= limitPrice
             if (this.currentBestAsk != null) {
                 Iterator<Map.Entry<BigDecimal, OrderList>> bidIterator = pendingBids.entrySet().iterator();
-                int fillIndex = 0;
                 while (bidIterator.hasNext() && usableLiquidity > 0) {
                     Map.Entry<BigDecimal, OrderList> entry = bidIterator.next();
                     BigDecimal limitPrice = entry.getKey();
@@ -185,7 +185,6 @@ public class PendingOrderManager {
             // 매도 조건: bestBid >= limitPrice
             if (this.currentBestBid != null) {
                 Iterator<Map.Entry<BigDecimal, OrderList>> askIterator = pendingAsks.entrySet().iterator();
-                int fillIndex = 0;
                 while (askIterator.hasNext() && usableLiquidity > 0) {
                     Map.Entry<BigDecimal, OrderList> entry = askIterator.next();
                     BigDecimal limitPrice = entry.getKey();
@@ -270,7 +269,7 @@ public class PendingOrderManager {
             // 1. 캐시에서 먼저 제거 시도 (Node를 직접 가져옴)
             OrderNode nodeToCancel = orderCache.remove(orderId);
             if (nodeToCancel == null) {
-                log.debug("[{}] 취소 실패: 대기열에 없는 주문입니다 (OrderID: {})", ticker, orderId);
+                log.info("[{}] 취소 실패: 대기열에 없는 주문입니다 (OrderID: {})", ticker, orderId);
                 return null;
             }
 
@@ -448,6 +447,7 @@ public class PendingOrderManager {
                 .ticker(ticker)
                 .matchPrice(matchPrice)
                 .matchQuantity(fillQty)
+                .remainingQuantity(order.getRemainingQuantity())
                 .executedAt(LocalDateTime.now())
                 .build();
     }
