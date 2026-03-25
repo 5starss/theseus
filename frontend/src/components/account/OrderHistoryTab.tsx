@@ -104,7 +104,8 @@ export function OrderHistoryTab() {
                                                         if (window.confirm("정말 주문을 취소하시겠습니까?")) {
                                                             try {
                                                                  await cancelOrder(order.id);
-                                                            } catch (error: any) {
+                                                            } catch (err) {
+                                                                const error = err as Error;
                                                                 alert(error.message || "주문 취소에 실패했습니다.");
                                                             }
                                                         }

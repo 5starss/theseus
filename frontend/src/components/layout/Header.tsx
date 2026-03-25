@@ -82,9 +82,7 @@ export default function Header() {
             {/* 왼쪽: 로고, 내비게이션 */}
             <div className="flex items-center h-full mr-4">
                 <Link to="/" className="flex items-center gap-2 mr-6">
-                    <div className="w-7 h-7 bg-blue-600 text-white flex items-center justify-center font-bold rounded">
-                        S
-                    </div>
+                    <img src="/Logo.png" alt="Logo" className="w-7 h-7" />
                     <span className="font-bold text-lg tracking-tight">싸피증권</span>
                 </Link>
 
@@ -164,7 +162,7 @@ export default function Header() {
                                             <div className="flex items-center gap-3">
                                                 {/* 종목 로고 */}
                                                 <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden shrink-0 border border-slate-50">
-                                                    <img 
+                                                    <img
                                                         src={`/icons/stocks/${stock.ticker}.png`}
                                                         alt={stock.name}
                                                         className="w-full h-full object-cover"
