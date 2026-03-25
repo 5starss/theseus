@@ -16,6 +16,7 @@ from app.trading.account_service import (
     apply_account_constraints,
     build_account_summary,
 )
+from app.trading.agent_response_store import mark_agent_response
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD, KST
 from app.trading.core_api_client import get_trading_account_snapshot, execute_order, get_user_profile
 from app.trading.market_data import get_current_price
@@ -232,7 +233,9 @@ def orchestrate_trading(
 
     # 3. 개별 에이전트 분석 (순차 실행)
     news_card = run_news_agent(ticker, question=strategy_profile["news_question"])
+    mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="news")
     quant_card, quant_state = run_quant_agent(ticker)
+    mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="quant")
     
     # 4. 상충 의견 검토 (Rebuttal)
     rebuttal_result = run_rebuttal_agent(
@@ -258,6 +261,7 @@ def orchestrate_trading(
     }
     
     order_card = JudgeAgent().generate_order_card(judge_payload)
+    mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="judge")
     
     # 6. 현실적 제약 조건 적용 (예수금/보유량)
     order_card = apply_account_constraints(
