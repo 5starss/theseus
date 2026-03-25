@@ -6,7 +6,7 @@ export interface RankingDto {
     rank: number;
     nickname: string;
     roi: number;
-    rankDate: string;
+    rankDateTime: string;
     percentile: number;
 }
 

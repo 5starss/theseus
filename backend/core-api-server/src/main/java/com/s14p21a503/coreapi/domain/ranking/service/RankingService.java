@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -41,10 +42,10 @@ public class RankingService {
      * 매일 전 유저의 자산을 계산하여 랭킹 스냅샷을 생성합니다.
      */
     @Transactional
-    @CacheEvict(value = {"ranking_page", "latest_ranking_date", "user_ranking"}, allEntries = true)
+    @CacheEvict(value = {"ranking_page", "latest_ranking_date", "user_ranking", "total_ranking_count"}, allEntries = true)
     public void createDailySnapshot() {
-        LocalDate today = LocalDate.now();
-        log.info("일간 랭킹 스냅샷 생성 시작 - 날짜: {}", today);
+        LocalDateTime now = LocalDateTime.now();
+        log.info("일간 랭킹 스냅샷 생성 시작 - 일시: {}", now);
 
         // 1. 모든 계좌와 닉네임 조회 (JOIN FETCH 형식의 쿼리 활용)
         List<Object[]> acctNickList = accountRepository.findAllWithNickname();
@@ -93,7 +94,7 @@ public class RankingService {
                     .setScale(4, RoundingMode.HALF_UP);
 
             rankingsData.add(DailyRanking.builder()
-                    .rankDate(today)
+                    .rankDateTime(now)
                     .userId(userId)
                     .nickname(nickname)
                     .roi(roi)
@@ -107,7 +108,7 @@ public class RankingService {
         for (int i = 0; i < rankingsData.size(); i++) {
             DailyRanking r = rankingsData.get(i);
             finalRankings.add(DailyRanking.builder()
-                    .rankDate(r.getRankDate())
+                    .rankDateTime(r.getRankDateTime())
                     .userId(r.getUserId())
                     .nickname(r.getNickname())
                     .roi(r.getRoi())
@@ -115,8 +116,8 @@ public class RankingService {
                     .build());
         }
 
-        // 6. 오늘 날짜의 기존 데이터가 있다면 삭제 (멱등성 보장) 후 저장
-        dailyRankingRepository.deleteAllByRankDate(today);
+        // 6. 오늘 날짜의 기존 데이터가 있다면 삭제 (당일 최신 랭킹 유지) 후 저장
+        dailyRankingRepository.deleteAllByRankDate(now.toLocalDate());
         dailyRankingRepository.flush();
         dailyRankingRepository.saveAll(finalRankings);
         log.info("일간 랭킹 스냅샷 생성 완료 - 총 {}명", finalRankings.size());
@@ -127,19 +128,19 @@ public class RankingService {
      */
     @Transactional(readOnly = true)
     public RankingResponseDto getRankings(Long userId, String nickname, Pageable pageable) {
-        // 1. 최신 랭킹 날짜 조회 (로컬 캐싱 적용)
-        LocalDate latestDate = rankingCacheService.getLatestDate();
+        // 1. 최신 랭킹 일시 조회 (로컬 캐싱 적용)
+        LocalDateTime latest = rankingCacheService.getLatestDateTime();
 
         // 2. 전체 페이징 목록 조회 (순위순, 닉네임 필터 적용 가능) - 로컬 캐싱 적용
-        Page<DailyRanking> page = rankingCacheService.getRankingPage(latestDate, nickname, pageable);
+        Page<DailyRanking> page = rankingCacheService.getRankingPage(latest, nickname, pageable);
         
         // 3. 전체 유저 수 조회 (퍼센트 계산용)
-        long totalCount = rankingCacheService.getTotalCount(latestDate);
+        long totalCount = rankingCacheService.getTotalCount(latest);
 
         // 4. 현재 요청한 유저의 개인 랭킹 정보 조회 (로그인 시에만)
         RankingResponseDto.RankingDto myRankingDto = null;
         if (userId != null) {
-            myRankingDto = rankingCacheService.getUserRanking(latestDate, userId)
+            myRankingDto = rankingCacheService.getUserRanking(latest, userId)
                     .map(r -> RankingResponseDto.RankingDto.from(r, totalCount))
                     .orElse(null);
         }

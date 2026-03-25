@@ -8,6 +8,7 @@ import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Getter
 @Builder
@@ -22,12 +23,12 @@ public class RankingResponseDto {
         private Long rank;
         private String nickname;
         private BigDecimal roi;
-        private LocalDate rankDate;
+        private LocalDateTime rankDateTime;
         private Double percentile;
 
         public static RankingDto from(DailyRanking dailyRanking, long totalCount) {
             double calcPercentile = totalCount > 0 
-                ? (double) dailyRanking.getRankOrder() / totalCount * 100 
+                ? Math.min((double) dailyRanking.getRankOrder() / totalCount * 100, 100.0)
                 : 0.0;
             
             return RankingDto.builder()
@@ -35,7 +36,7 @@ public class RankingResponseDto {
                     .rank(dailyRanking.getRankOrder())
                     .nickname(dailyRanking.getNickname())
                     .roi(dailyRanking.getRoi())
-                    .rankDate(dailyRanking.getRankDate())
+                    .rankDateTime(dailyRanking.getRankDateTime())
                     .percentile(Math.round(calcPercentile * 10.0) / 10.0) // 소수점 첫째자리 반올림
                     .build();
         }

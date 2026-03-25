@@ -1,5 +1,7 @@
 import { useEffect, useState, memo } from "react";
 import { rankingApi } from "../api/ranking";
+import { format, parseISO } from "date-fns";
+import { ko } from "date-fns/locale";
 import type { RankingSnapshotResponse } from "../api/ranking";
 import { useAuthStore } from "../store/useAuthStore";
 import { ChevronLeft, ChevronRight, Calendar, Search, Trophy } from "lucide-react";
@@ -59,7 +61,12 @@ export default function Ranking() {
     const myRank = data?.myRanking;
     const rankingList = data?.rankings.content || [];
     const totalPages = data?.rankings.totalPages || 0;
-    const latestDate = data?.rankings.content?.[0]?.rankDate || new Date().toISOString().split('T')[0];
+    
+    // 최종 업데이트 시각 포맷팅
+    const latestRaw = data?.rankings.content?.[0]?.rankDateTime;
+    const formattedLatest = latestRaw 
+        ? format(parseISO(latestRaw), "yyyy-MM-dd HH:mm", { locale: ko })
+        : "-";
 
     const handlePageChange = (targetPage: number) => {
         fetchRankings(targetPage, searchQuery);
@@ -116,7 +123,7 @@ export default function Ranking() {
                     <div className="flex items-end justify-between px-1">
                         <div className="flex items-center gap-1.5 text-[13px] text-[#99a1af] font-bold pb-1">
                             <Calendar className="w-3.5 h-3.5" />
-                            {latestDate} 기준
+                            {formattedLatest} 기준
                         </div>
 
                         <SearchBar onSearch={setSearchQuery} />
