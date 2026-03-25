@@ -11,19 +11,14 @@ export function WatchlistSection() {
     const navigate = useNavigate();
     const isLoggedIn = useAuthStore(state => state.isLoggedIn);
     const { watchlist, fetchWatchlist } = useStockStore();
-    const { stocks: stocksMap, connectMarketStream, disconnectMarketStream } = useMarketStore();
+    const { stocks: stocksMap, connectMarketStream } = useMarketStore();
 
     useEffect(() => {
         if (isLoggedIn) {
             fetchWatchlist();
-            // 전역 시세 스트림 연결 (다른 페이지에서도 주가가 보이도록)
             connectMarketStream();
         }
 
-        // 컴포넌트 언마운트 시 연결 해제 (메모리 누수 방지)
-        // 주의: 메인 페이지에서도 이 스트림을 쓰므로, 사이드바가 닫힐 때 해제할지 결정 필요.
-        // 여기서는 사이드바가 항상 레이아웃에 포함되어 있다고 가정함.
-        // return () => disconnectMarketStream(); 
     }, [isLoggedIn, fetchWatchlist, connectMarketStream]);
 
     // 관심 종목 리스트 생성 (마켓 스토어의 실시간 데이터 결합)
