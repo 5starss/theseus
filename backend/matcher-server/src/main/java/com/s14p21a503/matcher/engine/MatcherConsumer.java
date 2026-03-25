@@ -69,6 +69,10 @@ public class MatcherConsumer {
                 JournaledEvent journaledEvent = queueManager.takeOrder(ticker);
                 Object event = journaledEvent.getEvent();
                 long cmdSeqNo = journaledEvent.getSeqNo();
+                long startTime = System.currentTimeMillis();
+                
+                log.info("[{}] [DEQUEUE] 이벤트 처리 시작 - Seq: {}, Type: {}", 
+                        ticker, cmdSeqNo, event.getClass().getSimpleName());
                 
                 PendingOrderManager orderManager = orderManagerHolder.getManager(ticker);
                 UnifiedJournaler journaler = journalService.getJournaler(ticker);
@@ -147,6 +151,9 @@ public class MatcherConsumer {
                     // 제어 이벤트 처리가 완료되었음을 저널에 기록
                     journaler.write(JournalType.COMMIT, cmdSeqNo, null);
                 }
+
+                long duration = System.currentTimeMillis() - startTime;
+                log.info("[{}] [PROCESS_END] 이벤트 처리 완료 - Seq: {}, Duration: {}ms", ticker, cmdSeqNo, duration);
 
                 // 3. [Snapshot] 주기적으로 덤프를 생성하여 장애 복구 시 리플레이 시간을 단축합니다.
                 long currentCount = processedCountMap.getOrDefault(ticker, 0L) + 1;

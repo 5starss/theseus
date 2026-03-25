@@ -107,6 +107,7 @@ public class MatcherKafkaPublisher {
             ExecutionResult result = null;
             try {
                 result = queue.take();
+                log.info("[{}] [OUT_DEQUEUE] 결과 발행 워커가 이벤트를 꺼냄 - executionId: {}", ticker, result.getExecutionId());
                 sendWithRetry(result);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
