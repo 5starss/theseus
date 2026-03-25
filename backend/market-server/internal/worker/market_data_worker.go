@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"market-server/internal/metrics"
 	"market-server/pkg/kafka"
 	"market-server/pkg/kis"
 
@@ -67,8 +68,7 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 		switch dataType {
 		case "tick":
 			tick := parsedData.(Tick)
-			log.Printf("[KIS TICK #%d] Worker=%d ticker=%s name=%s price=%.0f rate=%.2f%% vol=%d",
-				msgCount, id, tick.Ticker, tick.Name, tick.CurrentPrice, tick.ChangeRate, tick.AccVolume)
+			metrics.TickMessagesProcessed.Inc()
 			// Kafka 푸시 (Ticker를 파티션 Key로 사용)
 			w.kafka.PublishTick(context.Background(), tick, tick.Ticker) // worker graceful shutdown 독립 실행 위해 Background
 			// Redis 반영
@@ -76,8 +76,7 @@ func (w *MarketDataWorker) processLoop(ctx context.Context, id int) {
 
 		case "orderbook":
 			ob := parsedData.(Orderbook)
-			log.Printf("[KIS ORDERBOOK #%d] Worker=%d ticker=%s name=%s ask=%.0f bid=%.0f",
-				msgCount, id, ob.Ticker, ob.Name, ob.AskPrice1, ob.BidPrice1)
+			metrics.OrderbookMessagesProcessed.Inc()
 			w.kafka.PublishOrderbook(context.Background(), ob, ob.Ticker)
 			w.updateOrderbookToRedis(context.Background(), ob)
 		}

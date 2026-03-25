@@ -1,0 +1,48 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # 1. 서버 인프라 (Node Exporter)
+  - job_name: 'prod-server-node'
+    static_configs:
+      - targets: ['host.docker.internal:8100']
+
+  # 2. Redis Exporter
+  - job_name: 'prod-elasticache-redis'
+    static_configs:
+      - targets: ['host.docker.internal:8121']
+
+  # 3. MySQL Exporter
+  - job_name: 'prod-rds-mysql'
+    static_configs:
+      - targets: ['host.docker.internal:8104']
+
+  # 4. Kafka Exporter
+  - job_name: 'prod-kafka'
+    static_configs:
+      - targets: ['host.docker.internal:8308']
+
+  # 5. Spring Boot Server - Core API
+  - job_name: 'prod-core-api-server'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8081']
+
+  # 6. Spring Boot Server - Matcher
+  - job_name: 'prod-matcher-server'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8082']
+
+  # 7. Spring Boot Server - API Gateway
+  - job_name: 'prod-api-gateway'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+
+  # 8. Go - Market Server
+  - job_name: 'prod-market-server'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8085']

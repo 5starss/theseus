@@ -28,7 +28,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, metrics
+        include: health, metrics, prometheus
 
 jwt:
   private-key-path: ${JWT_PRIVATE_KEY_PATH:classpath:keys/private_key.pem}
