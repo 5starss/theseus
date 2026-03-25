@@ -74,7 +74,8 @@ public class MatcherKafkaListener {
             return;
         }
 
-        log.info("주문 요청 수신: {} (Partition: {}, Offset: {})", orderRequest, partition, offset);
+        log.info("[{}] [RECV] 주문 요청 수신 - OrderId: {}, Action: {}, Partition: {}, Offset: {}", 
+                orderRequest.getTicker(), orderRequest.getOrderId(), orderRequest.getAction(), partition, offset);
         
         try {
             String ticker = orderRequest.getTicker();
@@ -92,11 +93,10 @@ public class MatcherKafkaListener {
             UnifiedJournaler.JournalOutcome outcome = journalService.getJournaler(ticker)
                     .write(JournalType.CMD, 0, partition, offset, JournalSerializer.serialize(orderRequest));
             
-            // [최적화] 시퀀스 번호만 나오면 바로 엔진 루프에 넣음 (전용 Executor에서 순서 보장)
             outcome.whenAssigned().thenAcceptAsync(seqNo -> {
                 queueManager.enqueue(ticker, seqNo, orderRequest);
                 matcherConsumer.ensureConsumerStarted(ticker);
-                log.debug("엔진 파이프라인 시작 - Seq: {}", seqNo);
+                log.info("[{}] [ENQUEUE] 엔진 큐 적재 완료 - Seq: {}, OrderId: {}", ticker, seqNo, orderRequest.getOrderId());
             }, tickerExecutor);
 
             // [안전성] 디스크 기록(Flush)까지 완료되어야 카프카에게 오프셋 커밋(Ack)

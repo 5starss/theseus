@@ -19,14 +19,14 @@ public class PendingOrderManager {
     private final String ticker;
     private final ExecutionIdGenerator executionIdGenerator;
 
-    // 가격 우선(TreeMap) 및 시간 우선(Queue) 보장을 위한 자료구조
+    // 가격 우선(TreeMap) 및 시간 우선(Custom OrderList) 보장을 위한 자료구조
     // 매수(Bid): 높은 가격이 우선이므로 내림차순 정렬
-    private final TreeMap<BigDecimal, Queue<OrderRequest>> pendingBids = new TreeMap<>(Collections.reverseOrder());
+    private final TreeMap<BigDecimal, OrderList> pendingBids = new TreeMap<>(Collections.reverseOrder());
     // 매도(Ask): 낮은 가격이 우선이므로 오름차순 정렬 (기본값)
-    private final TreeMap<BigDecimal, Queue<OrderRequest>> pendingAsks = new TreeMap<>();
+    private final TreeMap<BigDecimal, OrderList> pendingAsks = new TreeMap<>();
 
-    // 빠른 주문 취소를 위한 참조용 캐시 (O(1) 탐색용)
-    private final Map<Long, OrderRequest> orderCache = new HashMap<>();
+    // 빠른 주문 취소를 위한 참조용 캐시 (완벽한 O(1) 삭제를 위해 Node를 저장)
+    private final Map<Long, OrderNode> orderCache = new HashMap<>();
 
     // 현재 시장 1호가 캐싱
     private BigDecimal currentBestBid;
@@ -65,11 +65,16 @@ public class PendingOrderManager {
             }
 
             if (order.getOrderType() == OrderType.BUY) {
-                pendingBids.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
+                OrderList list = pendingBids.computeIfAbsent(order.getPrice(), k -> new OrderList());
+                OrderNode node = new OrderNode(order, list);
+                list.add(node);
+                orderCache.put(order.getOrderId(), node);
             } else if (order.getOrderType() == OrderType.SELL) {
-                pendingAsks.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).add(order);
+                OrderList list = pendingAsks.computeIfAbsent(order.getPrice(), k -> new OrderList());
+                OrderNode node = new OrderNode(order, list);
+                list.add(node);
+                orderCache.put(order.getOrderId(), node);
             }
-            orderCache.put(order.getOrderId(), order);
 
             return new ArrayList<>(); // 즉시 체결은 틱이 올 때 수행됨
         } finally {
@@ -132,19 +137,19 @@ public class PendingOrderManager {
             // 1. 대기 매수 주문 검사 (매수 주문 vs 시장 매도 틱)
             // 매수 조건: bestAsk <= limitPrice
             if (this.currentBestAsk != null) {
-                Iterator<Map.Entry<BigDecimal, Queue<OrderRequest>>> bidIterator = pendingBids.entrySet().iterator();
+                Iterator<Map.Entry<BigDecimal, OrderList>> bidIterator = pendingBids.entrySet().iterator();
                 int fillIndex = 0;
                 while (bidIterator.hasNext() && usableLiquidity > 0) {
-                    Map.Entry<BigDecimal, Queue<OrderRequest>> entry = bidIterator.next();
+                    Map.Entry<BigDecimal, OrderList> entry = bidIterator.next();
                     BigDecimal limitPrice = entry.getKey();
-                    Queue<OrderRequest> queue = entry.getValue();
+                    OrderList list = entry.getValue();
 
                     // 조건: 최우선 매도호가(bestAsk)가 내 지정가(limitPrice)보다 높으면 살 수 없음
                     if (this.currentBestAsk.compareTo(limitPrice) > 0) {
                         break;
                     }
 
-                    Iterator<OrderRequest> queueIterator = queue.iterator();
+                    Iterator<OrderRequest> queueIterator = list.iterator();
                     while (queueIterator.hasNext() && usableLiquidity > 0) {
                         OrderRequest bid = queueIterator.next();
                         
@@ -166,7 +171,7 @@ public class PendingOrderManager {
                             }
                         }
                     }
-                    if (queue.isEmpty()) {
+                    if (list.isEmpty()) {
                         bidIterator.remove();
                     }
                 }
@@ -179,19 +184,19 @@ public class PendingOrderManager {
             // 2. 대기 매도 주문 검사 (매도 주문 vs 시장 매수 틱)
             // 매도 조건: bestBid >= limitPrice
             if (this.currentBestBid != null) {
-                Iterator<Map.Entry<BigDecimal, Queue<OrderRequest>>> askIterator = pendingAsks.entrySet().iterator();
+                Iterator<Map.Entry<BigDecimal, OrderList>> askIterator = pendingAsks.entrySet().iterator();
                 int fillIndex = 0;
                 while (askIterator.hasNext() && usableLiquidity > 0) {
-                    Map.Entry<BigDecimal, Queue<OrderRequest>> entry = askIterator.next();
+                    Map.Entry<BigDecimal, OrderList> entry = askIterator.next();
                     BigDecimal limitPrice = entry.getKey();
-                    Queue<OrderRequest> queue = entry.getValue();
+                    OrderList list = entry.getValue();
 
                     // 조건: 최우선 매수호가(bestBid)가 내 지정가(limitPrice)보다 낮으면 팔 수 없음
                     if (this.currentBestBid.compareTo(limitPrice) < 0) {
                         break;
                     }
 
-                    Iterator<OrderRequest> queueIterator = queue.iterator();
+                    Iterator<OrderRequest> queueIterator = list.iterator();
                     while (queueIterator.hasNext() && usableLiquidity > 0) {
                         OrderRequest ask = queueIterator.next();
 
@@ -213,7 +218,7 @@ public class PendingOrderManager {
                             }
                         }
                     }
-                    if (queue.isEmpty()) {
+                    if (list.isEmpty()) {
                         askIterator.remove();
                     }
                 }
@@ -262,36 +267,33 @@ public class PendingOrderManager {
     public ExecutionResult cancelOrder(Long orderId, long currentSeqNo) {
         lock.lock();
         try {
-            // 1. 캐시에서 먼저 제거 시도
-            OrderRequest orderToCancel = orderCache.remove(orderId);
-            if (orderToCancel == null) {
+            // 1. 캐시에서 먼저 제거 시도 (Node를 직접 가져옴)
+            OrderNode nodeToCancel = orderCache.remove(orderId);
+            if (nodeToCancel == null) {
                 log.debug("[{}] 취소 실패: 대기열에 없는 주문입니다 (OrderID: {})", ticker, orderId);
                 return null;
             }
 
+            OrderRequest orderToCancel = nodeToCancel.order;
             BigDecimal price = orderToCancel.getPrice();
-            Queue<OrderRequest> queue = (orderToCancel.getOrderType() == OrderType.BUY) 
-                    ? pendingBids.get(price) 
-                    : pendingAsks.get(price);
+            OrderList list = nodeToCancel.list;
 
-            // 2. 큐에서 제거 시도
-            if (queue != null && queue.remove(orderToCancel)) {
-                // 제거 성공 시: 큐가 비었다면 트리맵에서도 제거
-                if (queue.isEmpty()) {
-                    if (orderToCancel.getOrderType() == OrderType.BUY) pendingBids.remove(price);
-                    else pendingAsks.remove(price);
+            // 2. 노드 기반 직접 삭제 (O(1))
+            nodeToCancel.remove();
+
+            // 리스트가 비었다면 트리맵에서도 제거
+            if (list.isEmpty()) {
+                if (orderToCancel.getOrderType() == OrderType.BUY) {
+                    pendingBids.remove(price);
+                } else {
+                    pendingAsks.remove(price);
                 }
-                
-                // 실제 취소 시점의 잔량(remainingQuantity)을 결과에 실어서 반환
-                long cancelledQty = orderToCancel.getRemainingQuantity();
-                log.info("[{}] 주문 취소 완료 (OrderID: {}, 취소수량: {})", ticker, orderId, cancelledQty);
-                return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, currentSeqNo, 0);
-            } else {
-                // 3. 큐에서 제거 실패 시: 캐시 복구 (Rollback) 및 거절(REJECTED) 응답 반환
-                orderCache.put(orderId, orderToCancel);
-                log.warn("[{}] 취소 거절: 캐시에는 있으나 큐에서 주문을 찾지 못함. 캐시를 복구하고 거절 응답을 보냅니다 (OrderID: {})", ticker, orderId);
-                return createExecutionResult(orderToCancel, EventType.CANCEL_REJECTED, null, 0L, currentSeqNo, 0);
             }
+            
+            // 실제 취소 시점의 잔량(remainingQuantity)을 결과에 실어서 반환
+            long cancelledQty = orderToCancel.getRemainingQuantity();
+            log.info("[{}] 주문 취소 완료 (OrderID: {}, 취소수량: {})", ticker, orderId, cancelledQty);
+            return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, currentSeqNo, 0);
         } finally {
             lock.unlock();
         }
@@ -304,12 +306,13 @@ public class PendingOrderManager {
     public void applyExecutionResult(ExecutionResult res) {
         lock.lock();
         try {
-            OrderRequest order = orderCache.get(res.getOrderId());
-            if (order == null) {
+            OrderNode node = orderCache.get(res.getOrderId());
+            if (node == null) {
                 log.warn("[{}] 복구 중 결과를 적용할 주문을 찾지 못함 (OrderID: {})", ticker, res.getOrderId());
                 return;
             }
 
+            OrderRequest order = node.order;
             // 잔량 차감
             long currentQty = order.getRemainingQuantity();
             long executedQty = res.getMatchQuantity();
@@ -318,19 +321,11 @@ public class PendingOrderManager {
             // 잔량이 0이면 오더북에서 제거
             if (order.getRemainingQuantity() == 0) {
                 orderCache.remove(order.getOrderId());
-                BigDecimal price = order.getPrice();
-                if (order.getOrderType() == OrderType.BUY) {
-                    Queue<OrderRequest> queue = pendingBids.get(price);
-                    if (queue != null) {
-                        queue.remove(order);
-                        if (queue.isEmpty()) pendingBids.remove(price);
-                    }
-                } else {
-                    Queue<OrderRequest> queue = pendingAsks.get(price);
-                    if (queue != null) {
-                        queue.remove(order);
-                        if (queue.isEmpty()) pendingAsks.remove(price);
-                    }
+                OrderList list = node.list;
+                node.remove();
+                if (list.isEmpty()) {
+                    pendingBids.remove(order.getPrice());
+                    pendingAsks.remove(order.getPrice()); // 어차피 해당 가격대의 리스트이므로 둘 다 시도(한 쪽만 존재함)
                 }
             }
         } finally {
@@ -344,10 +339,28 @@ public class PendingOrderManager {
     public SnapshotState.SnapshotStateBuilder fillSnapshotBuilder(SnapshotState.SnapshotStateBuilder builder) {
         lock.lock();
         try {
+            // 스냅샷용으로는 평탄화된 데이터 구조 반환
+            Map<Long, OrderRequest> flatCache = new HashMap<>();
+            orderCache.forEach((id, node) -> flatCache.put(id, node.order));
+
+            TreeMap<BigDecimal, Queue<OrderRequest>> flatBids = new TreeMap<>(Collections.reverseOrder());
+            pendingBids.forEach((price, list) -> {
+                Queue<OrderRequest> queue = new LinkedList<>();
+                list.forEach(queue::add);
+                flatBids.put(price, queue);
+            });
+
+            TreeMap<BigDecimal, Queue<OrderRequest>> flatAsks = new TreeMap<>();
+            pendingAsks.forEach((price, list) -> {
+                Queue<OrderRequest> queue = new LinkedList<>();
+                list.forEach(queue::add);
+                flatAsks.put(price, queue);
+            });
+
             return builder
-                    .pendingBids(new TreeMap<>(pendingBids))
-                    .pendingAsks(new TreeMap<>(pendingAsks))
-                    .orderCache(new HashMap<>(orderCache))
+                    .pendingBids(flatBids)
+                    .pendingAsks(flatAsks)
+                    .orderCache(flatCache)
                     .currentBestBid(currentBestBid)
                     .currentBestAsk(currentBestAsk)
                     .liquidityRemainder(liquidityRemainder);
@@ -363,11 +376,26 @@ public class PendingOrderManager {
         lock.lock();
         try {
             this.pendingBids.clear();
-            this.pendingBids.putAll(state.getPendingBids());
+            state.getPendingBids().forEach((price, queue) -> {
+                OrderList list = pendingBids.computeIfAbsent(price, k -> new OrderList());
+                queue.forEach(order -> {
+                    OrderNode node = new OrderNode(order, list);
+                    list.add(node);
+                    orderCache.put(order.getOrderId(), node);
+                });
+            });
+
             this.pendingAsks.clear();
-            this.pendingAsks.putAll(state.getPendingAsks());
-            this.orderCache.clear();
-            this.orderCache.putAll(state.getOrderCache());
+            state.getPendingAsks().forEach((price, queue) -> {
+                OrderList list = pendingAsks.computeIfAbsent(price, k -> new OrderList());
+                queue.forEach(order -> {
+                    OrderNode node = new OrderNode(order, list);
+                    list.add(node);
+                    orderCache.put(order.getOrderId(), node);
+                });
+            });
+
+            // orderCache는 앞서 구성됨
             this.currentBestBid = state.getCurrentBestBid();
             this.currentBestAsk = state.getCurrentBestAsk();
             this.liquidityRemainder = state.getLiquidityRemainder() != null ? state.getLiquidityRemainder() : BigDecimal.ZERO;
@@ -388,8 +416,8 @@ public class PendingOrderManager {
             int fillIndex = 0;
 
             // orderCache에 있는 모든 주문을 순회하며 취소 결과 생성
-            for (OrderRequest order : orderCache.values()) {
-                cancelResults.add(createExecutionResult(order, EventType.CANCELLED, null, 0L, currentSeqNo, fillIndex++));
+            for (OrderNode node : orderCache.values()) {
+                cancelResults.add(createExecutionResult(node.order, EventType.CANCELLED, null, 0L, currentSeqNo, fillIndex++));
             }
 
             // 모든 자료구조 초기화
@@ -422,5 +450,80 @@ public class PendingOrderManager {
                 .matchQuantity(fillQty)
                 .executedAt(LocalDateTime.now())
                 .build();
+    }
+
+    // ==========================================================
+    // [최적화용 내부 클래스: O(1) 삭제가 가능한 이중 연결 리스트]
+    // ==========================================================
+    private static class OrderNode {
+        final OrderRequest order;
+        OrderNode prev;
+        OrderNode next;
+        OrderList list;
+
+        OrderNode(OrderRequest order, OrderList list) {
+            this.order = order;
+            this.list = list;
+        }
+
+        void remove() {
+            if (list == null) return;
+            if (prev != null) prev.next = next;
+            if (next != null) next.prev = prev;
+            if (list.head == this) list.head = next;
+            if (list.tail == this) list.tail = prev;
+            list.size--;
+            this.prev = null;
+            this.next = null;
+            this.list = null;
+        }
+    }
+
+    private static class OrderList implements Iterable<OrderRequest> {
+        OrderNode head;
+        OrderNode tail;
+        int size = 0;
+
+        void add(OrderNode node) {
+            if (tail == null) {
+                head = tail = node;
+            } else {
+                tail.next = node;
+                node.prev = tail;
+                tail = node;
+            }
+            size++;
+        }
+
+        boolean isEmpty() {
+            return size == 0;
+        }
+
+        @Override
+        public Iterator<OrderRequest> iterator() {
+            return new Iterator<>() {
+                private OrderNode current = head;
+                private OrderNode lastReturned = null;
+
+                @Override
+                public boolean hasNext() {
+                    return current != null;
+                }
+
+                @Override
+                public OrderRequest next() {
+                    lastReturned = current;
+                    current = current.next;
+                    return lastReturned.order;
+                }
+
+                @Override
+                public void remove() {
+                    if (lastReturned == null) throw new IllegalStateException();
+                    lastReturned.remove();
+                    lastReturned = null;
+                }
+            };
+        }
     }
 }
