@@ -13,6 +13,7 @@ import (
 
 	"market-server/internal/config"
 	"market-server/internal/handler"
+	"market-server/internal/metrics"
 	"market-server/internal/repository"
 	"market-server/internal/service"
 	"market-server/internal/worker"
@@ -23,6 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -116,6 +118,10 @@ func main() {
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "UP", "server": "market-server (Go)"})
 	})
+
+	// Prometheus 메트릭 엔드포인트
+	_ = metrics.TickMessagesProcessed // metrics 패키지 초기화 보장
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	stockHandler := handler.NewStockHandler(stockSvc)
 	r.GET("/api/v1/stocks", stockHandler.GetStockList)

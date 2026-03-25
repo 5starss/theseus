@@ -28,3 +28,9 @@ matcher:
     max-batch-size: ${MATCHER_JOURNAL_MAX_BATCH_SIZE:1000}
   snapshot:
     retention: ${MATCHER_SNAPSHOT_RETENTION:3} # 보관할 스냅샷 개수
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics, prometheus

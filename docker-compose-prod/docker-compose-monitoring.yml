@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8100:9100"
+    networks:
+      - stock-network
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+  mysql-exporter:
+    image: prom/mysqld-exporter:v0.18.0
+    container_name: mysqld_exporter
+    restart: always
+    environment:
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_HOST=${DB_HOST}
+    ports:
+      - "127.0.0.1:8104:9104"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "[client]" > /tmp/my.cnf
+        echo "user=$$MYSQL_USER" >> /tmp/my.cnf
+        echo "password=$$MYSQL_PASSWORD" >> /tmp/my.cnf
+        echo "host=$$MYSQL_HOST" >> /tmp/my.cnf
+        exec /bin/mysqld_exporter --config.my-cnf=/tmp/my.cnf
+    networks:
+      - stock-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - REDIS_ADDR=redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8121:9121"
+    networks:
+      - stock-network
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    restart: unless-stopped
+    command:
+      - '--kafka.server=kafka:29092' # Using the internal kafka network from docker-compose-infra.yml
+    ports:
+      - "127.0.0.1:8308:9308"
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    external: true
+    name: stock-network

@@ -62,3 +62,9 @@ service:
   ai:
     url: http://ai-server:8086 
     api-docs-url: http://ai-server:8086
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics, prometheus
