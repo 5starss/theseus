@@ -4,6 +4,8 @@ import { watchlistApi } from '../api/watchlist';
 import { useSocketStore } from './useSocketStore';
 import { useAuthStore } from './useAuthStore';
 import { toast } from 'sonner';
+import type { Candle, StockStreamMessage } from '../types/stock';
+import type { StockWSMessageEvent } from '../types/common';
 
 // 주식 호가 및 거래 관련 전역 상태 타입
 interface StockState {
@@ -24,7 +26,7 @@ interface StockState {
 
     selectedOrderPrice: number; // 호가창에서 선택한 가격
 
-    candles: any[]; // 캔들 데이터 배열
+    candles: Candle[]; // 캔들 데이터 배열
     candlesLoading: boolean;
 
     // 관심 종목 (Watchlist)
@@ -32,14 +34,14 @@ interface StockState {
     watchlistLoading: boolean;
 
     setStock: (code: string) => void;
-    setCandles: (candles: any[]) => void;
-    appendHistoricalCandles: (historical: any[]) => void;
+    setCandles: (candles: Candle[]) => void;
+    appendHistoricalCandles: (historical: Candle[]) => void;
     setCurrentPrice: (price: number) => void;
     setSelectedOrderPrice: (price: number) => void;
     updateOrderbook: (ask: { price: number; volume: number }, bid: { price: number; volume: number }) => void;
     connectStockStream: (code: string) => void;
     disconnectStockStream: () => void;
-    handleWsMessage: (event: CustomEvent) => void;
+    handleWsMessage: (event: StockWSMessageEvent) => void;
 
     // 관심 종목 액션
     fetchWatchlist: () => Promise<void>;
@@ -166,19 +168,19 @@ export const useStockStore = create<StockState>((set, get) => ({
         }),
 
     // WebSocket 메시지 처리 함수
-    handleWsMessage: (event: any) => {
+    handleWsMessage: (event: StockWSMessageEvent) => {
         const rawData = event.detail;
         if (!rawData) return;
         const code = get().stockCode;
 
         // 백엔드에서 여러 메시지를 \n으로 묶어 보낼 수 있으므로 분리해서 처리
-        const lines = rawData.toString().split('\n');
+        const lines = rawData.split('\n');
 
         for (const line of lines) {
             if (!line.trim()) continue;
 
             try {
-                const data = JSON.parse(line);
+                const data: StockStreamMessage = JSON.parse(line);
 
                 if (data.topic === "TICK" && data.data && data.data.ticker === code) {
                     const tickData = data.data;
@@ -265,7 +267,7 @@ export const useStockStore = create<StockState>((set, get) => ({
         useSocketStore.getState().subscribe('ORDERBOOK', code);
 
         // 3. 핸들러 등록
-        window.addEventListener('ws-message' as any, get().handleWsMessage);
+        window.addEventListener('ws-message', get().handleWsMessage);
     },
 
     // 주식 스트림 연결 해제
@@ -273,7 +275,7 @@ export const useStockStore = create<StockState>((set, get) => ({
         const code = get().stockCode;
         useSocketStore.getState().unsubscribe('TICK', code);
         useSocketStore.getState().unsubscribe('ORDERBOOK', code);
-        window.removeEventListener('ws-message' as any, get().handleWsMessage);
+        window.removeEventListener('ws-message', get().handleWsMessage);
     },
 
     // 관심종목 목록 조회

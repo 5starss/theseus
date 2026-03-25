@@ -98,7 +98,7 @@ export const orderApi = {
         account_type?: AccountType;
     }): Promise<void> => {
         try {
-            const response = await api.post<ApiResponse<any>>('/api/v1/core/orders', {
+            const response = await api.post<ApiResponse<void>>('/api/v1/core/orders', {
                 account_type: 'USER', // 기본값
                 ...data
             });

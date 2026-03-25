@@ -16,11 +16,11 @@ import {
 } from "lightweight-charts";
 import { useStockStore } from "../../store/useStockStore";
 import { stockApi } from "../../api/stock";
-
+import type { Candle } from "../../types/stock";
 import type { TimeframeType } from '../../pages/StockDashboard';
 
 interface ExtendedCandle extends CandlestickData<Time> {
-    volume?: number;
+    volume: number;
 }
 
 // 로컬 시간 기준 YYYY-MM-DDTHH:mm:ss 포맷 생성
@@ -30,7 +30,7 @@ const toLocalISOString = (date: Date) => {
 };
 
 // 캔들 데이터 정제 유틸리티
-const processCandleData = (history: any[]): { candles: ExtendedCandle[], volumes: HistogramData<Time>[] } => {
+const processCandleData = (history: { timestamp: string | number; open: number; high: number; low: number; close: number; volume?: number; tradeVolume?: number }[]): { candles: ExtendedCandle[], volumes: HistogramData<Time>[] } => {
     if (!history || !Array.isArray(history)) return { candles: [], volumes: [] };
 
     const cleaned: ExtendedCandle[] = history
@@ -377,17 +377,21 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
             try {
                 candlestickSeriesRef.current.setData(candles);
 
-                const volumeData = candles.map((c: any, i: number) => {
+                const volumeData: HistogramData<Time>[] = candles.map((c, i) => {
                     const prevClose = i > 0 ? candles[i - 1].close : c.open;
-                    return { time: c.time, value: c.volume || 0, color: c.close >= prevClose ? "#fb2c36" : "#2b7fff" };
+                    return { 
+                        time: c.time, 
+                        value: c.volume, 
+                        color: c.close >= prevClose ? "#fb2c36" : "#2b7fff" 
+                    };
                 });
                 volumeSeriesRef.current.setData(volumeData);
 
                 [5, 20, 60].forEach(p => {
-                    const data = calculateMA(candles, p);
+                    const data = calculateMA(candles as unknown as ExtendedCandle[], p);
                     if (maSeriesRefs.current[`ma${p}`]) maSeriesRefs.current[`ma${p}`].setData(data);
                 });
-                lastCandleRef.current = { ...candles[candles.length - 1] };
+                lastCandleRef.current = candles[candles.length - 1] as unknown as ExtendedCandle;
             } catch (e) { console.error("[Chart] setData error:", e); }
         }
     }, [candles]);
@@ -434,17 +438,17 @@ export const StockChart = memo(function StockChart({ timeframe }: { timeframe: T
             lastCandleRef.current = updated;
             candlestickSeriesRef.current.update(updated);
             if (volumeSeriesRef.current) {
-                const prevClose = updated.time === (lastTimeSec as any) ? (candlesRef.current.slice(-2)[0]?.close || updated.open) : lastCandleRef.current.close;
+                const prevClose = updated.time === lastTimeSec ? (candlesRef.current.slice(-2)[0]?.close || updated.open) : lastCandleRef.current.close;
                 volumeSeriesRef.current.update({
                     time: updated.time,
-                    value: updated.volume || 0,
+                    value: updated.volume,
                     color: updated.close >= prevClose ? "#fb2c36" : "#2b7fff"
                 });
             }
 
             const curCandles = [...candlesRef.current];
-            if (curCandles.length > 0 && (curCandles[curCandles.length - 1].time as number) === currentBucketTimeNum) curCandles[curCandles.length - 1] = updated;
-            else curCandles.push(updated);
+            if (curCandles.length > 0 && (curCandles[curCandles.length - 1].time as number) === currentBucketTimeNum) curCandles[curCandles.length - 1] = updated as unknown as Candle;
+            else curCandles.push(updated as unknown as Candle);
 
             [5, 20, 60].forEach(p => {
                 if (curCandles.length >= p) {

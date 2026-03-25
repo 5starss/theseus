@@ -1,15 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { StockHeader } from "../components/stock/StockHeader";
 import { Orderbook } from "../components/stock/Orderbook";
-import { OrderPanel, MyStockInfo, MyOrderHistory } from "../components/stock/TradePanels";
+import { OrderPanel, MyStockInfo, MyOrderHistory } from "../components/stock/trade";
 import { StockChart } from "../components/stock/StockChart";
 import { useStockStore } from "../store/useStockStore";
 import { useAccountStore } from "../store/useAccountStore";
 import { useAuthStore } from "../store/useAuthStore";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
-
 
 export type TimeframeType = '1m' | '1h' | '1d' | '1w';
 

@@ -110,7 +110,11 @@ export default function LoginPage() {
 
                     {/* 비밀번호 찾기 링크 */}
                     <div className="flex justify-start mb-[32px]">
-                        <Button variant="ghost" type="button" className="text-[14px] font-medium text-[#155dfc] hover:text-[#124bc9] hover:bg-transparent px-0 h-auto transition-colors">
+                        <Button
+                            variant="link"
+                            type="button"
+                            className="text-[14px] font-medium text-[#155dfc] hover:text-[#124bc9] hover:bg-transparent px-0 h-auto transition-colors"
+                            onClick={() => navigate("/signup")}>
                             비밀번호를 잊으셨나요?
                         </Button>
                     </div>

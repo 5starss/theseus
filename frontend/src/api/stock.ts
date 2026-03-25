@@ -99,7 +99,7 @@ export const stockApi = {
             } else {
                 return generateDummyStocks(limit);
             }
-        } catch (error) {
+        } catch (_error) {
             console.warn("Backend is not available for stocks list. Using dummy data.");
             return generateDummyStocks(limit);
         }
@@ -138,7 +138,7 @@ export const stockApi = {
             } else {
                 return generateDummyCandles(ticker, interval, limit, endTime);
             }
-        } catch (error) {
+        } catch (_error) {
             console.warn(`Backend is not available for candles [${ticker}]. Using dummy data.`);
             return generateDummyCandles(ticker, interval, limit, endTime);
         }
@@ -155,7 +155,7 @@ export const stockApi = {
             } else {
                 return generateDummyOrderbook(ticker);
             }
-        } catch (error) {
+        } catch (_error) {
             console.warn(`Backend is not available for orderbook [${ticker}]. Using dummy data.`);
             return generateDummyOrderbook(ticker);
         }
@@ -170,7 +170,7 @@ export const stockApi = {
                 return response.data.result;
             }
             return null;
-        } catch (error) {
+        } catch (_error) {
             console.warn(`Backend is not available for tick snapshot [${ticker}].`);
             return null;
         }
