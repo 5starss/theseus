@@ -8,6 +8,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from app.trading.account_service import cap_buy_quantity
+
 load_dotenv()
 KST = timezone(timedelta(hours=9))
 
@@ -125,6 +127,17 @@ analysis_context, cross_validation, signal_weights 같은 부가 필드는 출�
         if action == "hold":
             quantity = 0
             price = 0
+        elif action == "buy":
+            effective_price = max(0, price or _safe_int(payload.get("current_price", 0)))
+            if effective_price > 0:
+                quantity, _ = cap_buy_quantity(
+                    requested_qty=quantity,
+                    available_cash=_safe_int(payload.get("available_cash", 0)),
+                    current_holding=payload.get("current_holding") or {},
+                    effective_price=effective_price,
+                    user_investment_style=str(payload.get("user_investment_style") or "GROWTH"),
+                    signal_confidence=((payload.get("quant_state_summary") or {}).get("risk_context") or {}).get("signal_confidence"),
+                )
         card["order"] = {
             "action": action,
             "order_type": order_type,

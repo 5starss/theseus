@@ -35,6 +35,40 @@ def _confidence_multiplier(signal_confidence: Any) -> float:
     return 1.0
 
 
+def cap_buy_quantity(
+    *,
+    requested_qty: int,
+    available_cash: int,
+    current_holding: Dict[str, Any],
+    effective_price: int,
+    user_investment_style: str = "GROWTH",
+    signal_confidence: Any = None,
+) -> tuple[int, Dict[str, Any]]:
+    order_ratio, position_ratio = _position_sizing_policy(user_investment_style)
+    confidence_ratio = _confidence_multiplier(signal_confidence)
+    current_quantity = int(current_holding.get("quantity") or 0)
+    total_asset_value = available_cash + current_quantity * effective_price
+    current_position_value = current_quantity * effective_price
+    order_budget = int(available_cash * order_ratio * confidence_ratio)
+    position_budget = max(0, int(total_asset_value * position_ratio) - current_position_value)
+    max_qty_by_cash = available_cash // effective_price if effective_price > 0 else 0
+    max_qty_by_order_budget = order_budget // effective_price if effective_price > 0 else 0
+    max_qty_by_position_budget = position_budget // effective_price if effective_price > 0 else 0
+    max_qty = min(max_qty_by_cash, max_qty_by_order_budget, max_qty_by_position_budget)
+    capped_qty = min(max(0, requested_qty), max(0, max_qty))
+    return capped_qty, {
+        "order_ratio": order_ratio,
+        "position_ratio": position_ratio,
+        "confidence_ratio": confidence_ratio,
+        "order_budget": order_budget,
+        "position_budget": position_budget,
+        "max_qty_by_cash": max_qty_by_cash,
+        "max_qty_by_order_budget": max_qty_by_order_budget,
+        "max_qty_by_position_budget": max_qty_by_position_budget,
+        "max_qty": max_qty,
+    }
+
+
 def extract_holding_from_snapshot(account_snapshot: Dict[str, Any], ticker: str) -> Dict[str, Any]:
     """
     Account Snapshot에서 특정 종목의 보유 정보를 추출합니다.
@@ -101,34 +135,32 @@ def apply_account_constraints(
         )
 
     if action == "buy":
-        order_ratio, position_ratio = _position_sizing_policy(user_investment_style)
-        confidence_ratio = _confidence_multiplier(signal_confidence)
-        total_asset_value = available_cash + int(current_holding.get("quantity") or 0) * effective_price
-        current_position_value = int(current_holding.get("quantity") or 0) * effective_price
-        order_budget = int(available_cash * order_ratio * confidence_ratio)
-        position_budget = max(0, int(total_asset_value * position_ratio) - current_position_value)
-        max_qty_by_cash = available_cash // effective_price if effective_price > 0 else 0
-        max_qty_by_order_budget = order_budget // effective_price if effective_price > 0 else 0
-        max_qty_by_position_budget = position_budget // effective_price if effective_price > 0 else 0
-        max_qty = min(max_qty_by_cash, max_qty_by_order_budget, max_qty_by_position_budget)
+        adjusted_qty, sizing = cap_buy_quantity(
+            requested_qty=requested_qty,
+            available_cash=available_cash,
+            current_holding=current_holding,
+            effective_price=effective_price,
+            user_investment_style=user_investment_style,
+            signal_confidence=signal_confidence,
+        )
+        max_qty = sizing["max_qty"]
         if max_qty <= 0:
             return _build_hold_order_card(
                 adjusted,
                 (
                     "투자 성향/신호 확신도 기준 주문 가능 한도가 부족해 매수할 수 없습니다. "
                     f"(available_cash={available_cash}, price={effective_price}, "
-                    f"order_ratio={order_ratio}, position_ratio={position_ratio}, confidence_ratio={confidence_ratio})"
+                    f"order_ratio={sizing['order_ratio']}, position_ratio={sizing['position_ratio']}, confidence_ratio={sizing['confidence_ratio']})"
                 ),
                 requested_order,
             )
-        adjusted_qty = min(requested_qty, max_qty)
         adjusted["order"]["price"] = effective_price
         adjusted["order"]["quantity"] = adjusted_qty
         adjusted["adjusted_by_account_state"] = adjusted_qty != requested_qty
         adjusted["adjustment_reason"] = (
             (
                 f"투자 성향({user_investment_style})과 신호 확신도 기준으로 최대 {max_qty}주까지만 매수 가능해 수량을 조정했습니다. "
-                f"(1회 주문 한도={order_budget:,}원, 종목 잔여 한도={position_budget:,}원)"
+                f"(1회 주문 한도={sizing['order_budget']:,}원, 종목 잔여 한도={sizing['position_budget']:,}원)"
             )
             if adjusted_qty != requested_qty else
             "투자 성향 및 신호 확신도 한도 범위 내 주문입니다."
