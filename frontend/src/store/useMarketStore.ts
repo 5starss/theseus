@@ -9,13 +9,18 @@ export interface MarketStock extends Stock {
     rank: number;
 }
 
+interface MarketUpdate {
+    topic: string;
+    data: MarketStock[];
+}
+
 interface MarketState {
     stocks: Record<string, MarketStock>;
     isConnecting: boolean;
     connectMarketStream: () => Promise<void>;
     disconnectMarketStream: () => void;
     // 수신한 데이터를 처리하는 내부 함수
-    handleWsMessage: (event: CustomEvent) => void;
+    handleWsMessage: (event: Event) => void;
 }
 
 // Zustand 스토어 생성
@@ -23,12 +28,13 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     stocks: {},
     isConnecting: false,
 
-    handleWsMessage: (event: any) => {
-        const rawData = event.detail;
+    handleWsMessage: (event: Event) => {
+        const customEvent = event as CustomEvent<string>;
+        const rawData = customEvent.detail;
         if (!rawData) return;
 
         try {
-            const data = JSON.parse(rawData.toString());
+            const data: MarketUpdate = JSON.parse(rawData);
             if (data.topic === 'HOME_40' && Array.isArray(data.data)) {
                 set((state) => {
                     const newStocks = { ...state.stocks };
@@ -57,10 +63,16 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     },
 
     connectMarketStream: async () => {
+        // 이미 연결 중이거나 데이터가 이미 존재한다면 중복 실행 방지
+        if (get().isConnecting || Object.keys(get().stocks).length > 0) {
+            console.log('Market Stream is already active or connecting. Skipping...');
+            return;
+        }
+
         console.log('Connecting Market Stream via Singleton...');
         set({ isConnecting: true });
 
-        // 1. 초기 데이터 가져오기 (백엔드 사양 상향에 맞춰 100개 요청)
+        // 1. 초기 데이터 가져오기
         try {
             const initialStocksList = await stockApi.getTopStocks(100, 'VOLUME');
             const initialStocksMap: Record<string, MarketStock> = {};
@@ -84,12 +96,13 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         useSocketStore.getState().subscribe('HOME_40');
 
         // 3. 메시지 핸들러 등록
-        window.addEventListener('ws-message' as any, get().handleWsMessage);
+        window.removeEventListener('ws-message', get().handleWsMessage); // 중복 등록 방지
+        window.addEventListener('ws-message', get().handleWsMessage);
     },
 
     disconnectMarketStream: () => {
         console.log('Disconnecting Market Stream (Unsubscribe)...');
         useSocketStore.getState().unsubscribe('HOME_40');
-        window.removeEventListener('ws-message' as any, get().handleWsMessage);
+        window.removeEventListener('ws-message', get().handleWsMessage);
     }
 }));
