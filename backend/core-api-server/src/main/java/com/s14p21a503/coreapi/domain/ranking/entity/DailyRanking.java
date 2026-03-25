@@ -7,15 +7,16 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "daily_rankings",
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_daily_rankings_date_user",
-                columnNames = {"rank_date", "user_id"}
+                columnNames = {"rank_date_time", "user_id"}
         ),
         indexes = {
-                @Index(name = "idx_daily_rankings_date_roi", columnList = "rank_date, roi DESC"),
+                @Index(name = "idx_daily_rankings_date_roi", columnList = "rank_date_time, roi DESC"),
                 @Index(name = "idx_daily_rankings_nickname_fts", columnList = "nickname")
         }
 )
@@ -30,8 +31,8 @@ public class DailyRanking extends BaseEntity {
     @Column(name = "daily_ranking_id")
     private Long id;
 
-    @Column(name = "rank_date", nullable = false)
-    private LocalDate rankDate;
+    @Column(name = "rank_date_time", nullable = false)
+    private LocalDateTime rankDateTime;
 
     @Column(name = "user_id", nullable = false)
     private Long userId;

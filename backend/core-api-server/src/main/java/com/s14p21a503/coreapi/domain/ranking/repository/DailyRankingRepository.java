@@ -10,30 +10,31 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Repository
 public interface DailyRankingRepository extends JpaRepository<DailyRanking, Long> {
     
-    Optional<DailyRanking> findTopByOrderByRankDateDesc();
+    Optional<DailyRanking> findTopByOrderByRankDateTimeDesc();
     
-    long countByRankDate(LocalDate rankDate);
+    long countByRankDateTime(LocalDateTime rankDateTime);
 
-    Page<DailyRanking> findAllByRankDateOrderByRankOrderAsc(LocalDate rankDate, Pageable pageable);
+    Page<DailyRanking> findAllByRankDateTimeOrderByRankOrderAsc(LocalDateTime rankDateTime, Pageable pageable);
 
     @Query(nativeQuery = true, 
            value = "SELECT * FROM daily_rankings " +
-                   "WHERE rank_date = :rankDate " +
+                   "WHERE rank_date_time = :rankDateTime " +
                    "AND MATCH(nickname) AGAINST(:nickname IN BOOLEAN MODE) " +
                    "ORDER BY rank_order ASC",
            countQuery = "SELECT count(*) FROM daily_rankings " +
-                        "WHERE rank_date = :rankDate " +
+                        "WHERE rank_date_time = :rankDateTime " +
                         "AND MATCH(nickname) AGAINST(:nickname IN BOOLEAN MODE)")
-    Page<DailyRanking> findAllByRankDateAndNicknameContainingOrderByRankOrderAsc(@Param("rankDate") LocalDate rankDate, @Param("nickname") String nickname, Pageable pageable);
+    Page<DailyRanking> findAllByRankDateTimeAndNicknameContainingOrderByRankOrderAsc(@Param("rankDateTime") LocalDateTime rankDateTime, @Param("nickname") String nickname, Pageable pageable);
 
-    Optional<DailyRanking> findByRankDateAndUserId(LocalDate rankDate, Long userId);
+    Optional<DailyRanking> findByRankDateTimeAndUserId(LocalDateTime rankDateTime, Long userId);
 
     @Modifying(clearAutomatically = true)
-    @Query("DELETE FROM DailyRanking d WHERE d.rankDate = :rankDate")
+    @Query("DELETE FROM DailyRanking d WHERE FUNCTION('DATE', d.rankDateTime) = :rankDate")
     void deleteAllByRankDate(@Param("rankDate") LocalDate rankDate);
 }

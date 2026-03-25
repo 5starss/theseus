@@ -13,10 +13,10 @@ public class RankingScheduler {
 
     private final RankingService rankingService;
 
-    // 매일 자정(00:00:00)에 실행
-    @Scheduled(cron = "0 0 0 * * *")
-    public void scheduleDailyRanking() {
-        log.info("정기 일간 랭킹 스냅샷 생성 스케줄러 실행");
+    // 매 시간 정각에 실행
+    @Scheduled(cron = "0 0 * * * *")
+    public void scheduleHourlyRanking() {
+        log.info("정기 랭킹 스냅샷 생성 스케줄러 실행 (1시간 주기)");
         try {
             rankingService.createDailySnapshot();
         } catch (Exception e) {
