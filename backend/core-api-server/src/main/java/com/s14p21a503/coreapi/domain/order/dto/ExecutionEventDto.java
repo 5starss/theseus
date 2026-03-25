@@ -23,12 +23,13 @@ public class ExecutionEventDto {
     private String ticker;
     private BigDecimal matchPrice;      //취소된 경우 null
     private Long matchQuantity;
+    private Long remainingQuantity;
     private LocalDateTime executedAt;
 
     @Builder
     public ExecutionEventDto(Long executionId, Long orderId, Long accountId, Long userId,
                              OrderType orderType, EventType eventType,
-                             String ticker, BigDecimal matchPrice, Long matchQuantity, LocalDateTime executedAt) {
+                             String ticker, BigDecimal matchPrice, Long matchQuantity, Long remainingQuantity, LocalDateTime executedAt) {
         this.executionId = executionId;
         this.orderId = orderId;
         this.accountId = accountId;
@@ -38,6 +39,7 @@ public class ExecutionEventDto {
         this.ticker = ticker;
         this.matchPrice = matchPrice;
         this.matchQuantity = matchQuantity;
+        this.remainingQuantity = remainingQuantity;
         this.executedAt = executedAt;
     }
 }

@@ -28,5 +28,6 @@ public class ExecutionResult implements Serializable {
     private String ticker;
     private BigDecimal matchPrice; //취소된 경우 null
     private Long matchQuantity;
+    private Long remainingQuantity;
     private LocalDateTime executedAt;
 }

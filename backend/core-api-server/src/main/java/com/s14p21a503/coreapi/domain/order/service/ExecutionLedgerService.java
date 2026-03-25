@@ -156,6 +156,7 @@ public class ExecutionLedgerService {
                 .ticker(order.getTicker())
                 .matchPrice(order.getPrice())
                 .matchQuantity((long) remainingQuantity)
+                .remainingQuantity(0L)
                 .executedAt(LocalDateTime.now())
                 .build();
         eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), stockNameForNotif, notificationDto));
@@ -209,6 +210,7 @@ public class ExecutionLedgerService {
                 .ticker(event.getTicker())
                 .matchPrice(order.getPrice())
                 .matchQuantity((long) remainingQuantity)
+                .remainingQuantity(0L)
                 .executedAt(event.getExecutedAt())
                 .build();
         eventPublisher.publishEvent(new ExecutionNotificationEvent(event.getUserId(), stockNameForNotif, notificationDto));

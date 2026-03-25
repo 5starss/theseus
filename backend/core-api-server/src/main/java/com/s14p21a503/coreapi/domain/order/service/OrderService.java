@@ -197,6 +197,7 @@ public class OrderService {
                 .ticker(order.getTicker())
                 .matchPrice(order.getPrice())
                 .matchQuantity((long) (order.getRequestedQuantity() - order.getExecutedQuantity()))
+                .remainingQuantity(0L)
                 .executedAt(LocalDateTime.now())
                 .build();
         eventPublisher.publishEvent(new ExecutionNotificationEvent(order.getUserId(), stockName, notificationDto));
