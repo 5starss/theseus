@@ -4,23 +4,65 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Bot, Loader2, Info } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Bot, Loader2, Info, CheckCircle2 } from "lucide-react";
 import { useAIStore } from "../../../store/useAIStore";
 import { useAuthStore } from "../../../store/useAuthStore";
 import { useStockStore } from "../../../store/useStockStore";
-import type { AutoTradeStyle } from "../../../api/ai";
+import { useMarketStore } from "../../../store/useMarketStore";
+import type { AutoTradeStyle, AgentStatus } from "../../../api/ai";
 import { AIGuideModal } from "./AIGuideModal";
+
+// 개별 종목 분석 상태 카드 컴포넌트
+const AgentStatusCard = ({ status }: { status: AgentStatus }) => {
+    const { stocks } = useMarketStore();
+    const stockName = stocks[status.ticker]?.name || status.ticker;
+
+    const steps = [
+        { label: "뉴스", completed: status.newsReceived },
+        { label: "퀀트", completed: status.quantReceived },
+        { label: "판단", completed: status.judgeReceived }
+    ];
+
+    return (
+        <div className="bg-white border border-slate-100 rounded-xl p-3 shadow-sm mb-3">
+            <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-bold text-slate-800">{stockName}</span>
+                <span className={`text-[10px] font-bold ${status.judgeReceived ? 'text-emerald-500' : 'text-slate-400'}`}>
+                    {status.judgeReceived ? '전략 수립 완료' : '전략 수립 중...'}
+                </span>
+            </div>
+            
+            <div className="flex items-center gap-1.5">
+                {steps.map((step, idx) => (
+                    <div key={idx} className="flex-1 flex items-center gap-1 bg-slate-50/50 rounded-lg py-1.5 px-2 border border-slate-50">
+                        {step.completed ? (
+                            <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
+                        ) : (
+                            <Loader2 size={12} className="text-purple-400 animate-spin shrink-0" />
+                        )}
+                        <span className={`text-[9px] font-bold ${step.completed ? 'text-slate-600' : 'text-slate-400'}`}>
+                            {step.label}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
 
 export const AIPopover = () => {
     const {
         isAIOn,
         investStyle,
         isAnalyzing,
+        agentStatuses,
         error,
         setInvestStyle,
         toggleAutoTrade,
         fetchConfig,
-        setError
+        setError,
+        stopPolling
     } = useAIStore();
     const { isLoggedIn, user } = useAuthStore();
     const { watchlist, fetchWatchlist } = useStockStore();
@@ -32,7 +74,10 @@ export const AIPopover = () => {
             fetchConfig(user.id);
             fetchWatchlist();
         }
-    }, [isLoggedIn, user, fetchConfig, fetchWatchlist]);
+        
+        // 언마운트 시 폴링 중지
+        return () => stopPolling();
+    }, [isLoggedIn, user, fetchConfig, fetchWatchlist, stopPolling]);
 
     const handleToggle = async () => {
         if (!isLoggedIn || !user) return;
@@ -64,8 +109,9 @@ export const AIPopover = () => {
                 <PopoverContent 
                     side="right" 
                     align="start"
+                    alignOffset={-40}
                     sideOffset={12} 
-                    className="w-64 p-4 rounded-2xl shadow-xl border-slate-100 outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=right]:slide-in-from-left-2"
+                    className="w-72 p-4 rounded-2xl shadow-xl border-slate-100 outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=right]:slide-in-from-left-2"
                     onOpenAutoFocus={(e) => e.preventDefault()}
                     onInteractOutside={(e) => {
                         if (isGuideOpen) {
@@ -140,6 +186,40 @@ export const AIPopover = () => {
                                 )}
                             </div>
                         </div>
+
+                        {/* AI 실시간 분석 상태 섹션 */}
+                        {isAIOn && (
+                            <div className="flex flex-col gap-3">
+                                <Label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        실시간 분석 리포트
+                                        <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                    </div>
+                                    <span className="text-[9px] text-slate-300 font-medium lowercase">
+                                        {new Date().getHours() < 12 ? 'morning slot' : 'afternoon slot'}
+                                    </span>
+                                </Label>
+                                <ScrollArea className="h-64 pr-2">
+                                    {(() => {
+                                        const currentSlot = new Date().getHours() < 12 ? 'morning' : 'afternoon';
+                                        const filtered = agentStatuses.filter(s => s.strategySlot === currentSlot);
+                                        
+                                        if (filtered.length > 0) {
+                                            return filtered.map((status, idx) => (
+                                                <AgentStatusCard key={idx} status={status} />
+                                            ));
+                                        }
+                                        
+                                        return (
+                                            <div className="flex flex-col items-center justify-center h-32 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                                                <Loader2 size={20} className="text-purple-300 animate-spin mb-2" />
+                                                <p className="text-[10px] text-slate-400 font-medium">분석 데이터를 수신 중입니다...</p>
+                                            </div>
+                                        );
+                                    })()}
+                                </ScrollArea>
+                            </div>
+                        )}
 
                         {error && (
                             <p className="text-[10px] text-red-500 font-bold text-center bg-red-50 py-2 rounded-lg animate-in fade-in slide-in-from-top-1 duration-200">

@@ -80,9 +80,9 @@ export default function Header() {
         <header className="h-14 w-full bg-white border-b border-slate-200 flex items-center px-4 shrink-0 shadow-sm z-50">
 
             {/* 왼쪽: 로고, 내비게이션 */}
-            <div className="flex items-center h-full mr-4">
-                <Link to="/" className="flex items-center gap-2 mr-6">
-                    <img src="/Logo.png" alt="Logo" className="w-7 h-7" />
+            <div className="flex items-center h-full ml-2 mr-4">
+                <Link to="/" className="flex items-center gap-0 mr-6">
+                    <img src="/ssafy_logo.png" alt="ssafy_logo" className="w-10 h-8" />
                     <span className="font-bold text-lg tracking-tight">싸피증권</span>
                 </Link>
 
