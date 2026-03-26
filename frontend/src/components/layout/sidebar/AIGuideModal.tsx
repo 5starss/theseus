@@ -69,7 +69,7 @@ export function AIGuideModal({ isOpen, onClose }: AIGuideModalProps) {
                                     <p>AI는 사용자가 <span className="font-bold text-slate-900">'관심종목'</span>으로 설정한 종목들에 대해서만 분석하고 매매를 진행합니다.</p>
                                     <ul className="list-disc list-inside space-y-1.5 text-slate-500">
                                         <li>평소 눈여겨보던 종목을 미리 관심종목 리스트에 담아주세요.</li>
-                                        <li>AI가 해당 종목들의 차트와 시장 흐름을 집중적으로 모니터링합니다.</li>
+                                        <li>관심종목은 최대 3개까지 설정할 수 있습니다.</li>
                                     </ul>
                                 </div>
                             </section>
@@ -91,7 +91,7 @@ export function AIGuideModal({ isOpen, onClose }: AIGuideModalProps) {
                                         </div>
                                         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                                             <p className="text-slate-800 text-sm font-bold mb-1">AI 분석 토글 (ON)</p>
-                                            <p className="text-slate-500 text-xs">이 스위치를 켜는 순간, AI가 실시간 시장 흐름을 읽기 시작합니다.</p>
+                                            <p className="text-slate-500 text-xs">이 스위치를 켜는 순간, AI가 매매 전략을 생성합니다.</p>
                                         </div>
                                     </div>
                                 </div>
@@ -116,8 +116,7 @@ export function AIGuideModal({ isOpen, onClose }: AIGuideModalProps) {
                             <ul className="space-y-3 px-2">
                                 {[
                                     "AI 계좌에 잔고가 충분한지 확인해 주세요.",
-                                    "관심종목 리스트를 업데이트하면 AI의 매매 대상도 함께 변경됩니다.",
-                                    "투자 성향은 언제든 변경할 수 있으며, 변경 즉시 AI의 매매 전략에 반영됩니다."
+                                    "관심종목 리스트를 업데이트하면 오전 8시 이후 한 번, 오후 12시 이후 한 번, 총 두 번 분석을 진행합니다.",
                                 ].map((text, idx) => (
                                     <li key={idx} className="flex items-start gap-3 text-slate-500 text-[13px] leading-snug">
                                         <div className="w-1 h-1 bg-slate-300 rounded-full mt-2 shrink-0" />
