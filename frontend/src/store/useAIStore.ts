@@ -6,7 +6,8 @@ interface AIState {
     // Settings
     isAIOn: boolean;
     investStyle: AutoTradeStyle;
-    
+    targetCount: number; // 분석을 기다려야 하는 목표 종목 수 (관심종목 개수 기반)
+
     // Status
     isAnalyzing: boolean;
     error: string | null;
@@ -16,6 +17,7 @@ interface AIState {
     // Actions
     setError: (error: string | null) => void;
     setInvestStyle: (style: AutoTradeStyle) => void;
+    setTargetCount: (count: number) => void;
     toggleAutoTrade: (userId: number, accountType: AccountType) => Promise<void>;
     fetchConfig: (userId: number) => Promise<void>;
     fetchAgentStatus: (userId: number) => Promise<void>;
@@ -26,6 +28,7 @@ interface AIState {
 export const useAIStore = create<AIState>((set, get) => ({
     isAIOn: false,
     investStyle: 'LONG',
+    targetCount: 0,
     isAnalyzing: false,
     error: null,
     agentStatuses: [],
@@ -34,6 +37,8 @@ export const useAIStore = create<AIState>((set, get) => ({
     setError: (error) => set({ error }),
 
     setInvestStyle: (style) => set({ investStyle: style }),
+
+    setTargetCount: (count) => set({ targetCount: count }),
 
     // 자동 매매 설정 업데이트
     toggleAutoTrade: async (userId, accountType) => {
@@ -47,13 +52,13 @@ export const useAIStore = create<AIState>((set, get) => ({
                 account_type: accountType,
             });
 
-            const isNowOn = response.config.enabled;
-            set({ 
-                isAIOn: isNowOn,
-                isAnalyzing: false 
+            const config = response.config;
+            set({
+                isAIOn: config.enabled,
+                isAnalyzing: false
             });
 
-            if (isNowOn) {
+            if (config.enabled) {
                 get().startPolling(userId);
             } else {
                 get().stopPolling();
@@ -68,13 +73,12 @@ export const useAIStore = create<AIState>((set, get) => ({
     fetchConfig: async (userId) => {
         try {
             const config = await aiApi.getAutoTradeConfig(userId);
-            const isNowOn = config.enabled;
-            set({ 
-                isAIOn: isNowOn,
-                investStyle: config.invest_style
+            set({
+                isAIOn: config.enabled,
+                investStyle: config.invest_style,
             });
 
-            if (isNowOn) {
+            if (config.enabled) {
                 get().startPolling(userId);
             }
         } catch (error) {
@@ -88,15 +92,24 @@ export const useAIStore = create<AIState>((set, get) => ({
             const statuses = await aiApi.getAgentStatus(userId);
             set({ agentStatuses: statuses, error: null });
 
-            // 현재 시간 기준 슬롯 판별 (오전 12시 기준)
+            // 현재 시간 기준 슬롯 판별
             const currentSlot = new Date().getHours() < 12 ? 'morning' : 'afternoon';
-
-            // 최적화: 현재 슬롯의 모든 종목 분석이 완료되었다면 더 이상 폴링할 필요 없음
             const currentSlotStatuses = statuses.filter(s => s.strategySlot === currentSlot);
-            const isAllFinished = currentSlotStatuses.length > 0 && currentSlotStatuses.every(s => s.judgeReceived);
-            
+
+            // 목표 개수 (관심종목 수, 최대 3)
+            const goal = get().targetCount;
+
+            // 중단 조건:
+            // 1. 목표 개수가 0보다 큼
+            // 2. 현재 슬롯의 리포트 개수가 목표 개수 이상임
+            // 3. 그 모든 리포트의 judgeReceived가 true임
+            const isAllFinished =
+                goal > 0 &&
+                currentSlotStatuses.length >= goal &&
+                currentSlotStatuses.every(s => s.judgeReceived);
+
             if (isAllFinished) {
-                console.log(`All AI analyses for ${currentSlot} finished. Stopping polling.`);
+                console.log(`AI Analysis Complete: ${currentSlotStatuses.length}/${goal} tickers finished. Polling stopped.`);
                 const interval = get().pollingInterval;
                 if (interval) {
                     window.clearInterval(interval);
@@ -105,8 +118,7 @@ export const useAIStore = create<AIState>((set, get) => ({
             }
         } catch (error: any) {
             console.error('Error fetching agent status:', error);
-            
-            // 500 에러 등 서버 오류 발생 시 폴링 중단 및 알림
+
             if (error.response?.status === 500) {
                 set({ error: 'AI 서버 상태가 불안정합니다. 잠시 후 다시 시도해주세요.' });
                 get().stopPolling();
@@ -118,7 +130,6 @@ export const useAIStore = create<AIState>((set, get) => ({
     startPolling: (userId) => {
         if (get().pollingInterval) return;
 
-        // 즉시 한 번 실행
         get().fetchAgentStatus(userId);
 
         const interval = window.setInterval(() => {

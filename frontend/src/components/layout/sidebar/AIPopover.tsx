@@ -32,7 +32,7 @@ const AgentStatusCard = ({ status }: { status: AgentStatus }) => {
                     {status.judgeReceived ? '전략 수립 완료' : '전략 수립 중...'}
                 </span>
             </div>
-            
+
             <div className="flex items-center gap-1.5">
                 {steps.map((step, idx) => (
                     <div key={idx} className="flex-1 flex items-center gap-1 bg-slate-50/50 rounded-lg py-1.5 px-2 border border-slate-50">
@@ -59,6 +59,7 @@ export const AIPopover = () => {
         agentStatuses,
         error,
         setInvestStyle,
+        setTargetCount,
         toggleAutoTrade,
         fetchConfig,
         setError,
@@ -74,10 +75,15 @@ export const AIPopover = () => {
             fetchConfig(user.id);
             fetchWatchlist();
         }
-        
+
         // 언마운트 시 폴링 중지
         return () => stopPolling();
     }, [isLoggedIn, user, fetchConfig, fetchWatchlist, stopPolling]);
+
+    // 관심종목 개수가 변경될 때마다 AI 목표 개수 업데이트 (최대 3개)
+    useEffect(() => {
+        setTargetCount(Math.min(watchlist.size, 3));
+    }, [watchlist.size, setTargetCount]);
 
     const handleToggle = async () => {
         if (!isLoggedIn || !user) return;
@@ -88,6 +94,8 @@ export const AIPopover = () => {
             return;
         }
 
+        // 켜기 전에 다시 한번 목표 개수 확정
+        setTargetCount(Math.min(watchlist.size, 3));
         await toggleAutoTrade(user.id, 'AI');
     };
 
@@ -106,11 +114,11 @@ export const AIPopover = () => {
                         <span className={`text-[10px] font-bold shrink-0 ${isAIOn ? 'text-purple-600' : 'text-slate-500 group-hover:text-purple-600'}`}>AI 매매</span>
                     </button>
                 </PopoverTrigger>
-                <PopoverContent 
-                    side="right" 
+                <PopoverContent
+                    side="right"
                     align="start"
                     alignOffset={-40}
-                    sideOffset={12} 
+                    sideOffset={12}
                     className="w-72 p-4 rounded-2xl shadow-xl border-slate-100 outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=right]:slide-in-from-left-2"
                     onOpenAutoFocus={(e) => e.preventDefault()}
                     onInteractOutside={(e) => {
@@ -203,13 +211,13 @@ export const AIPopover = () => {
                                     {(() => {
                                         const currentSlot = new Date().getHours() < 12 ? 'morning' : 'afternoon';
                                         const filtered = agentStatuses.filter(s => s.strategySlot === currentSlot);
-                                        
+
                                         if (filtered.length > 0) {
                                             return filtered.map((status, idx) => (
                                                 <AgentStatusCard key={idx} status={status} />
                                             ));
                                         }
-                                        
+
                                         return (
                                             <div className="flex flex-col items-center justify-center h-32 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                                                 <Loader2 size={20} className="text-purple-300 animate-spin mb-2" />
