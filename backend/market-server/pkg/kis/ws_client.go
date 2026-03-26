@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"market-server/internal/config"
+	"market-server/internal/metrics"
 
 	"github.com/gorilla/websocket"
 )
@@ -117,6 +118,8 @@ func (w *WSClient) Connect(ctx context.Context) error {
 // readPump KIS로부터 들어오는 메시지를 지속적으로 읽어 MessageChan으로 전달한다.
 func (w *WSClient) readPump(ctx context.Context) {
 	var rawCount int64
+	lastLogTime := time.Now()
+	var lastLogCount int64
 	defer func() {
 		log.Printf("readPump exiting. total raw messages received: %d", rawCount)
 	}()
@@ -143,63 +146,78 @@ func (w *WSClient) readPump(ctx context.Context) {
 		go w.autoReconnect(ctx)
 	}()
 
+	// readPump 실행 중 conn은 이 고루틴 외부에서 교체되지 않으므로
+	// 루프 진입 전 한 번만 캡처하여 매 반복 Lock/Unlock 제거
+	w.mu.Lock()
+	conn := w.conn
+	w.mu.Unlock()
+	if conn == nil {
+		return
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			log.Printf("KIS WS Read Error: %v", err)
+			return // defer 블록 실행 -> 재연결 시도
+		}
+
+		// KIS Ping 메시지 ("PINGPONG") 처리 — Pong 응답 전송
+		if string(msg) == "PINGPONG" {
 			w.mu.Lock()
-			conn := w.conn
+			conn.WriteMessage(websocket.TextMessage, []byte("PINGPONG"))
 			w.mu.Unlock()
-			if conn == nil {
-				return
-			}
+			continue
+		}
 
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("KIS WS Read Error: %v", err)
-				return // defer 블록 실행 -> 재연결 시도
+		// KIS JSON 제어 메시지 처리 (구독 ACK, 에러 응답 등)
+		if len(msg) > 0 && msg[0] == '{' {
+			var ctrl struct {
+				Body struct {
+					RtCd  string `json:"rt_cd"`
+					MsgCd string `json:"msg_cd"`
+					Msg1  string `json:"msg1"`
+				} `json:"body"`
 			}
-
-			// KIS Ping 메시지 ("PINGPONG") 처리 — Pong 응답 전송
-			if string(msg) == "PINGPONG" {
-				w.mu.Lock()
-				conn.WriteMessage(websocket.TextMessage, []byte("PINGPONG"))
-				w.mu.Unlock()
-				continue
-			}
-
-			// KIS JSON 제어 메시지 처리 (구독 ACK, 에러 응답 등)
-			if len(msg) > 0 && msg[0] == '{' {
-				var ctrl struct {
-					Body struct {
-						RtCd  string `json:"rt_cd"`
-						MsgCd string `json:"msg_cd"`
-						Msg1  string `json:"msg1"`
-					} `json:"body"`
+			if err := json.Unmarshal(msg, &ctrl); err == nil {
+				// rt_cd가 빈 문자열이면 body 구조가 없는 제어 메시지(header-only 등)이므로 무시.
+				// "" != "0" 조건만으로는 정상 메시지를 에러로 오판할 수 있다.
+				if ctrl.Body.RtCd != "" && ctrl.Body.RtCd != "0" {
+					log.Printf("KIS WS control error [%s]: %s — 재연결 중단, 서버를 재시작하세요", ctrl.Body.MsgCd, ctrl.Body.Msg1)
+					w.mu.Lock()
+					w.noReconnect = true
+					w.mu.Unlock()
+				} else if ctrl.Body.RtCd == "0" {
+					log.Printf("KIS WS control: %s", ctrl.Body.Msg1)
 				}
-				if err := json.Unmarshal(msg, &ctrl); err == nil {
-					// rt_cd가 빈 문자열이면 body 구조가 없는 제어 메시지(header-only 등)이므로 무시.
-					// "" != "0" 조건만으로는 정상 메시지를 에러로 오판할 수 있다.
-					if ctrl.Body.RtCd != "" && ctrl.Body.RtCd != "0" {
-						log.Printf("KIS WS control error [%s]: %s — 재연결 중단, 서버를 재시작하세요", ctrl.Body.MsgCd, ctrl.Body.Msg1)
-						w.mu.Lock()
-						w.noReconnect = true
-						w.mu.Unlock()
-					} else if ctrl.Body.RtCd == "0" {
-						log.Printf("KIS WS control: %s", ctrl.Body.Msg1)
-					}
-				}
-				continue
 			}
+			continue
+		}
 
-			// 수신된 Raw 데이터를 파서(Worker)가 처리할 수 있도록 버퍼드 채널로 비동기 전송
-			rawCount++
-			select {
-			case <-ctx.Done():
-				return
-			case w.MessageChan <- msg:
-			}
+		// 수신된 Raw 데이터를 파서(Worker)가 처리할 수 있도록 버퍼드 채널로 비동기 전송
+		rawCount++
+		metrics.KISRawMessagesReceived.Inc()
+
+		// 10초마다 초당 수신량 로그 출력 (진단용)
+		if now := time.Now(); now.Sub(lastLogTime) >= 10*time.Second {
+			elapsed := now.Sub(lastLogTime).Seconds()
+			rate := float64(rawCount-lastLogCount) / elapsed
+			log.Printf("[KIS WS] raw 수신율: %.1f msg/sec (채널 점유: %d/5000)",
+				rate, len(w.MessageChan))
+			lastLogTime = now
+			lastLogCount = rawCount
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case w.MessageChan <- msg:
 		}
 	}
 }

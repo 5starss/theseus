@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"market-server/internal/metrics"
 	"market-server/internal/service"
 )
 
@@ -54,6 +55,7 @@ func (h *WSHandler) ServeWS(c *gin.Context) {
 	}
 
 	client.Hub.Register <- client
+	metrics.WSConnections.Inc() // 클라이언트 연결 시 +1
 
 	// 새로운 고루틴에서 모든 작업을 수행하여 호출자의 메모리 참조 수집을 허용합니다.
 	go writePump(client)
@@ -62,6 +64,7 @@ func (h *WSHandler) ServeWS(c *gin.Context) {
 
 func readPump(client *service.WsClient) {
 	defer func() {
+		metrics.WSConnections.Dec() // 클라이언트 해제 시 -1
 		client.Hub.Unregister <- client
 		client.Conn.Close()
 	}()
