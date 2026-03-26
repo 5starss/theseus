@@ -15,6 +15,47 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _repair_common_json_issues(text: str) -> str:
+    repaired = text
+    requested_action_pattern = re.compile(
+        r'("requested_action"\s*:\s*\{)([\s\S]*?)(\})',
+        re.MULTILINE,
+    )
+
+    def _fix_requested_action(match: re.Match[str]) -> str:
+        prefix, body, suffix = match.groups()
+        lines = body.splitlines()
+        fixed_lines: List[str] = []
+        note_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                fixed_lines.append(line)
+                continue
+            if ":" in stripped or stripped in {"{", "}"}:
+                fixed_lines.append(line)
+                continue
+
+            comma = "," if stripped.endswith(",") else ""
+            value = stripped[:-1].strip() if comma else stripped
+            if re.fullmatch(r'"[^"]+"', value):
+                note_key = "note" if note_count == 0 else f"note_{note_count + 1}"
+                indent = line[: len(line) - len(line.lstrip())]
+                fixed_lines.append(f'{indent}"{note_key}": {value}{comma}')
+                note_count += 1
+                continue
+
+            fixed_lines.append(line)
+
+        return prefix + "".join(
+            f"{fixed_line}\n" if idx < len(fixed_lines) - 1 else fixed_line
+            for idx, fixed_line in enumerate(fixed_lines)
+        ) + suffix
+
+    return requested_action_pattern.sub(_fix_requested_action, repaired, count=1)
+
+
 def _load_json_object(text: str) -> Dict[str, Any]:
     try:
         return json.loads(text)
@@ -22,7 +63,11 @@ def _load_json_object(text: str) -> Dict[str, Any]:
         m = re.search(r"\{[\s\S]*\}", text)
         if not m:
             raise
-        return json.loads(m.group(0))
+        candidate = m.group(0)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return json.loads(_repair_common_json_issues(candidate))
 
 
 class NewsReporterAgent:
@@ -80,7 +125,9 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 - confidence는 0.0~1.0
 - score는 -30~30 정수
 - top_reasons는 최대 3개
-- requested_action은 object
+- requested_action은 반드시 아래 스키마의 object
+  {{"preference":"buy|hold|sell","avoid_if":"문장"}}
+- requested_action에 다른 키를 만들지 마세요
 - 모든 문자열 필드는 한국어로 작성
 - timestamp는 현재 시각 기준 ISO 형식
 """,
@@ -162,7 +209,25 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         card["timestamp"] = card.get("timestamp") or datetime.now().isoformat()
         card["top_reasons"] = (card.get("top_reasons") or [])[:3]
         card["risk_flags"] = card.get("risk_flags") or []
-        card["requested_action"] = card.get("requested_action") or {}
+        requested_action = card.get("requested_action")
+        if not isinstance(requested_action, dict):
+            requested_action = {}
+        preference = str(requested_action.get("preference") or "").strip().lower()
+        if preference not in {"buy", "hold", "sell"}:
+            stance = str(card.get("stance") or "hold").strip().lower()
+            if stance in {"strong_buy", "buy"}:
+                preference = "buy"
+            elif stance in {"strong_sell", "sell"}:
+                preference = "sell"
+            else:
+                preference = "hold"
+        avoid_if = str(
+            requested_action.get("avoid_if")
+            or requested_action.get("note")
+            or requested_action.get("note_2")
+            or "unknown"
+        ).strip() or "unknown"
+        card["requested_action"] = {"preference": preference, "avoid_if": avoid_if}
         return card
 
     def generate_response(
@@ -205,23 +270,41 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 
         context = self._build_card_context(news_docs, community_docs)
 
-        try:
-            raw = self.card_chain.invoke(
-                {
-                    "question": question,
-                    "ticker": ticker,
-                    "news_count": len(news_docs),
-                    "community_count": len(community_docs),
-                    "context": context,
-                }
-            )
-            card = _load_json_object(raw)
-        except Exception:
-            logger.warning("news analysis card parsing failed | raw=%s", str(raw)[:500] if "raw" in locals() else "")
+        card: Dict[str, Any] | None = None
+        last_error: Exception | None = None
+        last_raw = ""
+        payload = {
+            "question": question,
+            "ticker": ticker,
+            "news_count": len(news_docs),
+            "community_count": len(community_docs),
+            "context": context,
+        }
+
+        for attempt in range(2):
+            try:
+                raw = self.card_chain.invoke(payload)
+                last_raw = str(raw)
+                if not last_raw.strip():
+                    raise ValueError("empty_response")
+                card = _load_json_object(last_raw)
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "news analysis card parsing failed | attempt=%s error=%s raw=%r",
+                    attempt + 1,
+                    exc,
+                    last_raw[:500],
+                )
+
+        if card is None:
             card = self._build_empty_analysis_card(
                 ticker=ticker,
                 reason="뉴스 에이전트 분석 응답 파싱 실패",
                 risk_flag="agent_failure",
             )
+            if last_error is not None:
+                card["risk_flags"].append(f"parse_error:{type(last_error).__name__}")
 
         return self._normalize_card_payload(card, ticker=ticker)

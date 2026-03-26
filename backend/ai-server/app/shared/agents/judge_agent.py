@@ -8,7 +8,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
-from app.trading.account_service import cap_buy_quantity
 
 load_dotenv()
 KST = timezone(timedelta(hours=9))
@@ -72,16 +71,25 @@ quant_state_summary가 포함되어 있으면 반드시 참조하세요.
 - quant_state_summary는 해석 전 원본 상태이므로, QuantAgent 판단이 맞는지 교차 검증에 활용하세요.
 - 특히 risk_context.entry_risk, risk_context.signal_confidence, multi_timeframe.alignment_score를 주문 결정에 반영하세요.
 
+[수량 결정 지침]
+- 가용 한도(max_allowed_buy_quantity 또는 max_allowed_sell_quantity)를 제공했습니다. 이 수치는 포지션 사이징 정책이 반영된 '절대 상한선'입니다.
+- AI는 가용 한도 내에서 분석의 확신도(confidence)와 리스크를 고려하여 최종 주문 수량을 결정해야 합니다.
+- 확신도가 매우 높고 신호가 일치하면 가용 한도의 100%에 가깝게 채우세요.
+- 의견이 상충하거나 리스크가 감지되면 가용 한도의 20~50% 수준으로 수량을 조절하여 보수적으로 접근하세요.
+- 단순히 최대치를 적는 것이 아니라, 당신의 확신도에 비례하는 전략적 숫자를 '정수'로 출력하십시오.
+
 반드시 JSON object 하나만 출력하세요.
 모든 설명 문자열은 한국어로 작성하세요.
 verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하세요.
 출력은 아래 최소 스키마만 사용하세요.
 {{
   "ticker": "종목코드",
+  "final_stance": "buy|sell|hold",
+  "final_score": -30 ~ 30 사이의 정수 (-30: 강한 매도, 0: 관망, 30: 강한 매수),
   "order": {{
     "action": "buy|sell|hold",
     "order_type": "market|limit",
-    "quantity": 정수,
+    "quantity": 정수 (max_allowed 한도 내에서 확신도에 비례하여 설정),
     "price": 정수 또는 null
   }},
   "verdict": "최종 판단 이유"
@@ -127,17 +135,6 @@ analysis_context, cross_validation, signal_weights 같은 부가 필드는 출�
         if action == "hold":
             quantity = 0
             price = 0
-        elif action == "buy":
-            effective_price = max(0, price or _safe_int(payload.get("current_price", 0)))
-            if effective_price > 0:
-                quantity, _ = cap_buy_quantity(
-                    requested_qty=quantity,
-                    available_cash=_safe_int(payload.get("available_cash", 0)),
-                    current_holding=payload.get("current_holding") or {},
-                    effective_price=effective_price,
-                    user_investment_style=str(payload.get("user_investment_style") or "GROWTH"),
-                    signal_confidence=((payload.get("quant_state_summary") or {}).get("risk_context") or {}).get("signal_confidence"),
-                )
         card["order"] = {
             "action": action,
             "order_type": order_type,
