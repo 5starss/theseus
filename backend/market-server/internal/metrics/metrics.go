@@ -35,4 +35,18 @@ var (
 		Name: "market_redis_errors_total",
 		Help: "Total number of Redis errors by operation",
 	}, []string{"operation"})
+
+	// KIS WebSocket raw 수신 카운터 (처리 전 단계) — 진단용
+	// TickMessagesProcessed와 비교하면 파이프라인 어디서 드롭되는지 파악 가능
+	KISRawMessagesReceived = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "market_kis_raw_messages_total",
+		Help: "Total raw messages received from KIS WebSocket (before parsing)",
+	})
+
+	// WSPool 공유 채널 현재 점유율 Gauge — 배압(backpressure) 모니터링용
+	WSPoolChannelLen = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "market_wspool_channel_len",
+		Help: "Current number of messages buffered in WSPool shared channel",
+	})
 )
+
