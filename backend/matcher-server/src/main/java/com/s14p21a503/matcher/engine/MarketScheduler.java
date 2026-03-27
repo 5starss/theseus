@@ -59,7 +59,7 @@ public class MarketScheduler {
                     .timestamp(now)
                     .build();
             // seqNo를 -1로 주어 관리용 이벤트임을 표시
-            queueManager.enqueue(ticker, -1, event); 
+            queueManager.enqueue(ticker, -1, -1, -1L, event); 
             matcherConsumer.ensureConsumerStarted(ticker);
         }
         
