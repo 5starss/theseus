@@ -94,7 +94,7 @@ public class MatcherKafkaListener {
                     .write(JournalType.CMD, 0, partition, offset, JournalSerializer.serialize(orderRequest));
             
             outcome.whenAssigned().thenAcceptAsync(seqNo -> {
-                queueManager.enqueue(ticker, seqNo, orderRequest);
+                queueManager.enqueue(ticker, seqNo, partition, offset, orderRequest);
                 matcherConsumer.ensureConsumerStarted(ticker);
                 log.info("[{}] [ENQUEUE] 엔진 큐 적재 완료 - Seq: {}, OrderId: {}", ticker, seqNo, orderRequest.getOrderId());
             }, tickerExecutor);
@@ -155,7 +155,7 @@ public class MatcherKafkaListener {
                     .write(JournalType.CMD, 0, partition, offset, JournalSerializer.serialize(event));
 
             outcome.whenAssigned().thenAcceptAsync(seqNo -> {
-                queueManager.enqueue(ticker, seqNo, event);
+                queueManager.enqueue(ticker, seqNo, partition, offset, event);
                 matcherConsumer.ensureConsumerStarted(ticker);
             }, tickerExecutor);
 
@@ -204,7 +204,7 @@ public class MatcherKafkaListener {
                     .write(JournalType.CMD, 0, partition, offset, JournalSerializer.serialize(tickDataEvent));
 
             outcome.whenAssigned().thenAcceptAsync(seqNo -> {
-                queueManager.enqueue(ticker, seqNo, tickDataEvent);
+                queueManager.enqueue(ticker, seqNo, partition, offset, tickDataEvent);
                 matcherConsumer.ensureConsumerStarted(ticker);
             }, tickerExecutor);
 
@@ -229,12 +229,12 @@ public class MatcherKafkaListener {
             if (event.getTicker() == null) {
                 // 전 종목 제어: PendingOrderManagerHolder를 통해 관리되는 모든 종목에 신호를 보냄
                 for (String ticker : orderManagerHolder.getTickers()) {
-                    queueManager.enqueue(ticker, -1, event); // 제어 이벤트는 특수 시퀀스(-1) 사용
+                    queueManager.enqueue(ticker, -1, -1, -1L, event); // 제어 이벤트는 특수 시퀀스(-1) 사용
                     matcherConsumer.ensureConsumerStarted(ticker);
                 }
             } else {
                 // 특정 종목 제어
-                queueManager.enqueue(event.getTicker(), -1, event);
+                queueManager.enqueue(event.getTicker(), -1, -1, -1L, event);
                 matcherConsumer.ensureConsumerStarted(event.getTicker());
             }
             ack.acknowledge();

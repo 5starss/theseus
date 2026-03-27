@@ -192,7 +192,7 @@ public class UnifiedRecoveryManager {
         // 복구 완료 시점에 현재 시장 상태가 CLOSE라면 미체결 주문 일괄 취소 (장 종료 보장)
         if (!marketStateManager.isMarketOpen()) {
             log.info("[{}] 복구 시점 시장 상태가 CLOSE이므로 모든 미체결 주문 일괄 취소를 시작합니다.", ticker);
-            orderManager.cancelAllOrders(startSeqNo + cmdMap.size()); // 마지막 시퀀스 번호 기반으로 수행
+            orderManager.cancelAllOrders(); // 마지막 시퀀스 번호 기반 대신 일괄 취소
         }
     }
 
@@ -207,17 +207,19 @@ public class UnifiedRecoveryManager {
     private void replayCommand(String ticker, PendingOrderManager orderManager, JournalReader.JournalEntry entry) throws Exception {
         Object payload = JournalSerializer.deserialize(entry.getPayload());
         long seqNo = entry.getHeader().getSeqNo();
+        int partition = entry.getHeader().getPartition();
+        long offset = entry.getHeader().getOffset();
 
         if (payload instanceof OrderRequest) {
             OrderRequest order = (OrderRequest) payload;
             if ("CANCEL".equalsIgnoreCase(order.getAction())) {
-                orderManager.cancelOrder(order.getOrderId(), seqNo);
+                orderManager.cancelOrder(order.getOrderId(), partition, offset);
             } else {
                 orderManager.addOrder(order);
             }
         } else if (payload instanceof TickDataEvent) {
             TickDataEvent tick = (TickDataEvent) payload;
-            orderManager.matchWithTick(tick, seqNo);
+            orderManager.matchWithTick(tick, seqNo, partition, offset);
         } else if (payload instanceof MarketDataEvent) {
             MarketDataEvent mkt = (MarketDataEvent) payload;
             orderManager.updateMarketData(mkt);

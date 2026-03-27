@@ -98,7 +98,7 @@ public class PendingOrderManager {
     /**
      * 시장 체결(Tick) 데이터 수신 시, 대기 주문들과 매칭 수행
      */
-    public List<ExecutionResult> matchWithTick(TickDataEvent tick, long currentSeqNo) {
+    public List<ExecutionResult> matchWithTick(TickDataEvent tick, long currentSeqNo, int partition, long offset) {
         lock.lock();
         try {
             List<ExecutionResult> trades = new ArrayList<>();
@@ -163,7 +163,7 @@ public class PendingOrderManager {
                             bid.setRemainingQuantity(bid.getRemainingQuantity() - fillQty);
                             usableLiquidity -= fillQty;
 
-                            trades.add(createExecutionResult(bid, fillQty, this.currentBestAsk, bid.getRemainingQuantity(), currentSeqNo, fillIndex++));
+                            trades.add(createExecutionResult(bid, fillQty, this.currentBestAsk, bid.getRemainingQuantity(), partition, offset, fillIndex++));
 
                             if (bid.getRemainingQuantity() == 0) {
                                 orderCache.remove(bid.getOrderId());
@@ -209,7 +209,7 @@ public class PendingOrderManager {
                             ask.setRemainingQuantity(ask.getRemainingQuantity() - fillQty);
                             usableLiquidity -= fillQty;
 
-                            trades.add(createExecutionResult(ask, fillQty, this.currentBestBid, ask.getRemainingQuantity(), currentSeqNo, fillIndex++));
+                            trades.add(createExecutionResult(ask, fillQty, this.currentBestBid, ask.getRemainingQuantity(), partition, offset, fillIndex++));
 
                             if (ask.getRemainingQuantity() == 0) {
                                 orderCache.remove(ask.getOrderId());
@@ -263,7 +263,7 @@ public class PendingOrderManager {
     /**
      * 주문 취소 처리
      */
-    public ExecutionResult cancelOrder(Long orderId, long currentSeqNo) {
+    public ExecutionResult cancelOrder(Long orderId, int partition, long offset) {
         lock.lock();
         try {
             // 1. 캐시에서 먼저 제거 시도 (Node를 직접 가져옴)
@@ -292,7 +292,7 @@ public class PendingOrderManager {
             // 실제 취소 시점의 잔량(remainingQuantity)을 결과에 실어서 반환
             long cancelledQty = orderToCancel.getRemainingQuantity();
             log.info("[{}] 주문 취소 완료 (OrderID: {}, 취소수량: {})", ticker, orderId, cancelledQty);
-            return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, 0L, currentSeqNo, 0);
+            return createExecutionResult(orderToCancel, EventType.CANCELLED, null, cancelledQty, 0L, partition, offset, 0);
         } finally {
             lock.unlock();
         }
@@ -408,7 +408,7 @@ public class PendingOrderManager {
     /**
      * 모든 미체결 주문 일괄 취소 처리
      */
-    public List<ExecutionResult> cancelAllOrders(long currentSeqNo) {
+    public List<ExecutionResult> cancelAllOrders() {
         lock.lock();
         try {
             List<ExecutionResult> cancelResults = new ArrayList<>();
@@ -417,7 +417,7 @@ public class PendingOrderManager {
             // orderCache에 있는 모든 주문을 순회하며 취소 결과 생성
             for (OrderNode node : orderCache.values()) {
                 long cancelledQty = node.order.getRemainingQuantity();
-                cancelResults.add(createExecutionResult(node.order, EventType.CANCELLED, null, cancelledQty, 0L, currentSeqNo, fillIndex++));
+                cancelResults.add(createExecutionResult(node.order, EventType.CANCELLED, null, cancelledQty, 0L, -1, -1, fillIndex++));
             }
 
             // 모든 자료구조 초기화
@@ -432,14 +432,14 @@ public class PendingOrderManager {
         }
     }
 
-    private ExecutionResult createExecutionResult(OrderRequest order, long fillQty, BigDecimal matchPrice, long remainingQty, long seqNo, int fillIndex) {
-        return createExecutionResult(order, EventType.MATCHED, matchPrice, fillQty, remainingQty, seqNo, fillIndex);
+    private ExecutionResult createExecutionResult(OrderRequest order, long fillQty, BigDecimal matchPrice, long remainingQty, int partition, long offset, int fillIndex) {
+        return createExecutionResult(order, EventType.MATCHED, matchPrice, fillQty, remainingQty, partition, offset, fillIndex);
     }
 
     private ExecutionResult createExecutionResult(OrderRequest order, EventType eventType, BigDecimal matchPrice,
-            long fillQty, long remainingQty, long seqNo, int fillIndex) {
+            long fillQty, long remainingQty, int partition, long offset, int fillIndex) {
         return ExecutionResult.builder()
-                .executionId(executionIdGenerator.generate(seqNo, fillIndex))
+                .executionId(executionIdGenerator.generate(partition, offset, fillIndex))
                 .orderId(order.getOrderId())
                 .accountId(order.getAccountId())
                 .userId(order.getUserId())
