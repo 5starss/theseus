@@ -63,41 +63,43 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     },
 
     connectMarketStream: async () => {
-        // 이미 연결 중이거나 데이터가 이미 존재한다면 중복 실행 방지
-        if (get().isConnecting || Object.keys(get().stocks).length > 0) {
-            console.log('Market Stream is already active or connecting. Skipping...');
+        // 이미 연결 중이라면 중복 실행 방지
+        if (get().isConnecting) {
             return;
         }
 
         console.log('Connecting Market Stream via Singleton...');
         set({ isConnecting: true });
 
-        // 1. 초기 데이터 가져오기
         try {
-            const initialStocksList = await stockApi.getTopStocks(100, 'VOLUME');
-            const initialStocksMap: Record<string, MarketStock> = {};
+            // 데이터가 없는 경우에만 초기 데이터 가져오기
+            if (Object.keys(get().stocks).length === 0) {
+                const initialStocksList = await stockApi.getTopStocks(100, 'VOLUME');
+                const initialStocksMap: Record<string, MarketStock> = {};
 
-            initialStocksList.forEach((stock, index) => {
-                initialStocksMap[stock.ticker] = {
-                    ...stock,
-                    buyRatio: Math.floor(Math.random() * 60) + 20,
-                    sellRatio: Math.floor(Math.random() * 60) + 20,
-                    rank: index + 1
-                };
-            });
+                initialStocksList.forEach((stock, index) => {
+                    initialStocksMap[stock.ticker] = {
+                        ...stock,
+                        buyRatio: Math.floor(Math.random() * 60) + 20,
+                        sellRatio: Math.floor(Math.random() * 60) + 20,
+                        rank: index + 1
+                    };
+                });
 
-            set({ stocks: initialStocksMap, isConnecting: false });
+                set({ stocks: initialStocksMap });
+            }
+
+            // 2. 싱글톤 구독 설정
+            useSocketStore.getState().subscribe('HOME_40');
+
+            // 3. 메시지 핸들러 등록
+            window.removeEventListener('ws-message', get().handleWsMessage); // 중복 등록 방지
+            window.addEventListener('ws-message', get().handleWsMessage);
         } catch (err) {
-            console.error("Failed to fetch top stocks", err);
+            console.error("Failed to connect market stream or fetch top stocks", err);
+        } finally {
             set({ isConnecting: false });
         }
-
-        // 2. 싱글톤 구독 설정
-        useSocketStore.getState().subscribe('HOME_40');
-
-        // 3. 메시지 핸들러 등록
-        window.removeEventListener('ws-message', get().handleWsMessage); // 중복 등록 방지
-        window.addEventListener('ws-message', get().handleWsMessage);
     },
 
     disconnectMarketStream: () => {
