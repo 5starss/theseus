@@ -342,13 +342,16 @@ class AutoTradeService:
                 logger.error("스케줄러 등록 실패: %s", e)
         return response
 
-    def run_enabled_users_cycle(self) -> Dict[str, Any]:
+    def run_enabled_users_cycle(self, *, force: bool = False, force_refresh: bool = False) -> Dict[str, Any]:
         configs = [c for c in self.list_configs() if c.enabled]
         if not configs: return {"status": "ok", "message": "no_enabled_users"}
         max_workers = min(self._max_parallel_users, len(configs))
         results = []
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="autotrade") as executor:
-            futures = {executor.submit(self.run_user_cycle, c.user_id): c.user_id for c in configs}
+            futures = {
+                executor.submit(self.run_user_cycle, c.user_id, force=force, force_refresh=force_refresh): c.user_id
+                for c in configs
+            }
             for future in as_completed(futures):
                 try: results.append(future.result())
                 except Exception as e: results.append({"status": "failed", "error": str(e)})

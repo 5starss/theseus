@@ -37,8 +37,8 @@ class RAGIngestPipeline:
         all_docs = news_docs + community_docs
         vdb = NewsVectorDB()
         if reset_collection:
-            logger.info("기존 컬렉션 초기화 후 순차 색인 진행")
-            vdb.delete_collection()
+            logger.info("기존 컬렉션에서 동일 ticker 문서만 제거 후 순차 색인 진행: %s", ticker)
+            vdb.delete_documents({"ticker": ticker})
         indexed_count = vdb.add_documents(all_docs)
 
         return IngestResult(
@@ -49,4 +49,3 @@ class RAGIngestPipeline:
             community_count=len(community_docs),
             indexed_count=indexed_count,
         )
-

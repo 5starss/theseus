@@ -8,10 +8,16 @@ from app.shared.schemas import Document as AppDocument
 from collector.kis_news import fetch_kis_news_title
 from collector.storage import get_storage_dir, save_snapshot
 
-from app.shared.rag.vector_db import NewsVectorDB
-from app.shared.rag.reranker import SolarReranker
 from app.news.sources_community import load_community_documents_from_snapshot
-from typing import List, Any
+from app.shared.rag.reranker import SolarReranker
+from app.shared.rag.vector_db import NewsVectorDB
+
+DEFAULT_NEWS_QUERY = "이 종목의 향후 단기 주가 방향은 어떨까?"
+DEFAULT_COLLECTION_NAME = "kis_news_titles"
+NEWS_SOURCE = "KIS_NEWS"
+COMMUNITY_SOURCE = "TOSS_COMMUNITY"
+NEWS_TOP_K = 5
+COMMUNITY_TOP_K = 2
 
 
 def _format_publish_dt(data_dt: str, data_tm: str) -> str:
@@ -77,20 +83,28 @@ def _latest_snapshot_path(prefix: str, ticker: str) -> str | None:
     return files[-1]
 
 
+def _build_metadata_filter(*, source: str, ticker: str) -> Dict[str, str]:
+    return {"source": source, "ticker": ticker}
+
+
+def _build_vector_db(collection_name: str | None = None) -> NewsVectorDB:
+    return NewsVectorDB(collection_name=collection_name or DEFAULT_COLLECTION_NAME)
+
+
 def retrieve_news(
     ticker: str,
-    query: str = "이 종목의 향후 단기 주가 방향은 어떨까?",
-    top_k: int = 5,
+    query: str = DEFAULT_NEWS_QUERY,
+    top_k: int = NEWS_TOP_K,
     collection_name: str | None = None,
 ) -> List[Any]:
     """
     ChromaDB에서 뉴스 데이터를 검색하고 Rerank하여 반환합니다.
     """
-    vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
+    vdb = _build_vector_db(collection_name)
     search_results = vdb.hybrid_query(
         query_text=query,
         k=top_k * 2,
-        metadata_filter={"source": "KIS_NEWS", "ticker": ticker},
+        metadata_filter=_build_metadata_filter(source=NEWS_SOURCE, ticker=ticker),
     )
     
     if not search_results:
@@ -106,18 +120,18 @@ def retrieve_news(
 
 def retrieve_community_posts(
     ticker: str,
-    query: str = "이 종목의 향후 단기 주가 방향은 어떨까?",
-    top_k: int = 2,
+    query: str = DEFAULT_NEWS_QUERY,
+    top_k: int = COMMUNITY_TOP_K,
     collection_name: str | None = None,
 ) -> List[Any]:
     """
     ChromaDB에서 커뮤니티 데이터를 검색하고 중복 제거 후 반환합니다.
     """
-    vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
+    vdb = _build_vector_db(collection_name)
     search_results = vdb.hybrid_query(
         query_text=query,
         k=top_k * 2,
-        metadata_filter={"source": "TOSS_COMMUNITY", "ticker": ticker},
+        metadata_filter=_build_metadata_filter(source=COMMUNITY_SOURCE, ticker=ticker),
     )
     
     if not search_results:

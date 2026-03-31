@@ -239,6 +239,62 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         card["requested_action"] = {"preference": preference, "avoid_if": avoid_if}
         return card
 
+    @staticmethod
+    def _count_news_references(top_reasons: List[Any]) -> int:
+        count = 0
+        for reason in top_reasons:
+            if not isinstance(reason, str):
+                continue
+            if re.search(r"\[N\d+\]", reason):
+                count += 1
+        return count
+
+    @classmethod
+    def _enforce_news_evidence_guard(
+        cls,
+        card: Dict[str, Any],
+        news_docs: List[Document],
+    ) -> Dict[str, Any]:
+        stance = str(card.get("stance") or "hold").strip().lower()
+        if stance not in {"strong_buy", "buy", "sell", "strong_sell"}:
+            return card
+
+        top_reasons = card.get("top_reasons")
+        if not isinstance(top_reasons, list):
+            top_reasons = []
+        unique_titles = {
+            str(doc.metadata.get("title") or "").strip()
+            for doc in news_docs
+            if str(doc.metadata.get("title") or "").strip()
+        }
+        has_news_reference = cls._count_news_references(top_reasons) > 0
+        has_minimum_news_docs = len(unique_titles) >= 2
+
+        if has_news_reference and has_minimum_news_docs:
+            return card
+
+        risk_flags = card.get("risk_flags")
+        if not isinstance(risk_flags, list):
+            risk_flags = []
+        if "insufficient_news_evidence" not in risk_flags:
+            risk_flags.append("insufficient_news_evidence")
+        card["risk_flags"] = risk_flags
+        card["stance"] = "hold"
+        try:
+            current_confidence = float(card.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            current_confidence = 0.0
+        card["confidence"] = min(current_confidence, 0.35)
+        card["score"] = 0
+        card["requested_action"] = {
+            "preference": "hold",
+            "avoid_if": "핵심 뉴스 근거가 부족하면 방향성 판단을 보류",
+        }
+        guard_reason = "핵심 뉴스 근거가 약해 방향성 판단을 보류합니다."
+        existing_reasons = [reason for reason in top_reasons if isinstance(reason, str)]
+        card["top_reasons"] = [guard_reason, *existing_reasons][:3]
+        return card
+
     def generate_response(
         self,
         question: str,
@@ -323,4 +379,5 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
             if last_error is not None:
                 card["risk_flags"].append(f"parse_error:{type(last_error).__name__}")
 
-        return self._normalize_card_payload(card, ticker=ticker)
+        normalized = self._normalize_card_payload(card, ticker=ticker)
+        return self._enforce_news_evidence_guard(normalized, news_docs=news_docs)

@@ -12,6 +12,8 @@ from app.trading.constants import KST, REDIS_BATCH_READY_PREFIX, STRATEGY_CACHE_
 from app.trading.monitoring import process_saved_strategies, sync_pending_strategy_archives
 
 logger = logging.getLogger(__name__)
+MORNING_STRATEGY_HOUR = 9
+MORNING_STRATEGY_MINUTE = 0
 
 class BatchScheduler:
     """
@@ -55,22 +57,38 @@ class BatchScheduler:
     def is_today_strategy_ready(self) -> bool:
         return self.is_today_quant_ready() and self.is_today_news_ready()
 
+    @staticmethod
+    def _delay_until(hour: int, minute: int) -> int:
+        now = datetime.now(KST)
+        target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        return max(0, int((target_time - now).total_seconds()))
+
+    def _schedule_morning_strategy_generation(self, job_id: str) -> None:
+        self.schedule_global_generation(
+            job_id,
+            delay_seconds=self._delay_until(MORNING_STRATEGY_HOUR, MORNING_STRATEGY_MINUTE),
+        )
+
+    @staticmethod
+    def _is_batch_success(result: dict) -> bool:
+        return result.get("status") in ("ok", "partial")
+
     def run_batch_prepare(self, *, days: int) -> dict:
         result = run_daily_batch_preparation(data_dir=self.data_dir, days=days)
-        if result.get("status") in ("ok", "partial"):
+        if self._is_batch_success(result):
             self.mark_today_batch_ready("quant")
             self.mark_today_batch_ready("news")
         return result
 
     def run_news_batch_prepare(self) -> dict:
         result = run_news_rag_batch()
-        if result.get("status") in ("ok", "partial"):
+        if self._is_batch_success(result):
             self.mark_today_batch_ready("news")
         return result
 
     def run_quant_batch_prepare(self, *, days: int, ready_for_time: datetime | None = None) -> dict:
         result = run_quant_feature_batch(data_dir=self.data_dir, days=days)
-        if result.get("status") in ("ok", "partial"):
+        if self._is_batch_success(result):
             self.mark_batch_ready("quant", base_time=ready_for_time)
         return result
 
@@ -87,16 +105,30 @@ class BatchScheduler:
         )
         logger.info("[Job] 사용자 %s의 전략 생성 작업을 %s 분 뒤(%s)에 예약했습니다.", user_id, delay_minutes, run_date)
 
-    def schedule_global_generation(self, job_id: str, *, delay_seconds: int = 0) -> None:
+    def schedule_global_generation(
+        self,
+        job_id: str,
+        *,
+        delay_seconds: int = 0,
+        force: bool = False,
+        force_refresh: bool = False,
+    ) -> None:
         run_date = datetime.now(KST) + timedelta(seconds=delay_seconds)
         self.scheduler.add_job(
             auto_trade_service.run_enabled_users_cycle,
             trigger="date",
             run_date=run_date,
+            kwargs={"force": force, "force_refresh": force_refresh},
             id=job_id,
             replace_existing=True,
         )
-        logger.info("[Job] 활성 사용자 전역 전략 생성 작업을 예약했습니다. (job_id=%s, run_date=%s)", job_id, run_date)
+        logger.info(
+            "[Job] 활성 사용자 전역 전략 생성 작업을 예약했습니다. (job_id=%s, run_date=%s, force=%s, force_refresh=%s)",
+            job_id,
+            run_date,
+            force,
+            force_refresh,
+        )
 
     def start(self):
         """스케줄러 시작"""
@@ -170,8 +202,8 @@ class BatchScheduler:
             result = self.run_news_batch_prepare()
             logger.info("[Job] 뉴스/RAG 배치 완료 (status=%s)", result.get("status"))
             if self.is_today_strategy_ready():
-                logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
-                self.schedule_global_generation("post_morning_batch_generation")
+                logger.info("[Job] 모든 배치가 완료되어 오전 09:00 전략 생성을 예약합니다.")
+                self._schedule_morning_strategy_generation("post_morning_batch_generation")
         except Exception as e:
             logger.error("[Job] 뉴스/RAG 배치 실패: %s", e)
 
@@ -199,8 +231,8 @@ class BatchScheduler:
             except Exception as e:
                 logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
         if self.is_today_strategy_ready():
-            logger.info("[Job] 오전 08:20 재시도 후 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
-            self.schedule_global_generation("post_retry_batch_generation")
+            logger.info("[Job] 오전 08:20 재시도 후 모든 배치가 완료되어 오전 09:00 전략 생성을 예약합니다.")
+            self._schedule_morning_strategy_generation("post_retry_batch_generation")
 
     def _midday_news_batch(self):
         logger.info("[Job] 오후 12:00 뉴스/RAG 배치 시작...")

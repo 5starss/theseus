@@ -170,3 +170,18 @@ class NewsVectorDB:
         )
         self.bm25 = None
         self.all_docs = []
+
+    def delete_documents(self, metadata_filter: Dict[str, Any]) -> int:
+        if not metadata_filter:
+            return 0
+
+        try:
+            self.vector_store._collection.delete(where=metadata_filter)
+            logger.info("메타데이터 필터로 문서 삭제 완료: %s", metadata_filter)
+        except Exception as exc:
+            logger.error("메타데이터 필터 문서 삭제 실패 (%s): %s", metadata_filter, exc)
+            raise
+
+        self.bm25 = None
+        self.all_docs = []
+        return 1
