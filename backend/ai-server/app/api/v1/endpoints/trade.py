@@ -12,22 +12,31 @@ from app.shared.rag.ingest_pipeline import RAGIngestPipeline
 router = APIRouter()
 
 TICKER_PATTERN = r"^\d{6}$"
+DEFAULT_NEWS_QUESTION = "이 종목의 향후 단기 주가 방향은 어떨까?"
 news_ingest_pipeline = RAGIngestPipeline()
+
+
+def _ok_response(**payload: Any) -> Dict[str, Any]:
+    return {"status": "ok", **payload}
+
+
+def _server_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/news", response_model=Dict[str, Any])
 async def run_news_agent_endpoint(
     ticker: str = Query(..., pattern=TICKER_PATTERN, description="종목 코드"),
-    question: str = Query("이 종목의 향후 단기 주가 방향은 어떨까?", description="뉴스 분석 질문"),
+    question: str = Query(DEFAULT_NEWS_QUESTION, description="뉴스 분석 질문"),
 ) -> Dict[str, Any]:
     """
     뉴스 에이전트만 단독 호출하여 특정 종목에 대한 뉴스/커뮤니티 기반 분석 카드를 반환합니다.
     """
     try:
         news_card = run_news_agent(ticker=ticker, question=question)
-        return {"status": "ok", "news_card": news_card}
+        return _ok_response(news_card=news_card)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error(e)
 
 
 @router.post("/news/ingest", response_model=Dict[str, Any])
@@ -48,28 +57,26 @@ async def ingest_news_endpoint(
                 community_limit=community_limit,
                 reset_collection=reset_collection,
             )
-            return {
-                "status": "ok",
-                "message": "백그라운드에서 뉴스 색인을 시작합니다.",
-                "ticker": ticker,
-                "community_limit": community_limit,
-                "reset_collection": reset_collection,
-                "timestamp": datetime.now().isoformat(),
-            }
+            return _ok_response(
+                message="백그라운드에서 뉴스 색인을 시작합니다.",
+                ticker=ticker,
+                community_limit=community_limit,
+                reset_collection=reset_collection,
+                timestamp=datetime.now().isoformat(),
+            )
 
         result = news_ingest_pipeline.run(
             ticker=ticker,
             community_limit=community_limit,
             reset_collection=reset_collection,
         )
-        return {
-            "status": "ok",
-            "message": "뉴스 색인 완료",
-            "result": result.to_dict(),
-            "timestamp": datetime.now().isoformat(),
-        }
+        return _ok_response(
+            message="뉴스 색인 완료",
+            result=result.to_dict(),
+            timestamp=datetime.now().isoformat(),
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error(e)
 
 
 @router.get("/orchestrate", response_model=Dict[str, Any])
@@ -89,24 +96,21 @@ async def orchestrate_trade_endpoint(
             user_id=user_id,
             account_type=account_type,
         )
-        return {"status": "ok", "order_card": order_card}
+        return _ok_response(order_card=order_card)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _server_error(e)
 
 
 @router.get("/auto/config", response_model=Dict[str, Any])
 async def get_auto_trade_config(
     user_id: int = Query(..., description="자동매매 대상 사용자 ID"),
 ) -> Dict[str, Any]:
-    return {"status": "ok", "config": auto_trade_service.get_config(user_id).model_dump()}
+    return _ok_response(config=auto_trade_service.get_config(user_id).model_dump())
 
 
 @router.get("/auto/configs", response_model=Dict[str, Any])
 async def list_auto_trade_configs() -> Dict[str, Any]:
-    return {
-        "status": "ok",
-        "configs": [config.model_dump() for config in auto_trade_service.list_configs()],
-    }
+    return _ok_response(configs=[config.model_dump() for config in auto_trade_service.list_configs()])
 
 
 @router.post("/auto/config", response_model=Dict[str, Any])
@@ -130,7 +134,4 @@ async def get_agent_response_status(
     user_id: Optional[int] = Query(None, description="조회할 사용자 ID"),
     trade_date: Optional[str] = Query(None, description="조회 기준일 (YYYY-MM-DD)"),
 ) -> Dict[str, Any]:
-    return {
-        "status": "ok",
-        "items": list_agent_response_statuses(user_id=user_id, trade_date=trade_date),
-    }
+    return _ok_response(items=list_agent_response_statuses(user_id=user_id, trade_date=trade_date))
