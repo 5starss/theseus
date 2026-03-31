@@ -35,6 +35,7 @@ def convert_news_items_to_documents(ticker: str, news_items: List[Dict[str, Any]
         docs.append(
             AppDocument(
                 id=f"KIS_{unique_id}",
+                ticker=ticker,
                 source="KIS_NEWS",
                 published_at=published_at,
                 title=title,
@@ -86,8 +87,11 @@ def retrieve_news(
     ChromaDB에서 뉴스 데이터를 검색하고 Rerank하여 반환합니다.
     """
     vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
-    # KIS_NEWS 소스 필터 적용
-    search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="KIS_NEWS")
+    search_results = vdb.hybrid_query(
+        query_text=query,
+        k=top_k * 2,
+        metadata_filter={"source": "KIS_NEWS", "ticker": ticker},
+    )
     
     if not search_results:
         snapshot_path = _latest_snapshot_path("raw", ticker)
@@ -110,8 +114,11 @@ def retrieve_community_posts(
     ChromaDB에서 커뮤니티 데이터를 검색하고 중복 제거 후 반환합니다.
     """
     vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
-    # TOSS_COMMUNITY 소스 필터 적용
-    search_results = vdb.hybrid_query(query_text=query, k=top_k * 2, source_filter="TOSS_COMMUNITY")
+    search_results = vdb.hybrid_query(
+        query_text=query,
+        k=top_k * 2,
+        metadata_filter={"source": "TOSS_COMMUNITY", "ticker": ticker},
+    )
     
     if not search_results:
         snapshot_path = _latest_snapshot_path("comm", ticker)
