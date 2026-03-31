@@ -69,12 +69,10 @@ export default function SignupPage() {
             style={{ backgroundImage: "linear-gradient(139.619deg, rgb(239, 246, 255) 0%, rgb(255, 255, 255) 50%, rgb(239, 246, 255) 100%)" }}
         >
             {/*헤더 / 로고 (카드 밖 세션) */}
-            <div className="flex items-center gap-2 mb-[40px] z-10 transition-transform hover:scale-105 cursor-pointer" onClick={() => navigate("/")}>
-                <div className="w-[48px] h-[48px] bg-[#155dfc] text-white flex items-center justify-center font-bold rounded-2xl shadow-lg text-2xl">
-                    S
-                </div>
+            <Link to="/" className="flex items-center gap-1 mb-[40px] z-10 transition-transform hover:scale-105 cursor-pointer">
+                <img src="/ssafy_logo.png" alt="ssafy_logo" className="w-12 h-10" />
                 <span className="font-bold text-[30px] tracking-tight text-slate-900">싸피증권</span>
-            </div>
+            </Link>
 
             {/* 회원가입 카드 */}
             <div className="w-full max-w-[560px] bg-white rounded-3xl shadow-[0px_10px_50px_0px_rgba(0,0,0,0.1)] border border-slate-100 px-[40px] pt-[30px] pb-[50px] z-10 relative">
