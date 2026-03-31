@@ -94,14 +94,16 @@ class NewsReporterAgent:
 1. 모든 분석 내용에는 반드시 참고한 데이터의 번호(예: [1], [2])를 붙여 근거를 제시하십시오.
 2. 분석 시 다음 단계를 준수하십시오:
 - 현재 상황 분석: 핵심 이슈 요약 및 관련 근거 제시.
-- 긍정적(Bullish) 요인: 상승 모멘텀 추출 (사실 기반 우선, 투자자 심리 참고).
-- 부정적(Bearish) 요인: 하락 리스크 추출 (사실 기반 우선, 투자자 심리 참고).
+- 긍정적(Bullish) 요인: 상승 모멘텀 추출 (반드시 뉴스 근거 우선, 커뮤니티는 보조 의견만 허용).
+- 부정적(Bearish) 요인: 하락 리스크 추출 (반드시 뉴스 근거 우선, 커뮤니티는 보조 의견만 허용).
 - 종합 전망 예측: 위 요소들을 결합한 향후 향방 예측.
 3. 데이터 출처별 신뢰도 가중치를 엄격히 적용하십시오.
 - 뉴스(KIS_NEWS): 신뢰도 1.0 (핵심 근거로 활용, 객관적 사실 판단 기준)
 - 커뮤니티(TOSS_COMMUNITY): 신뢰도 0.2 (시장 분위기/투자자 심리 참고용)
-4. 커뮤니티 정보는 단독으로 결론을 내리는 근거로 사용하지 마십시오.
-5. 투자 판단의 책임은 본인에게 있음을 명시하십시오.
+4. 커뮤니티 정보는 반드시 별도 보조 섹션에서만 다루고, 뉴스 근거를 보완하는 용도로만 사용하십시오.
+5. 뉴스 근거가 없는 방향성 판단, 목표가 제시, 상승/하락 모멘텀 단정은 금지합니다.
+6. 뉴스가 없거나 뉴스 근거가 약하면 결론은 반드시 중립적 관망으로 제한하고, 커뮤니티는 심리 참고 사항으로만 요약하십시오.
+7. 투자 판단의 책임은 본인에게 있음을 명시하십시오.
 
 [참고 데이터 목록]
 {context}
@@ -130,6 +132,11 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 - requested_action에 다른 키를 만들지 마세요
 - 모든 문자열 필드는 한국어로 작성
 - timestamp는 현재 시각 기준 ISO 형식
+- 뉴스(N*)는 핵심 근거, 커뮤니티(C*)는 보조 근거로만 사용하세요
+- C*만으로 stance/score/confidence를 결정하지 마세요
+- stance가 buy/sell/strong_buy/strong_sell 이려면 반드시 top_reasons에 N* 근거가 포함되어야 합니다
+- 뉴스 근거가 없거나 약하면 stance는 hold, requested_action.preference는 hold로 제한하세요
+- 커뮤니티는 투자심리 보조 정보일 뿐이며, top_reasons의 주근거가 되어서는 안 됩니다
 """,
                 ),
                 (
@@ -190,14 +197,16 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         context_parts: List[str] = []
         if news_docs:
             context_parts.append(
-                "\n".join(
+                "[뉴스 - 핵심 근거]\n"
+                + "\n".join(
                     f"[N{i+1}] ({doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
                     for i, doc in enumerate(news_docs)
                 )
             )
         if community_docs:
             context_parts.append(
-                "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
+                "[커뮤니티 - 보조 참고, 단독 결론 금지]\n"
+                + "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
             )
         return "\n\n".join(context_parts)
 
@@ -266,6 +275,13 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
                 ticker=ticker,
                 reason="분석 가능한 뉴스/커뮤니티 데이터가 없습니다.",
                 risk_flag="no_data",
+            )
+
+        if not news_docs and community_docs:
+            return self._build_empty_analysis_card(
+                ticker=ticker,
+                reason="뉴스 근거가 없어 커뮤니티만으로는 방향성 판단을 보류합니다.",
+                risk_flag="no_news_core_evidence",
             )
 
         context = self._build_card_context(news_docs, community_docs)

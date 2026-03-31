@@ -123,7 +123,7 @@ def run_news_agent(ticker: str, question: str = "이 종목의 향후 단기 주
     logger.debug(f"[{ticker}] 1단계: 뉴스/커뮤니티 수집 및 NewsAgent 실행")
     
     news_docs = retrieve_news(ticker, query=question, top_k=5)
-    comm_docs = retrieve_community_posts(ticker, query=question, top_k=3)
+    comm_docs = retrieve_community_posts(ticker, query=question, top_k=2)
     
     agent = NewsReporterAgent()
     return agent.generate_analysis_card(
