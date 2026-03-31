@@ -196,11 +196,11 @@ class BatchScheduler:
             try:
                 result = self.run_news_batch_prepare()
                 logger.info("[Job] 오전 08:20 뉴스/RAG 재시도 완료")
-                if self.is_today_strategy_ready():
-                    logger.info("[Job] 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
-                    self.schedule_global_generation("post_retry_batch_generation")
             except Exception as e:
                 logger.error("[Job] 오전 08:20 뉴스/RAG 재시도 실패: %s", e)
+        if self.is_today_strategy_ready():
+            logger.info("[Job] 오전 08:20 재시도 후 모든 배치가 완료되어 활성 사용자 전역 전략 생성을 예약합니다.")
+            self.schedule_global_generation("post_retry_batch_generation")
 
     def _midday_news_batch(self):
         logger.info("[Job] 오후 12:00 뉴스/RAG 배치 시작...")

@@ -15,6 +15,47 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
+def _repair_common_json_issues(text: str) -> str:
+    repaired = text
+    requested_action_pattern = re.compile(
+        r'("requested_action"\s*:\s*\{)([\s\S]*?)(\})',
+        re.MULTILINE,
+    )
+
+    def _fix_requested_action(match: re.Match[str]) -> str:
+        prefix, body, suffix = match.groups()
+        lines = body.splitlines()
+        fixed_lines: List[str] = []
+        note_count = 0
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                fixed_lines.append(line)
+                continue
+            if ":" in stripped or stripped in {"{", "}"}:
+                fixed_lines.append(line)
+                continue
+
+            comma = "," if stripped.endswith(",") else ""
+            value = stripped[:-1].strip() if comma else stripped
+            if re.fullmatch(r'"[^"]+"', value):
+                note_key = "note" if note_count == 0 else f"note_{note_count + 1}"
+                indent = line[: len(line) - len(line.lstrip())]
+                fixed_lines.append(f'{indent}"{note_key}": {value}{comma}')
+                note_count += 1
+                continue
+
+            fixed_lines.append(line)
+
+        return prefix + "".join(
+            f"{fixed_line}\n" if idx < len(fixed_lines) - 1 else fixed_line
+            for idx, fixed_line in enumerate(fixed_lines)
+        ) + suffix
+
+    return requested_action_pattern.sub(_fix_requested_action, repaired, count=1)
+
+
 def _load_json_object(text: str) -> Dict[str, Any]:
     try:
         return json.loads(text)
@@ -22,7 +63,11 @@ def _load_json_object(text: str) -> Dict[str, Any]:
         m = re.search(r"\{[\s\S]*\}", text)
         if not m:
             raise
-        return json.loads(m.group(0))
+        candidate = m.group(0)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return json.loads(_repair_common_json_issues(candidate))
 
 
 class NewsReporterAgent:
@@ -49,14 +94,16 @@ class NewsReporterAgent:
 1. 모든 분석 내용에는 반드시 참고한 데이터의 번호(예: [1], [2])를 붙여 근거를 제시하십시오.
 2. 분석 시 다음 단계를 준수하십시오:
 - 현재 상황 분석: 핵심 이슈 요약 및 관련 근거 제시.
-- 긍정적(Bullish) 요인: 상승 모멘텀 추출 (사실 기반 우선, 투자자 심리 참고).
-- 부정적(Bearish) 요인: 하락 리스크 추출 (사실 기반 우선, 투자자 심리 참고).
+- 긍정적(Bullish) 요인: 상승 모멘텀 추출 (반드시 뉴스 근거 우선, 커뮤니티는 보조 의견만 허용).
+- 부정적(Bearish) 요인: 하락 리스크 추출 (반드시 뉴스 근거 우선, 커뮤니티는 보조 의견만 허용).
 - 종합 전망 예측: 위 요소들을 결합한 향후 향방 예측.
 3. 데이터 출처별 신뢰도 가중치를 엄격히 적용하십시오.
 - 뉴스(KIS_NEWS): 신뢰도 1.0 (핵심 근거로 활용, 객관적 사실 판단 기준)
 - 커뮤니티(TOSS_COMMUNITY): 신뢰도 0.2 (시장 분위기/투자자 심리 참고용)
-4. 커뮤니티 정보는 단독으로 결론을 내리는 근거로 사용하지 마십시오.
-5. 투자 판단의 책임은 본인에게 있음을 명시하십시오.
+4. 커뮤니티 정보는 반드시 별도 보조 섹션에서만 다루고, 뉴스 근거를 보완하는 용도로만 사용하십시오.
+5. 뉴스 근거가 없는 방향성 판단, 목표가 제시, 상승/하락 모멘텀 단정은 금지합니다.
+6. 뉴스가 없거나 뉴스 근거가 약하면 결론은 반드시 중립적 관망으로 제한하고, 커뮤니티는 심리 참고 사항으로만 요약하십시오.
+7. 투자 판단의 책임은 본인에게 있음을 명시하십시오.
 
 [참고 데이터 목록]
 {context}
@@ -80,9 +127,16 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 - confidence는 0.0~1.0
 - score는 -30~30 정수
 - top_reasons는 최대 3개
-- requested_action은 object
+- requested_action은 반드시 아래 스키마의 object
+  {{"preference":"buy|hold|sell","avoid_if":"문장"}}
+- requested_action에 다른 키를 만들지 마세요
 - 모든 문자열 필드는 한국어로 작성
 - timestamp는 현재 시각 기준 ISO 형식
+- 뉴스(N*)는 핵심 근거, 커뮤니티(C*)는 보조 근거로만 사용하세요
+- C*만으로 stance/score/confidence를 결정하지 마세요
+- stance가 buy/sell/strong_buy/strong_sell 이려면 반드시 top_reasons에 N* 근거가 포함되어야 합니다
+- 뉴스 근거가 없거나 약하면 stance는 hold, requested_action.preference는 hold로 제한하세요
+- 커뮤니티는 투자심리 보조 정보일 뿐이며, top_reasons의 주근거가 되어서는 안 됩니다
 """,
                 ),
                 (
@@ -143,14 +197,16 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         context_parts: List[str] = []
         if news_docs:
             context_parts.append(
-                "\n".join(
+                "[뉴스 - 핵심 근거]\n"
+                + "\n".join(
                     f"[N{i+1}] ({doc.metadata.get('published_at', '시간 미상')}) {doc.page_content}"
                     for i, doc in enumerate(news_docs)
                 )
             )
         if community_docs:
             context_parts.append(
-                "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
+                "[커뮤니티 - 보조 참고, 단독 결론 금지]\n"
+                + "\n".join(f"[C{i+1}] {doc.page_content}" for i, doc in enumerate(community_docs))
             )
         return "\n\n".join(context_parts)
 
@@ -162,7 +218,25 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         card["timestamp"] = card.get("timestamp") or datetime.now().isoformat()
         card["top_reasons"] = (card.get("top_reasons") or [])[:3]
         card["risk_flags"] = card.get("risk_flags") or []
-        card["requested_action"] = card.get("requested_action") or {}
+        requested_action = card.get("requested_action")
+        if not isinstance(requested_action, dict):
+            requested_action = {}
+        preference = str(requested_action.get("preference") or "").strip().lower()
+        if preference not in {"buy", "hold", "sell"}:
+            stance = str(card.get("stance") or "hold").strip().lower()
+            if stance in {"strong_buy", "buy"}:
+                preference = "buy"
+            elif stance in {"strong_sell", "sell"}:
+                preference = "sell"
+            else:
+                preference = "hold"
+        avoid_if = str(
+            requested_action.get("avoid_if")
+            or requested_action.get("note")
+            or requested_action.get("note_2")
+            or "unknown"
+        ).strip() or "unknown"
+        card["requested_action"] = {"preference": preference, "avoid_if": avoid_if}
         return card
 
     def generate_response(
@@ -203,25 +277,50 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
                 risk_flag="no_data",
             )
 
+        if not news_docs and community_docs:
+            return self._build_empty_analysis_card(
+                ticker=ticker,
+                reason="뉴스 근거가 없어 커뮤니티만으로는 방향성 판단을 보류합니다.",
+                risk_flag="no_news_core_evidence",
+            )
+
         context = self._build_card_context(news_docs, community_docs)
 
-        try:
-            raw = self.card_chain.invoke(
-                {
-                    "question": question,
-                    "ticker": ticker,
-                    "news_count": len(news_docs),
-                    "community_count": len(community_docs),
-                    "context": context,
-                }
-            )
-            card = _load_json_object(raw)
-        except Exception:
-            logger.warning("news analysis card parsing failed | raw=%s", str(raw)[:500] if "raw" in locals() else "")
+        card: Dict[str, Any] | None = None
+        last_error: Exception | None = None
+        last_raw = ""
+        payload = {
+            "question": question,
+            "ticker": ticker,
+            "news_count": len(news_docs),
+            "community_count": len(community_docs),
+            "context": context,
+        }
+
+        for attempt in range(2):
+            try:
+                raw = self.card_chain.invoke(payload)
+                last_raw = str(raw)
+                if not last_raw.strip():
+                    raise ValueError("empty_response")
+                card = _load_json_object(last_raw)
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "news analysis card parsing failed | attempt=%s error=%s raw=%r",
+                    attempt + 1,
+                    exc,
+                    last_raw[:500],
+                )
+
+        if card is None:
             card = self._build_empty_analysis_card(
                 ticker=ticker,
                 reason="뉴스 에이전트 분석 응답 파싱 실패",
                 risk_flag="agent_failure",
             )
+            if last_error is not None:
+                card["risk_flags"].append(f"parse_error:{type(last_error).__name__}")
 
         return self._normalize_card_payload(card, ticker=ticker)

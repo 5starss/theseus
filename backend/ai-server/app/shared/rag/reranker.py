@@ -35,6 +35,20 @@ def build_llm_rerank_prompt() -> ChatPromptTemplate:
 class SolarReranker:
     """질문-문서 관련성을 LLM으로 재정렬합니다."""
 
+    @staticmethod
+    def deduplicate_documents(
+        documents: List[LangChainDocument],
+        threshold: float = 0.9,
+    ) -> List[LangChainDocument]:
+        if not documents:
+            return []
+
+        embedder = UpstageEmbedder()
+        doc_embeddings = [np.array(emb) for emb in embedder.embed_documents([doc.page_content for doc in documents])]
+        reranker = SolarReranker.__new__(SolarReranker)
+        unique_docs, _ = reranker._remove_redundancy(documents, doc_embeddings, threshold=threshold)
+        return unique_docs
+
     def __init__(self, llm_model: str = "gpt-4.1-nano"):
         self.embedder = UpstageEmbedder()
         api_key = os.getenv("GMS_API_KEY")

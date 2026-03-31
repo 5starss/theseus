@@ -220,7 +220,7 @@ def build_account_summary(
 def _build_hold_order_card(order_card: Dict[str, Any], reason: str, requested_order: Dict[str, Any]) -> Dict[str, Any]:
     """내부 보조 함수: 주문을 HOLD로 강제 변환"""
     adjusted = copy.deepcopy(order_card)
-    adjusted["final_stance"] = "hold"
+    # AI의 본래 스탠스와 판단(verdict)은 유지하여 추적성 확보
     adjusted["order"] = {
         "action": "hold",
         "order_type": "limit",

@@ -20,9 +20,9 @@ public class MessageQueueManager {
         return queues.computeIfAbsent(ticker, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
     }
 
-    public void enqueue(String ticker, long seqNo, Object event) {
+    public void enqueue(String ticker, long seqNo, int partition, long offset, Object event) {
         try {
-            getQueue(ticker).put(new JournaledEvent(seqNo, event));
+            getQueue(ticker).put(new JournaledEvent(seqNo, partition, offset, event));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("주문 큐 적재 실패", e);

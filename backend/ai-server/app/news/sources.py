@@ -103,11 +103,11 @@ def retrieve_news(
 def retrieve_community_posts(
     ticker: str,
     query: str = "이 종목의 향후 단기 주가 방향은 어떨까?",
-    top_k: int = 3,
+    top_k: int = 2,
     collection_name: str | None = None,
 ) -> List[Any]:
     """
-    ChromaDB에서 커뮤니티 데이터를 검색하고 Rerank하여 반환합니다.
+    ChromaDB에서 커뮤니티 데이터를 검색하고 중복 제거 후 반환합니다.
     """
     vdb = NewsVectorDB(collection_name=collection_name or "kis_news_titles")
     # TOSS_COMMUNITY 소스 필터 적용
@@ -118,7 +118,6 @@ def retrieve_community_posts(
         if not snapshot_path:
             return []
         return load_community_documents_from_snapshot(snapshot_path)[:top_k]
-        
-    reranker = SolarReranker()
-    reranked_docs = reranker.rerank(query=query, documents=search_results, top_n=top_k)
-    return reranked_docs
+
+    deduped_docs = SolarReranker.deduplicate_documents(search_results, threshold=0.9)
+    return deduped_docs[:top_k]

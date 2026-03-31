@@ -10,5 +10,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class JournaledEvent {
     private final long seqNo;
+    private final int partition;
+    private final long offset;
     private final Object event;
 }

@@ -23,7 +23,7 @@ from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
 from app.shared.rag.vector_db import NewsVectorDB
 from app.shared.schemas import Document
-from app.trading.account_service import apply_account_constraints, build_account_summary
+from app.trading.account_service import apply_account_constraints, build_account_summary, cap_buy_quantity
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD
 from app.trading.strategy_service import build_strategy_profile
 
@@ -223,6 +223,29 @@ def run_rebuttal_agent(
         }
 
 
+def _resolve_signal_confidence(
+    news_card: Dict[str, Any],
+    quant_card: Dict[str, Any],
+    quant_state: Dict[str, Any],
+) -> Any:
+    quant_risk_context = quant_state.get("risk_context") if isinstance(quant_state, dict) else {}
+    quant_signal_confidence = (
+        quant_risk_context.get("signal_confidence") if isinstance(quant_risk_context, dict) else None
+    )
+    if quant_signal_confidence:
+        return quant_signal_confidence
+
+    confidences = []
+    for card in (news_card, quant_card):
+        try:
+            confidences.append(float(card.get("confidence")))
+        except Exception:
+            continue
+    if not confidences:
+        return None
+    return sum(confidences) / len(confidences)
+
+
 def build_order_card(
     *,
     ticker: str,
@@ -240,6 +263,7 @@ def build_order_card(
 ) -> Dict[str, Any]:
     news_docs = retrieve_sim_news(collection_name=collection_name, query=strategy_profile["news_question"], top_k=5)
     community_docs: List[Any] = []
+    current_holding = account.holding_payload(ticker)
     news_card = news_agent.generate_analysis_card(
         ticker=ticker,
         question=strategy_profile["news_question"],
@@ -254,12 +278,25 @@ def build_order_card(
         quant_card=quant_card,
         score_gap_threshold=score_gap_threshold,
     )
+    signal_confidence = _resolve_signal_confidence(news_card, quant_card, quant_state)
+    max_buy_qty, _ = cap_buy_quantity(
+        requested_qty=999999,
+        available_cash=account.cash,
+        current_holding=current_holding,
+        effective_price=previous_close,
+        user_investment_style=strategy_profile["user_investment_style"],
+        signal_confidence=signal_confidence,
+    )
+    max_sell_qty = int(current_holding.get("available_quantity") or 0)
 
     judge_payload = {
         "ticker": ticker,
         "current_price": previous_close,
         "available_cash": account.cash,
-        "current_holding": account.holding_payload(ticker),
+        "current_holding": current_holding,
+        "max_allowed_buy_quantity": max_buy_qty,
+        "max_allowed_sell_quantity": max_sell_qty,
+        "signal_confidence": signal_confidence,
         "risk_type": strategy_profile["risk_type"],
         "invest_style": strategy_profile["invest_style"],
         "user_investment_style": strategy_profile["user_investment_style"],
@@ -272,14 +309,10 @@ def build_order_card(
         "rebuttal": rebuttal_result,
     }
     order_card = judge_agent.generate_order_card(judge_payload)
-    signal_confidence = (
-        (quant_state.get("risk_context") or {}).get("signal_confidence")
-        if isinstance(quant_state, dict) else None
-    )
     order_card = apply_account_constraints(
         order_card,
         available_cash=account.cash,
-        current_holding=account.holding_payload(ticker),
+        current_holding=current_holding,
         current_price=Decimal(str(previous_close)),
         user_investment_style=strategy_profile["user_investment_style"],
         signal_confidence=signal_confidence,
@@ -288,7 +321,7 @@ def build_order_card(
         {
             "account_snapshot": build_account_summary(
                 available_cash=account.cash,
-                current_holding=account.holding_payload(ticker),
+                current_holding=current_holding,
                 account_type="SIM",
                 user_id=user_id,
                 strategy_profile=strategy_profile,
@@ -314,6 +347,7 @@ def simulate_fill(
 ) -> Dict[str, Any]:
     order = order_card.get("order", {})
     action = str(order.get("action") or "hold").lower()
+    order_type = str(order.get("order_type") or "limit").lower()
     quantity = int(order.get("quantity") or 0)
     limit_price = int(order.get("price") or 0)
 
@@ -331,7 +365,43 @@ def simulate_fill(
         "holding_after": account.holding_payload(ticker),
     }
 
-    if action not in {"buy", "sell"} or quantity <= 0 or limit_price <= 0:
+    if action not in {"buy", "sell"} or quantity <= 0:
+        result["status"] = "skipped"
+        return result
+
+    if order_type == "market":
+        for row in intraday_df.itertuples(index=False):
+            current_price = int(getattr(row, "close"))
+            if current_price <= 0:
+                continue
+
+            executable_qty = quantity
+            if action == "buy":
+                executable_qty = min(quantity, account.cash // current_price if current_price > 0 else 0)
+            else:
+                executable_qty = min(quantity, account.holding_payload(ticker)["available_quantity"])
+
+            if executable_qty <= 0:
+                result["status"] = "blocked"
+                return result
+
+            account.apply_fill(ticker=ticker, action=action, quantity=executable_qty, price=current_price)
+            result.update(
+                {
+                    "status": "filled",
+                    "executed_at": pd.Timestamp(getattr(row, "ts")).isoformat(),
+                    "executed_price": current_price,
+                    "executed_quantity": executable_qty,
+                    "cash_after": account.cash,
+                    "holding_after": account.holding_payload(ticker),
+                }
+            )
+            return result
+
+        result["status"] = "skipped"
+        return result
+
+    if limit_price <= 0:
         result["status"] = "skipped"
         return result
 

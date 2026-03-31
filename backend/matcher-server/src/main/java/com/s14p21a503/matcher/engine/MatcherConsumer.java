@@ -69,6 +69,8 @@ public class MatcherConsumer {
                 JournaledEvent journaledEvent = queueManager.takeOrder(ticker);
                 Object event = journaledEvent.getEvent();
                 long cmdSeqNo = journaledEvent.getSeqNo();
+                int partition = journaledEvent.getPartition();
+                long offset = journaledEvent.getOffset();
                 long startTime = System.currentTimeMillis();
                 
                 if (event instanceof TickDataEvent || event instanceof MarketDataEvent) {
@@ -89,7 +91,7 @@ public class MatcherConsumer {
 
                     if ("CANCEL".equalsIgnoreCase(order.getAction())) {
                         // [Case A: 주문 취소] 오더북에서 즉시 제거하고 결과를 저널에 씁니다.
-                        ExecutionResult cancelResult = orderManager.cancelOrder(order.getOrderId(), cmdSeqNo);
+                        ExecutionResult cancelResult = orderManager.cancelOrder(order.getOrderId(), partition, offset);
                         if (cancelResult != null) {
                             processExecutionResult(ticker, journaler, cmdSeqNo, cancelResult);
                         }
@@ -106,7 +108,7 @@ public class MatcherConsumer {
                 } else if (event instanceof TickDataEvent) {
                     // [Case C: 시장 체결(Tick)] 가용 유동성을 계산하여 대기 오더와 매칭을 수행합니다.
                     TickDataEvent tick = (TickDataEvent) event;
-                    List<ExecutionResult> results = orderManager.matchWithTick(tick, cmdSeqNo);
+                    List<ExecutionResult> results = orderManager.matchWithTick(tick, cmdSeqNo, partition, offset);
 
                     // 각 개별 체결 결과에 대해 저널 기록 및 외부(Kafka) 발행을 수행합니다.
                     for (ExecutionResult res : results) {
@@ -140,7 +142,7 @@ public class MatcherConsumer {
                         case MARKET_CLOSE:
                             marketStateManager.setStatus(MarketStatus.CLOSE);
                             // 모든 미체결 주문 일괄 취소 (정규 종료 시에만 수행)
-                            List<ExecutionResult> results = orderManager.cancelAllOrders(cmdSeqNo);
+                            List<ExecutionResult> results = orderManager.cancelAllOrders();
                             for (ExecutionResult res : results) {
                                 processExecutionResult(ticker, journaler, cmdSeqNo, res);
                             }
