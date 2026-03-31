@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document as LangChainDocument
@@ -40,6 +40,7 @@ class NewsVectorDB:
                 page_content=doc.body,
                 metadata={
                     "id": doc.id,
+                    "ticker": doc.ticker,
                     "source": doc.source,
                     "published_at": doc.published_at,
                     "title": doc.title,
@@ -56,9 +57,17 @@ class NewsVectorDB:
         logger.info("[API 시간] 벡터 색인(add_documents): %s건, %.2f초", len(lc_docs), elapsed)
         return len(lc_docs)
 
-    def query(self, query_text: str, k: int = 5) -> List[LangChainDocument]:
+    def query(
+        self,
+        query_text: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[LangChainDocument]:
         start_ts = time.perf_counter()
-        results = self.vector_store.similarity_search(query_text, k=k)
+        if metadata_filter:
+            results = self.vector_store.similarity_search(query_text, k=k, filter=metadata_filter)
+        else:
+            results = self.vector_store.similarity_search(query_text, k=k)
         elapsed = time.perf_counter() - start_ts
         logger.info("[API 시간] 벡터 검색(similarity_search): k=%s, %.2f초", k, elapsed)
         return results
@@ -90,26 +99,27 @@ class NewsVectorDB:
         self.bm25 = BM25Okapi(tokenized_corpus)
         logger.info("BM25 인덱스 준비 완료: %s건", len(documents))
 
-    def hybrid_query(self, query_text: str, k: int = 5, source_filter: Optional[str] = None) -> List[LangChainDocument]:
+    def hybrid_query(
+        self,
+        query_text: str,
+        k: int = 5,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[LangChainDocument]:
         if not self.bm25:
             self._prepare_bm25(self._load_all_documents())
 
         if not self.bm25:
-            return self.query(query_text, k=k)
+            return self.query(query_text, k=k, metadata_filter=metadata_filter)
 
         start_ts = time.perf_counter()
-        if source_filter:
-            vector_results = self.vector_store.similarity_search(
-                query_text,
-                k=k * 3,
-                filter={"source": source_filter},
-            )
+        if metadata_filter:
+            vector_results = self.vector_store.similarity_search(query_text, k=k * 3, filter=metadata_filter)
         else:
             vector_results = self.vector_store.similarity_search(query_text, k=k * 3)
         elapsed = time.perf_counter() - start_ts
         logger.info(
             "[API 시간] 하이브리드 벡터 검색(similarity_search)%s: %.2f초",
-            f" [필터: {source_filter}]" if source_filter else "",
+            f" [필터: {metadata_filter}]" if metadata_filter else "",
             elapsed,
         )
 
@@ -122,7 +132,7 @@ class NewsVectorDB:
             if bm25_scores[i] <= 0:
                 continue
             doc = self.all_docs[i]
-            if source_filter and doc.metadata.get("source") != source_filter:
+            if metadata_filter and any(doc.metadata.get(key) != value for key, value in metadata_filter.items()):
                 continue
             bm25_results.append(doc)
             if len(bm25_results) >= k * 3:
@@ -146,7 +156,7 @@ class NewsVectorDB:
 
         logger.info(
             "하이브리드 검색 완료%s: %s건",
-            f" [필터: {source_filter}]" if source_filter else "",
+            f" [필터: {metadata_filter}]" if metadata_filter else "",
             len(final_results),
         )
         return final_results

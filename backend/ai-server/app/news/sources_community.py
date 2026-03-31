@@ -20,6 +20,7 @@ def convert_community_items_to_documents(ticker: str, items: List[Dict[str, Any]
         docs.append(
             AppDocument(
                 id=f"COMM_{ticker}_{int(datetime.now().timestamp())}_{idx}",
+                ticker=ticker,
                 source="TOSS_COMMUNITY",
                 published_at=published_at,
                 title=f"[{ticker}] 커뮤니티 여론 ({nickname})",
