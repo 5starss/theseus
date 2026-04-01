@@ -15,14 +15,18 @@ public class PendingOrderManagerHolder {
 
     private final ExecutionIdGenerator executionIdGenerator;
 
-    @Value("${matcher.participation-rate:0.30}")
+    @Value("${matcher.participation-rate:1.0}")
     private double participationRate;
+
+    @Value("${matcher.small-cap-participation-rate:1.0}")
+    private double smallCapParticipationRate;
 
     private final ConcurrentHashMap<String, PendingOrderManager> managers = new ConcurrentHashMap<>();
 
     public PendingOrderManager getManager(String ticker) {
         return managers.computeIfAbsent(ticker,
-                key -> new PendingOrderManager(key, executionIdGenerator, BigDecimal.valueOf(participationRate)));
+                key -> new PendingOrderManager(key, executionIdGenerator, 
+                        BigDecimal.valueOf(participationRate), BigDecimal.valueOf(smallCapParticipationRate)));
     }
 
     public Set<String> getTickers() {

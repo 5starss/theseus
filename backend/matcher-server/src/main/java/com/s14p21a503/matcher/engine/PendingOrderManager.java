@@ -36,14 +36,17 @@ public class PendingOrderManager {
 
     // 서비스 참여율 (시장 거래량의 몇 %를 우리 서비스 유동성으로 가져올지 정의)
     private final BigDecimal participationRate;
+    private final BigDecimal smallCapParticipationRate;
 
     // 유동성 소수점 적립금 (버려지는 유동성 방지)
     private BigDecimal liquidityRemainder = BigDecimal.ZERO;
 
-    public PendingOrderManager(String ticker, ExecutionIdGenerator executionIdGenerator, BigDecimal participationRate) {
+    public PendingOrderManager(String ticker, ExecutionIdGenerator executionIdGenerator, 
+                               BigDecimal participationRate, BigDecimal smallCapParticipationRate) {
         this.ticker = ticker;
         this.executionIdGenerator = executionIdGenerator;
         this.participationRate = participationRate;
+        this.smallCapParticipationRate = smallCapParticipationRate;
     }
 
     /**
@@ -104,15 +107,11 @@ public class PendingOrderManager {
             List<ExecutionResult> trades = new ArrayList<>();
 
             // ==========================================================
-            // 1. 소외주 배려: 누적 거래량(accVol)이 10만주 미만인 경우, 지정된 participationRate(5%) 대신
-            //    50%의 높은 비율을 동적으로 적용하여 소형주/소외주의 체결 속도 저하를 방지합니다.
-            // ==========================================================
             long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
             BigDecimal dynamicRate = participationRate;
-            if (tick.getAccVol() != null) {
-                if (tick.getAccVol() < 100_000L) {
-                    dynamicRate = new BigDecimal("0.50");
-                }
+            if (tick.getAccVol() != null && tick.getAccVol() < 100_000L) {
+                // 소외주인 경우 설정된 소외주 참여율을 적용하되, 기본 참여율보다 낮아지지 않도록 보장
+                dynamicRate = participationRate.max(smallCapParticipationRate);
             }
 
             // 2. 틱 거래량에 보정된 비율 곱셈
@@ -243,10 +242,8 @@ public class PendingOrderManager {
             // ==========================================================
             long tradeVol = (tick.getTradeVol() != null) ? tick.getTradeVol() : 0L;
             BigDecimal dynamicRate = participationRate;
-            if (tick.getAccVol() != null) {
-                if (tick.getAccVol() < 100_000L) {
-                    dynamicRate = new BigDecimal("0.50");
-                }
+            if (tick.getAccVol() != null && tick.getAccVol() < 100_000L) {
+                dynamicRate = participationRate.max(smallCapParticipationRate);
             }
 
             BigDecimal calculatedLiquidity = new BigDecimal(tradeVol).multiply(dynamicRate);
