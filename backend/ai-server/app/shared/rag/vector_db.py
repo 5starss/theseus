@@ -30,6 +30,17 @@ class NewsVectorDB:
         self.bm25: Optional[BM25Okapi] = None
         self.all_docs: List[LangChainDocument] = []
 
+    def _build_chroma_filter(self, metadata_filter: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not metadata_filter:
+            return None
+        if len(metadata_filter) <= 1:
+            return metadata_filter
+        if "$and" in metadata_filter or "$or" in metadata_filter:
+            return metadata_filter
+        
+        and_conditions = [{k: v} for k, v in metadata_filter.items()]
+        return {"$and": and_conditions}
+
     def add_documents(self, documents: List[AppDocument]) -> int:
         if not documents:
             logger.warning("색인할 문서가 없습니다.")
@@ -65,7 +76,8 @@ class NewsVectorDB:
     ) -> List[LangChainDocument]:
         start_ts = time.perf_counter()
         if metadata_filter:
-            results = self.vector_store.similarity_search(query_text, k=k, filter=metadata_filter)
+            chroma_filter = self._build_chroma_filter(metadata_filter)
+            results = self.vector_store.similarity_search(query_text, k=k, filter=chroma_filter)
         else:
             results = self.vector_store.similarity_search(query_text, k=k)
         elapsed = time.perf_counter() - start_ts
@@ -113,7 +125,8 @@ class NewsVectorDB:
 
         start_ts = time.perf_counter()
         if metadata_filter:
-            vector_results = self.vector_store.similarity_search(query_text, k=k * 3, filter=metadata_filter)
+            chroma_filter = self._build_chroma_filter(metadata_filter)
+            vector_results = self.vector_store.similarity_search(query_text, k=k * 3, filter=chroma_filter)
         else:
             vector_results = self.vector_store.similarity_search(query_text, k=k * 3)
         elapsed = time.perf_counter() - start_ts
@@ -175,8 +188,9 @@ class NewsVectorDB:
         if not metadata_filter:
             return 0
 
+        chroma_filter = self._build_chroma_filter(metadata_filter)
         try:
-            self.vector_store._collection.delete(where=metadata_filter)
+            self.vector_store._collection.delete(where=chroma_filter)
             logger.info("메타데이터 필터로 문서 삭제 완료: %s", metadata_filter)
         except Exception as exc:
             logger.error("메타데이터 필터 문서 삭제 실패 (%s): %s", metadata_filter, exc)
