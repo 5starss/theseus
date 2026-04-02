@@ -39,7 +39,7 @@ const AgentStatusCard = ({ status }: { status: AgentStatus }) => {
                         {step.completed ? (
                             <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
                         ) : (
-                            <Loader2 size={12} className="text-purple-400 animate-spin shrink-0" />
+                            <Loader2 size={12} className="text-indigo-400 animate-spin shrink-0" />
                         )}
                         <span className={`text-[9px] font-bold ${step.completed ? 'text-slate-600' : 'text-slate-400'}`}>
                             {step.label}
@@ -109,9 +109,9 @@ export const AIPopover = () => {
         <>
             <Popover onOpenChange={handleOpenChange}>
                 <PopoverTrigger asChild>
-                    <button className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer group ${isAIOn ? 'bg-purple-100 text-purple-600 shadow-sm' : 'text-slate-500 hover:text-purple-600 hover:bg-purple-50'}`}>
+                    <button className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all cursor-pointer group ${isAIOn ? 'bg-indigo-100 text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-indigo-600 hover:bg-indigo-50'}`}>
                         <Bot size={24} className={`${isAIOn ? "animate-pulse" : "group-hover:scale-110 transition-transform"}`} />
-                        <span className={`text-[10px] font-bold shrink-0 ${isAIOn ? 'text-purple-600' : 'text-slate-500 group-hover:text-purple-600'}`}>AI 매매</span>
+                        <span className={`text-[10px] font-bold shrink-0 ${isAIOn ? 'text-indigo-600' : 'text-slate-500 group-hover:text-indigo-600'}`}>AI 매매</span>
                     </button>
                 </PopoverTrigger>
                 <PopoverContent
@@ -138,7 +138,7 @@ export const AIPopover = () => {
                                                 e.stopPropagation();
                                                 setIsGuideOpen(true);
                                             }}
-                                            className="p-1 text-slate-300 hover:text-purple-500 transition-colors focus:outline-none"
+                                            className="p-1 text-slate-300 hover:text-indigo-500 transition-colors focus:outline-none"
                                         >
                                             <Info size={20} />
                                         </button>
@@ -161,7 +161,7 @@ export const AIPopover = () => {
                                 onValueChange={(val) => setInvestStyle(val as AutoTradeStyle)}
                                 disabled={isAIOn || isAnalyzing}
                             >
-                                <SelectTrigger className="w-full h-10 border-slate-100 bg-slate-50 rounded-xl focus:ring-purple-200">
+                                <SelectTrigger className="w-full h-10 border-slate-100 bg-slate-50 rounded-xl focus:ring-indigo-200">
                                     <SelectValue placeholder="스타일 선택" />
                                 </SelectTrigger>
                                 <SelectContent position="popper" sideOffset={4} className="rounded-xl border-slate-100 w-[var(--radix-select-trigger-width)]">
@@ -178,17 +178,17 @@ export const AIPopover = () => {
                             </div>
                             <div className="flex items-center gap-2">
                                 {isAnalyzing ? (
-                                    <Loader2 size={16} className="animate-spin text-purple-600" />
+                                    <Loader2 size={16} className="animate-spin text-indigo-600" />
                                 ) : (
                                     <>
-                                        <span className={`text-[10px] font-black w-8 text-center transition-colors ${isAIOn ? 'text-purple-600' : 'text-slate-300'}`}>
+                                        <span className={`text-[10px] font-black w-8 text-center transition-colors ${isAIOn ? 'text-indigo-600' : 'text-slate-300'}`}>
                                             {isAIOn ? 'ON' : 'OFF'}
                                         </span>
                                         <Switch
                                             checked={isAIOn}
                                             onCheckedChange={handleToggle}
                                             disabled={!isLoggedIn || isAnalyzing}
-                                            className="data-[state=checked]:bg-purple-600"
+                                            className="data-[state=checked]:bg-indigo-600"
                                         />
                                     </>
                                 )}
@@ -220,7 +220,7 @@ export const AIPopover = () => {
 
                                         return (
                                             <div className="flex flex-col items-center justify-center h-32 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
-                                                <Loader2 size={20} className="text-purple-300 animate-spin mb-2" />
+                                                <Loader2 size={20} className="text-indigo-300 animate-spin mb-2" />
                                                 <p className="text-[10px] text-slate-400 font-medium">분석 데이터를 수신 중입니다...</p>
                                             </div>
                                         );
