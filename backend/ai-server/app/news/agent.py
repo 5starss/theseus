@@ -135,7 +135,8 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
 - 뉴스(N*)는 핵심 근거, 커뮤니티(C*)는 보조 근거로만 사용하세요
 - C*만으로 stance/score/confidence를 결정하지 마세요
 - stance가 buy/sell/strong_buy/strong_sell 이려면 반드시 top_reasons에 N* 근거가 포함되어야 합니다
-- 뉴스 근거가 없거나 약하면 stance는 hold, requested_action.preference는 hold로 제한하세요
+- 뉴스 근거가 전혀 없으면 stance는 hold, requested_action.preference는 hold로 제한하세요
+- 뉴스 근거가 1건으로 제한적이거나 후속 확인이 부족하면 strong 계열은 금지하고, 필요하면 낮은 confidence의 buy/sell 또는 hold만 허용하세요
 - 커뮤니티는 투자심리 보조 정보일 뿐이며, top_reasons의 주근거가 되어서는 안 됩니다
 """,
                 ),
@@ -279,19 +280,47 @@ $schema, agent, ticker, timestamp, stance, confidence, score, signal_breakdown, 
         if "insufficient_news_evidence" not in risk_flags:
             risk_flags.append("insufficient_news_evidence")
         card["risk_flags"] = risk_flags
-        card["stance"] = "hold"
         try:
             current_confidence = float(card.get("confidence") or 0.0)
         except (TypeError, ValueError):
             current_confidence = 0.0
-        card["confidence"] = min(current_confidence, 0.35)
-        card["score"] = 0
-        card["requested_action"] = {
-            "preference": "hold",
-            "avoid_if": "핵심 뉴스 근거가 부족하면 방향성 판단을 보류",
-        }
-        guard_reason = "핵심 뉴스 근거가 약해 방향성 판단을 보류합니다."
+        try:
+            current_score = int(float(card.get("score") or 0))
+        except (TypeError, ValueError):
+            current_score = 0
         existing_reasons = [reason for reason in top_reasons if isinstance(reason, str)]
+
+        if not has_news_reference:
+            card["stance"] = "hold"
+            card["confidence"] = min(current_confidence, 0.35)
+            card["score"] = 0
+            card["requested_action"] = {
+                "preference": "hold",
+                "avoid_if": "핵심 뉴스 근거가 부족하면 방향성 판단을 보류",
+            }
+            guard_reason = "핵심 뉴스 근거가 약해 방향성 판단을 보류합니다."
+            card["top_reasons"] = [guard_reason, *existing_reasons][:3]
+            return card
+
+        # 뉴스 근거가 1건뿐이어도 방향성이 명확하면 약한 의견은 허용하되,
+        # 과도한 확신과 strong stance는 제한합니다.
+        if stance == "strong_buy":
+            card["stance"] = "buy"
+        elif stance == "strong_sell":
+            card["stance"] = "sell"
+
+        card["confidence"] = min(current_confidence, 0.55)
+        if current_score > 0:
+            card["score"] = min(current_score, 12)
+        elif current_score < 0:
+            card["score"] = max(current_score, -12)
+        else:
+            card["score"] = 0
+        card["requested_action"] = {
+            "preference": "buy" if card["stance"] in {"strong_buy", "buy"} else "sell",
+            "avoid_if": "핵심 뉴스의 후속 확인이 부족하면 비중을 낮춰 접근",
+        }
+        guard_reason = "핵심 뉴스 근거가 제한적이어서 확신도와 점수를 보수적으로 낮췄습니다."
         card["top_reasons"] = [guard_reason, *existing_reasons][:3]
         return card
 
