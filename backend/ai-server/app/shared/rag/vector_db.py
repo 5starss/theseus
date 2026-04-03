@@ -84,8 +84,15 @@ class NewsVectorDB:
         logger.info("[API 시간] 벡터 검색(similarity_search): k=%s, %.2f초", k, elapsed)
         return results
 
-    def _load_all_documents(self) -> List[LangChainDocument]:
-        results = self.vector_store.get()
+    def _load_all_documents(
+        self,
+        metadata_filter: Optional[Dict[str, Any]] = None,
+    ) -> List[LangChainDocument]:
+        get_kwargs: Dict[str, Any] = {}
+        if metadata_filter:
+            get_kwargs["where"] = self._build_chroma_filter(metadata_filter)
+
+        results = self.vector_store.get(**get_kwargs)
         docs: List[LangChainDocument] = []
         ids = results.get("ids", [])
         documents = results.get("documents", [])
@@ -118,7 +125,15 @@ class NewsVectorDB:
         metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> List[LangChainDocument]:
         if not self.bm25:
-            self._prepare_bm25(self._load_all_documents())
+            try:
+                self._prepare_bm25(self._load_all_documents(metadata_filter=metadata_filter))
+            except Exception as exc:
+                logger.warning(
+                    "BM25 인덱스 준비 실패, 벡터 검색으로 폴백합니다 [filter=%s]: %s",
+                    metadata_filter,
+                    exc,
+                )
+                return self.query(query_text, k=k, metadata_filter=metadata_filter)
 
         if not self.bm25:
             return self.query(query_text, k=k, metadata_filter=metadata_filter)
