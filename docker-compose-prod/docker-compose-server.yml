@@ -1,0 +1,83 @@
+services:
+  api-gateway:
+    build:
+      context: ../backend/api-gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
+      - AUTH_CORS_ALLOWED_ORIGINS=${AUTH_CORS_ALLOWED_ORIGINS}
+    ports:
+      - "8080:8080"
+    networks:
+      - stock-network
+
+  core-api-server:
+    build:
+      context: ../backend/core-api-server
+      dockerfile: Dockerfile
+    container_name: core-api-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
+      - AUTH_CORS_ALLOWED_ORIGINS=${AUTH_CORS_ALLOWED_ORIGINS}
+    ports:
+      - "8081:8081"
+    networks:
+      - stock-network
+
+  matcher-server:
+    build:
+      context: ../backend/matcher-server
+      dockerfile: Dockerfile
+    container_name: matcher-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+      - SPRING_PROFILES_ACTIVE=prod
+    ports:
+      - "8082:8082"
+    volumes:
+      - /var/lib/matcher-data:/var/lib/matcher-data
+    networks:
+      - stock-network
+
+  market-server:
+    build:
+      context: ../backend/market-server
+      dockerfile: Dockerfile
+    container_name: market-server
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8085:8085"
+    networks:
+      - stock-network
+
+  ai-server:
+    build:
+      context: ../backend/ai-server
+      dockerfile: Dockerfile
+    container_name: ai-server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - AI_SERVER_CHROMA_DIR=/app/chroma_db
+    volumes:
+      - /home/ubuntu/ai-server-data/chroma_db:/app/chroma_db
+
+    ports:
+      - "8086:8086"
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    external: true
+    name: stock-network

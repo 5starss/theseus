@@ -1,0 +1,60 @@
+package com.s14p21a503.coreapi.domain.ranking.service;
+
+import com.s14p21a503.coreapi.domain.ranking.entity.DailyRanking;
+import com.s14p21a503.coreapi.domain.ranking.repository.DailyRankingRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Optional;
+
+@Service
+@RequiredArgsConstructor
+public class RankingCacheService {
+
+    private final DailyRankingRepository dailyRankingRepository;
+
+    /**
+     * 특정 사용자의 특정 날짜 랭킹 정보를 캐싱합니다.
+     */
+    @Cacheable(value = "user_ranking", key = "#dateTime.toString() + '_' + #userId")
+    public Optional<DailyRanking> getUserRanking(LocalDateTime dateTime, Long userId) {
+        return dailyRankingRepository.findByRankDateTimeAndUserId(dateTime, userId);
+    }
+
+    /**
+     * 가장 최근의 랭킹 날짜를 조회하여 캐싱합니다.
+     */
+    @Cacheable(value = "latest_ranking_date", key = "'LATEST_DT'")
+    public LocalDateTime getLatestDateTime() {
+        return dailyRankingRepository.findTopByOrderByRankDateTimeDesc()
+                .map(DailyRanking::getRankDateTime)
+                .orElse(LocalDateTime.now());
+    }
+
+    /**
+     * 특정 날짜의 랭킹 페이지를 캐싱하여 반환합니다. (로컬 캐시)
+     * Spring AOP 특성상 내부 호출 시 프록시가 작동하지 않으므로 별도 클래스로 분리했습니다.
+     */
+    @Cacheable(value = "ranking_page", key = "#dateTime.toString() + '_' + (#nickname ?: 'ALL') + '_' + #pageable.pageNumber + '_' + #pageable.pageSize")
+    public Page<DailyRanking> getRankingPage(LocalDateTime dateTime, String nickname, Pageable pageable) {
+        if (nickname != null && !nickname.isEmpty()) {
+            return dailyRankingRepository.findAllByRankDateTimeAndNicknameContainingOrderByRankOrderAsc(
+                    dateTime, nickname, pageable);
+        } else {
+            return dailyRankingRepository.findAllByRankDateTimeOrderByRankOrderAsc(dateTime, pageable);
+        }
+    }
+
+    /**
+     * 특정 날짜의 전체 랭킹 유저 수를 조회하여 캐싱합니다.
+     */
+    @Cacheable(value = "total_ranking_count", key = "#dateTime.toString()")
+    public long getTotalCount(LocalDateTime dateTime) {
+        return dailyRankingRepository.countByRankDateTime(dateTime);
+    }
+}

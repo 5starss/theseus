@@ -1,0 +1,56 @@
+version: '3.8'
+
+networks:
+  stock-network:
+    external: true
+
+services:
+  api-gateway:
+    build: ../backend/api-gateway
+    container_name: api-gateway
+    env_file: .env # 동일 폴더의 .env 파일을 읽어옵니다.
+    ports:
+      - "8080:8080"
+    networks:
+      - stock-network
+
+  core-api-server:
+    build: ../backend/core-api-server
+    container_name: core-api-server
+    env_file: .env
+    environment:
+      - SPRING_DATASOURCE_URL=${SPRING_DATASOURCE_URL}
+      - SPRING_DATASOURCE_USERNAME=${SPRING_DATASOURCE_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATASOURCE_PASSWORD}
+      - SPRING_DATA_REDIS_HOST=${SPRING_DATA_REDIS_HOST}
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - stock-network
+
+  matcher-server:
+    build: ../backend/matcher-server
+    container_name: matcher-server
+    env_file: .env
+    environment:
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - stock-network
+
+  market-server:
+    build: ../backend/market-server
+    container_name: market-server
+    env_file: .env
+    environment:
+      - REDIS_HOST=${REDIS_HOST}
+      - KAFKA_BROKER=${SPRING_KAFKA_BOOTSTRAP_SERVERS} # 변수명 통일
+    networks:
+      - stock-network
+
+  ai-server:
+    build: ../backend/ai-server
+    container_name: ai-server
+    env_file: .env
+    ports:
+      - "8086:8086"
+    networks:
+      - stock-network

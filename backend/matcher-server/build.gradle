@@ -1,0 +1,57 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.5.11'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.s14p21a503'
+version = '0.0.1-SNAPSHOT'
+description = 'matcher-server'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.kafka:spring-kafka'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'io.micrometer:micrometer-registry-prometheus'
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+task monitor(type: JavaExec) {
+    group = 'verification'
+    description = 'Monitors the journal log for a specific ticker'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.s14p21a503.matcher.tools.JournalMonitor'
+    standardInput = System.in
+    
+    // gradle monitor -Pticker=005930 -PlogDir=c:/MATERCHER-DATA 등으로 실행 가능
+    args = [
+        project.findProperty('ticker') ?: '005930',
+        project.findProperty('logDir') ?: 'c:/MATERCHER-DATA'
+    ]
+}

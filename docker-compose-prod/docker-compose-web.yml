@@ -1,0 +1,33 @@
+services:
+  nginx:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 호스트의 /etc/letsencrypt를 컨테이너의 동일 경로로 마운트
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - stock-network
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    volumes:
+      # Certbot도 동일한 호스트 경로를 사용해야 파일이 공유됨
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/www/certbot:/var/www/certbot
+    networks:
+      - stock-network
+
+networks:
+  stock-network:
+    external: true
+    name: stock-network

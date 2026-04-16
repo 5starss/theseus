@@ -1,0 +1,36 @@
+package com.s14p21a503.coreapi.domain.user.service;
+
+import com.s14p21a503.coreapi.common.exception.CustomException;
+import com.s14p21a503.coreapi.common.response.status.ErrorCode;
+import com.s14p21a503.coreapi.domain.user.dto.UserProfileResponseDto;
+import com.s14p21a503.coreapi.domain.user.dto.InvestmentStyleUpdateRequestDto;
+import com.s14p21a503.coreapi.domain.user.entity.User;
+import com.s14p21a503.coreapi.domain.user.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+@RequiredArgsConstructor
+public class UserService {
+
+    private final UserRepository userRepository;
+
+    @Transactional(readOnly = true)
+    public UserProfileResponseDto getProfile(Long userId) {
+        return userRepository.findById(userId)
+                .map(UserProfileResponseDto::from)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    @Transactional
+    public UserProfileResponseDto updateInvestmentStyle(Long userId, InvestmentStyleUpdateRequestDto dto) {
+        if (dto.getInvestmentStyle() == null) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+        user.updateInvestmentStyle(dto.getInvestmentStyle());
+        return UserProfileResponseDto.from(user);
+    }
+}

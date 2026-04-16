@@ -1,0 +1,72 @@
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+venv
+.venv
+
+agent/
+storage/
+chroma_db/
+
+*.pem
+
+# [보안 및 환경 설정] - 팀장님 가이드 추가분
+.env
+.env.local
+.env.*.local
+*.env
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime/debug artifacts
+next_data.json
+toss_page.html
+
+# Storage ─ 디렉토리 구조는 유지, 데이터 파일은 무시
+storage/news/*
+storage/quant/*
+!storage/news/.gitkeep
+!storage/quant/.gitkeep
+storage/.kis_token.json

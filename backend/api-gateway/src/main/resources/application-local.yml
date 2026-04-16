@@ -1,0 +1,61 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*" 
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+
+springdoc:
+  swagger-ui:
+    persist-authorization: true 
+    urls:
+      - name: core-api
+        url: /v3/api-docs/core-api
+      - name: market
+        url: /v3/api-docs/market
+      - name: ai-api
+        url: /v3/api-docs/ai
+
+jwt:
+  public-key-path: classpath:public_key.pem 
+  whitelist:
+    - /api/v1/core/auth/signup
+    - /api/v1/core/auth/login
+    - /api/v1/core/auth/refresh
+    - /api/v1/core/rankings
+    - /api/v1/core/rankings/**
+    - /api/v1/core/orders/trade-policy
+    - /api/v1/market/stocks
+    - /api/v1/market/stocks/*
+    - /api/v1/market/stocks/*/candles
+    - /api/v1/market/stocks/search
+    - /ws/v1/stocks
+    - /swagger-ui.html
+    - /swagger-ui/**
+    - /v3/api-docs/**
+
+service:
+  core:
+    url: http://localhost:8081
+    api-docs-url: http://localhost:8081
+  market:
+    url: http://localhost:8085
+    ws-url: ws://localhost:8085
+    api-docs-url: http://localhost:8085
+  ai:
+    url: http://localhost:8086
+    api-docs-url: http://localhost:8086
