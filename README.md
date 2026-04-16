@@ -1,123 +1,61 @@
-# 📈 싸피증권 (SSAFY Securities)
+## Git Hook 설치 (필수)
+이 프로젝트는 커밋 메시지에 Jira 이슈 키를 자동으로 붙이기 위해
+Git hook을 사용합니다.
 
-> 💡 **“1억으로 시작하는 AI 기반 가상 주식 투자 플랫폼”**
+  1. 현재 브랜치명에서 Jira 이슈 키 추출 ([A-Z0-9]{2,}-[0-9]+ 패턴 예:S14P-123)
+  2. 이슈 키가 없으면 → 아무것도 안 
+  3. 커밋 메시지에 이미 이슈 키가 있으면 → 아무것도 안 함
+  4. 첫 줄 맨 앞에 이슈키 삽입
 
-싸피증권은 실시간 주식 데이터와 AI 자동매매 기능을 결합한  
-**가상 주식 거래 및 전략 실험 플랫폼**입니다.
+  예시:
+  브랜치명: feature/S14P-42-login
+  커밋 메시지 입력: "로그인 기능 추가"
+  → 결과: "S14P-42 로그인 기능 추가"
 
-사용자는 실제 시장 데이터를 기반으로 투자 경험을 쌓고,  
-AI 에이전트를 통해 자동매매 전략을 실행하고 검증할 수 있습니다.
-
----
-
-# 🚀 주요 기능
-
-## 📊 실시간 주식 거래
-- KIS API 기반 실시간 시세 및 호가 데이터 수신
-- 종목 검색 및 상세 정보 조회
-- 캔들 차트 및 거래량 분석
-
-## 💰 가상 투자 시스템
-- 1억 원 가상 자본 제공
-- 주문 (매수 / 매도) 및 체결 처리
-- 포지션 및 수익률 관리
-
-## ⚙️ 매칭 엔진
-- 자체 구현 주문 매칭 시스템
-- 실시간 체결 처리
-- 주문장 기반 거래 시뮬레이션
-
-## 🤖 AI 자동매매
-- 뉴스 + 시장 데이터 기반 전략 분석
-- 자연어 기반 전략 정의 (RSI, EMA 등)
-- 자동 매수/매도 실행
-
-## 🔔 실시간 알림
-- SSE 기반 이벤트 스트리밍
-- 주문 체결 및 상태 알림
-
----
-
-# 🏗️ 시스템 아키텍처
-
-Client
-
-↓
-
-Nginx (HTTPS)
-
-↓
-
-API Gateway (Spring Cloud Gateway)
-
-↓
-
-| core-api | matcher | market | ai-server |
-
-↓
-
-| RDS(MySQL) | Redis | Kafka |
-
-
----
-
-# ⚙️ 기술 스택
-
-## 🖥 Backend
-- Java 21, Spring Boot
-- Spring Cloud Gateway
-- JPA (Hibernate)
-
-## 🤖 AI
-- Python, FastAPI
-
-## 📡 데이터 & 메시징
-- MySQL (AWS RDS)
-- Redis
-- Apache Kafka
-
-## 🌐 Infra
-- Docker / Docker Compose
-- Nginx (HTTPS)
-- Jenkins (CI/CD)
-- AWS EC2
-
-## 📊 Monitoring
-- Prometheus
-- Grafana
-
----
-
-# 🔄 CI/CD
-
-- GitLab 기반 브랜치 전략 (dev → main)
-- Jenkins 자동 빌드 및 배포
-- Docker Compose 기반 서비스 재배포
+## 최초 1회 실행
 
 ```bash
-docker-compose up -d --build api-gateway
+sh tools/git-hooks/install.sh
 ```
 
+# Stock Project 로컬 개발 세팅 가이드
 
-📦 프로젝트 구조
+우리 프로젝트의 초기 환경 구축 및 실행을 위한 가이드입니다. 팀원 여러분은 아래 순서대로 세팅을 완료해 주세요.
+
+---
+
+## 1. 전제 조건 (Prerequisites)
+* **Docker Desktop** 설치 및 실행
+* **IntelliJ IDEA** 
+* **Java 21** 
+
+---
+
+## 2. 인프라 환경 구축 (Docker)
+
+우리 프로젝트는 마이크로서비스 간의 원활한 통신을 위해 **공통 외부 네트워크**를 
+사용합니다. **최초 1회** 아래 명령어를 터미널에서 실행해 주세요.
+
+```bash
+# 공통 네트워크 생성 (필수)
+docker network create stock-network
+
+# 인프라 컨테이너 실행
+cd docker-compose
+docker-compose -f docker-compose-infra.yml up -d
+
 ```
-backend/
-  ├── api-gateway
-  ├── core-api-server
-  ├── matcher-server
-  ├── market-server
-  └── ai-server
+## 3. 환경변수 세팅
+각 서버 모듈의 루트 폴더에 .env 파일을 생성해 주세요.
 
-docker-compose-prod/
-nginx/
-frontend/
-```
+[파일 위치]
 
-## 🎯 서비스 목표
-- 개인 투자자의 실전 투자 경험 제공
-- AI 기반 자동매매 전략 실험
-- 안전한 환경에서 투자 학습 가능
+backend/api-gateway/.env
 
-## 🏁 한 줄 소개
+backend/core-api-server/.env
 
-- 💡 “AI가 대신 투자하는, 실전형 주식 시뮬레이션 플랫폼”
+backend/market-server/.env
+
+backend/matcher-server/.env
+
+
