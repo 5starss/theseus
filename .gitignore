@@ -1,8 +1,56 @@
-/.idea/
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.iml
+
+# Node.js
+node_modules/
+dist/
+build/
+.vite/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+*.p12
+*.jks
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Java / Gradle
+.gradle/
+out/
+target/
+bin/
+*.class
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Existing project-specific ignores
 /CLAUDE.md
 /GEMINI.md
 text.md
-.vscode/
 /backend/market-server/tmp/api-server
 /backend/market-server/api
 /backend/api-gateway/docs/AGENT_PLAN.md
