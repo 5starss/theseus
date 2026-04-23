@@ -1,7 +1,14 @@
+server:
+  port: ${SERVER_PORT:8081}
+
 spring:
+  config:
+    import:
+      - optional:file:./.env.local[.properties] # .env.local 파일을 읽어옴
+      - optional:file:../../infra/docker/local/.env.local[.properties]
   application:
     name: theseus-api-server
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
-      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:13306/theseus}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:root}
