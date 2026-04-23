@@ -1,1 +1,24 @@
-# Production Docker Compose placeholder
+services:
+  theseus-core-server:
+    build:
+      context: ../../../backend/theseus-core-server
+      dockerfile: Dockerfile
+    image: theseus-core-server:local
+    container_name: theseus-local-core-server
+    env_file:
+      - .env.local
+    environment:
+      CORE_POSTGRES_HOST: theseus-local-postgres
+      CORE_POSTGRES_PORT: 5432
+      CORE_POSTGRES_DSN: postgresql://root:root@theseus-local-postgres:5432/theseus_core
+    ports:
+      - "8086:8086"
+    depends_on:
+      theseus-local-postgres:
+        condition: service_healthy
+    networks:
+      - theseus-local-network
+
+networks:
+  theseus-local-network:
+    name: theseus-local-network
