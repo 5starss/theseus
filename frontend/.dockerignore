@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-ssr
+build
+*.local
+.env*
+.vscode
+.git
+.idea
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Docker
+Dockerfile
+.dockerignore
+
+# OS 메타데이터
+.DS_Store
+Thumbs.db
+
+README.md
+LICENSE
