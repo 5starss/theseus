@@ -177,7 +177,7 @@ FastAPI 서버 구축, Spring Boot와의 통신, Vector DB 연동 등 시스템�
   * 클라이언트 대상 `/stream` GET 엔드포인트 구축 및 `StreamingResponse` 구현.
   * `BackgroundTasks`와 `httpx`를 사용한 Zero-Trust Server-to-Server 과금 로직 구현.
 * **RAG 및 Vector DB 인프라 (Knowledge Base)**
-  * ChromaDB 도커 컨테이너 구축 및 FastAPI에서의 `HttpClient` 연동.
+  * PostgreSQL 도커 컨테이너 구축 및 FastAPI에서의 `HttpClient` 연동.
   * 지식 검색 도구 뼈대(`search_knowledge.py`) 작성 및 데이터 입출력 연동.
 * **배포 및 샌드박스 인프라 (Security & Docker)**
   * FastAPI 서버를 위한 멀티스테이지 Dockerfile 작성.
