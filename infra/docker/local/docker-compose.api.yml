@@ -1,1 +1,22 @@
-# Local development Docker Compose placeholder
+services:
+  theseus-api-server:
+    build:
+      context: ../../../backend/theseus-api-server
+      dockerfile: Dockerfile
+    image: theseus-api-server:local
+    container_name: theseus-local-api-server
+    env_file:
+      - .env.local
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://theseus-local-mysql:3306/theseus
+    ports:
+      - "8081:8081"
+    depends_on:
+      theseus-local-mysql:
+        condition: service_healthy
+    networks:
+      - theseus-local-network
+
+networks:
+  theseus-local-network:
+    name: theseus-local-network

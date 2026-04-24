@@ -1,1 +1,44 @@
-# Development Docker Compose placeholder
+services:
+  theseus-local-mysql:
+    image: mysql:8.4
+    container_name: theseus-local-mysql
+    env_file:
+      - .env.local
+    ports:
+      - "13306:3306"
+    volumes:
+      - theseus-local-mysql-data:/var/lib/mysql
+    networks:
+      - theseus-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  theseus-local-postgres:
+    image: postgres:16
+    container_name: theseus-local-postgres
+    env_file:
+      - .env.local
+    ports:
+      - "15432:5432"
+    volumes:
+      - theseus-local-postgres-data:/var/lib/postgresql/data
+    networks:
+      - theseus-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  theseus-local-network:
+    name: theseus-local-network
+
+volumes:
+  theseus-local-mysql-data:
+    name: theseus-local-mysql-data
+  theseus-local-postgres-data:
+    name: theseus-local-postgres-data
