@@ -17,7 +17,7 @@ services:
       retries: 10
 
   theseus-local-postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16 # pgvector extension 사용을 위해 PostgreSQL 이미지를 pgvector 지원 이미지로 변경
     container_name: theseus-local-postgres
     env_file:
       - .env.local
@@ -25,6 +25,7 @@ services:
       - "15432:5432"
     volumes:
       - theseus-local-postgres-data:/var/lib/postgresql/data
+      - ./initdb/postgres:/docker-entrypoint-initdb.d # 초기화 SQL을 마운트해 pgvector extension을 자동 생성
     networks:
       - theseus-local-network
     healthcheck:
