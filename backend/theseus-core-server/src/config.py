@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
+from typing import Literal
 
 class Settings(BaseSettings):
     # App Settings
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     ENV: str = "dev"
     
     # Auth Settings
-    AUTH_MODE: str = "mock"  # mock | spring
+    AUTH_MODE: Literal["mock", "spring"] = "mock"
     SPRING_BOOT_INTERNAL_URL: str = "http://localhost:8080"
     SPRING_BOOT_AUTH_VERIFY_URL: str = "http://localhost:8080/api/auth/verify"
     AUTH_TIMEOUT_SECONDS: int = 5
