@@ -1,5 +1,6 @@
 import httpx
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from src.config import settings
 from src.auth.schemas import UserSession
 import logging
@@ -24,7 +25,14 @@ class AuthClient:
                 )
                 
                 if response.status_code == 200:
-                    return UserSession(**response.json())
+                    try:
+                        return UserSession(**response.json())
+                    except ValidationError as exc:
+                        logger.error(f"Invalid auth response schema: {exc}")
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="Authentication service returned invalid session data"
+                        )
                 elif response.status_code in [401, 403]:
                     raise HTTPException(
                         status_code=response.status_code,

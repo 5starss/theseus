@@ -126,7 +126,7 @@ uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 * 사용자가 생성한 커스텀 `.py` 도구들은 메인 FastAPI 프로세스 메모리에 직접 로드되어 실행되어서는 안 됩니다.
 * 프로덕션 환경에서는 툴 실행 요청 시 **Docker-in-Docker(DinD) 환경**이나 **Serverless Function (AWS Lambda 등)**을 통해 격리된(Sandboxed) 공간에서 원격 실행(Remote Execution)되도록 배포해야 합니다.
 
-### 7.2. ChromaDB 서버 분리
+### 7.2. PostgreSQL 서버 분리
 * 다중 FastAPI 컨테이너 스케일링을 위해 로컬 디렉토리 모드(`PersistentClient`)를 금지하고, 반드시 클라이언트-서버 모드(`HttpClient`)를 사용해 중앙 데이터베이스를 바라보도록 구성해야 합니다.
 
 ### 7.3. Zero-Trust 과금 아키텍처

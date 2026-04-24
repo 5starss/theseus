@@ -7,23 +7,36 @@ from typing import Optional
 
 security = HTTPBearer(auto_error=False)
 
-async def get_token(
-    request: Request,
-    auth: Optional[HTTPAuthorizationCredentials] = Depends(security)
+async def get_bearer_token(
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
     """
-    Header(Bearer) 또는 Query Parameter(token)에서 토큰을 추출합니다.
-    SSE 등의 연결을 위해 쿼리 파라미터를 지원합니다.
+    Authorization Header에서 Bearer 토큰을 추출합니다.
     """
-    # 1. Header 우선 확인
     if auth:
         return auth.credentials
-    
-    # 2. Query Parameter 확인
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def get_sse_token(
+    request: Request,
+    auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
+    """
+    SSE 연결에서는 Header(Bearer) 또는 Query Parameter(token)에서 토큰을 추출합니다.
+    """
+    if auth:
+        return auth.credentials
+
     token = request.query_params.get("token")
     if token:
         return token
-        
+
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Missing authentication token",
@@ -31,7 +44,7 @@ async def get_token(
     )
 
 async def get_session_context(
-    token: str = Depends(get_token)
+    token: str = Depends(get_bearer_token)
 ) -> SessionContext:
     """
     추출된 토큰을 검증하고 세션 컨텍스트를 반환합니다.
@@ -49,6 +62,30 @@ async def get_session_context(
     # 실제 Spring Boot 연동 모드
     user_session: UserSession = await auth_client.verify_token(token)
     
+    return SessionContext(
+        user_id=user_session.user_id,
+        project_id=user_session.project_id,
+        permission_level=user_session.permission_level,
+        token=token
+    )
+
+
+async def get_sse_session_context(
+    token: str = Depends(get_sse_token)
+) -> SessionContext:
+    """
+    SSE 전용 토큰 추출 방식을 사용하는 세션 컨텍스트 의존성입니다.
+    """
+    if settings.AUTH_MODE == "mock":
+        return SessionContext(
+            user_id="dev-user",
+            project_id="dev-project",
+            permission_level=3,
+            token=token
+        )
+
+    user_session: UserSession = await auth_client.verify_token(token)
+
     return SessionContext(
         user_id=user_session.user_id,
         project_id=user_session.project_id,
