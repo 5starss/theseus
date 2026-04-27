@@ -7,6 +7,10 @@ httpx
 python-dotenv
 langchain
 langchain-openai
+sqlalchemy>=2.0.0
+psycopg[binary]
+pgvector
+sentence-transformers
 pymysql
 cryptography
 sshtunnel>=0.4.0
