@@ -5,7 +5,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -25,20 +24,19 @@ public class SwaggerSecurityConfig {
 	/**
 	 * Allows Swagger paths without authentication and keeps authentication required for other requests.
 	 *
-	 * @param httpSecurity Spring Security HTTP configuration
+	 * @param http Spring Security HTTP configuration
 	 * @return SecurityFilterChain with Swagger path access rules
 	 * @throws Exception when Spring Security configuration fails
 	 */
 	@Bean
-	public SecurityFilterChain swaggerSecurityFilterChain(HttpSecurity httpSecurity) throws Exception {
-		return httpSecurity
-			.csrf(AbstractHttpConfigurer::disable)
-			.authorizeHttpRequests(authorizationManagerRequestMatcherRegistry ->
-				authorizationManagerRequestMatcherRegistry
-					.requestMatchers(SWAGGER_PATHS).permitAll()
-					.anyRequest().authenticated())
-			.formLogin(Customizer.withDefaults())
-			.httpBasic(Customizer.withDefaults())
-			.build();
+	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+		http
+			.csrf(csrf -> csrf.disable())
+			.authorizeHttpRequests(auth -> auth
+				.requestMatchers(SWAGGER_PATHS).permitAll()
+				.anyRequest().authenticated())
+			.formLogin(Customizer.withDefaults());
+
+		return http.build();
 	}
 }
