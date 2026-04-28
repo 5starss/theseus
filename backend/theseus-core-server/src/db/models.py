@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -37,3 +39,28 @@ class KnowledgeChunk(Base):
 
     # 관계 설정
     document = relationship("KnowledgeDocument", back_populates="chunks")
+
+
+class BillingOutbox(Base):
+    __tablename__ = "billing_outbox"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(255), nullable=False, index=True)
+    project_id = Column(String(255), nullable=False, index=True)
+    usage_data = Column(JSONB, nullable=False)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    next_retry_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

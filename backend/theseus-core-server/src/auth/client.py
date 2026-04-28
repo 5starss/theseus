@@ -57,16 +57,25 @@ class BillingClient:
         self.usage_url = settings.SPRING_BOOT_BILLING_USAGE_URL
         self.timeout = settings.INTERNAL_API_TIMEOUT_SECONDS
 
-    async def report_usage(self, report: BillingUsageReport) -> bool:
+    async def report_usage(
+        self,
+        report: BillingUsageReport,
+        idempotency_key: str | None = None,
+    ) -> bool:
         """
         Spring Boot 서버에 사용량(Usage) 보고를 수행합니다.
         BackgroundTasks에서 호출되므로 예외를 직접 발생시키지 않고 로깅만 수행합니다.
         """
         async with httpx.AsyncClient() as client:
             try:
+                headers = {}
+                if idempotency_key:
+                    headers["X-Idempotency-Key"] = idempotency_key
+
                 response = await client.post(
                     self.usage_url,
                     json=report.model_dump(mode="json"),
+                    headers=headers,
                     timeout=self.timeout
                 )
                 

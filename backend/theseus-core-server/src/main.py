@@ -1,6 +1,9 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from src.builder.worker import setup_scheduler
 from src.config import settings
 from src.routes import health, stream
 import logging
@@ -9,10 +12,34 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = setup_scheduler()
+    app.state.billing_scheduler = scheduler
+
+    if scheduler is not None:
+        scheduler.start()
+        logger.info(
+            "Billing outbox scheduler started (interval=%ss, batch_size=%s)",
+            settings.BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS,
+            settings.BILLING_OUTBOX_BATCH_SIZE,
+        )
+    else:
+        logger.warning("Billing outbox scheduler is unavailable in this environment.")
+
+    try:
+        yield
+    finally:
+        if scheduler is not None and scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("Billing outbox scheduler stopped.")
+
 app = FastAPI(
     title=settings.APP_NAME,
     version="0.1.0",
-    description="Theseus B2B AI Agent Platform Core Server"
+    description="Theseus B2B AI Agent Platform Core Server",
+    lifespan=lifespan,
 )
 
 # CORS 설정
