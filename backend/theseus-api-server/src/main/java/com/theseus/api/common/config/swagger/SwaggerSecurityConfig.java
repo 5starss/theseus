@@ -1,40 +1,46 @@
 package com.theseus.api.common.config.swagger;
 
+import com.theseus.api.domain.auth.token.JwtAuthenticationFilter;
+import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-/**
- * Swagger 및 개발 단계 API 테스트를 위한 Security 설정입니다.
- */
+@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "springdoc.swagger-ui", name = "enabled", havingValue = "true", matchIfMissing = true)
 @Configuration
 public class SwaggerSecurityConfig {
 
 	private static final String[] SWAGGER_PATHS = {
-			"/swagger-ui.html",
-			"/swagger-ui/**",
-			"/v3/api-docs",
-			"/v3/api-docs/**"
+		"/swagger-ui.html",
+		"/swagger-ui/**",
+		"/v3/api-docs",
+		"/v3/api-docs/**"
 	};
 
-	/**
-	 * 개발 단계에서는 Swagger 테스트 편의를 위해 모든 요청을 허용합니다.
-	 *
-	 * @param http Spring Security HTTP 설정 객체
-	 * @return SecurityFilterChain
-	 * @throws Exception Security 설정 실패 시 발생
-	 */
+	private static final String[] AUTH_PATHS = {
+		"/auth/login"
+	};
+
+	private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
 	@Bean
 	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 		http
-				.csrf(csrf -> csrf.disable())
-				.authorizeHttpRequests(auth -> auth
-						.anyRequest().permitAll())
-				.formLogin(formLogin -> formLogin.disable())
-				.httpBasic(httpBasic -> httpBasic.disable());
+			.csrf(csrf -> csrf.disable())
+			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+			.authorizeHttpRequests(auth -> auth
+				.requestMatchers(SWAGGER_PATHS).permitAll()
+				.requestMatchers(AUTH_PATHS).permitAll()
+				.requestMatchers("/users/**").hasRole("SUPER_ADMIN")
+				.anyRequest().authenticated())
+			.formLogin(formLogin -> formLogin.disable())
+			.httpBasic(httpBasic -> httpBasic.disable())
+			.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
 		return http.build();
 	}
