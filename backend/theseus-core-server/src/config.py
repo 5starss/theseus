@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
+    BILLING_OUTBOX_BATCH_SIZE: int = 10
+    BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
     
     # Database Settings (PostgreSQL + pgvector)
     CORE_POSTGRES_HOST: str = "localhost"
