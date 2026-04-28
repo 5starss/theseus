@@ -1,0 +1,100 @@
+package com.theseus.api.domain.user.service;
+
+import com.theseus.api.domain.user.dto.request.UserCreateRequest;
+import com.theseus.api.domain.user.dto.request.UserUpdateRequest;
+import com.theseus.api.domain.user.dto.response.UserResponse;
+import com.theseus.api.domain.user.entity.SystemRole;
+import com.theseus.api.domain.user.entity.User;
+import com.theseus.api.domain.user.entity.UserStatus;
+import com.theseus.api.domain.user.repository.UserRepository;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+@Service
+public class UserService {
+
+	private final UserRepository userRepository;
+	private final PasswordEncoder passwordEncoder;
+
+	public List<UserResponse> getUsers() {
+		return userRepository.findAll().stream()
+			.map(UserResponse::createFrom)
+			.toList();
+	}
+
+	public UserResponse getUser(Long userId) {
+		User user = getUserEntity(userId);
+
+		return UserResponse.createFrom(user);
+	}
+
+	@Transactional
+	public UserResponse createUser(UserCreateRequest request) {
+		validateCreateRequest(request);
+
+		User user = request.toEntity(passwordEncoder.encode(request.getPassword()));
+		User savedUser = userRepository.save(user);
+
+		return UserResponse.createFrom(savedUser);
+	}
+
+	@Transactional
+	public UserResponse updateUser(Long userId, UserUpdateRequest request) {
+		User user = getUserEntity(userId);
+		validateEmailDuplication(userId, request.getEmail());
+
+		SystemRole systemRole = request.getSystemRole() == null ? user.getSystemRole() : request.getSystemRole();
+		UserStatus status = request.getStatus() == null ? user.getStatus() : request.getStatus();
+
+		user.update(
+			request.getName(),
+			request.getEmail(),
+			passwordEncoder.encode(request.getPassword()),
+			systemRole,
+			status
+		);
+
+		return UserResponse.createFrom(user);
+	}
+
+	@Transactional
+	public UserResponse deleteUser(Long userId) {
+		User user = getUserEntity(userId);
+
+		user.deactivate();
+
+		return UserResponse.createFrom(user);
+	}
+
+	private User getUserEntity(Long userId) {
+		return userRepository.findById(userId)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+	}
+
+	private void validateCreateRequest(UserCreateRequest request) {
+		if (userRepository.existsByEmployeeNumber(request.getEmployeeNumber())) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 사번입니다.");
+		}
+
+		if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 이메일입니다.");
+		}
+	}
+
+	private void validateEmailDuplication(Long userId, String email) {
+		if (email == null) {
+			return;
+		}
+
+		if (userRepository.existsByEmailAndIdNot(email, userId)) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 이메일입니다.");
+		}
+	}
+}
