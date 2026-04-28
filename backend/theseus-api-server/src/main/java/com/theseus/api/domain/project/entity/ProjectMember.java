@@ -112,13 +112,36 @@ public class ProjectMember {
 		Boolean canDeleteTool,
 		ProjectMemberStatus status
 	) {
-		this.projectRole = projectRole;
-		this.accessLevel = accessLevel;
-		this.canCreateTool = canCreateTool;
-		this.canUseTool = canUseTool;
-		this.canUpdateTool = canUpdateTool;
-		this.canDeleteTool = canDeleteTool;
-		this.status = status;
+		if (projectRole != null) {
+			this.projectRole = projectRole;
+		}
+		if (accessLevel != null) {
+			this.accessLevel = accessLevel;
+		}
+		if (canCreateTool != null) {
+			this.canCreateTool = canCreateTool;
+		}
+		if (canUseTool != null) {
+			this.canUseTool = canUseTool;
+		}
+		if (canUpdateTool != null) {
+			this.canUpdateTool = canUpdateTool;
+		}
+		if (canDeleteTool != null) {
+			this.canDeleteTool = canDeleteTool;
+		}
+		if (status != null) {
+			this.status = status;
+		}
+	}
+
+	public void assignProjectAdminRole() {
+		projectRole = ProjectRole.ADMIN;
+		status = ProjectMemberStatus.IN_PROGRESS;
+		canCreateTool = true;
+		canUseTool = true;
+		canUpdateTool = true;
+		canDeleteTool = true;
 	}
 
 	public void complete() {

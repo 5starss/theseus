@@ -64,9 +64,19 @@ public class Project {
 	}
 
 	public void update(String name, String description, ProjectStatus status) {
-		this.name = name;
-		this.description = description;
-		this.status = status;
+		if (name != null) {
+			this.name = name;
+		}
+		if (description != null) {
+			this.description = description;
+		}
+		if (status != null) {
+			this.status = status;
+		}
+	}
+
+	public void updateProjectAdminUser(User projectAdminUser) {
+		this.projectAdminUser = projectAdminUser;
 	}
 
 	public void deactivate() {
