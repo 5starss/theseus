@@ -11,12 +11,12 @@ import lombok.Getter;
 @Builder
 public class ProjectMemberResponse {
 
-	private Long id;
+	private Long projectMemberId;
 	private Long projectId;
 	private String projectName;
 	private Long userId;
 	private String employeeNumber;
-	private String userName;
+	private String name;
 	private ProjectRole projectRole;
 	private Integer accessLevel;
 	private Boolean canCreateTool;
@@ -24,18 +24,23 @@ public class ProjectMemberResponse {
 	private Boolean canUpdateTool;
 	private Boolean canDeleteTool;
 	private ProjectMemberStatus status;
+	private Boolean isProjectAdminUser;
 	private Long createdByUserId;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 
 	public static ProjectMemberResponse createFrom(ProjectMember projectMember) {
+		return createOf(projectMember, false);
+	}
+
+	public static ProjectMemberResponse createOf(ProjectMember projectMember, boolean isProjectAdminUser) {
 		return ProjectMemberResponse.builder()
-			.id(projectMember.getId())
+			.projectMemberId(projectMember.getId())
 			.projectId(projectMember.getProject().getId())
 			.projectName(projectMember.getProject().getName())
 			.userId(projectMember.getUser().getId())
 			.employeeNumber(projectMember.getUser().getEmployeeNumber())
-			.userName(projectMember.getUser().getName())
+			.name(projectMember.getUser().getName())
 			.projectRole(projectMember.getProjectRole())
 			.accessLevel(projectMember.getAccessLevel())
 			.canCreateTool(projectMember.getCanCreateTool())
@@ -43,6 +48,7 @@ public class ProjectMemberResponse {
 			.canUpdateTool(projectMember.getCanUpdateTool())
 			.canDeleteTool(projectMember.getCanDeleteTool())
 			.status(projectMember.getStatus())
+			.isProjectAdminUser(isProjectAdminUser)
 			.createdByUserId(projectMember.getCreatedByUser() == null ? null : projectMember.getCreatedByUser().getId())
 			.createdAt(projectMember.getCreatedAt())
 			.updatedAt(projectMember.getUpdatedAt())
