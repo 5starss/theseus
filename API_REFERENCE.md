@@ -22,7 +22,7 @@
 
 | 구분 | 값 | 근거 |
 | --- | --- | --- |
-| 운영 Gateway Base URL | `https://j14a503.p.ssafy.io` | `frontend/nginx.conf` |
+| 운영 Gateway Base URL | `https://ssafy-stock.kr` | `frontend/nginx.conf` |
 | 로컬 Gateway Base URL | `http://localhost:8080` | `frontend/vite.config.ts`, `backend/api-gateway/src/main/resources/application-local.yml` |
 | Core 외부 Prefix | `/api/v1/core` | Gateway route rewrite |
 | Market 외부 Prefix | `/api/v1/market` | Gateway route rewrite |
