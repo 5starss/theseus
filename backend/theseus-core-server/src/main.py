@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.builder.worker import setup_scheduler
 from src.config import settings
-from src.routes import health, stream
+from src.routes import health, sandbox, stream
 import logging
 
 # 로깅 설정
@@ -54,6 +54,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(health.router, tags=["System"])
 app.include_router(stream.router, prefix="/api/v1", tags=["Streaming"])
+app.include_router(sandbox.router, prefix="/api/v1", tags=["Sandbox"])
 
 # 글로벌 예외 처리
 @app.exception_handler(Exception)

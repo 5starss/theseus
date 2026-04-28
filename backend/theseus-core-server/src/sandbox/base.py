@@ -2,8 +2,20 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 
+
+class SandboxUnavailableError(RuntimeError):
+    """Raised when the sandbox backend cannot be reached safely."""
+
+
 class SandboxInput(BaseModel):
     project_id: str
+    tool_name: str
+    tool_code: str
+    payload: Dict[str, Any]
+    timeout_seconds: int = 10
+
+
+class SandboxExecutionRequest(BaseModel):
     tool_name: str
     tool_code: str
     payload: Dict[str, Any]
@@ -15,6 +27,9 @@ class SandboxOutput(BaseModel):
     stdout: str = ""
     stderr: str = ""
     error_message: Optional[str] = None
+    exit_code: Optional[int] = None
+    timed_out: bool = False
+    resource_limited: bool = False
     execution_time_ms: int = 0
 
 class ToolRunner(ABC):

@@ -20,6 +20,7 @@ paramiko<3.0.0
 boto3
 apscheduler==3.10.4
 redis
+docker==7.0.0
 
 # OpenHarness Engine (Local Editable Install)
 -e ./OpenHarness
