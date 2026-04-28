@@ -4,6 +4,18 @@
 
 ### 🚀 Features (주요 구현 내용)
 
+#### Session 7 (2026-04-28)
+
+- **TUI 명령어 및 시스템 프롬프트 덮어쓰기 문제 완벽 해결 (Definitive Fix)**:
+  - **이슈 원인 규명**: OpenHarness의 내부 런타임(`handle_line()`)이 매 턴 `build_runtime_system_prompt()`를 강제로 호출해 Theseus의 커스텀 시스템 프롬프트를 "You are OpenHarness..."로 리셋하고, 모듈 파편화로 인해 레지스트리에 명령어가 무시되는 핵심 병목 구조를 식별.
+  - **Python MRO 기반 `_process_line` 오버라이드 구현**:
+    - `TheseusTUI`에서 부모 클래스인 `OpenHarnessTerminalApp`의 `_process_line` 메서드를 완전히 대체하여 이벤트 파이프라인 제어권 확보.
+    - 테세우스 전용 슬래시 명령어(`/plan`, `/agent` 등)는 파편화된 프레임워크 레지스트리를 우회하여 다이렉트로 핸들러 실행.
+    - 일반 텍스트 입력 시 `handle_line()`을 타지 않고 테세우스 프롬프트를 강제 주입 후 `engine.submit_message()`를 직접 호출하도록 파이프라인 재설계.
+  - **코드 및 아키텍처 클린업**:
+    - 이전에 시도했던 위험한 `importlib.reload` 방식과 `types.MethodType` 몽키 패칭, Textual `Input.Submitted` 프론트엔드 이벤트 가로채기 등의 불안정한 우회 코드를 모두 제거하여 코드베이스 안정성과 가독성 대폭 향상.
+  - 디버깅 과정을 담은 리포트 `tui_command_registration_issue.md` 신규 작성 및 배포.
+
 #### Session 6 (2026-04-27)
 
 - **LLM API 통신 호환성 및 자동 복구(Auto-Recovery) 강화**:
