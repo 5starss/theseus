@@ -23,7 +23,8 @@ public class SwaggerSecurityConfig {
 	};
 
 	private static final String[] AUTH_PATHS = {
-		"/auth/login"
+		"/auth/login",
+		"/api/v1/auth/login"
 	};
 
 	private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -36,7 +37,7 @@ public class SwaggerSecurityConfig {
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(SWAGGER_PATHS).permitAll()
 				.requestMatchers(AUTH_PATHS).permitAll()
-				.requestMatchers("/users/**").hasRole("SUPER_ADMIN")
+				.requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
 				.anyRequest().authenticated())
 			.formLogin(formLogin -> formLogin.disable())
 			.httpBasic(httpBasic -> httpBasic.disable())

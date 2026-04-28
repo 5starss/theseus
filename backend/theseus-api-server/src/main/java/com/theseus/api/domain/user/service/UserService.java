@@ -1,9 +1,11 @@
 package com.theseus.api.domain.user.service;
 
+import com.theseus.api.domain.project.entity.ProjectStatus;
+import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.user.dto.request.UserCreateRequest;
+import com.theseus.api.domain.user.dto.request.UserStatusUpdateRequest;
 import com.theseus.api.domain.user.dto.request.UserUpdateRequest;
 import com.theseus.api.domain.user.dto.response.UserResponse;
-import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.entity.UserStatus;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -21,6 +23,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserService {
 
 	private final UserRepository userRepository;
+	private final ProjectRepository projectRepository;
 	private final PasswordEncoder passwordEncoder;
 
 	public List<UserResponse> getUsers() {
@@ -50,16 +53,25 @@ public class UserService {
 		User user = getUserEntity(userId);
 		validateEmailDuplication(userId, request.getEmail());
 
-		SystemRole systemRole = request.getSystemRole() == null ? user.getSystemRole() : request.getSystemRole();
-		UserStatus status = request.getStatus() == null ? user.getStatus() : request.getStatus();
-
 		user.update(
 			request.getName(),
 			request.getEmail(),
-			passwordEncoder.encode(request.getPassword()),
-			systemRole,
-			status
+			null,
+			request.getSystemRole()
 		);
+
+		return UserResponse.createFrom(user);
+	}
+
+	@Transactional
+	public UserResponse updateUserStatus(Long userId, UserStatusUpdateRequest request) {
+		User user = getUserEntity(userId);
+
+		if (UserStatus.INACTIVE.equals(request.getStatus())) {
+			validateCanDeactivateUser(user);
+		}
+
+		user.updateStatus(request.getStatus());
 
 		return UserResponse.createFrom(user);
 	}
@@ -67,6 +79,7 @@ public class UserService {
 	@Transactional
 	public UserResponse deleteUser(Long userId) {
 		User user = getUserEntity(userId);
+		validateCanDeactivateUser(user);
 
 		user.deactivate();
 
@@ -95,6 +108,12 @@ public class UserService {
 
 		if (userRepository.existsByEmailAndIdNot(email, userId)) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 이메일입니다.");
+		}
+	}
+
+	private void validateCanDeactivateUser(User user) {
+		if (projectRepository.existsByProjectAdminUserAndStatus(user, ProjectStatus.ACTIVE)) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "활성 프로젝트 담당자는 비활성화할 수 없습니다.");
 		}
 	}
 }
