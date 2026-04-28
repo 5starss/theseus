@@ -182,3 +182,8 @@ uv.lock
 
 
 .openharness
+OpenHarness/
+.theseus_sessions/
+.theseus_history.json
+test_log.txt
+temp/
