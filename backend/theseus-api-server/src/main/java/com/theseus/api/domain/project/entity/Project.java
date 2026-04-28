@@ -44,6 +44,10 @@ public class Project {
 	@JoinColumn(name = "created_by_user_id", nullable = false)
 	private User createdByUser;
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "project_admin_user_id", nullable = false)
+	private User projectAdminUser;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
@@ -51,11 +55,12 @@ public class Project {
 	private LocalDateTime updatedAt;
 
 	@Builder
-	private Project(String name, String description, ProjectStatus status, User createdByUser) {
+	private Project(String name, String description, ProjectStatus status, User createdByUser, User projectAdminUser) {
 		this.name = name;
 		this.description = description;
 		this.status = status == null ? ProjectStatus.ACTIVE : status;
 		this.createdByUser = createdByUser;
+		this.projectAdminUser = projectAdminUser;
 	}
 
 	public void update(String name, String description, ProjectStatus status) {

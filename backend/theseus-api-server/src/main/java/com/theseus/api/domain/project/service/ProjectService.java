@@ -53,11 +53,11 @@ public class ProjectService {
 		User currentUser = getCurrentUserEntity();
 		validateSuperAdmin(currentUser);
 
-		User adminUser = getUserEntity(request.getAdminUserId());
-		Project project = projectRepository.save(request.toEntity(currentUser));
+		User projectAdminUser = getProjectAdminUser(request.getAdminEmployeeNumber(), request.getAdminName());
+		Project project = projectRepository.save(request.toEntity(currentUser, projectAdminUser));
 		ProjectMember adminMember = ProjectMember.builder()
 			.project(project)
-			.user(adminUser)
+			.user(projectAdminUser)
 			.projectRole(ProjectRole.ADMIN)
 			.accessLevel(1)
 			.canCreateTool(true)
@@ -112,6 +112,11 @@ public class ProjectService {
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+	}
+
+	private User getProjectAdminUser(String employeeNumber, String name) {
+		return userRepository.findByEmployeeNumberAndName(employeeNumber, name)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트 담당자를 찾을 수 없습니다."));
 	}
 
 	private void validateSuperAdmin(User user) {

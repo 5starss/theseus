@@ -39,7 +39,7 @@ public class ProjectController {
 	}
 
 	@PostMapping
-	@Operation(summary = "프로젝트 생성", description = "SUPER_ADMIN이 프로젝트를 생성하고 프로젝트 ADMIN 멤버를 함께 등록합니다.")
+	@Operation(summary = "프로젝트 생성", description = "SUPER_ADMIN이 프로젝트를 생성하고 사번, 이름으로 조회한 담당자를 프로젝트 PM 및 ADMIN 멤버로 등록합니다.")
 	public ResponseEntity<ProjectResponse> createProject(@Valid @RequestBody ProjectCreateRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED)
 			.body(projectService.createProject(request));

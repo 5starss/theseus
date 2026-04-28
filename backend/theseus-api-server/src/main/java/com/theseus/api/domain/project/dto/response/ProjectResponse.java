@@ -16,6 +16,9 @@ public class ProjectResponse {
 	private ProjectStatus status;
 	private Long createdByUserId;
 	private String createdByUserName;
+	private Long projectAdminUserId;
+	private String projectAdminEmployeeNumber;
+	private String projectAdminName;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 
@@ -27,6 +30,9 @@ public class ProjectResponse {
 			.status(project.getStatus())
 			.createdByUserId(project.getCreatedByUser().getId())
 			.createdByUserName(project.getCreatedByUser().getName())
+			.projectAdminUserId(project.getProjectAdminUser().getId())
+			.projectAdminEmployeeNumber(project.getProjectAdminUser().getEmployeeNumber())
+			.projectAdminName(project.getProjectAdminUser().getName())
 			.createdAt(project.getCreatedAt())
 			.updatedAt(project.getUpdatedAt())
 			.build();
