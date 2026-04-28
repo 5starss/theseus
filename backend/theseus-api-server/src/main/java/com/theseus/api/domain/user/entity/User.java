@@ -1,5 +1,6 @@
 package com.theseus.api.domain.user.entity;
 
+import com.theseus.api.common.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -7,11 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -27,7 +25,7 @@ import lombok.NoArgsConstructor;
 	}
 )
 @Entity
-public class User {
+public class User extends BaseEntity {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -53,11 +51,6 @@ public class User {
 	@Column(nullable = false, length = 30)
 	private UserStatus status;
 
-	@Column(name = "created_at", nullable = false, updatable = false)
-	private LocalDateTime createdAt;
-
-	@Column(name = "updated_at", nullable = false)
-	private LocalDateTime updatedAt;
 
 	@Builder
 	private User(
@@ -98,15 +91,5 @@ public class User {
 		return SystemRole.SUPER_ADMIN.equals(systemRole);
 	}
 
-	@PrePersist
-	private void prePersist() {
-		LocalDateTime now = LocalDateTime.now();
-		createdAt = now;
-		updatedAt = now;
-	}
 
-	@PreUpdate
-	private void preUpdate() {
-		updatedAt = LocalDateTime.now();
-	}
 }
