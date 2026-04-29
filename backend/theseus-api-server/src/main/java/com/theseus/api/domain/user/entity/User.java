@@ -93,10 +93,6 @@ public class User extends BaseEntity {
 		this.status = status;
 	}
 
-	public void deactivate() {
-		this.status = UserStatus.INACTIVE;
-	}
-
 	public boolean isSuperAdmin() {
 		return SystemRole.SUPER_ADMIN.equals(systemRole);
 	}
