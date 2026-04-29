@@ -17,6 +17,7 @@ public enum ErrorCode {
     // Auth
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "AUTH-001", "인증되지 않은 사용자입니다."),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "AUTH-002", "아이디 또는 비밀번호가 올바르지 않습니다."),
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH-003", "유효하지 않은 Refresh Token입니다."),
     
     // User
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER-001", "존재하지 않는 사용자입니다."),

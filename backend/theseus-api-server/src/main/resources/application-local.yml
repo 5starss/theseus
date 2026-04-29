@@ -31,3 +31,7 @@ springdoc:
 jwt:
   secret: ${JWT_SECRET:theseus-local-development-jwt-secret-key-must-be-changed}
   access-token-expiration-millis: ${JWT_ACCESS_TOKEN_EXPIRATION_MILLIS:3600000}
+  refresh-token-expiration-millis: ${JWT_REFRESH_TOKEN_EXPIRATION_MILLIS:1209600000}
+  refresh-token-cookie-name: ${JWT_REFRESH_TOKEN_COOKIE_NAME:refreshToken}
+  refresh-token-cookie-secure: ${JWT_REFRESH_TOKEN_COOKIE_SECURE:false}
+  refresh-token-cookie-same-site: ${JWT_REFRESH_TOKEN_COOKIE_SAME_SITE:Lax}
