@@ -24,29 +24,49 @@ export interface ProjectSummaryResponse {
   updatedAt: string;
 }
 
-export interface ProjectPageResponse<T> {
+export interface PageResponse<T> {
   content: T[];
-  page: number;
+  number?: number;
+  page?: number;
   size: number;
   totalElements: number;
   totalPages: number;
+}
+
+export interface UserCreateRequest {
+  employeeNumber: string;
+  name: string;
+  email: string;
+  password?: string;
+  systemRole?: 'SUPER_ADMIN' | 'USER';
+  status?: 'ACTIVE' | 'INACTIVE';
 }
 
 export const adminApi = {
   /**
    * 사용자 목록 조회
    */
-  getUsers: async () => {
-    const response = await apiClient.get<ApiResponse<UserResponse[]>>('/admin/users');
+  getUsers: async (page = 0, size = 10) => {
+    const response = await apiClient.get<ApiResponse<PageResponse<UserResponse>>>('/api/v1/admin/users', {
+      params: { page, size }
+    });
+    return response.data.result;
+  },
+
+  /**
+   * 사용자 계정 발급
+   */
+  createUser: async (data: UserCreateRequest) => {
+    const response = await apiClient.post<ApiResponse<UserResponse>>('/api/v1/admin/users', data);
     return response.data.result;
   },
 
   /**
    * 전체 프로젝트 목록 조회
    */
-  getProjects: async (page = 0, size = 20) => {
-    const response = await apiClient.get<ApiResponse<ProjectPageResponse<ProjectSummaryResponse>>>(
-      '/admin/projects',
+  getProjects: async (page = 0, size = 8) => {
+    const response = await apiClient.get<ApiResponse<PageResponse<ProjectSummaryResponse>>>(
+      '/api/v1/admin/projects',
       {
         params: { page, size },
       }

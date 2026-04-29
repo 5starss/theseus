@@ -5,6 +5,9 @@ import com.theseus.api.domain.user.entity.SystemRole;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 public interface UserRepository extends JpaRepository<User, Long> {
 
 	boolean existsByEmployeeNumber(String employeeNumber);
@@ -20,4 +23,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
 	Optional<User> findByEmployeeNumber(String employeeNumber);
 
 	Optional<User> findByEmployeeNumberAndName(String employeeNumber, String name);
+
+	Page<User> findBySystemRoleNot(SystemRole role, Pageable pageable);
 }

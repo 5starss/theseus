@@ -47,13 +47,13 @@ public class InitialSuperAdminInitializer implements ApplicationRunner {
 			}
 
 			User initialSuperAdmin = User.builder()
-				.employeeNumber(initialAdminEmployeeNumber)
-				.name(initialAdminName)
-				.email(hasText(initialAdminEmail) ? initialAdminEmail : null)
-				.password(passwordEncoder.encode(initialAdminPassword))
-				.systemRole(SystemRole.SUPER_ADMIN)
-				.status(UserStatus.ACTIVE)
-				.build();
+					.employeeNumber(initialAdminEmployeeNumber)
+					.name(initialAdminName)
+					.email(hasText(initialAdminEmail) ? initialAdminEmail : null)
+					.password(passwordEncoder.encode(initialAdminPassword))
+					.systemRole(SystemRole.SUPER_ADMIN)
+					.status(UserStatus.ACTIVE)
+					.build();
 
 			userRepository.save(initialSuperAdmin);
 			log.info(">>>> Initial SUPER_ADMIN has been created. employeeNumber={}", initialAdminEmployeeNumber);
@@ -64,8 +64,8 @@ public class InitialSuperAdminInitializer implements ApplicationRunner {
 
 	private boolean hasInitialAdminRequiredValues() {
 		return hasText(initialAdminEmployeeNumber)
-			&& hasText(initialAdminName)
-			&& hasText(initialAdminPassword);
+				&& hasText(initialAdminName)
+				&& hasText(initialAdminPassword);
 	}
 
 	private boolean hasText(String value) {
