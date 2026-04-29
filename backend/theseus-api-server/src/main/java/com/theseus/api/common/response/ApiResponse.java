@@ -3,6 +3,7 @@ package com.theseus.api.common.response;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.common.response.status.SuccessCode;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 
 public record ApiResponse<T>(
@@ -48,5 +49,14 @@ public record ApiResponse<T>(
                 message,
                 null);
         return ResponseEntity.status(code.getStatus()).body(body);
+    }
+
+    public static ResponseEntity<ApiResponse<Void>> onFailure(HttpStatusCode statusCode, String code, String message) {
+        ApiResponse<Void> body = new ApiResponse<>(
+                false,
+                code,
+                message,
+                null);
+        return ResponseEntity.status(statusCode).body(body);
     }
 }
