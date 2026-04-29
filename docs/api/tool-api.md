@@ -1,15 +1,17 @@
 # Tool API
 
-## Common Rules
+## 공통 규칙
 
 - 인증이 필요한 요청은 `Authorization: Bearer {accessToken}`을 사용한다.
 - Tool 생성, 사용, 수정, 삭제 권한은 `project_members`의 Boolean 권한으로 판단한다.
-- 승인과 반려는 프로젝트 `ADMIN` 또는 `MANAGER`가 수행한다.
+- Tool 승인과 반려는 프로젝트 `ADMIN` 또는 `MANAGER`가 수행한다.
 - 승인된 Tool 접근 가능 여부는 `project_members.access_level >= tools.tool_grade`로 판단한다.
 - 한 채팅 세션에서 여러 Tool을 생성할 수 있다.
 - Tool 생성 또는 수정과 관련된 메시지는 `chat_messages.tool_id`로 해당 Tool에 연결한다.
+- AI 생성 중 progress/chunk는 Redis와 SSE로만 전달하고 `chat_messages`에는 저장하지 않는다.
+- 최종 USER, ASSISTANT, SYSTEM 메시지만 `chat_messages`에 저장한다.
 
-## Status Values
+## 상태 값
 
 | 구분 | 값 |
 | --- | --- |
@@ -19,8 +21,9 @@
 | `senderType` | `USER`, `ASSISTANT`, `SYSTEM` |
 | `messageType` | `CHAT`, `TOOL_DRAFT_REQUEST`, `TOOL_DRAFT_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_REGENERATE_RESPONSE`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE` |
 | `contentType` | `TEXT`, `MARKDOWN`, `JSON` |
+| `runStatus` | `RUNNING`, `PERSISTING`, `COMPLETED`, `FAILED` |
 
-`messageType`은 메시지가 어떤 업무 흐름에 속하는지 나타낸다. `contentType`은 메시지 본문을 어떤 형식으로 해석할지 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
+`messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
 ## Draft Tool 생성
 
@@ -31,50 +34,53 @@ Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
+### 권한
 
 - 프로젝트 멤버
 - `project_members.status = 진행중`
 - `project_members.can_create_tool = true`
 
-요청:
+### Request Body
 
 ```json
 {
-  "message": "CSV 파일을 업로드하면 매출 합계를 계산하는 Tool을 만들어줘.",
+  "userMessage": "CSV 파일을 업로드하면 매출 합계를 계산하는 Tool을 만들어줘.",
   "fileName": "sales-summary-tool"
 }
 ```
 
-동작:
-
-- `tools`에 `status = DRAFT`, `draft_phase = PLAN`인 Tool을 생성한다.
-- 사용자 요청 메시지를 `chat_messages`에 `message_type = TOOL_DRAFT_REQUEST`, `content_type = TEXT`로 저장하고 `tool_id`를 연결한다.
-- Assistant가 계획 또는 명세를 작성한 뒤 `chat_messages`에 `message_type = TOOL_DRAFT_RESPONSE`, `content_type = MARKDOWN` 또는 `JSON`으로 저장하고 같은 `tool_id`를 연결한다.
-- Assistant 계획 또는 명세가 사용자에게 제시되면 `tools.draft_phase = REVIEW`로 변경한다.
-- 세션 전체 메시지 순서는 `message_order`로 증가한다.
-- `file_name`은 같은 프로젝트 안에서 유일해야 한다.
-
-응답:
+### Response Body
 
 ```json
 {
   "success": true,
-  "code": 201,
-  "message": "Draft Tool이 생성되었습니다.",
+  "code": 202,
+  "message": "Draft Tool 생성을 시작하였습니다.",
   "result": {
-    "toolId": 1,
+    "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
+    "toolId": 7,
     "projectId": 1,
-    "sessionId": 1,
-    "fileName": "sales-summary-tool",
+    "sessionId": 10,
     "status": "DRAFT",
-    "draftPhase": "REVIEW",
-    "rawMarkdown": "### Tool 생성 계획...",
-    "structuredPlanJson": "{...}",
-    "draftSnapshot": "{...}"
+    "draftPhase": "PLAN",
+    "sseUrl": "/api/v1/tool-runs/3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11/events"
   }
 }
 ```
+
+### 동작
+
+- BE가 Access Token, 프로젝트 멤버, Tool 생성 권한을 검증한다.
+- BE가 `tools.status = DRAFT`, `tools.draft_phase = PLAN`인 Tool을 생성한다.
+- BE가 AI 생성 실행 ID인 `runId`를 생성한다.
+- BE가 Redis에 run 상태를 등록하고 TTL을 설정한다.
+- BE가 Kafka에 USER 메시지 저장 이벤트를 발행한다.
+- BE가 AI 서버에 `runId`, `projectId`, `chatSessionId`, `toolId`, `prompt`를 포함해 생성 요청한다.
+- AI progress/chunk는 Redis에 누적하고 SSE로 FE에 전달한다.
+- AI 완료 후 BE가 전체 응답을 취합하고 Kafka에 완료 이벤트를 발행한다.
+- Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool draft 데이터를 갱신한다.
+- Kafka Consumer가 `tools.draft_phase = REVIEW`로 변경한다.
+- 저장과 상태 변경이 끝난 뒤 `completed` 이벤트를 FE에 전달한다.
 
 ## Draft Tool 재생성
 
@@ -85,66 +91,145 @@ Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
+### 권한
 
 - Tool 생성자 또는 `can_update_tool = true`인 프로젝트 멤버
 - `tools.status = DRAFT` 또는 `REJECTED`
 
-요청:
+### Request Body
 
 ```json
 {
-  "message": "2번 블록에서 입력 파일 형식을 xlsx도 허용하도록 수정해줘."
+  "feedback": "2번 블록에서 입력 파일 형식을 xlsx도 허용하도록 수정해줘."
 }
 ```
 
-동작:
+### Response Body
 
-- 사용자 첨삭 메시지를 `chat_messages`에 `message_type = TOOL_FEEDBACK`, `content_type = TEXT`로 저장하고 `tool_id`를 연결한다.
-- 첨삭을 받은 시점에 `tools.draft_phase = PLAN`으로 변경한다.
-- Assistant가 수정된 계획 또는 명세를 다시 작성해 `chat_messages`에 `message_type = TOOL_REGENERATE_RESPONSE`, `content_type = MARKDOWN` 또는 `JSON`으로 저장하고 같은 `tool_id`를 연결한다.
-- 수정된 계획 또는 명세가 사용자에게 제시되면 `tools.draft_phase = REVIEW`로 변경한다.
-- 같은 세션 안의 다른 Tool 관련 메시지와 섞이지 않도록 `tool_id` 기준으로 Draft 대화 이력을 조회한다.
+```json
+{
+  "success": true,
+  "code": 202,
+  "message": "Draft Tool 재생성을 시작하였습니다.",
+  "result": {
+    "runId": "74bd2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d22",
+    "toolId": 7,
+    "projectId": 1,
+    "sessionId": 10,
+    "status": "DRAFT",
+    "draftPhase": "PLAN",
+    "sseUrl": "/api/v1/tool-runs/74bd2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d22/events"
+  }
+}
+```
 
-응답:
+### 동작
+
+- 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `TEXT`로 저장한다.
+- 대상 Tool은 AI 재생성 시작 시 `draft_phase = PLAN`으로 변경한다.
+- 재생성마다 새 `runId`를 발급한다.
+- 최종 Assistant 응답은 `TOOL_REGENERATE_RESPONSE`로 저장한다.
+- 수정된 계획 또는 명세가 저장되면 `draft_phase = REVIEW`로 변경한다.
+
+## AI 생성 이벤트 구독
+
+```http
+GET /api/v1/tool-runs/{runId}/events
+Accept: text/event-stream
+Authorization: Bearer {accessToken}
+Last-Event-ID: {lastEventSeq}
+```
+
+### 권한
+
+- run 생성 요청자
+- 해당 프로젝트 접근 권한을 가진 프로젝트 멤버
+
+### Event: progress
+
+```text
+event: progress
+id: 19
+data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","message":"입력 파일 구조를 분석하고 있습니다."}
+```
+
+### Event: chunk
+
+```text
+event: chunk
+id: 20
+data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","content":"## Tool Plan\n\n1. CSV 업로드..."}
+```
+
+### Event: completed
+
+```text
+event: completed
+id: 21
+data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","toolId":7,"draftPhase":"REVIEW"}
+```
+
+### Event: failed
+
+```text
+event: failed
+id: 21
+data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","code":"AI_GENERATION_FAILED","message":"Tool 초안 생성에 실패했습니다."}
+```
+
+## AI 생성 run 상태 조회
+
+```http
+GET /api/v1/tool-runs/{runId}
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### Response Body
 
 ```json
 {
   "success": true,
   "code": 200,
-  "message": "Draft Tool이 재생성되었습니다.",
+  "message": "AI 생성 상태 조회에 성공하였습니다.",
   "result": {
-    "toolId": 1,
-    "status": "DRAFT",
-    "draftPhase": "REVIEW",
-    "rawMarkdown": "### 수정된 Tool 생성 계획...",
-    "structuredPlanJson": "{...}",
-    "draftSnapshot": "{...}"
+    "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
+    "projectId": 1,
+    "chatSessionId": 10,
+    "toolId": 7,
+    "status": "RUNNING",
+    "lastEventSeq": 18,
+    "progressText": "입력 파일 구조를 분석하고 있습니다."
   }
 }
 ```
+
+### 동작
+
+- Redis TTL이 남아 있으면 Redis 기준 상태를 반환한다.
+- Redis TTL이 만료되었으면 DB의 최종 Tool/Message 상태를 조회한다.
+- Redis와 DB 모두 복구할 수 없으면 재생성 요청이 필요하다.
 
 ## Tool 승인 요청
 
 ```http
 POST /api/v1/projects/{projectId}/tools/{toolId}/approval-requests
 Accept: application/json
-Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
+### 권한
 
 - Tool 생성자
 - `tools.status = DRAFT`
 - `tools.draft_phase = REVIEW`
 
-동작:
+### 동작
 
 - `tool_approvals`에 `approval_status = PENDING`인 승인 요청을 생성한다.
 - `request_number`는 같은 Tool 안에서 1부터 증가한다.
 - `tools.status = PENDING`으로 변경한다.
-- 승인 요청 메시지를 대화 이력에 남길 경우 `message_type = TOOL_APPROVAL_REQUEST`로 저장한다.
+- 승인 요청 메시지를 남길 경우 `message_type = TOOL_APPROVAL_REQUEST`로 저장한다.
 
 ## 승인 이력 조회
 
@@ -154,7 +239,7 @@ Accept: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
+### 권한
 
 - 프로젝트 멤버
 
@@ -166,7 +251,20 @@ Accept: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
+### 권한
+
+- 프로젝트 `ADMIN`
+- 프로젝트 `MANAGER`
+
+## 승인 요청 상세 조회
+
+```http
+GET /api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
 
 - 프로젝트 `ADMIN`
 - 프로젝트 `MANAGER`
@@ -180,12 +278,7 @@ Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
-
-- 프로젝트 `ADMIN`
-- 프로젝트 `MANAGER`
-
-요청:
+### Request Body
 
 ```json
 {
@@ -194,9 +287,10 @@ Authorization: Bearer {accessToken}
 }
 ```
 
-동작:
+### 동작
 
 - `tool_approvals.approval_status = APPROVED`로 변경한다.
+- `tool_approvals.reviewed_by_project_member_id`에 검토자를 저장한다.
 - `tools.status = APPROVED`로 변경한다.
 - `tools.tool_grade`를 저장한다.
 
@@ -209,12 +303,7 @@ Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-권한:
-
-- 프로젝트 `ADMIN`
-- 프로젝트 `MANAGER`
-
-요청:
+### Request Body
 
 ```json
 {
@@ -222,8 +311,9 @@ Authorization: Bearer {accessToken}
 }
 ```
 
-동작:
+### 동작
 
 - `tool_approvals.approval_status = REJECTED`로 변경한다.
+- `tool_approvals.reviewed_by_project_member_id`에 검토자를 저장한다.
 - `tools.status = REJECTED`로 변경한다.
 - 반려 이후 생성자는 Draft Tool 재생성 API로 계획을 수정할 수 있다.
