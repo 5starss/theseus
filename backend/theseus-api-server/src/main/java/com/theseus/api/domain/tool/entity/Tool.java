@@ -8,6 +8,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -44,15 +45,19 @@ public class Tool {
 	private Long id;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "project_id", nullable = false)
+	@JoinColumn(name = "project_id", nullable = false, foreignKey = @ForeignKey(name = "fk_tools_project"))
 	private Project project;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "chat_session_id", nullable = false)
+	@JoinColumn(name = "chat_session_id", nullable = false, foreignKey = @ForeignKey(name = "fk_tools_chat_session"))
 	private ChatSession chatSession;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "created_by_project_member_id", nullable = false)
+	@JoinColumn(
+		name = "created_by_project_member_id",
+		nullable = false,
+		foreignKey = @ForeignKey(name = "fk_tools_created_by_project_member")
+	)
 	private ProjectMember createdByProjectMember;
 
 	@Column(name = "file_name", nullable = false, length = 120)

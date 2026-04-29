@@ -11,6 +11,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
 
 	List<ChatMessage> findByChatSessionOrderByMessageOrderAsc(ChatSession chatSession);
 
+	List<ChatMessage> findByChatSessionAndToolIsNullOrderByMessageOrderAsc(ChatSession chatSession);
+
 	List<ChatMessage> findByChatSessionAndToolOrderByMessageOrderAsc(ChatSession chatSession, Tool tool);
 
 	List<ChatMessage> findByToolOrderByMessageOrderAsc(Tool tool);

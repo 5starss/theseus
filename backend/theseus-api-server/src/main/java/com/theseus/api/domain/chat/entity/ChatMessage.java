@@ -42,7 +42,11 @@ public class ChatMessage {
 	private Long id;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "chat_session_id", nullable = false)
+	@JoinColumn(
+		name = "chat_session_id",
+		nullable = false,
+		foreignKey = @ForeignKey(name = "fk_chat_messages_chat_session")
+	)
 	private ChatSession chatSession;
 
 	@ManyToOne(fetch = FetchType.LAZY)
