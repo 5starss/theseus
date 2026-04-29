@@ -1,10 +1,12 @@
 package com.theseus.api.domain.chat.entity;
 
+import com.theseus.api.domain.tool.entity.Tool;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.ForeignKey;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -28,7 +30,8 @@ import lombok.NoArgsConstructor;
 		@UniqueConstraint(name = "uk_chat_messages_session_order", columnNames = {"chat_session_id", "message_order"})
 	},
 	indexes = {
-		@Index(name = "idx_chat_messages_session_order", columnList = "chat_session_id, message_order")
+		@Index(name = "idx_chat_messages_session_order", columnList = "chat_session_id, message_order"),
+		@Index(name = "idx_chat_messages_tool_order", columnList = "tool_id, message_order")
 	}
 )
 @Entity
@@ -41,6 +44,10 @@ public class ChatMessage {
 	@ManyToOne(fetch = FetchType.LAZY)
 	@JoinColumn(name = "chat_session_id", nullable = false)
 	private ChatSession chatSession;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "tool_id", foreignKey = @ForeignKey(name = "fk_chat_messages_tool"))
+	private Tool tool;
 
 	@Column(name = "message_order", nullable = false)
 	private Integer messageOrder;
@@ -58,11 +65,13 @@ public class ChatMessage {
 	@Builder
 	private ChatMessage(
 		ChatSession chatSession,
+		Tool tool,
 		Integer messageOrder,
 		ChatMessageSenderType senderType,
 		String content
 	) {
 		this.chatSession = chatSession;
+		this.tool = tool;
 		this.messageOrder = messageOrder;
 		this.senderType = senderType;
 		this.content = content;
