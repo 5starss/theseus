@@ -6,6 +6,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -70,6 +71,7 @@ public class JwtTokenProvider {
 		Date expiresAt = new Date(now.getTime() + expirationMillis);
 
 		return Jwts.builder()
+			.id(UUID.randomUUID().toString())
 			.subject(String.valueOf(user.getId()))
 			.claim("role", user.getSystemRole().name())
 			.claim(TOKEN_TYPE_CLAIM, tokenType)

@@ -5,6 +5,7 @@ import com.theseus.api.domain.user.entity.User;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JwtTokenProviderTest {
@@ -18,6 +19,34 @@ class JwtTokenProviderTest {
 		ACCESS_TOKEN_EXPIRATION_MILLIS,
 		REFRESH_TOKEN_EXPIRATION_MILLIS
 	);
+
+	@Test
+	@DisplayName("access token은 발급할 때마다 고유한 식별자를 가진다")
+	void createAccessTokenCreatesUniqueToken() {
+		// Given
+		User user = createUser();
+
+		// When
+		String firstAccessToken = jwtTokenProvider.createAccessToken(user);
+		String secondAccessToken = jwtTokenProvider.createAccessToken(user);
+
+		// Then
+		assertThat(firstAccessToken).isNotEqualTo(secondAccessToken);
+	}
+
+	@Test
+	@DisplayName("refresh token은 발급할 때마다 고유한 식별자를 가진다")
+	void createRefreshTokenCreatesUniqueToken() {
+		// Given
+		User user = createUser();
+
+		// When
+		String firstRefreshToken = jwtTokenProvider.createRefreshToken(user);
+		String secondRefreshToken = jwtTokenProvider.createRefreshToken(user);
+
+		// Then
+		assertThat(firstRefreshToken).isNotEqualTo(secondRefreshToken);
+	}
 
 	@Test
 	@DisplayName("refresh token은 access token으로 인증할 수 없다")
