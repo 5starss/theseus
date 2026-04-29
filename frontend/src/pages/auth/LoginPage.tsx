@@ -71,7 +71,7 @@ const LoginForm = ({ role, isLoading, onSubmit, errorMsg }: LoginFormProps) => {
             <span className="text-red-500 text-[12px] mt-1 ml-1 block">{errors.password.message}</span>
           )}
         </div>
-        
+
         {/* Error Message */}
         {errorMsg && (
           <div className="flex items-center gap-2 text-red-400 bg-red-400/10 p-3 rounded-[4px] text-[13px] border border-red-400/20">
@@ -97,8 +97,17 @@ const LoginForm = ({ role, isLoading, onSubmit, errorMsg }: LoginFormProps) => {
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    return localStorage.getItem('loginTab') || 'user';
+  });
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    localStorage.setItem('loginTab', value);
+    setErrorMsg(null); // Clear error message when switching tabs
+  };
 
   const handleLogin = async (data: LoginFormData, role: 'USER' | 'ADMIN') => {
     setIsLoading(true);
@@ -107,7 +116,7 @@ export default function LoginPage() {
       // In a real scenario, you might send the role as well if the API supports it,
       // or the API determines the role based on the credentials.
       const res = await authApi.login(data);
-      
+
       // 권한 검증: 관리자 탭에서 일반 유저 로그인 시도 시
       if (role === 'ADMIN' && res.systemRole === 'USER') {
         setErrorMsg('해당 계정은 관리자 권한이 없습니다. 사용자 탭을 이용해주세요.');
@@ -115,7 +124,7 @@ export default function LoginPage() {
       }
 
       // 권한 검증: 사용자 탭에서 관리자 로그인 시도 시
-      if (role === 'USER' && (res.systemRole === 'SUPER_ADMIN' || res.systemRole === 'PROJECT_ADMIN')) {
+      if (role === 'USER' && (res.systemRole === 'SUPER_ADMIN')) {
         setErrorMsg('해당 계정은 관리자입니다. 관리자 탭을 이용해주세요.');
         return;
       }
@@ -127,8 +136,12 @@ export default function LoginPage() {
         systemRole: res.systemRole,
       });
 
-      // Redirect to main page after successful login
-      navigate('/');
+      // Redirect based on role
+      if (res.systemRole === 'SUPER_ADMIN') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       console.error('Login Error:', err);
       if (err.response?.status === 401) {
@@ -158,24 +171,24 @@ export default function LoginPage() {
 
       {/* Login Card */}
       <div className="w-full max-w-[420px] backdrop-blur-[12px] bg-[#0d1c2d] border border-[rgba(65,71,81,0.2)] rounded-[8px] shadow-[0px_20px_50px_0px_rgba(0,0,0,0.5)] overflow-hidden relative">
-        
+
         {/* Decorative Corner Accents */}
         <div className="absolute top-0 left-0 w-[48px] h-[48px] border-t border-l border-[rgba(65,71,81,0.3)] pointer-events-none" />
         <div className="absolute top-0 right-0 w-[48px] h-[48px] border-t border-r border-[rgba(65,71,81,0.3)] pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-[48px] h-[48px] border-b border-l border-[rgba(65,71,81,0.3)] pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-[48px] h-[48px] border-b border-r border-[rgba(65,71,81,0.3)] pointer-events-none" />
 
-        <Tabs defaultValue="user" className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           {/* Tabs */}
           <TabsList className="w-full bg-transparent border-b border-[rgba(65,71,81,0.2)] rounded-none h-auto p-0 flex">
-            <TabsTrigger 
-              value="user" 
+            <TabsTrigger
+              value="user"
               className="flex-1 rounded-none data-[state=active]:bg-[rgba(28,43,60,0.4)] data-[state=active]:border-b-2 data-[state=active]:border-[#60a5fa] data-[state=active]:text-[#60a5fa] text-[#c1c7d3] h-[58px] text-[18px] font-medium transition-none data-[state=active]:shadow-none"
             >
               사용자
             </TabsTrigger>
-            <TabsTrigger 
-              value="admin" 
+            <TabsTrigger
+              value="admin"
               className="flex-1 rounded-none data-[state=active]:bg-[rgba(28,43,60,0.4)] data-[state=active]:border-b-2 data-[state=active]:border-[#60a5fa] data-[state=active]:text-[#60a5fa] text-[#c1c7d3] h-[58px] text-[18px] font-medium transition-none data-[state=active]:shadow-none"
             >
               관리자
