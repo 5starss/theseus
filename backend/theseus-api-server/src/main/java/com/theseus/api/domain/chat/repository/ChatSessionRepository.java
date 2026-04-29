@@ -5,6 +5,8 @@ import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ChatSessionRepository extends JpaRepository<ChatSession, Long> {
@@ -14,7 +16,19 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, Long> 
 		ProjectMember projectMember
 	);
 
+	Page<ChatSession> findByProjectAndProjectMemberOrderByUpdatedAtDesc(
+		Project project,
+		ProjectMember projectMember,
+		Pageable pageable
+	);
+
 	List<ChatSession> findByProjectMemberAndClosedAtIsNullOrderByUpdatedAtDesc(ProjectMember projectMember);
 
 	Optional<ChatSession> findByIdAndProjectMember(Long id, ProjectMember projectMember);
+
+	Optional<ChatSession> findByIdAndProjectAndProjectMember(
+		Long id,
+		Project project,
+		ProjectMember projectMember
+	);
 }

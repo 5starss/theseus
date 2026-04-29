@@ -57,6 +57,7 @@
 | Chat Session | 채팅 세션 생성 | `POST` | `/api/v1/projects/{projectId}/sessions` |
 | Chat Session | 채팅 세션 목록 조회 | `GET` | `/api/v1/projects/{projectId}/sessions?page=0&size=20` |
 | Chat Session | 채팅 세션 상세 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}` |
+| Chat Session | 채팅 세션 제목 수정 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}` |
 | Chat Session | 채팅 세션 종료 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}/close` |
 | Tool | Draft Tool 생성 | `POST` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/generate` |
 | Tool | Draft Tool 재생성 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/regenerate` |
@@ -114,7 +115,9 @@
 
 - 프로젝트 멤버가 대화 세션을 생성한다.
 - 한 세션 안에서 여러 Tool 생성 흐름을 진행할 수 있다.
+- 로그인한 프로젝트 멤버는 본인이 생성한 세션 목록을 조회한다.
 - 세션 상세 조회는 `chat_messages.message_order ASC` 기준으로 메시지를 반환한다.
+- 세션 제목은 `PATCH /api/v1/projects/{projectId}/sessions/{sessionId}`로 수정한다.
 - 종료된 세션에는 새 Tool 생성 요청을 제한한다.
 
 ## Chat Message
