@@ -6,6 +6,8 @@ services:
     container_name: api-gateway
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=prod
@@ -22,6 +24,8 @@ services:
     container_name: core-api-server
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=prod
@@ -38,6 +42,8 @@ services:
     container_name: matcher-server
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - TZ=Asia/Seoul
       - SPRING_PROFILES_ACTIVE=prod
@@ -55,11 +61,14 @@ services:
     container_name: market-server
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8085:8085"
     networks:
       - stock-network
-
+    volumes:
+      - ./.env:/app/.env
   ai-server:
     build:
       context: ../backend/ai-server
@@ -67,6 +76,8 @@ services:
     container_name: ai-server
     restart: unless-stopped
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - AI_SERVER_CHROMA_DIR=/app/chroma_db
     volumes:
