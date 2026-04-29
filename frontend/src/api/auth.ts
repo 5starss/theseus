@@ -10,7 +10,7 @@ export interface LoginResponse {
   accessToken: string;
   userId: number;
   name: string;
-  systemRole: 'SUPER_ADMIN' | 'PROJECT_ADMIN' | 'USER'; // Adjust based on actual roles
+  systemRole: 'SUPER_ADMIN' | 'USER'; // Adjust based on actual roles
 }
 
 export interface ApiResponse<T> {

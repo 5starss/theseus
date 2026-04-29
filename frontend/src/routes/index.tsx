@@ -1,6 +1,8 @@
 import { createBrowserRouter } from 'react-router-dom';
 import AuthLayout from '@/layouts/AuthLayout';
 import LoginPage from '@/pages/auth/LoginPage';
+import AdminLayout from '@/layouts/AdminLayout';
+import SuperAdminPage from '@/pages/admin/SuperAdminPage';
 
 export const router = createBrowserRouter([
   {
@@ -14,6 +16,16 @@ export const router = createBrowserRouter([
       {
         path: 'login',
         element: <LoginPage />,
+      },
+    ],
+  },
+  {
+    path: '/admin',
+    element: <AdminLayout />,
+    children: [
+      {
+        path: '',
+        element: <SuperAdminPage />,
       },
     ],
   },
