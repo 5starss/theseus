@@ -89,6 +89,7 @@ public class ToolApproval {
 			"requestedByProjectMember must not be null"
 		);
 		this.approvalStatus = ToolApprovalStatus.PENDING;
+		this.requestedAt = LocalDateTime.now();
 	}
 
 	public void approve(ProjectMember reviewedByProjectMember, String reviewFeedback) {
