@@ -40,6 +40,9 @@ Behavior:
 - 일반 대화 메시지는 `tool_id = null`로 저장한다.
 - Tool 생성, 계획 제시, 첨삭, 재제시 메시지는 같은 `tool_id`로 묶는다.
 - `senderType`은 `USER`, `ASSISTANT`, `SYSTEM`을 사용한다.
+- `messageType`은 메시지가 어떤 업무 흐름에 속하는지 나타낸다.
+- `contentType`은 메시지 본문을 어떤 형식으로 해석할지 나타낸다.
+- 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
 ## Tool
 

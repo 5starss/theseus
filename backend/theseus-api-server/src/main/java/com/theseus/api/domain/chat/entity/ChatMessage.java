@@ -56,6 +56,14 @@ public class ChatMessage {
 	@Column(name = "sender_type", nullable = false, length = 30)
 	private ChatMessageSenderType senderType;
 
+	@Enumerated(EnumType.STRING)
+	@Column(name = "message_type", nullable = false, length = 50, columnDefinition = "VARCHAR(50) DEFAULT 'CHAT'")
+	private ChatMessageType messageType;
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "content_type", nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'TEXT'")
+	private ChatMessageContentType contentType;
+
 	@Column(nullable = false, columnDefinition = "MEDIUMTEXT")
 	private String content;
 
@@ -68,12 +76,16 @@ public class ChatMessage {
 		Tool tool,
 		Integer messageOrder,
 		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
 		String content
 	) {
 		this.chatSession = chatSession;
 		this.tool = tool;
 		this.messageOrder = messageOrder;
 		this.senderType = senderType;
+		this.messageType = messageType == null ? ChatMessageType.CHAT : messageType;
+		this.contentType = contentType == null ? ChatMessageContentType.TEXT : contentType;
 		this.content = content;
 	}
 

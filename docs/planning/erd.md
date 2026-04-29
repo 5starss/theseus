@@ -31,6 +31,8 @@ Theseus MVP는 사용자, 프로젝트, 프로젝트 멤버, 채팅 세션, 채�
 - 일반 대화 메시지: `chat_messages.tool_id = NULL`
 - Tool 생성 요청, 계획 제시, 첨삭, 재제시 메시지: `chat_messages.tool_id = tools.id`
 - 세션 안 메시지 순서는 `(chat_session_id, message_order)`로 유일하다.
+- 메시지의 업무 흐름 분류는 `message_type`으로 구분한다.
+- 메시지 본문의 파싱 또는 렌더링 형식은 `content_type`으로 구분한다.
 - Tool 관련 메시지는 `(tool_id, message_order)` 인덱스로 조회한다.
 
 Draft Tool 생성 흐름은 다음 상태 전이를 따른다.
@@ -155,6 +157,8 @@ CREATE TABLE chat_messages (
     tool_id BIGINT NULL,
     message_order INT NOT NULL,
     sender_type VARCHAR(30) NOT NULL,
+    message_type VARCHAR(50) NOT NULL DEFAULT 'CHAT',
+    content_type VARCHAR(30) NOT NULL DEFAULT 'TEXT',
     content MEDIUMTEXT NOT NULL,
     created_at DATETIME NOT NULL,
     CONSTRAINT pk_chat_messages PRIMARY KEY (id),

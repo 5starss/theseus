@@ -17,6 +17,10 @@
 | `draftPhase` | `PLAN`, `REVIEW` |
 | `approvalStatus` | `PENDING`, `REJECTED`, `APPROVED` |
 | `senderType` | `USER`, `ASSISTANT`, `SYSTEM` |
+| `messageType` | `CHAT`, `TOOL_DRAFT_REQUEST`, `TOOL_DRAFT_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_REGENERATE_RESPONSE`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE` |
+| `contentType` | `TEXT`, `MARKDOWN`, `JSON` |
+
+`messageType`은 메시지가 어떤 업무 흐름에 속하는지 나타낸다. `contentType`은 메시지 본문을 어떤 형식으로 해석할지 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
 ## Draft Tool 생성
 
@@ -45,8 +49,8 @@ Authorization: Bearer {accessToken}
 동작:
 
 - `tools`에 `status = DRAFT`, `draft_phase = PLAN`인 Tool을 생성한다.
-- 사용자 요청 메시지를 `chat_messages`에 저장하고 `tool_id`를 연결한다.
-- Assistant가 계획 또는 명세를 작성한 뒤 `chat_messages`에 저장하고 같은 `tool_id`를 연결한다.
+- 사용자 요청 메시지를 `chat_messages`에 `message_type = TOOL_DRAFT_REQUEST`, `content_type = TEXT`로 저장하고 `tool_id`를 연결한다.
+- Assistant가 계획 또는 명세를 작성한 뒤 `chat_messages`에 `message_type = TOOL_DRAFT_RESPONSE`, `content_type = MARKDOWN` 또는 `JSON`으로 저장하고 같은 `tool_id`를 연결한다.
 - Assistant 계획 또는 명세가 사용자에게 제시되면 `tools.draft_phase = REVIEW`로 변경한다.
 - 세션 전체 메시지 순서는 `message_order`로 증가한다.
 - `file_name`은 같은 프로젝트 안에서 유일해야 한다.
@@ -96,9 +100,9 @@ Authorization: Bearer {accessToken}
 
 동작:
 
-- 사용자 첨삭 메시지를 `chat_messages`에 저장하고 `tool_id`를 연결한다.
+- 사용자 첨삭 메시지를 `chat_messages`에 `message_type = TOOL_FEEDBACK`, `content_type = TEXT`로 저장하고 `tool_id`를 연결한다.
 - 첨삭을 받은 시점에 `tools.draft_phase = PLAN`으로 변경한다.
-- Assistant가 수정된 계획 또는 명세를 다시 작성해 `chat_messages`에 저장하고 같은 `tool_id`를 연결한다.
+- Assistant가 수정된 계획 또는 명세를 다시 작성해 `chat_messages`에 `message_type = TOOL_REGENERATE_RESPONSE`, `content_type = MARKDOWN` 또는 `JSON`으로 저장하고 같은 `tool_id`를 연결한다.
 - 수정된 계획 또는 명세가 사용자에게 제시되면 `tools.draft_phase = REVIEW`로 변경한다.
 - 같은 세션 안의 다른 Tool 관련 메시지와 섞이지 않도록 `tool_id` 기준으로 Draft 대화 이력을 조회한다.
 
@@ -140,6 +144,7 @@ Authorization: Bearer {accessToken}
 - `tool_approvals`에 `approval_status = PENDING`인 승인 요청을 생성한다.
 - `request_number`는 같은 Tool 안에서 1부터 증가한다.
 - `tools.status = PENDING`으로 변경한다.
+- 승인 요청 메시지를 대화 이력에 남길 경우 `message_type = TOOL_APPROVAL_REQUEST`로 저장한다.
 
 ## 승인 이력 조회
 
