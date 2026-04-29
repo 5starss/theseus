@@ -25,7 +25,6 @@ export default function ProjectListSection() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [totalElements, setTotalElements] = useState(0);
-
   useEffect(() => {
     fetchProjects(page);
   }, [page]);
@@ -33,12 +32,19 @@ export default function ProjectListSection() {
   const fetchProjects = async (pageNumber: number) => {
     setIsLoading(true);
     try {
-      const data = await adminApi.getProjects(pageNumber, 20);
-      setProjects(data.content);
-      setTotalPages(data.totalPages);
-      setTotalElements(data.totalElements);
+      const data = await adminApi.getProjects(pageNumber, 8);
+      if (data && data.content) {
+        setProjects(data.content);
+        setTotalPages(data.totalPages);
+        setTotalElements(data.totalElements);
+      } else {
+        setProjects([]);
+        setTotalPages(0);
+        setTotalElements(0);
+      }
     } catch (error) {
       console.error('Failed to fetch projects:', error);
+      setProjects([]);
     } finally {
       setIsLoading(false);
     }
@@ -51,7 +57,7 @@ export default function ProjectListSection() {
   );
 
   return (
-    <div className="bg-[#0d1c2d] rounded-lg border border-[rgba(65,71,81,0.3)] shadow-2xl overflow-hidden flex flex-col h-full">
+    <div className="bg-[#0d1c2d] rounded-lg border border-[rgba(65,71,81,0.3)] shadow-2xl flex flex-col">
       <div className="px-6 pt-6 pb-[25px] border-b border-[rgba(65,71,81,0.2)] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded bg-[rgba(250,189,52,0.1)] flex items-center justify-center shrink-0">
@@ -79,7 +85,7 @@ export default function ProjectListSection() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="w-full min-h-[500px]">
         <Table>
           <TableHeader className="bg-[rgba(28,43,60,0.5)] border-b border-[rgba(65,71,81,0.1)] sticky top-0 z-10">
             <TableRow className="border-none hover:bg-transparent">
@@ -148,7 +154,7 @@ export default function ProjectListSection() {
           </button>
           <span className="text-xs text-white/60 px-2">{page + 1} / {totalPages || 1}</span>
           <button
-            disabled={page >= totalPages - 1}
+            disabled={page >= (totalPages || 1) - 1}
             onClick={() => setPage(p => p + 1)}
             className="px-2 py-1 text-xs text-white/60 hover:text-white disabled:opacity-50"
           >

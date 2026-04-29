@@ -8,11 +8,13 @@ import com.theseus.api.domain.user.dto.request.UserCreateRequest;
 import com.theseus.api.domain.user.dto.request.UserStatusUpdateRequest;
 import com.theseus.api.domain.user.dto.request.UserUpdateRequest;
 import com.theseus.api.domain.user.dto.response.UserResponse;
+import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.entity.UserStatus;
 import com.theseus.api.domain.user.repository.UserRepository;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,10 +28,9 @@ public class UserService {
 	private final ProjectRepository projectRepository;
 	private final PasswordEncoder passwordEncoder;
 
-	public List<UserResponse> getUsers() {
-		return userRepository.findAll().stream()
-			.map(UserResponse::createFrom)
-			.toList();
+	public Page<UserResponse> getUsers(Pageable pageable) {
+		return userRepository.findBySystemRoleNot(SystemRole.SUPER_ADMIN, pageable)
+				.map(UserResponse::createFrom);
 	}
 
 	public UserResponse getUser(Long userId) {
@@ -54,11 +55,10 @@ public class UserService {
 		validateEmailDuplication(userId, request.getEmail());
 
 		user.update(
-			request.getName(),
-			request.getEmail(),
-			null,
-			request.getSystemRole()
-		);
+				request.getName(),
+				request.getEmail(),
+				null,
+				request.getSystemRole());
 
 		return UserResponse.createFrom(user);
 	}
@@ -78,7 +78,7 @@ public class UserService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+				.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private void validateCreateRequest(UserCreateRequest request) {
