@@ -59,6 +59,8 @@
 | Chat Session | 채팅 세션 상세 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}` |
 | Chat Session | 채팅 세션 제목 수정 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}` |
 | Chat Session | 채팅 세션 종료 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}/close` |
+| Chat Message | 채팅 메시지 등록 | `POST` | `/api/v1/projects/{projectId}/sessions/{sessionId}/messages` |
+| Chat Message | 채팅 메시지 목록 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/messages` |
 | Tool | Draft Tool 생성 | `POST` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/generate` |
 | Tool | Draft Tool 재생성 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/regenerate` |
 | Tool | Tool 목록 조회 | `GET` | `/api/v1/projects/{projectId}/tools?scope=accessible&status=APPROVED&page=0&size=20` |
@@ -122,13 +124,14 @@
 
 ## Chat Message
 
-- 별도 공개 CRUD API보다 ChatSession, Tool 생성, Tool 재생성, 승인 요청 흐름에서 함께 저장한다.
+- 외부 메시지 등록 API는 USER 메시지를 저장한다.
 - `message_order`는 세션 안의 전체 메시지 순서다.
 - `(chat_session_id, message_order)`는 유일하다.
 - 일반 대화 메시지는 `tool_id = null`로 저장한다.
 - Tool 생성, 계획 제시, 첨삭, 재제시, 승인 요청 메시지는 같은 `tool_id`로 묶는다.
 - 진행 중 progress/chunk 이벤트는 `chat_messages`에 저장하지 않는다.
 - 최종 USER, ASSISTANT, SYSTEM 메시지만 `chat_messages`에 저장한다.
+- ASSISTANT 메시지는 AI 완료 후 Kafka Consumer가 내부 저장 로직으로 저장한다.
 
 ## Tool
 
