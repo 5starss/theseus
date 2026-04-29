@@ -1,5 +1,7 @@
 package com.theseus.api.domain.user.controller;
 
+import com.theseus.api.common.response.ApiResponse;
+import com.theseus.api.common.response.status.SuccessCode;
 import com.theseus.api.domain.user.dto.request.UserCreateRequest;
 import com.theseus.api.domain.user.dto.request.UserStatusUpdateRequest;
 import com.theseus.api.domain.user.dto.request.UserUpdateRequest;
@@ -10,7 +12,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -33,8 +34,8 @@ public class UserController {
 		summary = "사용자 목록 조회",
 		description = "Super Admin이 등록된 사용자 계정 목록을 조회합니다."
 	)
-	public ResponseEntity<List<UserResponse>> getUsers() {
-		return ResponseEntity.ok(userService.getUsers());
+	public ResponseEntity<ApiResponse<List<UserResponse>>> getUsers() {
+		return ApiResponse.onSuccess(SuccessCode.OK, userService.getUsers());
 	}
 
 	@GetMapping("/{userId}")
@@ -42,8 +43,8 @@ public class UserController {
 		summary = "사용자 단건 조회",
 		description = "Super Admin이 사용자 ID로 등록된 사용자 계정 상세 정보를 조회합니다."
 	)
-	public ResponseEntity<UserResponse> getUser(@PathVariable Long userId) {
-		return ResponseEntity.ok(userService.getUser(userId));
+	public ResponseEntity<ApiResponse<UserResponse>> getUser(@PathVariable Long userId) {
+		return ApiResponse.onSuccess(SuccessCode.OK, userService.getUser(userId));
 	}
 
 	@PostMapping
@@ -51,9 +52,8 @@ public class UserController {
 		summary = "사용자 계정 발급",
 		description = "Super Admin이 새 사용자 계정을 발급합니다. 일반 회원가입 API가 아니며, 입력받은 비밀번호는 BCrypt로 해싱되어 저장됩니다."
 	)
-	public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserCreateRequest request) {
-		return ResponseEntity.status(HttpStatus.CREATED)
-			.body(userService.createUser(request));
+	public ResponseEntity<ApiResponse<UserResponse>> createUser(@Valid @RequestBody UserCreateRequest request) {
+		return ApiResponse.onSuccess(SuccessCode.CREATED, userService.createUser(request));
 	}
 
 	@PatchMapping("/{userId}")
@@ -61,11 +61,11 @@ public class UserController {
 		summary = "사용자 기본 정보 수정",
 		description = "Super Admin이 사용자 이름, 이메일, 시스템 권한을 수정합니다."
 	)
-	public ResponseEntity<UserResponse> updateUser(
+	public ResponseEntity<ApiResponse<UserResponse>> updateUser(
 		@PathVariable Long userId,
 		@Valid @RequestBody UserUpdateRequest request
 	) {
-		return ResponseEntity.ok(userService.updateUser(userId, request));
+		return ApiResponse.onSuccess(SuccessCode.OK, userService.updateUser(userId, request));
 	}
 
 	@PatchMapping("/{userId}/status")
@@ -73,10 +73,11 @@ public class UserController {
 		summary = "사용자 상태 변경",
 		description = "Super Admin이 사용자 상태를 변경합니다. 활성 프로젝트의 담당자(PM)는 INACTIVE로 변경할 수 없습니다."
 	)
-	public ResponseEntity<UserResponse> updateUserStatus(
+	public ResponseEntity<ApiResponse<UserResponse>> updateUserStatus(
 		@PathVariable Long userId,
 		@Valid @RequestBody UserStatusUpdateRequest request
 	) {
-		return ResponseEntity.ok(userService.updateUserStatus(userId, request));
+		return ApiResponse.onSuccess(SuccessCode.OK, userService.updateUserStatus(userId, request));
 	}
 }
+
