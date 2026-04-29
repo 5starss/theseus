@@ -22,6 +22,7 @@ public enum ErrorCode {
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER-001", "존재하지 않는 사용자입니다."),
     DUPLICATE_EMPLOYEE_NUMBER(HttpStatus.CONFLICT, "USER-002", "이미 존재하는 사번입니다."),
     DUPLICATE_EMAIL(HttpStatus.CONFLICT, "USER-003", "이미 존재하는 이메일입니다."),
+    ACTIVE_PROJECT_ADMIN_USER(HttpStatus.CONFLICT, "USER-004", "활성 프로젝트 담당자는 비활성화할 수 없습니다."),
 
     
     // Project

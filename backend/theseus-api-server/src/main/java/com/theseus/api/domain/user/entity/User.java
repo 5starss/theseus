@@ -73,13 +73,23 @@ public class User extends BaseEntity {
 		String name,
 		String email,
 		String password,
-		SystemRole systemRole,
-		UserStatus status
+		SystemRole systemRole
 	) {
-		this.name = name;
-		this.email = email;
-		this.password = password;
-		this.systemRole = systemRole;
+		if (name != null) {
+			this.name = name;
+		}
+		if (email != null) {
+			this.email = email;
+		}
+		if (password != null) {
+			this.password = password;
+		}
+		if (systemRole != null) {
+			this.systemRole = systemRole;
+		}
+	}
+
+	public void updateStatus(UserStatus status) {
 		this.status = status;
 	}
 

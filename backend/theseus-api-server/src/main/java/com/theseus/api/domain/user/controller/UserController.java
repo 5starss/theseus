@@ -1,6 +1,7 @@
 package com.theseus.api.domain.user.controller;
 
 import com.theseus.api.domain.user.dto.request.UserCreateRequest;
+import com.theseus.api.domain.user.dto.request.UserStatusUpdateRequest;
 import com.theseus.api.domain.user.dto.request.UserUpdateRequest;
 import com.theseus.api.domain.user.dto.response.UserResponse;
 import com.theseus.api.domain.user.service.UserService;
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RequiredArgsConstructor
 @Tag(name = "User", description = "사용자 계정 관리 API")
-@RequestMapping("/users")
+@RequestMapping("/api/v1/admin/users")
 @RestController
 public class UserController {
 
@@ -29,7 +31,7 @@ public class UserController {
 	@GetMapping
 	@Operation(
 		summary = "사용자 목록 조회",
-		description = "등록된 사용자 계정 목록을 조회합니다. 사용자 계정은 일반 회원가입이 아니라 Super Admin이 발급하는 대상입니다."
+		description = "Super Admin이 등록된 사용자 계정 목록을 조회합니다."
 	)
 	public ResponseEntity<List<UserResponse>> getUsers() {
 		return ResponseEntity.ok(userService.getUsers());
@@ -38,7 +40,7 @@ public class UserController {
 	@GetMapping("/{userId}")
 	@Operation(
 		summary = "사용자 단건 조회",
-		description = "사용자 ID로 등록된 사용자 계정 상세 정보를 조회합니다."
+		description = "Super Admin이 사용자 ID로 등록된 사용자 계정 상세 정보를 조회합니다."
 	)
 	public ResponseEntity<UserResponse> getUser(@PathVariable Long userId) {
 		return ResponseEntity.ok(userService.getUser(userId));
@@ -54,10 +56,10 @@ public class UserController {
 			.body(userService.createUser(request));
 	}
 
-	@PostMapping("/{userId}/update")
+	@PatchMapping("/{userId}")
 	@Operation(
-		summary = "사용자 계정 수정",
-		description = "사용자 이름, 이메일, 비밀번호, 시스템 권한, 계정 상태를 수정합니다. 비밀번호를 수정하면 BCrypt로 다시 해싱되어 저장됩니다."
+		summary = "사용자 기본 정보 수정",
+		description = "Super Admin이 사용자 이름, 이메일, 시스템 권한을 수정합니다."
 	)
 	public ResponseEntity<UserResponse> updateUser(
 		@PathVariable Long userId,
@@ -66,12 +68,15 @@ public class UserController {
 		return ResponseEntity.ok(userService.updateUser(userId, request));
 	}
 
-	@PostMapping("/{userId}/delete")
+	@PatchMapping("/{userId}/status")
 	@Operation(
-		summary = "사용자 계정 비활성화",
-		description = "사용자 계정을 물리 삭제하지 않고 INACTIVE 상태로 변경합니다."
+		summary = "사용자 상태 변경",
+		description = "Super Admin이 사용자 상태를 변경합니다. 활성 프로젝트의 담당자(PM)는 INACTIVE로 변경할 수 없습니다."
 	)
-	public ResponseEntity<UserResponse> deleteUser(@PathVariable Long userId) {
-		return ResponseEntity.ok(userService.deleteUser(userId));
+	public ResponseEntity<UserResponse> updateUserStatus(
+		@PathVariable Long userId,
+		@Valid @RequestBody UserStatusUpdateRequest request
+	) {
+		return ResponseEntity.ok(userService.updateUserStatus(userId, request));
 	}
 }

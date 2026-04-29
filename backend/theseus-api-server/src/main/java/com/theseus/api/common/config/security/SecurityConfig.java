@@ -31,7 +31,8 @@ public class SecurityConfig {
     };
 
     private static final String[] AUTH_PATHS = {
-            "/auth/login"
+            "/auth/login",
+            "/api/v1/auth/login"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
@@ -52,7 +53,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(SWAGGER_PATHS).permitAll()
                         .requestMatchers(AUTH_PATHS).permitAll()
-                        .requestMatchers("/users/**").hasRole("SUPER_ADMIN")
+                        .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
