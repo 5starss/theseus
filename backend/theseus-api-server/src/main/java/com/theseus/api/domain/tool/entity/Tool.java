@@ -20,6 +20,7 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
@@ -70,14 +71,14 @@ public class Tool {
 	private String displayDescription;
 
 	@Enumerated(EnumType.STRING)
-	@Column(nullable = false, length = 30)
+	@Column(nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'DRAFT'")
 	private ToolStatus status;
 
 	@Enumerated(EnumType.STRING)
-	@Column(name = "draft_phase", nullable = false, length = 30)
-	private DraftPhase draftPhase;
+	@Column(name = "draft_phase", nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'PLAN'")
+	private ToolDraftPhase draftPhase;
 
-	@Column(name = "tool_grade")
+	@Column(name = "tool_grade", columnDefinition = "INT UNSIGNED")
 	private Integer toolGrade;
 
 	@Column(name = "raw_markdown", columnDefinition = "LONGTEXT")
@@ -104,20 +105,23 @@ public class Tool {
 		String displayName,
 		String displayDescription,
 		ToolStatus status,
-		DraftPhase draftPhase,
+		ToolDraftPhase draftPhase,
 		Integer toolGrade,
 		String rawMarkdown,
 		String structuredPlanJson,
 		String draftSnapshot
 	) {
-		this.project = project;
-		this.chatSession = chatSession;
-		this.createdByProjectMember = createdByProjectMember;
-		this.fileName = fileName;
+		this.project = Objects.requireNonNull(project, "project must not be null");
+		this.chatSession = Objects.requireNonNull(chatSession, "chatSession must not be null");
+		this.createdByProjectMember = Objects.requireNonNull(
+			createdByProjectMember,
+			"createdByProjectMember must not be null"
+		);
+		this.fileName = validateFileName(fileName);
 		this.displayName = displayName;
 		this.displayDescription = displayDescription;
 		this.status = status == null ? ToolStatus.DRAFT : status;
-		this.draftPhase = draftPhase == null ? DraftPhase.PLAN : draftPhase;
+		this.draftPhase = draftPhase == null ? ToolDraftPhase.PLAN : draftPhase;
 		this.toolGrade = toolGrade;
 		this.rawMarkdown = rawMarkdown;
 		this.structuredPlanJson = structuredPlanJson;
@@ -128,7 +132,7 @@ public class Tool {
 		String rawMarkdown,
 		String structuredPlanJson,
 		String draftSnapshot,
-		DraftPhase draftPhase
+		ToolDraftPhase draftPhase
 	) {
 		if (rawMarkdown != null) {
 			this.rawMarkdown = rawMarkdown;
@@ -144,12 +148,25 @@ public class Tool {
 		}
 	}
 
+	public void startRegeneration() {
+		status = ToolStatus.DRAFT;
+		draftPhase = ToolDraftPhase.PLAN;
+	}
+
+	public void completeDraftReview(
+		String rawMarkdown,
+		String structuredPlanJson,
+		String draftSnapshot
+	) {
+		updateDraft(rawMarkdown, structuredPlanJson, draftSnapshot, ToolDraftPhase.REVIEW);
+	}
+
 	public void markAsPlan() {
-		draftPhase = DraftPhase.PLAN;
+		draftPhase = ToolDraftPhase.PLAN;
 	}
 
 	public void markAsReview() {
-		draftPhase = DraftPhase.REVIEW;
+		draftPhase = ToolDraftPhase.REVIEW;
 	}
 
 	public void requestApproval() {
@@ -163,7 +180,7 @@ public class Tool {
 
 	public void reject() {
 		status = ToolStatus.REJECTED;
-		draftPhase = DraftPhase.REVIEW;
+		draftPhase = ToolDraftPhase.REVIEW;
 	}
 
 	public void updateDisplayInfo(String displayName, String displayDescription, Integer toolGrade) {
@@ -182,6 +199,42 @@ public class Tool {
 		status = ToolStatus.DELETED;
 	}
 
+	public boolean isDraft() {
+		return ToolStatus.DRAFT.equals(status);
+	}
+
+	public boolean isPending() {
+		return ToolStatus.PENDING.equals(status);
+	}
+
+	public boolean isApproved() {
+		return ToolStatus.APPROVED.equals(status);
+	}
+
+	public boolean isRejected() {
+		return ToolStatus.REJECTED.equals(status);
+	}
+
+	public boolean isDeleted() {
+		return ToolStatus.DELETED.equals(status);
+	}
+
+	public boolean canRequestApproval() {
+		return ToolStatus.DRAFT.equals(status) && ToolDraftPhase.REVIEW.equals(draftPhase);
+	}
+
+	public boolean canRegenerate() {
+		return ToolStatus.DRAFT.equals(status) || ToolStatus.REJECTED.equals(status);
+	}
+
+	public boolean isAccessibleWithAccessLevel(Integer accessLevel) {
+		if (toolGrade == null) {
+			return true;
+		}
+
+		return accessLevel != null && accessLevel >= toolGrade;
+	}
+
 	@PrePersist
 	private void prePersist() {
 		LocalDateTime now = LocalDateTime.now();
@@ -192,5 +245,13 @@ public class Tool {
 	@PreUpdate
 	private void preUpdate() {
 		updatedAt = LocalDateTime.now();
+	}
+
+	private String validateFileName(String fileName) {
+		if (fileName == null || fileName.isBlank()) {
+			throw new IllegalArgumentException("fileName must not be blank");
+		}
+
+		return fileName;
 	}
 }
