@@ -76,16 +76,6 @@ public class UserService {
 		return UserResponse.createFrom(user);
 	}
 
-	@Transactional
-	public UserResponse deleteUser(Long userId) {
-		User user = getUserEntity(userId);
-		validateCanDeactivateUser(user);
-
-		user.deactivate();
-
-		return UserResponse.createFrom(user);
-	}
-
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
 			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
