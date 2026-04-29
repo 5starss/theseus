@@ -1,0 +1,11 @@
+package com.theseus.api.domain.chat.entity;
+
+public enum ChatMessageType {
+	CHAT,
+	TOOL_DRAFT_REQUEST,
+	TOOL_DRAFT_RESPONSE,
+	TOOL_FEEDBACK,
+	TOOL_REGENERATE_RESPONSE,
+	TOOL_APPROVAL_REQUEST,
+	SYSTEM_NOTICE
+}
