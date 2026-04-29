@@ -24,6 +24,18 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 
 	Optional<Tool> findByIdAndProject(Long id, Project project);
 
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+		select tool
+		from Tool tool
+		where tool.id = :id
+			and tool.project = :project
+		""")
+	Optional<Tool> findByIdAndProjectForUpdate(
+		@Param("id") Long id,
+		@Param("project") Project project
+	);
+
 	Optional<Tool> findByIdAndProjectAndStatusNot(Long id, Project project, ToolStatus status);
 
 	Optional<Tool> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
