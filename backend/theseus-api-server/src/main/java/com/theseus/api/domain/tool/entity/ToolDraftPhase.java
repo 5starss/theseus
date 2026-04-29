@@ -1,6 +1,6 @@
 package com.theseus.api.domain.tool.entity;
 
-public enum DraftPhase {
+public enum ToolDraftPhase {
 	PLAN,
 	REVIEW
 }
