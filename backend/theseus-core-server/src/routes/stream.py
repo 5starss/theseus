@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 from src.auth.dependencies import get_sse_session_context
-from src.auth.schemas import SessionContext, BillingUsageReport, UsageMetrics
-from src.auth.client import billing_client
+from src.auth.schemas import SessionContext, UsageMetrics
 from src.builder.engine import EngineInitializationError, get_query_engine
+from src.db.postgres import get_db
+from src.db.repositories.billing import BillingOutboxRepository
 import json
 import logging
 
@@ -28,7 +30,7 @@ def _truncate_tool_output(output: object, max_length: int = 500) -> str:
 async def stream_agent_response(
     session: SessionContext,
     prompt: str,
-    background_tasks: BackgroundTasks,
+    db: Session,
 ):
     """Request-agnostic SSE handler for a single Theseus engine run."""
     usage_data = UsageMetrics(model_name="unknown", prompt_tokens=0, completion_tokens=0, total_tokens=0)
@@ -93,19 +95,22 @@ async def stream_agent_response(
         logger.error("Theseus stream error: %s", exc, exc_info=True)
         yield sse_event("error", {"message": str(exc)})
     finally:
-        report = BillingUsageReport(
+        outbox_record = BillingOutboxRepository(db).enqueue(
             user_id=session.user_id,
             project_id=session.project_id,
             usage=usage_data,
         )
-        background_tasks.add_task(billing_client.report_usage, report)
-        logger.info("Billing report queued for user %s", session.user_id)
+        logger.info(
+            "Billing outbox enqueued for user %s with record %s",
+            session.user_id,
+            outbox_record.id,
+        )
 
 @router.get("/stream")
 async def stream_endpoint(
-    background_tasks: BackgroundTasks,
     prompt: str = Query(..., min_length=1),
     session: SessionContext = Depends(get_sse_session_context),
+    db: Session = Depends(get_db),
 ):
     """
     인증된 사용자에게 SSE 스트림을 반환하며, 종료 시 과금을 수행합니다.
@@ -114,7 +119,7 @@ async def stream_endpoint(
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
     return StreamingResponse(
-        stream_agent_response(session, prompt, background_tasks),
+        stream_agent_response(session, prompt, db),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

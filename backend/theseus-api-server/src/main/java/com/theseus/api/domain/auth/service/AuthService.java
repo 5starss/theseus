@@ -1,16 +1,16 @@
 package com.theseus.api.domain.auth.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.dto.request.LoginRequest;
 import com.theseus.api.domain.auth.dto.response.LoginResponse;
 import com.theseus.api.domain.auth.token.JwtTokenProvider;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -18,7 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class AuthService {
 
 	private static final String TOKEN_TYPE = "Bearer";
-	private static final String LOGIN_FAILED_MESSAGE = "아이디 또는 비밀번호가 올바르지 않습니다.";
+
 
 	private final UserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
@@ -41,12 +41,12 @@ public class AuthService {
 	private User findLoginUser(String loginId) {
 		return userRepository.findByEmployeeNumber(loginId)
 			.or(() -> userRepository.findByEmail(loginId))
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, LOGIN_FAILED_MESSAGE));
+			.orElseThrow(() -> new CustomException(ErrorCode.LOGIN_FAILED));
 	}
 
 	private void validatePassword(String password, User user) {
 		if (!passwordEncoder.matches(password, user.getPassword())) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, LOGIN_FAILED_MESSAGE);
+			throw new CustomException(ErrorCode.LOGIN_FAILED);
 		}
 	}
 }

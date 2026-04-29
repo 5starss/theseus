@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
+    BILLING_OUTBOX_BATCH_SIZE: int = 10
+    BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
+    SANDBOX_IMAGE: str = "python:3.11-slim"
+    SANDBOX_MEMORY_LIMIT: str = "128m"
+    SANDBOX_CPU_QUOTA: int = 50000
+    SANDBOX_CPU_PERIOD: int = 100000
+    SANDBOX_KEEP_FAILED_CONTAINERS: bool = False
     
     # Database Settings (PostgreSQL + pgvector)
     CORE_POSTGRES_HOST: str = "localhost"

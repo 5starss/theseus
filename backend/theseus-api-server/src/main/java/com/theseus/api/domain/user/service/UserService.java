@@ -1,5 +1,7 @@
 package com.theseus.api.domain.user.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.project.entity.ProjectStatus;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.user.dto.request.UserCreateRequest;
@@ -11,11 +13,9 @@ import com.theseus.api.domain.user.entity.UserStatus;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -88,32 +88,27 @@ public class UserService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private void validateCreateRequest(UserCreateRequest request) {
 		if (userRepository.existsByEmployeeNumber(request.getEmployeeNumber())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 사번입니다.");
+			throw new CustomException(ErrorCode.DUPLICATE_EMPLOYEE_NUMBER);
 		}
-
 		if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 이메일입니다.");
+			throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
 		}
 	}
 
 	private void validateEmailDuplication(Long userId, String email) {
-		if (email == null) {
-			return;
-		}
-
-		if (userRepository.existsByEmailAndIdNot(email, userId)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 존재하는 이메일입니다.");
+		if (email != null && userRepository.existsByEmailAndIdNot(email, userId)) {
+			throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
 		}
 	}
 
 	private void validateCanDeactivateUser(User user) {
 		if (projectRepository.existsByProjectAdminUserAndStatus(user, ProjectStatus.ACTIVE)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "활성 프로젝트 담당자는 비활성화할 수 없습니다.");
+			throw new CustomException(ErrorCode.ACTIVE_PROJECT_ADMIN_USER);
 		}
 	}
 }

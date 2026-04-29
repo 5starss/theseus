@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
@@ -22,22 +23,17 @@ public class SwaggerSecurityConfig {
 		"/v3/api-docs/**"
 	};
 
-	private static final String[] AUTH_PATHS = {
-		"/auth/login",
-		"/api/v1/auth/login"
-	};
-
 	private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
 	@Bean
-	public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+	@Order(1)
+	public SecurityFilterChain swaggerSecurityFilterChain(HttpSecurity http) throws Exception {
 		http
+			.securityMatcher(SWAGGER_PATHS)
 			.csrf(csrf -> csrf.disable())
 			.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.authorizeHttpRequests(auth -> auth
 				.requestMatchers(SWAGGER_PATHS).permitAll()
-				.requestMatchers(AUTH_PATHS).permitAll()
-				.requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
 				.anyRequest().authenticated())
 			.formLogin(formLogin -> formLogin.disable())
 			.httpBasic(httpBasic -> httpBasic.disable())
