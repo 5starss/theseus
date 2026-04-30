@@ -55,6 +55,14 @@ Authorization: Bearer {accessToken}
 - `contentType`이 없으면 `TEXT`로 저장한다.
 - `messageOrder`는 세션 기준으로 자동 증가한다.
 
+### Tool 관련 메시지
+
+- 일반 채팅 메시지는 `toolId = null`로 저장한다.
+- Tool 생성, 재생성, 승인 요청과 직접 연결된 메시지는 `chat_messages.tool_id`로 대상 Tool과 연결한다.
+- 블록별 PLAN 피드백은 `messageType = TOOL_FEEDBACK`, `contentType = JSON`으로 저장한다.
+- 승인 요청은 `messageType = TOOL_APPROVAL_REQUEST`, `contentType = JSON`으로 저장한다.
+- Tool 관련 메시지도 동일한 ChatSession 안에서 `messageOrder`를 공유한다.
+
 ## 채팅 메시지 목록 조회
 
 ```http
