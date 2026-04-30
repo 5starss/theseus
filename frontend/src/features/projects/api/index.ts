@@ -1,6 +1,6 @@
-import { apiClient } from './client';
-import type { ApiResponse } from './auth';
-import type { PageResponse } from './admin';
+import { apiClient } from '@/api/client';
+import type { ApiResponse } from '@/api/auth';
+import type { PageResponse } from '@/features/admin/api';
 
 export interface MyProjectResponse {
   projectId: number;

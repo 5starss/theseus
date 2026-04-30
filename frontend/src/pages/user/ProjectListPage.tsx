@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Folder } from 'lucide-react';
-import { projectApi } from '@/api/project';
-import type { MyProjectResponse } from '@/api/project';
+import { projectApi } from '@/features/projects/api';
+import type { MyProjectResponse } from '@/features/projects/api';
 
 export default function ProjectListPage() {
   const [projects, setProjects] = useState<MyProjectResponse[]>([]);

@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
-import { adminApi } from '../../../api/admin';
-import type { UserResponse, ProjectSummaryResponse } from '../../../api/admin';
+import { adminApi } from '../api';
+import type { UserResponse, ProjectSummaryResponse } from '../api';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '../../../components/ui/dialog';
-import { Input } from '../../../components/ui/input';
-import { Label } from '../../../components/ui/label';
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface EditProjectModalProps {
   isOpen: boolean;
