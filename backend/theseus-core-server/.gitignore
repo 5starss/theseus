@@ -187,3 +187,6 @@ uv.lock
 .theseus_history.json
 test_log.txt
 temp/
+
+debug_dumps/
+OpenHarness/
