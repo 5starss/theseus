@@ -3,29 +3,43 @@ import AuthLayout from '@/layouts/AuthLayout';
 import LoginPage from '@/pages/auth/LoginPage';
 import AdminLayout from '@/layouts/AdminLayout';
 import SuperAdminPage from '@/pages/admin/SuperAdminPage';
+import UserLayout from '@/layouts/UserLayout';
+import ProjectListPage from '@/pages/user/ProjectListPage';
+import ProtectedRoute from './ProtectedRoute';
 
 export const router = createBrowserRouter([
   {
-    path: '/',
-    element: <AuthLayout />,
+    element: <ProtectedRoute />,
     children: [
       {
-        path: '',
-        element: <LoginPage />, // temporarily redirect root to login
+        path: '/',
+        element: <UserLayout />,
+        children: [
+          {
+            path: '',
+            element: <ProjectListPage />,
+          },
+        ],
       },
       {
-        path: 'login',
-        element: <LoginPage />,
+        path: '/admin',
+        element: <AdminLayout />,
+        children: [
+          {
+            path: '',
+            element: <SuperAdminPage />,
+          },
+        ],
       },
     ],
   },
   {
-    path: '/admin',
-    element: <AdminLayout />,
+    path: '/login',
+    element: <AuthLayout />,
     children: [
       {
         path: '',
-        element: <SuperAdminPage />,
+        element: <LoginPage />,
       },
     ],
   },
