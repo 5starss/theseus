@@ -31,11 +31,15 @@ export const useAuthStore = create<AuthState>()(
         isAuthenticated: true 
       }),
 
-      logout: () => set({ 
-        accessToken: null, 
-        user: null, 
-        isAuthenticated: false 
-      }),
+      logout: () => {
+        set({ 
+          accessToken: null, 
+          user: null, 
+          isAuthenticated: false 
+        });
+        // Clear persisted storage explicitly
+        localStorage.removeItem('auth-storage');
+      },
 
       setAccessToken: (token) => set({ 
         accessToken: token 
