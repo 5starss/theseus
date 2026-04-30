@@ -58,6 +58,16 @@ public class ProjectController {
         return ApiResponse.onSuccess(SuccessCode.OK, ProjectPageResponse.createFrom(projects));
     }
 
+    @Operation(summary = "프로젝트 단건 조회", description = "Super Admin은 모든 프로젝트를 조회할 수 있고, 프로젝트 멤버는 본인이 속한 활성 프로젝트만 조회할 수 있습니다.")
+    @GetMapping("/projects/{projectId}")
+    public ResponseEntity<ApiResponse<ProjectResponse>> getProject(
+            @AuthenticationPrincipal AuthenticatedUser currentUser,
+            @PathVariable Long projectId
+    ) {
+        ProjectResponse response = projectService.getProject(currentUser, projectId);
+        return ApiResponse.onSuccess(SuccessCode.OK, response);
+    }
+
     @Operation(summary = "프로젝트 생성", description = "Super Admin이 프로젝트를 생성하고, 활성 사용자 중 사번과 이름이 일치하는 사용자를 프로젝트 담당자(PM)로 지정합니다.")
     @PostMapping("/projects")
     public ResponseEntity<ApiResponse<ProjectResponse>> createProject(
@@ -79,4 +89,3 @@ public class ProjectController {
         return ApiResponse.onSuccess(SuccessCode.OK, response);
     }
 }
-

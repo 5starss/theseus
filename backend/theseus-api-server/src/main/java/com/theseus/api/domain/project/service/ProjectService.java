@@ -67,6 +67,15 @@ public class ProjectService {
 			.map(ProjectSummaryResponse::createFrom);
 	}
 
+	public ProjectResponse getProject(AuthenticatedUser currentUser, Long projectId) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+
+		validateProjectViewer(project, user);
+
+		return ProjectResponse.createOf(project, findProjectAdminMember(project));
+	}
+
 	@Transactional
 	public ProjectResponse createProject(AuthenticatedUser currentUser, ProjectCreateRequest request) {
 		User createdByUser = getCurrentUserEntity(currentUser);
@@ -172,6 +181,23 @@ public class ProjectService {
 		}
 
 		validateProjectAdmin(project, user);
+	}
+
+	private void validateProjectViewer(Project project, User user) {
+		if (SystemRole.SUPER_ADMIN.equals(user.getSystemRole())) {
+			return;
+		}
+
+		if (!ProjectStatus.ACTIVE.equals(project.getStatus())) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active project member permission is required.");
+		}
+
+		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Project member permission is required."));
+
+		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active project member permission is required.");
+		}
 	}
 
 	private void validateProjectAdmin(Project project, User user) {
