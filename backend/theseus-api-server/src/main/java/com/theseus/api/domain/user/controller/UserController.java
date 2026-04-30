@@ -40,7 +40,7 @@ public class UserController {
 	}
 
 	@GetMapping("/{userId}")
-	@Operation(summary = "사용자 단건 조회", description = "Super Admin이 사용자 ID로 등록된 사용자 계정 상세 정보를 조회합니다.")
+	@Operation(summary = "사용자 상세 조회", description = "Super Admin이 사용자 ID로 등록된 사용자 계정 상세 정보를 조회합니다.")
 	public ResponseEntity<ApiResponse<UserResponse>> getUser(@PathVariable Long userId) {
 		return ApiResponse.onSuccess(SuccessCode.OK, userService.getUser(userId));
 	}

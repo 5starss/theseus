@@ -58,7 +58,7 @@ public class ProjectController {
         return ApiResponse.onSuccess(SuccessCode.OK, ProjectPageResponse.createFrom(projects));
     }
 
-    @Operation(summary = "프로젝트 단건 조회", description = "Super Admin은 모든 프로젝트를 조회할 수 있고, 프로젝트 멤버는 본인이 속한 활성 프로젝트만 조회할 수 있습니다.")
+    @Operation(summary = "프로젝트 상세 조회", description = "Super Admin은 모든 프로젝트를 조회할 수 있고, 프로젝트 멤버는 본인이 속한 활성 프로젝트만 조회할 수 있습니다.")
     @GetMapping("/projects/{projectId}")
     public ResponseEntity<ApiResponse<ProjectResponse>> getProject(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
