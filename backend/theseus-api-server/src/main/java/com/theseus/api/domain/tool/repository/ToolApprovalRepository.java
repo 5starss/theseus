@@ -39,6 +39,19 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 	@Query("""
 		select toolApproval
 		from ToolApproval toolApproval
+		join fetch toolApproval.tool tool
+		where toolApproval.id = :id
+			and tool.project = :project
+	""")
+	Optional<ToolApproval> findByIdAndToolProjectForUpdate(
+		@Param("id") Long id,
+		@Param("project") Project project
+	);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+		select toolApproval
+		from ToolApproval toolApproval
 		where toolApproval.tool = :tool
 		order by toolApproval.requestNumber desc
 	""")
