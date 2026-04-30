@@ -14,7 +14,7 @@ from typing import Optional
 
 from openai import OpenAI
 
-from theseus_engine.schemas import PlanBlock, PlanDocument, SubItem
+from theseus_engine.models.schemas import PlanBlock, PlanDocument, SubItem
 
 
 def _make_sub_items(items: list[str]) -> list[SubItem]:

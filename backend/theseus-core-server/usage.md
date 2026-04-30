@@ -5,7 +5,7 @@
 터미널에서 아래의 명령어를 입력하세요:
 
 ```bash
-python theseus_engine/app.py
+python theseus_engine/tui/tui_main.py
 ```
 
 ## 주요 기능 및 명령어

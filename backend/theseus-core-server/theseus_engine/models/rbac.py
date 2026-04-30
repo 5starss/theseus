@@ -34,7 +34,7 @@ class TheseusPermissionChecker(PermissionChecker):
             return PermissionDecision(
                 allowed=False,
                 requires_confirmation=False,
-                reason=f"[RBAC 거부] 현재 사용자의 권한 레벨({self.user_level})로는 툴 '{tool_name}' (요구 레벨: {required_level})을 실행할 수 없습니다."
+                reason=f"[RBAC Denied] User level ({self.user_level}) is insufficient for tool '{tool_name}' (requires level {required_level})."
             )
             
         # [Theseus] always_confirm_tools에 포함된 도구는 RBAC 통과 후에도 항상 사용자 확인을 거칩니다.
@@ -42,7 +42,7 @@ class TheseusPermissionChecker(PermissionChecker):
             return PermissionDecision(
                 allowed=False,
                 requires_confirmation=True,
-                reason=f"[보안 정책] '{tool_name}'은(는) 민감한 도구이므로 사용자의 명시적인 승인이 필요합니다."
+                reason=f"[Security Policy] '{tool_name}' is a sensitive tool and requires explicit user approval."
             )
 
         # 권한이 충분하면 부모 클래스의 기본 정책(SENSITIVE PATH 필터링 등)을 우선 검사합니다.
@@ -51,7 +51,7 @@ class TheseusPermissionChecker(PermissionChecker):
         # 부모 클래스가 '수정 권한 도구(Mutating)'라서 사람의 확인이 필요하다고 막았다면,
         # 우리의 RBAC를 통과했으므로 자동 승인 처리합니다. (단, SENSITIVE PATH 차단 등은 유지)
         if not decision.allowed and decision.requires_confirmation:
-            return PermissionDecision(allowed=True, reason=f"[RBAC 승인] 레벨 {self.user_level} >= {required_level}")
+            return PermissionDecision(allowed=True, reason=f"[RBAC Approved] Level {self.user_level} >= {required_level}")
             
         return decision
 

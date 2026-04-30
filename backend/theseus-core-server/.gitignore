@@ -182,7 +182,7 @@ uv.lock
 
 
 .openharness
-OpenHarness/
+# OpenHarness/
 .theseus_sessions/
 .theseus_history.json
 test_log.txt
