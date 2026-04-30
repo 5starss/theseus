@@ -25,6 +25,115 @@
 
 `messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
+## Tool 목록 조회
+
+```http
+GET /api/v1/projects/{projectId}/tools?scope=accessible&status=APPROVED&page=0&size=20
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 프로젝트 멤버
+- `project_members.status = 진행중`
+- `project_members.can_use_tool = true`
+
+### Query Parameters
+
+| 이름 | 필수 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `scope` | N | `accessible` | 접근 가능한 Tool만 조회한다. |
+| `status` | N | `APPROVED` | 승인된 Tool만 조회한다. |
+| `page` | N | `0` | 0부터 시작하는 페이지 번호다. |
+| `size` | N | `20` | 페이지 크기다. |
+
+### 동작
+
+- `scope`는 `accessible`만 지원한다.
+- `status`는 `APPROVED`만 지원한다.
+- `tools.tool_grade IS NULL`이거나 `project_members.access_level >= tools.tool_grade`인 Tool만 조회한다.
+- `tools.updated_at DESC` 순서로 조회한다.
+
+### Response Body
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "content": [
+      {
+        "toolId": 7,
+        "projectId": 1,
+        "chatSessionId": 10,
+        "createdByProjectMemberId": 3,
+        "createdByUserId": 5,
+        "createdByUserName": "홍길동",
+        "fileName": "sales-summary-tool",
+        "displayName": "매출 요약 Tool",
+        "displayDescription": "CSV 매출 데이터를 요약합니다.",
+        "status": "APPROVED",
+        "draftPhase": "REVIEW",
+        "toolGrade": 2,
+        "createdAt": "2026-04-30T10:00:00",
+        "updatedAt": "2026-04-30T10:10:00"
+      }
+    ],
+    "page": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1
+  }
+}
+```
+
+## Tool 상세 조회
+
+```http
+GET /api/v1/projects/{projectId}/tools/{toolId}
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 프로젝트 멤버
+- `project_members.status = 진행중`
+- `project_members.can_use_tool = true`
+- `tools.status = APPROVED`
+- `tools.tool_grade IS NULL` 또는 `project_members.access_level >= tools.tool_grade`
+
+### Response Body
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "toolId": 7,
+    "projectId": 1,
+    "chatSessionId": 10,
+    "createdByProjectMemberId": 3,
+    "createdByUserId": 5,
+    "createdByUserName": "홍길동",
+    "fileName": "sales-summary-tool",
+    "displayName": "매출 요약 Tool",
+    "displayDescription": "CSV 매출 데이터를 요약합니다.",
+    "status": "APPROVED",
+    "draftPhase": "REVIEW",
+    "toolGrade": 2,
+    "rawMarkdown": "## Tool Plan...",
+    "structuredPlanJson": "{\"steps\":[]}",
+    "draftSnapshot": "{\"version\":1}",
+    "createdAt": "2026-04-30T10:00:00",
+    "updatedAt": "2026-04-30T10:10:00"
+  }
+}
+```
+
 ## Draft Tool 생성
 
 ```http
@@ -53,7 +162,7 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "success": true,
+  "isSuccess": true,
   "code": 202,
   "message": "Draft Tool 생성을 시작하였습니다.",
   "result": {
@@ -108,7 +217,7 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "success": true,
+  "isSuccess": true,
   "code": 202,
   "message": "Draft Tool 재생성을 시작하였습니다.",
   "result": {
@@ -189,7 +298,7 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "success": true,
+  "isSuccess": true,
   "code": 200,
   "message": "AI 생성 상태 조회에 성공하였습니다.",
   "result": {

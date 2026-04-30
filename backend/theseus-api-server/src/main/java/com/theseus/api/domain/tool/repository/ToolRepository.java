@@ -7,6 +7,8 @@ import com.theseus.api.domain.tool.entity.ToolStatus;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -21,6 +23,33 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 	List<Tool> findByProjectAndStatusOrderByUpdatedAtDesc(Project project, ToolStatus status);
 
 	List<Tool> findByProjectAndStatusNotOrderByUpdatedAtDesc(Project project, ToolStatus status);
+
+	@Query(
+		value = """
+			select tool
+			from Tool tool
+			join fetch tool.chatSession
+			join fetch tool.createdByProjectMember createdByProjectMember
+			join fetch createdByProjectMember.user
+			where tool.project = :project
+				and tool.status = :status
+				and (tool.toolGrade is null or tool.toolGrade <= :accessLevel)
+			order by tool.updatedAt desc
+		""",
+		countQuery = """
+			select count(tool)
+			from Tool tool
+			where tool.project = :project
+				and tool.status = :status
+				and (tool.toolGrade is null or tool.toolGrade <= :accessLevel)
+		"""
+	)
+	Page<Tool> findAccessibleByProjectAndStatus(
+		@Param("project") Project project,
+		@Param("status") ToolStatus status,
+		@Param("accessLevel") Integer accessLevel,
+		Pageable pageable
+	);
 
 	Optional<Tool> findByIdAndProject(Long id, Project project);
 

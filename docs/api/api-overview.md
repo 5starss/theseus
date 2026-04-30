@@ -16,7 +16,7 @@
 
 ```json
 {
-  "success": true,
+  "isSuccess": true,
   "code": 200,
   "message": "요청에 성공하였습니다.",
   "result": {}
@@ -25,7 +25,7 @@
 
 ```json
 {
-  "success": false,
+  "isSuccess": false,
   "code": 400,
   "message": "요청에 실패하였습니다.",
   "result": null
