@@ -1,12 +1,13 @@
 import unittest
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from src.auth.dependencies import get_sse_session_context
 from src.auth.schemas import SessionContext
 from src.builder.engine import EngineInitializationError
+from src.db.postgres import get_db
 from src.main import app
 
 
@@ -59,6 +60,11 @@ class FakeAssembly:
     error_event_type: type
 
 
+@dataclass
+class FakeOutboxRecord:
+    id: int = 1
+
+
 def mock_session() -> SessionContext:
     return SessionContext(
         user_id="test-user",
@@ -68,9 +74,14 @@ def mock_session() -> SessionContext:
     )
 
 
+def fake_db():
+    yield object()
+
+
 class StreamRouteTests(unittest.TestCase):
     def setUp(self):
         app.dependency_overrides[get_sse_session_context] = mock_session
+        app.dependency_overrides[get_db] = fake_db
         self.client = TestClient(app)
 
     def tearDown(self):
@@ -78,7 +89,7 @@ class StreamRouteTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
     def test_stream_endpoint_emits_sse_events(self):
-        def fake_get_query_engine(_session):
+        def fake_get_query_engine(_context):
             events = [
                 FakeAssistantTextDelta(text="hello "),
                 FakeToolExecutionStarted(tool_name="glob"),
@@ -96,7 +107,10 @@ class StreamRouteTests(unittest.TestCase):
             )
 
         with patch("src.routes.stream.get_query_engine", side_effect=fake_get_query_engine):
-            with patch("src.routes.stream.billing_client.report_usage", new=AsyncMock(return_value=True)):
+            with patch(
+                "src.routes.stream.BillingOutboxRepository.enqueue",
+                return_value=FakeOutboxRecord(),
+            ):
                 response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
 
         self.assertEqual(response.status_code, 200)
@@ -111,13 +125,19 @@ class StreamRouteTests(unittest.TestCase):
         self.assertIn('"total_tokens": 18', response.text)
 
     def test_stream_endpoint_returns_422_when_prompt_missing(self):
-        with patch("src.routes.stream.billing_client.report_usage", new=AsyncMock(return_value=True)):
+        with patch(
+            "src.routes.stream.BillingOutboxRepository.enqueue",
+            return_value=FakeOutboxRecord(),
+        ):
             response = self.client.get("/api/v1/stream")
 
         self.assertEqual(response.status_code, 422)
 
     def test_stream_endpoint_returns_422_when_prompt_blank(self):
-        with patch("src.routes.stream.billing_client.report_usage", new=AsyncMock(return_value=True)):
+        with patch(
+            "src.routes.stream.BillingOutboxRepository.enqueue",
+            return_value=FakeOutboxRecord(),
+        ):
             response = self.client.get("/api/v1/stream", params={"prompt": "   "})
 
         self.assertEqual(response.status_code, 422)
@@ -128,7 +148,10 @@ class StreamRouteTests(unittest.TestCase):
             "src.routes.stream.get_query_engine",
             side_effect=EngineInitializationError("OpenHarness is not available"),
         ):
-            with patch("src.routes.stream.billing_client.report_usage", new=AsyncMock(return_value=True)):
+            with patch(
+                "src.routes.stream.BillingOutboxRepository.enqueue",
+                return_value=FakeOutboxRecord(),
+            ):
                 response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
 
         self.assertEqual(response.status_code, 200)
@@ -136,6 +159,16 @@ class StreamRouteTests(unittest.TestCase):
         self.assertIn(
             'event: error\ndata: {"message": "OpenHarness is not available"}',
             response.text,
+        )
+
+    def test_stream_endpoint_fails_fast_when_permissions_unavailable(self):
+        with patch("src.routes.stream.settings.AUTH_MODE", "spring"):
+            response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["detail"],
+            "Project tool permissions are unavailable",
         )
 
 
