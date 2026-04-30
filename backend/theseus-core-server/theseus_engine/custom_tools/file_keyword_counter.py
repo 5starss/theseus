@@ -16,6 +16,11 @@ class FileKeywordCounterTool(BaseTool):
     description = "Counts case-insensitive occurrences of 'error' and 'exception' in a file and returns the result as JSON."
     input_model = FileKeywordCounterInput
     permission_level = 1
+    example_queries = [
+        "파일에서 에러 몇 개야?", "로그에 에러 얼마나 있어?",
+        "exception 개수 세줘", "error 키워드 분석해줘",
+        "count errors in file", "how many exceptions",
+    ]
 
     async def execute(self, arguments: FileKeywordCounterInput, context: ToolExecutionContext) -> ToolResult:
         """

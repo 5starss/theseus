@@ -29,6 +29,11 @@ class TestLogCreatorTool(BaseTool):
     description = "Creates a test log file for demonstration purposes."
     input_model = TestLogCreatorInput
     permission_level = 1
+    example_queries = [
+        "테스트 로그 파일 만들어줘", "샘플 로그 생성해줘",
+        "테스트용 로그 파일",
+        "create test log", "generate sample log file",
+    ]
 
     async def execute(self, arguments: TestLogCreatorInput, context: ToolExecutionContext) -> ToolResult:
         try:

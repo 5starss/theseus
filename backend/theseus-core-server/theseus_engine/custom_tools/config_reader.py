@@ -16,6 +16,11 @@ class ConfigReaderTool(BaseTool):
     description = "Reads a value for a given key from a specified configuration file."
     input_model = ConfigReaderInput
     permission_level = 1
+    example_queries = [
+        ".env 파일에서 값 읽어줘", "환경변수 확인해줘",
+        "설정값 조회해줘", "API 키 읽어줘",
+        "read config value", "get env variable",
+    ]
 
     async def execute(self, arguments: ConfigReaderInput, context: ToolExecutionContext) -> ToolResult:
         try:

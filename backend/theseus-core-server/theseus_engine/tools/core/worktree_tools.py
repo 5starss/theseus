@@ -1,0 +1,145 @@
+"""Git worktree management tools for Theseus."""
+
+from __future__ import annotations
+
+import subprocess
+import re
+import logging
+from typing import Optional
+from pathlib import Path
+from pydantic import BaseModel, Field
+from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+
+log = logging.getLogger(__name__)
+
+
+class EnterWorktreeInput(BaseModel):
+    """Arguments for entering a worktree."""
+
+    branch: str = Field(description="Target branch name for the worktree")
+    path: Optional[str] = Field(default=None, description="Optional worktree path")
+    create_branch: bool = Field(default=True, description="Whether to create a new branch")
+    base_ref: str = Field(default="HEAD", description="Base ref when creating a new branch")
+
+
+EnterWorktreeInput.model_rebuild()
+
+
+class EnterWorktreeTool(BaseTool):
+    """Create a git worktree to work on a separate branch safely."""
+
+    name = "enter_worktree"
+    description = (
+        "Create a git worktree in a separate directory. This allows you to "
+        "modify code on a different branch without affecting the current directory. "
+        "Useful for sandboxed experimentation."
+    )
+    input_model = EnterWorktreeInput
+    permission_level = 2
+
+    async def execute(
+        self, arguments: EnterWorktreeInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        top_level = _git_output(context.cwd, "rev-parse", "--show-toplevel")
+        if top_level is None:
+            return ToolResult(
+                output="Git 저장소가 아니거나 Git 명령을 실행할 수 없습니다.",
+                is_error=True
+            )
+
+        repo_root = Path(top_level)
+        worktree_path = _resolve_worktree_path(repo_root, arguments.branch, arguments.path)
+        
+        # Ensure parent directory exists
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        cmd = ["git", "worktree", "add"]
+        if arguments.create_branch:
+            cmd.extend(["-b", arguments.branch, str(worktree_path), arguments.base_ref])
+        else:
+            cmd.extend([str(worktree_path), arguments.branch])
+            
+        result = subprocess.run(
+            cmd,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        
+        output = (result.stdout or result.stderr).strip() or f"Created worktree {worktree_path}"
+        if result.returncode != 0:
+            return ToolResult(output=f"워크트리 생성 실패: {output}", is_error=True)
+            
+        return ToolResult(
+            output=(
+                f"✅ 워크트리 생성 성공\n"
+                f"Path: {worktree_path}\n"
+                f"Branch: {arguments.branch}\n\n"
+                f"이제 해당 경로로 이동하여 안전하게 코드를 수정할 수 있습니다."
+            )
+        )
+
+
+class ExitWorktreeInput(BaseModel):
+    """Arguments for worktree removal."""
+
+    path: str = Field(description="Worktree path to remove")
+
+
+class ExitWorktreeTool(BaseTool):
+    """Remove an existing git worktree."""
+
+    name = "exit_worktree"
+    description = "Remove a git worktree by its path and clean up the directory."
+    input_model = ExitWorktreeInput
+    permission_level = 2
+
+    async def execute(
+        self, arguments: ExitWorktreeInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        path = Path(arguments.path).expanduser()
+        if not path.is_absolute():
+            path = (context.cwd / path).resolve()
+            
+        result = subprocess.run(
+            ["git", "worktree", "remove", "--force", str(path)],
+            cwd=context.cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        
+        output = (result.stdout or result.stderr).strip() or f"Removed worktree {path}"
+        if result.returncode != 0:
+            return ToolResult(output=f"워크트리 제거 실패: {output}", is_error=True)
+            
+        return ToolResult(output=f"✅ 워크트리 제거 완료: {path}")
+
+
+def _git_output(cwd: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        return (result.stdout or "").strip()
+    except Exception:
+        return None
+
+
+def _resolve_worktree_path(repo_root: Path, branch: str, path: str | None) -> Path:
+    if path:
+        resolved = Path(path).expanduser()
+        if not resolved.is_absolute():
+            resolved = repo_root / resolved
+        return resolved.resolve()
+    
+    # Default path: .theseus/worktrees/<branch-slug>
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-") or "worktree"
+    return (repo_root / ".theseus" / "worktrees" / slug).resolve()

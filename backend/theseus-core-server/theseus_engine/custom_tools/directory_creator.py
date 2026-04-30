@@ -15,6 +15,11 @@ class DirectoryCreatorTool(BaseTool):
     description = "Creates a directory at the specified path."
     input_model = DirectoryCreatorInput
     permission_level = 1
+    example_queries = [
+        "폴더 만들어줘", "디렉토리 생성해줘",
+        "새 폴더 생성", "경로 만들어줘",
+        "create directory", "make folder",
+    ]
 
     async def execute(self, arguments: DirectoryCreatorInput, context: ToolExecutionContext) -> ToolResult:
         try:

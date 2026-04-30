@@ -37,6 +37,11 @@ class GoogleTTSDownloaderTool(BaseTool):
     description = "Google Cloud TTS API를 사용하여 텍스트를 음성 파일로 변환합니다."
     input_model = GoogleTTSDownloaderInput
     permission_level = 1
+    example_queries = [
+        "텍스트를 음성으로 변환해줘", "TTS 변환해줘",
+        "이 글 읽어줘", "음성 파일 만들어줘",
+        "text to speech", "convert text to audio",
+    ]
 
     async def execute(
         self, arguments: GoogleTTSDownloaderInput, context: ToolExecutionContext
