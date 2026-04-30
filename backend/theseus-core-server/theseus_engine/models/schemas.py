@@ -49,6 +49,9 @@ class PlanStep(BaseModel):
     )
 
 
+PlanStep.model_rebuild()
+
+
 class PlanDocument(BaseModel):
     """LLM이 생성하는 구조화된 플랜 문서.
 
@@ -88,6 +91,9 @@ class PlanDocument(BaseModel):
     )
 
 
+PlanDocument.model_rebuild()
+
+
 # ---------------------------------------------------------------------------
 # UI Rendering Models (Frontend / CLI)
 # ---------------------------------------------------------------------------
@@ -110,6 +116,9 @@ class SubItem(BaseModel):
     )
     index: int = Field(description="1-based index within the parent block")
     content: str = Field(description="Text content of this sub-item")
+
+
+SubItem.model_rebuild()
 
 
 class PlanBlock(BaseModel):
@@ -142,3 +151,6 @@ class PlanBlock(BaseModel):
     )
     editable: bool = Field(default=True)
     metadata: dict = Field(default_factory=dict)
+
+
+PlanBlock.model_rebuild()

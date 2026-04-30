@@ -8,7 +8,7 @@
   * **RBAC 기반 툴 필터링**: 사용자 권한(Level)에 따른 동적 도구 주입으로 보안 강화 및 컨텍스트 압축
   * **메타-툴링 (Meta-Tooling)**: 자연어를 통한 툴 생성 파이프라인 (Planning -> Code Gen -> Validation)
   * **Direct SSE 스트리밍**: 클라이언트와의 실시간 통신 및 Zero-Trust 과금 처리
-  * **KB 기반 RAG**: ChromaDB 연동을 통한 사내 지식 베이스 시맨틱 검색
+  * **KB 기반 RAG**: PostgreSQL(`pgvector`) 연동을 통한 사내 지식 베이스 시맨틱 검색
 * **비고:** FastAPI 기반 Python 서버이며, 메인 비즈니스/인증을 담당하는 **Java Spring Boot 서버**의 제어 하에 Worker 및 Streaming End-point 역할을 수행합니다.
 
 ## 2. 개발 환경 및 공통 설정
@@ -24,7 +24,7 @@
 * **Web Framework:** `fastapi`, `uvicorn`, `pydantic` (엄격한 파라미터 검증)
 * **Streaming & I/O:** `sse-starlette`, `httpx` (비동기 HTTP 통신)
 * **Agent Engine:** `openharness` (사내 라이브러리 임포트)
-* **Vector DB / RAG:** `chromadb` (Client-Server 모드), `sentence-transformers`, `langchain-core`
+* **Vector DB / RAG:** `psycopg2`, `pgvector`, `sentence-transformers`, `langchain-core`
 * **Tracing:** `langsmith`
 
 ## 4. 기능 상세 명세
@@ -51,7 +51,7 @@
 
 ### 4.5. KB 기반 RAG 검색 도구
 * **역할:** 에이전트가 필요 시 사내 위키나 과거 해결 사례를 스스로 검색(`search_knowledge_base`)합니다.
-* **구조:** 스케일 아웃(Scale-out) 시 데이터 불일치를 막기 위해 독립된 `ChromaDB` 중앙 서버를 바라봅니다.
+* **구조:** 스케일 아웃(Scale-out) 시 데이터 불일치를 막기 위해 독립된 중앙 PostgreSQL 서버(pgvector 활성화)를 바라봅니다.
 
 ---
 
@@ -63,7 +63,7 @@
    * `custom_tools/{project_id}` 폴더에서 권한에 맞는 툴만 메모리에 동적 로드.
 3. **Streaming (에이전트 실행):**
    * OpenHarness 엔진(`run_query`)이 실행되며, LangSmith를 통해 모든 궤적이 추적됩니다.
-   * RAG가 필요하면 `search_knowledge_base` 툴을 호출하여 중앙 ChromaDB에서 맥락을 가져옵니다.
+   * RAG가 필요하면 `search_knowledge_base` 툴을 호출하여 중앙 PostgreSQL DB에서 임베딩 벡터 기반의 맥락을 가져옵니다.
    * LLM 응답 청크가 생성되는 즉시 클라이언트로 SSE 브로드캐스트됩니다.
 4. **Post-Process (과금 및 유지보수):**
    * 스트리밍 종료 시 토큰 `usage` 정보가 Spring Boot 내부망으로 안전하게 전송됩니다.
@@ -77,7 +77,7 @@
 
 * **Python 3.11**
 * **uv** (권장 패키지 매니저, `pip install uv`로 설치 가능)
-* **Docker** (ChromaDB 서버 및 배포용)
+* **Docker** (PostgreSQL 서버 및 배포용)
 
 ### 6.2. 리포지터리 클론 및 환경 구성
 
@@ -104,9 +104,20 @@ LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 LANGCHAIN_API_KEY=<Your_LangSmith_API_Key>
 LANGCHAIN_PROJECT=theseus-core
 
-# Vector DB
-CHROMA_SERVER_HOST=localhost
-CHROMA_SERVER_PORT=8000
+# Database Settings (PostgreSQL + pgvector)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=15432
+POSTGRES_DB=theseus_core
+POSTGRES_USER=root
+POSTGRES_PASSWORD=root
+POSTGRES_SCHEMA=public
+
+# RAG & Embeddings Settings
+EMBEDDING_PROVIDER=local
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+VECTOR_DIMENSION=384
+RAG_TOP_K=5
+RAG_MIN_SCORE=0.5
 
 # Spring Boot Internal API
 SPRING_BOOT_INTERNAL_URL=http://localhost:8080/internal/billing/usage
@@ -148,7 +159,7 @@ theseus-core/
 │       ├── analysis_validator.py
 │       └── suggestion_validator.py
 ├── basic_tools/            # 시스템 기본 제공 코어 도구 
-│   └── search_knowledge.py # KB 기반 RAG 검색 도구 (ChromaDB 연동)
+│   └── search_knowledge.py # KB 기반 RAG 검색 도구 (PostgreSQL pgvector 연동)
 ├── custom_tools/           # 프로젝트별 생성된 도구 격리 공간
 │   ├── project_A/
 │   │   ├── custom_db_query.py  
