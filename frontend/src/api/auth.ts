@@ -26,8 +26,7 @@ export const authApi = {
    * @param data { loginId, password }
    */
   login: async (data: LoginRequest) => {
-    // Note: The actual endpoint in backend is /auth/login based on AuthController's @RequestMapping("/auth")
-    const response = await apiClient.post<ApiResponse<LoginResponse>>('/auth/login', data);
+    const response = await apiClient.post<ApiResponse<LoginResponse>>('/api/v1/auth/login', data);
     return response.data.result;
   },
 
@@ -35,7 +34,7 @@ export const authApi = {
    * 로그아웃 API
    */
   logout: async () => {
-    const response = await apiClient.post<ApiResponse<void>>('/auth/logout');
+    const response = await apiClient.post<ApiResponse<void>>('/api/v1/auth/logout');
     return response.data;
   },
 };

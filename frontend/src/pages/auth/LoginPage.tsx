@@ -9,7 +9,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useNavigate } from 'react-router-dom';
 
 const loginSchema = z.object({
-  loginId: z.string().min(1, '아이디를 입력해주세요.'),
+  loginId: z.string().min(1, '사번을 입력해주세요.'),
   password: z.string().min(1, '비밀번호를 입력해주세요.'),
 });
 
@@ -37,13 +37,13 @@ const LoginForm = ({ role, isLoading, onSubmit, errorMsg }: LoginFormProps) => {
         {/* ID Input */}
         <div className="relative">
           <label className="absolute -top-2 left-2 bg-[#0d1c2d] px-1 text-[#c1c7d3] text-[12px] font-medium tracking-[0.6px] z-10">
-            아이디
+            사번
           </label>
           <div className={`bg-[#010f1f] border ${errors.loginId ? 'border-red-500' : 'border-[rgba(65,71,81,0.3)]'} rounded-[4px] h-[50px] flex items-center px-4 mt-2 relative focus-within:border-[#60a5fa] focus-within:ring-1 focus-within:ring-[#60a5fa]/50 transition-colors`}>
             <User className={`w-4 h-4 mr-3 ${errors.loginId ? 'text-red-500' : 'text-[#8b919d]'}`} />
             <input
               type="text"
-              placeholder="ID"
+              placeholder="사번"
               className="bg-transparent border-none outline-none text-[#8b919d] text-[16px] w-full"
               {...register('loginId')}
             />
@@ -62,7 +62,7 @@ const LoginForm = ({ role, isLoading, onSubmit, errorMsg }: LoginFormProps) => {
             <Lock className={`w-4 h-4 mr-3 ${errors.password ? 'text-red-500' : 'text-[#8b919d]'}`} />
             <input
               type="password"
-              placeholder="Password"
+              placeholder="비밀번호"
               className="bg-transparent border-none outline-none text-[#8b919d] text-[16px] w-full"
               {...register('password')}
             />
