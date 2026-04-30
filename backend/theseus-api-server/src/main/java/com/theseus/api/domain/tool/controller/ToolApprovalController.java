@@ -27,15 +27,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequiredArgsConstructor
-@Tag(name = "ToolApproval", description = "Tool approval API")
+@Tag(name = "ToolApproval", description = "Tool 승인 관리 API")
 @RequestMapping("/api/v1/projects/{projectId}")
 public class ToolApprovalController {
 
 	private final ToolApprovalService toolApprovalService;
 
 	@Operation(
-		summary = "Get Tool approval requests",
-		description = "Project ADMIN or MANAGER retrieves Tool approval requests in the project."
+		summary = "Tool 승인 요청 목록 조회",
+		description = "프로젝트 ADMIN 또는 MANAGER가 프로젝트의 Tool 승인 요청 목록을 조회합니다."
 	)
 	@GetMapping("/tool-approvals")
 	public ResponseEntity<ApiResponse<ToolApprovalPageResponse<ToolApprovalResponse>>> getToolApprovals(
@@ -56,8 +56,8 @@ public class ToolApprovalController {
 	}
 
 	@Operation(
-		summary = "Get Tool approval request detail",
-		description = "Project ADMIN or MANAGER retrieves a Tool approval request detail."
+		summary = "Tool 승인 요청 상세 조회",
+		description = "프로젝트 ADMIN 또는 MANAGER가 Tool 승인 요청 상세 정보를 조회합니다."
 	)
 	@GetMapping("/tool-approvals/{toolApprovalId}")
 	public ResponseEntity<ApiResponse<ToolApprovalResponse>> getToolApproval(
@@ -70,8 +70,8 @@ public class ToolApprovalController {
 	}
 
 	@Operation(
-		summary = "Request Tool approval",
-		description = "The Tool creator requests approval for a Draft Tool in REVIEW phase."
+		summary = "Tool 승인 요청",
+		description = "Tool 생성자가 REVIEW 단계의 Draft Tool에 대한 승인을 요청합니다."
 	)
 	@PostMapping("/tools/{toolId}/approval-requests")
 	public ResponseEntity<ApiResponse<ToolApprovalResponse>> requestToolApproval(
@@ -84,8 +84,8 @@ public class ToolApprovalController {
 	}
 
 	@Operation(
-		summary = "Approve Tool approval request",
-		description = "Project ADMIN or MANAGER approves a pending Tool approval request."
+		summary = "Tool 승인",
+		description = "프로젝트 ADMIN 또는 MANAGER가 대기 중인 Tool 승인 요청을 승인합니다."
 	)
 	@PatchMapping("/tool-approvals/{toolApprovalId}/approve")
 	public ResponseEntity<ApiResponse<ToolApprovalResponse>> approveToolApproval(
@@ -104,8 +104,8 @@ public class ToolApprovalController {
 	}
 
 	@Operation(
-		summary = "Reject Tool approval request",
-		description = "Project ADMIN or MANAGER rejects a pending Tool approval request."
+		summary = "Tool 반려",
+		description = "프로젝트 ADMIN 또는 MANAGER가 대기 중인 Tool 승인 요청을 반려합니다."
 	)
 	@PatchMapping("/tool-approvals/{toolApprovalId}/reject")
 	public ResponseEntity<ApiResponse<ToolApprovalResponse>> rejectToolApproval(
