@@ -64,7 +64,7 @@ public class ProjectMemberService {
 		User user = getCurrentUserEntity(currentUser);
 		Project project = getProjectEntity(projectId);
 		validateProjectAdmin(project, user);
-		User targetUser = getUserEntity(request.getUserId());
+		User targetUser = getUserEntityByEmployeeNumber(request.getEmployeeNumber());
 		validateActiveUser(targetUser);
 
 		if (projectMemberRepository.existsByProjectAndUser(project, targetUser)) {
@@ -119,6 +119,11 @@ public class ProjectMemberService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+	}
+
+	private User getUserEntityByEmployeeNumber(String employeeNumber) {
+		return userRepository.findByEmployeeNumber(employeeNumber)
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
 	}
 
