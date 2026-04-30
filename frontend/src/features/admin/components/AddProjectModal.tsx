@@ -39,9 +39,10 @@ export default function AddProjectModal({ isOpen, onClose, onSuccess }: AddProje
         alert('사용자를 찾을 수 없습니다.');
         setSearchedUser(null);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Search failed:', error);
-      const message = error.response?.data?.message || '사용자를 찾을 수 없습니다.';
+      const axiosErr = error as { response?: { data?: { message?: string } } };
+      const message = axiosErr.response?.data?.message || '사용자를 찾을 수 없습니다.';
       alert(message);
       setSearchedUser(null);
     } finally {
