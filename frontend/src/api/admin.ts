@@ -24,6 +24,33 @@ export interface ProjectSummaryResponse {
   updatedAt: string;
 }
 
+export interface ProjectCreateRequest {
+  name: string;
+  description?: string;
+  adminEmployeeNumber: string;
+  adminName: string;
+}
+
+export interface ProjectUpdateRequest {
+  name?: string;
+  description?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
+  adminEmployeeNumber?: string;
+  adminName?: string;
+}
+
+export interface ProjectResponse {
+  projectId: number;
+  name: string;
+  description: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  projectAdminUserId: number;
+  projectAdminEmployeeNumber: string;
+  projectAdminName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PageResponse<T> {
   content: T[];
   number?: number;
@@ -92,6 +119,32 @@ export const adminApi = {
         params: { page, size },
       }
     );
+    return response.data.result;
+  },
+
+  /**
+   * 사번으로 사용자 조회
+   */
+  searchUserByEmployeeNumber: async (employeeNumber: string) => {
+    const response = await apiClient.get<ApiResponse<UserResponse>>('/api/v1/admin/users/search', {
+      params: { employeeNumber }
+    });
+    return response.data.result;
+  },
+
+  /**
+   * 프로젝트 생성
+   */
+  createProject: async (data: ProjectCreateRequest) => {
+    const response = await apiClient.post<ApiResponse<ProjectResponse>>('/api/v1/projects', data);
+    return response.data.result;
+  },
+
+  /**
+   * 프로젝트 수정
+   */
+  updateProject: async (projectId: number, data: ProjectUpdateRequest) => {
+    const response = await apiClient.patch<ApiResponse<ProjectResponse>>(`/api/v1/projects/${projectId}`, data);
     return response.data.result;
   },
 };

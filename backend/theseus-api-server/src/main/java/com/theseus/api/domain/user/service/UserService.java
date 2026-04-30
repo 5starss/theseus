@@ -39,6 +39,12 @@ public class UserService {
 		return UserResponse.createFrom(user);
 	}
 
+	public UserResponse getUserByEmployeeNumber(String employeeNumber) {
+		User user = userRepository.findByEmployeeNumber(employeeNumber)
+				.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+		return UserResponse.createFrom(user);
+	}
+
 	@Transactional
 	public UserResponse createUser(UserCreateRequest request) {
 		validateCreateRequest(request);

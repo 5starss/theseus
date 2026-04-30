@@ -45,6 +45,12 @@ public class UserController {
 		return ApiResponse.onSuccess(SuccessCode.OK, userService.getUser(userId));
 	}
 
+	@GetMapping("/search")
+	@Operation(summary = "사번으로 사용자 조회", description = "Super Admin이 사번(employeeNumber)으로 사용자 정보를 조회합니다.")
+	public ResponseEntity<ApiResponse<UserResponse>> getUserByEmployeeNumber(@RequestParam String employeeNumber) {
+		return ApiResponse.onSuccess(SuccessCode.OK, userService.getUserByEmployeeNumber(employeeNumber));
+	}
+
 	@PostMapping
 	@Operation(summary = "사용자 계정 발급", description = "Super Admin이 새 사용자 계정을 발급합니다. 일반 회원가입 API가 아니며, 입력받은 비밀번호는 BCrypt로 해싱되어 저장됩니다.")
 	public ResponseEntity<ApiResponse<UserResponse>> createUser(@Valid @RequestBody UserCreateRequest request) {
