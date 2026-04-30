@@ -1,5 +1,5 @@
-import { apiClient } from './client';
-import type { ApiResponse } from './auth';
+import { apiClient } from '@/api/client';
+import type { ApiResponse } from '@/api/auth';
 
 export interface UserResponse {
   id: number;

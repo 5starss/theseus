@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, MoreVertical, Edit, Layers, Settings2, Plus, Trash2 } from 'lucide-react';
-import { adminApi } from '../../../api/admin';
-import type { ProjectSummaryResponse } from '../../../api/admin';
+import { adminApi } from '../api';
+import type { ProjectSummaryResponse } from '../api';
 import {
   Table,
   TableBody,
@@ -9,14 +9,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../../../components/ui/table';
+} from '@/components/ui/table';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '../../../components/ui/dropdown-menu';
-import { Input } from '../../../components/ui/input';
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import AddProjectModal from './AddProjectModal';
 import EditProjectModal from './EditProjectModal';
 
