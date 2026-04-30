@@ -27,13 +27,75 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 		ToolApprovalStatus approvalStatus
 	);
 
-	Page<ToolApproval> findByTool_ProjectAndApprovalStatusOrderByRequestedAtDesc(
-		Project project,
-		ToolApprovalStatus approvalStatus,
+	@Query(
+		value = """
+			select toolApproval
+			from ToolApproval toolApproval
+			join fetch toolApproval.tool tool
+			join fetch tool.project project
+			join fetch toolApproval.requestedByProjectMember requestedByProjectMember
+			join fetch requestedByProjectMember.user requestedByUser
+			left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
+			left join fetch reviewedByProjectMember.user reviewedByUser
+			where project = :project
+			order by toolApproval.requestedAt desc
+		""",
+		countQuery = """
+			select count(toolApproval)
+			from ToolApproval toolApproval
+			join toolApproval.tool tool
+			where tool.project = :project
+		"""
+	)
+	Page<ToolApproval> findByProject(
+		@Param("project") Project project,
 		Pageable pageable
 	);
 
-	Optional<ToolApproval> findByIdAndTool_Project(Long id, Project project);
+	@Query(
+		value = """
+			select toolApproval
+			from ToolApproval toolApproval
+			join fetch toolApproval.tool tool
+			join fetch tool.project project
+			join fetch toolApproval.requestedByProjectMember requestedByProjectMember
+			join fetch requestedByProjectMember.user requestedByUser
+			left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
+			left join fetch reviewedByProjectMember.user reviewedByUser
+			where project = :project
+				and toolApproval.approvalStatus = :approvalStatus
+			order by toolApproval.requestedAt desc
+		""",
+		countQuery = """
+			select count(toolApproval)
+			from ToolApproval toolApproval
+			join toolApproval.tool tool
+			where tool.project = :project
+				and toolApproval.approvalStatus = :approvalStatus
+		"""
+	)
+	Page<ToolApproval> findByProjectAndApprovalStatus(
+		@Param("project") Project project,
+		@Param("approvalStatus") ToolApprovalStatus approvalStatus,
+		Pageable pageable
+	);
+
+	@Query("""
+		select toolApproval
+		from ToolApproval toolApproval
+		join fetch toolApproval.tool tool
+		join fetch tool.project project
+		join fetch toolApproval.requestedByProjectMember requestedByProjectMember
+		join fetch requestedByProjectMember.user requestedByUser
+		left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
+		left join fetch reviewedByProjectMember.user reviewedByUser
+		where toolApproval.id = :id
+			and project = :project
+	""")
+	Optional<ToolApproval> findByIdAndToolProject(
+		@Param("id") Long id,
+		@Param("project") Project project
+	);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("""

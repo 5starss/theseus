@@ -364,6 +364,60 @@ Authorization: Bearer {accessToken}
 
 - 프로젝트 `ADMIN`
 - 프로젝트 `MANAGER`
+- `project_members.status = 진행중`
+
+### Query Parameters
+
+| 이름 | 필수 | 기본값 | 설명 |
+| --- | --- | --- | --- |
+| `approvalStatus` | N | 없음 | `PENDING`, `APPROVED`, `REJECTED` 중 하나로 필터링한다. 생략하면 전체 승인 요청을 조회한다. |
+| `page` | N | `0` | 0부터 시작하는 페이지 번호다. |
+| `size` | N | `20` | 페이지 크기다. |
+
+### 동작
+
+- 프로젝트 `ADMIN` 또는 `MANAGER`만 조회할 수 있다.
+- `approvalStatus`가 전달되면 해당 상태의 승인 요청만 조회한다.
+- `approvalStatus`가 전달되지 않으면 프로젝트의 전체 승인 요청을 조회한다.
+- `requested_at DESC` 순서로 조회한다.
+
+### Response Body
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "content": [
+      {
+        "toolApprovalId": 11,
+        "projectId": 1,
+        "toolId": 7,
+        "fileName": "sales-summary-tool",
+        "displayName": "매출 요약 Tool",
+        "requestNumber": 1,
+        "approvalStatus": "PENDING",
+        "requestedByProjectMemberId": 3,
+        "requestedByUserId": 5,
+        "requestedByUserName": "홍길동",
+        "reviewedByProjectMemberId": null,
+        "reviewedByUserId": null,
+        "reviewedByUserName": null,
+        "reviewFeedback": null,
+        "requestedAt": "2026-04-30T10:20:00",
+        "reviewedAt": null,
+        "toolStatus": "PENDING",
+        "draftPhase": "REVIEW"
+      }
+    ],
+    "page": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1
+  }
+}
+```
 
 ## 승인 요청 상세 조회
 
@@ -377,6 +431,42 @@ Authorization: Bearer {accessToken}
 
 - 프로젝트 `ADMIN`
 - 프로젝트 `MANAGER`
+- `project_members.status = 진행중`
+
+### 동작
+
+- 프로젝트 `ADMIN` 또는 `MANAGER`만 조회할 수 있다.
+- 요청한 `toolApprovalId`가 해당 프로젝트에 속하지 않으면 조회할 수 없다.
+
+### Response Body
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "toolApprovalId": 11,
+    "projectId": 1,
+    "toolId": 7,
+    "fileName": "sales-summary-tool",
+    "displayName": "매출 요약 Tool",
+    "requestNumber": 1,
+    "approvalStatus": "PENDING",
+    "requestedByProjectMemberId": 3,
+    "requestedByUserId": 5,
+    "requestedByUserName": "홍길동",
+    "reviewedByProjectMemberId": null,
+    "reviewedByUserId": null,
+    "reviewedByUserName": null,
+    "reviewFeedback": null,
+    "requestedAt": "2026-04-30T10:20:00",
+    "reviewedAt": null,
+    "toolStatus": "PENDING",
+    "draftPhase": "REVIEW"
+  }
+}
+```
 
 ## Tool 승인
 

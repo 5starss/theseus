@@ -24,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +57,120 @@ class ToolApprovalServiceTest {
 
 	@Autowired
 	private UserRepository userRepository;
+
+	@Test
+	@DisplayName("Project ADMIN can get ToolApproval list filtered by approval status")
+	void getToolApprovals() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A142001");
+		ToolApproval firstPendingApproval = createPendingToolApproval(fixture);
+		User secondCreatorUser = createUser("A142002");
+		ProjectMember secondCreator = createProjectMember(fixture.project(), secondCreatorUser, ProjectRole.MEMBER);
+		ToolApproval secondPendingApproval = createPendingToolApproval(
+			fixture.project(),
+			secondCreatorUser,
+			secondCreator
+		);
+		User reviewedCreatorUser = createUser("A142003");
+		ProjectMember reviewedCreator = createProjectMember(fixture.project(), reviewedCreatorUser, ProjectRole.MEMBER);
+		ToolApproval reviewedApproval = createPendingToolApproval(
+			fixture.project(),
+			reviewedCreatorUser,
+			reviewedCreator
+		);
+		toolApprovalService.approveToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			reviewedApproval.getId(),
+			createApproveRequest(3, "approved")
+		);
+
+		// When
+		Page<ToolApprovalResponse> response = toolApprovalService.getToolApprovals(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			ToolApprovalStatus.PENDING,
+			0,
+			20
+		);
+
+		// Then
+		assertThat(response.getTotalElements()).isEqualTo(2);
+		assertThat(response.getContent())
+			.extracting(ToolApprovalResponse::getToolApprovalId)
+			.containsExactlyInAnyOrder(firstPendingApproval.getId(), secondPendingApproval.getId())
+			.doesNotContain(reviewedApproval.getId());
+		assertThat(response.getContent())
+			.extracting(ToolApprovalResponse::getApprovalStatus)
+			.containsOnly(ToolApprovalStatus.PENDING);
+	}
+
+	@Test
+	@DisplayName("Project MANAGER can get ToolApproval detail")
+	void getToolApproval() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A142011");
+		User managerUser = createUser("A142012");
+		createProjectMember(fixture.project(), managerUser, ProjectRole.MANAGER);
+		ToolApproval toolApproval = createPendingToolApproval(fixture);
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.getToolApproval(
+			createAuthenticatedUser(managerUser),
+			fixture.project().getId(),
+			toolApproval.getId()
+		);
+
+		// Then
+		assertThat(response.getToolApprovalId()).isEqualTo(toolApproval.getId());
+		assertThat(response.getProjectId()).isEqualTo(fixture.project().getId());
+		assertThat(response.getToolId()).isEqualTo(toolApproval.getTool().getId());
+		assertThat(response.getFileName()).isEqualTo(toolApproval.getTool().getFileName());
+		assertThat(response.getRequestedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(response.getRequestedByUserId()).isEqualTo(fixture.user().getId());
+		assertThat(response.getRequestedByUserName()).isEqualTo(fixture.user().getName());
+	}
+
+	@Test
+	@DisplayName("Project MEMBER cannot get ToolApproval list")
+	void getToolApprovalsFailsWhenReviewerIsMember() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A142021");
+		User memberUser = createUser("A142022");
+		createProjectMember(fixture.project(), memberUser, ProjectRole.MEMBER);
+		createPendingToolApproval(fixture);
+
+		// When & Then
+		assertThatThrownBy(() -> toolApprovalService.getToolApprovals(
+			createAuthenticatedUser(memberUser),
+			fixture.project().getId(),
+			ToolApprovalStatus.PENDING,
+			0,
+			20
+		))
+			.isInstanceOf(ResponseStatusException.class)
+			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
+			.isEqualTo(HttpStatus.FORBIDDEN);
+	}
+
+	@Test
+	@DisplayName("Non-project member cannot get ToolApproval detail")
+	void getToolApprovalFailsWhenCurrentUserIsNotProjectMember() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A142031");
+		ToolApproval toolApproval = createPendingToolApproval(fixture);
+		User outsider = createUser("A142032");
+
+		// When & Then
+		assertThatThrownBy(() -> toolApprovalService.getToolApproval(
+			createAuthenticatedUser(outsider),
+			fixture.project().getId(),
+			toolApproval.getId()
+		))
+			.isInstanceOf(ResponseStatusException.class)
+			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
+			.isEqualTo(HttpStatus.FORBIDDEN);
+	}
 
 	@Test
 	@DisplayName("REVIEW 단계의 Draft Tool은 생성자가 승인 요청할 수 있다")
@@ -257,10 +372,14 @@ class ToolApprovalServiceTest {
 	}
 
 	private ToolApproval createPendingToolApproval(ProjectFixture fixture) {
-		Tool tool = createReviewPhaseDraftTool(fixture.project(), fixture.projectMember());
+		return createPendingToolApproval(fixture.project(), fixture.user(), fixture.projectMember());
+	}
+
+	private ToolApproval createPendingToolApproval(Project project, User creatorUser, ProjectMember creator) {
+		Tool tool = createReviewPhaseDraftTool(project, creator);
 		ToolApprovalResponse response = toolApprovalService.requestToolApproval(
-			createAuthenticatedUser(fixture.user()),
-			fixture.project().getId(),
+			createAuthenticatedUser(creatorUser),
+			project.getId(),
 			tool.getId()
 		);
 
