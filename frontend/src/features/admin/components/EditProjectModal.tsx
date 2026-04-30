@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { adminApi } from '../api';
 import type { UserResponse, ProjectSummaryResponse } from '../api';
 import {
@@ -19,28 +19,23 @@ interface EditProjectModalProps {
 }
 
 export default function EditProjectModal({ isOpen, onClose, onSuccess, project }: EditProjectModalProps) {
-  const [projectName, setProjectName] = useState('');
-  const [description, setDescription] = useState('');
-  const [employeeNumber, setEmployeeNumber] = useState('');
-  const [searchedUser, setSearchedUser] = useState<UserResponse | null>(null);
+  const [formState, setFormState] = useState({
+    projectName: project?.name || '',
+    description: project?.description || '',
+    employeeNumber: project?.projectAdminEmployeeNumber || '',
+    searchedUser: project ? ({
+      id: project.projectAdminUserId,
+      employeeNumber: project.projectAdminEmployeeNumber,
+      name: project.projectAdminName,
+      email: '',
+      systemRole: 'USER',
+      status: 'ACTIVE',
+    } as UserResponse) : null,
+  });
   const [isSearching, setIsSearching] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  useEffect(() => {
-    if (project) {
-      setProjectName(project.name || '');
-      setDescription(project.description || '');
-      setEmployeeNumber(project.projectAdminEmployeeNumber || '');
-      setSearchedUser({
-        id: project.projectAdminUserId,
-        employeeNumber: project.projectAdminEmployeeNumber,
-        name: project.projectAdminName,
-        email: '', // Not strictly needed for update payload, just for display
-        systemRole: 'USER',
-        status: 'ACTIVE'
-      } as UserResponse);
-    }
-  }, [project]);
+  const { projectName, description, employeeNumber, searchedUser } = formState;
 
   const handleSearch = async () => {
     const trimmedId = employeeNumber.trim();
@@ -50,16 +45,17 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
     try {
       const user = await adminApi.searchUserByEmployeeNumber(trimmedId);
       if (user) {
-        setSearchedUser(user);
+        setFormState(prev => ({ ...prev, searchedUser: user }));
       } else {
         alert('사용자를 찾을 수 없습니다.');
-        setSearchedUser(null);
+        setFormState(prev => ({ ...prev, searchedUser: null }));
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Search failed:', error);
-      const message = error.response?.data?.message || '사용자를 찾을 수 없습니다.';
+      const axiosErr = error as { response?: { data?: { message?: string } } };
+      const message = axiosErr.response?.data?.message || '사용자를 찾을 수 없습니다.';
       alert(message);
-      setSearchedUser(null);
+      setFormState(prev => ({ ...prev, searchedUser: null }));
     } finally {
       setIsSearching(false);
     }
@@ -97,7 +93,7 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
             <Label className="font-['WenQuanYi_Zen_Hei:Medium',sans-serif] text-[#c1c7d3] text-[12px] tracking-[0.6px] uppercase">프로젝트 명</Label>
             <Input
               value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
+              onChange={(e) => setFormState(prev => ({ ...prev, projectName: e.target.value }))}
               placeholder="프로젝트 명 입력"
               className="bg-[#010f1f] border-[#414751] text-[#d4e4fa] h-[48px] px-[17px] text-[14px]"
             />
@@ -107,7 +103,7 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
             <Label className="font-['WenQuanYi_Zen_Hei:Medium',sans-serif] text-[#c1c7d3] text-[12px] tracking-[0.6px] uppercase">프로젝트 설명</Label>
             <Input
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => setFormState(prev => ({ ...prev, description: e.target.value }))}
               placeholder="프로젝트 설명 입력"
               className="bg-[#010f1f] border-[#414751] text-[#d4e4fa] h-[48px] px-[17px] text-[14px]"
             />
@@ -119,8 +115,7 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
               <Input
                 value={employeeNumber}
                 onChange={(e) => {
-                  setEmployeeNumber(e.target.value);
-                  setSearchedUser(null);
+                  setFormState(prev => ({ ...prev, employeeNumber: e.target.value, searchedUser: null }));
                 }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 placeholder="담당자 사번 입력"
@@ -136,7 +131,7 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
                 disabled={isSearching || !employeeNumber.trim()}
                 className="absolute right-3 h-8 px-2 flex items-center justify-center text-[#60a5fa] text-[12px] hover:text-white disabled:opacity-50 font-medium z-10 transition-colors"
               >
-                {isSearching ? "..." : "검색"}
+                {isSearching ? '...' : '검색'}
               </button>
             </div>
           </div>

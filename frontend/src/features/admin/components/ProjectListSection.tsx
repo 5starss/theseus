@@ -31,42 +31,44 @@ export default function ProjectListSection() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [totalElements, setTotalElements] = useState(0);
-  // Reset to page 0 when search term changes
-  useEffect(() => {
-    setPage(0);
-  }, [searchTerm]);
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
-  // Fetch projects when page changes
-  useEffect(() => {
-    fetchProjects();
-  }, [page]);
+  const refetch = () => setFetchTrigger(n => n + 1);
 
-  const fetchProjects = async () => {
-    setIsLoading(true);
-    try {
-      const data = await adminApi.getProjects(page, 8);
-      if (data && data.content) {
-        setProjects(data.content);
-        setTotalPages(data.totalPages);
-        setTotalElements(data.totalElements);
-      } else {
-        setProjects([]);
-        setTotalPages(0);
-        setTotalElements(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const data = await adminApi.getProjects(page, 8);
+        if (cancelled) return;
+        if (data && data.content) {
+          setProjects(data.content);
+          setTotalPages(data.totalPages);
+          setTotalElements(data.totalElements);
+        } else {
+          setProjects([]);
+          setTotalPages(0);
+          setTotalElements(0);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to fetch projects:', error);
+          setProjects([]);
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Failed to fetch projects:', error);
-      setProjects([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [page, fetchTrigger]);
 
   const handleStatusToggle = async (projectId: number, currentStatus: 'ACTIVE' | 'INACTIVE') => {
     const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
     try {
       await adminApi.updateProject(projectId, { status: newStatus });
-      fetchProjects();
+      refetch();
     } catch (error) {
       console.error('Failed to update project status:', error);
       alert('프로젝트 상태 변경에 실패했습니다.');
@@ -99,7 +101,7 @@ export default function ProjectListSection() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6b7280]" />
             <Input
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => { setSearchTerm(e.target.value); setPage(0); }}
               placeholder="프로젝트 검색..."
               className="w-[192px] h-8 pl-9 bg-[#010f1f] border-[rgba(65,71,81,0.2)] text-[#6b7280] text-[12px] placeholder:text-[#6b7280] focus-visible:ring-1 focus-visible:ring-white/20 rounded"
             />
@@ -227,7 +229,7 @@ export default function ProjectListSection() {
       <AddProjectModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onSuccess={fetchProjects}
+        onSuccess={refetch}
       />
       
       <EditProjectModal
@@ -236,8 +238,9 @@ export default function ProjectListSection() {
           setIsEditModalOpen(false);
           setSelectedProject(null);
         }}
-        onSuccess={fetchProjects}
+        onSuccess={refetch}
         project={selectedProject}
+        key={selectedProject?.projectId ?? 0}
       />
     </div>
   );

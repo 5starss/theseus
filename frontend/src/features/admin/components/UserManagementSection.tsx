@@ -50,35 +50,35 @@ export default function UserManagementSection() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [totalElements, setTotalElements] = useState(0);
-  // Reset to page 0 when search term changes
-  useEffect(() => {
-    setPage(0);
-  }, [searchTerm]);
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
-  // Fetch users when page changes
-  useEffect(() => {
-    fetchUsers();
-  }, [page]);
+  const refetch = () => setFetchTrigger(n => n + 1);
 
-  const fetchUsers = async () => {
-    setIsLoading(true);
-    try {
-      const data = await adminApi.getUsers(page, 8);
-      if (data && data.content) {
-        setUsers(data.content);
-        setTotalPages(data.totalPages);
-        setTotalElements(data.totalElements);
-      } else {
-        setUsers([]);
-        setTotalPages(0);
-        setTotalElements(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const data = await adminApi.getUsers(page, 8);
+        if (cancelled) return;
+        if (data && data.content) {
+          setUsers(data.content);
+          setTotalPages(data.totalPages);
+          setTotalElements(data.totalElements);
+        } else {
+          setUsers([]);
+          setTotalPages(0);
+          setTotalElements(0);
+        }
+      } catch (error) {
+        if (!cancelled) console.error('Failed to fetch users:', error);
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Failed to fetch users:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [page, fetchTrigger]);
 
   const handleAddUser = async () => {
     try {
@@ -91,7 +91,7 @@ export default function UserManagementSection() {
       });
       setIsAddUserOpen(false);
       setNewUserForm({ employeeNumber: '', name: '', email: '', password: '' });
-      fetchUsers();
+      refetch();
     } catch (error) {
       console.error('Failed to create user:', error);
       alert('사용자 생성에 실패했습니다.');
@@ -116,7 +116,7 @@ export default function UserManagementSection() {
       });
       setIsEditUserOpen(false);
       setEditingUserId(null);
-      fetchUsers();
+      refetch();
     } catch (error) {
       console.error('Failed to update user:', error);
       alert('사용자 정보 수정에 실패했습니다.');
@@ -127,7 +127,7 @@ export default function UserManagementSection() {
     try {
       const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
       await adminApi.updateUserStatus(userId, newStatus);
-      fetchUsers();
+      refetch();
     } catch (error) {
       console.error('Failed to update user status:', error);
       alert('상태 변경에 실패했습니다.');
@@ -157,7 +157,7 @@ export default function UserManagementSection() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#6b7280]" />
             <Input
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => { setSearchTerm(e.target.value); setPage(0); }}
               placeholder="사용자 검색..."
               className="w-[192px] h-8 pl-9 bg-[#010f1f] border-[rgba(65,71,81,0.2)] text-[#6b7280] text-[12px] placeholder:text-[#6b7280] focus-visible:ring-1 focus-visible:ring-white/20 rounded"
             />

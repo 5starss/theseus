@@ -142,9 +142,10 @@ export default function LoginPage() {
       } else {
         navigate('/');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Login Error:', err);
-      if (err.response?.status === 401) {
+      const axiosErr = err as { response?: { status?: number } };
+      if (axiosErr.response?.status === 401) {
         setErrorMsg('아이디 또는 비밀번호가 올바르지 않습니다.');
       } else {
         setErrorMsg('서버와 통신 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
