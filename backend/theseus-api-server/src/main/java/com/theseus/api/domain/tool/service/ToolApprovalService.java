@@ -1,5 +1,7 @@
 package com.theseus.api.domain.tool.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
@@ -26,10 +28,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -75,7 +75,7 @@ public class ToolApprovalService {
 		validateToolReviewer(reviewer);
 
 		ToolApproval toolApproval = toolApprovalRepository.findByIdAndToolProject(toolApprovalId, project)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool approval was not found."));
+			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
 
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
@@ -179,24 +179,24 @@ public class ToolApprovalService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication is required.");
+			throw new CustomException(ErrorCode.UNAUTHORIZED);
 		}
 
 		return userRepository.findById(currentUser.userId())
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User was not found."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project was not found."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Project member permission is required."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active project member permission is required.");
+			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;
@@ -204,42 +204,42 @@ public class ToolApprovalService {
 
 	private Tool getToolForUpdate(Project project, Long toolId) {
 		return toolRepository.findByIdAndProjectForUpdate(toolId, project)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool was not found."));
+			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_NOT_FOUND));
 	}
 
 	private ToolApproval getToolApprovalForUpdate(Project project, Long toolApprovalId) {
 		return toolApprovalRepository.findByIdAndToolProjectForUpdate(toolApprovalId, project)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool approval was not found."));
+			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
 	}
 
 	private void validateToolCreator(Tool tool, ProjectMember projectMember) {
 		if (!Objects.equals(tool.getCreatedByProjectMember().getId(), projectMember.getId())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the Tool creator can request approval.");
+			throw new CustomException(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
 		}
 	}
 
 	private void validateRequestableTool(Tool tool) {
 		if (!tool.canRequestApproval()) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "Only REVIEW phase Draft Tool can request approval.");
+			throw new CustomException(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
 		}
 	}
 
 	private void validateToolReviewer(ProjectMember projectMember) {
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			&& !ProjectRole.MANAGER.equals(projectMember.getProjectRole())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project ADMIN or MANAGER permission is required.");
+			throw new CustomException(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 		}
 	}
 
 	private void validateReviewableToolApproval(ToolApproval toolApproval) {
 		if (!toolApproval.isPending()) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "Tool approval request is already reviewed.");
+			throw new CustomException(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
 		}
 	}
 
 	private void validatePendingTool(Tool tool) {
 		if (!tool.isPending()) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending Tool can be reviewed.");
+			throw new CustomException(ErrorCode.TOOL_APPROVAL_PENDING_TOOL_REQUIRED);
 		}
 	}
 

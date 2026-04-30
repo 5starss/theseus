@@ -1,5 +1,7 @@
 package com.theseus.api.domain.project.controller;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.common.response.ApiResponse;
 import com.theseus.api.common.response.status.SuccessCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
@@ -13,7 +15,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +25,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequiredArgsConstructor
@@ -90,7 +90,7 @@ public class ProjectMemberController {
             try {
                 return ProjectMemberStatus.createFrom(status);
             } catch (IllegalArgumentException exception) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 프로젝트 멤버 상태입니다.");
+                throw new CustomException(ErrorCode.INVALID_PROJECT_MEMBER_STATUS);
             }
         }
     }

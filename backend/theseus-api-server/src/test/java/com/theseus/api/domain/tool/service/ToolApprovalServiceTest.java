@@ -1,5 +1,7 @@
 package com.theseus.api.domain.tool.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessage;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
@@ -30,10 +32,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.Page;
-import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -156,9 +156,9 @@ class ToolApprovalServiceTest {
 			0,
 			20
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 	}
 
 	@Test
@@ -175,9 +175,9 @@ class ToolApprovalServiceTest {
 			fixture.project().getId(),
 			toolApproval.getId()
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 	}
 
 	@Test
@@ -266,9 +266,9 @@ class ToolApprovalServiceTest {
 			creatorFixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
 	}
 
 	@Test
@@ -284,9 +284,9 @@ class ToolApprovalServiceTest {
 			fixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.CONFLICT);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
 	}
 
 	@Test
@@ -362,9 +362,9 @@ class ToolApprovalServiceTest {
 			toolApproval.getId(),
 			createApproveRequest(2, "approved")
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 	}
 
 	@Test
@@ -387,9 +387,9 @@ class ToolApprovalServiceTest {
 			toolApproval.getId(),
 			createRejectRequest("reject")
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.CONFLICT);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
 	}
 
 	private ToolApproval createPendingToolApproval(ProjectFixture fixture) {

@@ -1,5 +1,7 @@
 package com.theseus.api.domain.project.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectMemberCreateRequest;
 import com.theseus.api.domain.project.dto.request.ProjectMemberUpdateRequest;
@@ -15,10 +17,8 @@ import com.theseus.api.domain.user.entity.UserStatus;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -68,7 +68,7 @@ public class ProjectMemberService {
 		validateActiveUser(targetUser);
 
 		if (projectMemberRepository.existsByProjectAndUser(project, targetUser)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "이미 등록된 프로젝트 멤버입니다.");
+			throw new CustomException(ErrorCode.DUPLICATE_PROJECT_MEMBER);
 		}
 
 		ProjectMember projectMember = projectMemberRepository.save(request.toEntity(project, targetUser, user));
@@ -104,32 +104,32 @@ public class ProjectMemberService {
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getProjectMemberEntity(Project project, Long projectMemberId) {
 		return projectMemberRepository.findByProjectAndId(project, projectMemberId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트 멤버를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
 	}
 
 	private ProjectMember getProjectMember(Project project, User user) {
 		return projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트 멤버를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
 	}
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getUserEntityByEmployeeNumber(String employeeNumber) {
 		return userRepository.findByEmployeeNumber(employeeNumber)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증 정보가 없습니다.");
+			throw new CustomException(ErrorCode.UNAUTHORIZED);
 		}
 
 		return getUserEntity(currentUser.userId());
@@ -137,20 +137,20 @@ public class ProjectMemberService {
 
 	private void validateProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 멤버 권한이 필요합니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 멤버 권한이 필요합니다.");
+			throw new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateProjectAdmin(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 ADMIN 권한이 필요합니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
 
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			|| !ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 ADMIN 권한이 필요합니다.");
+			throw new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
@@ -163,13 +163,13 @@ public class ProjectMemberService {
 		ProjectMemberStatus nextStatus = request.getStatus() == null ? projectMember.getStatus() : request.getStatus();
 
 		if (!ProjectRole.ADMIN.equals(nextRole) || !ProjectMemberStatus.IN_PROGRESS.equals(nextStatus)) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "프로젝트 담당자는 ADMIN/진행중 상태를 유지해야 합니다.");
+			throw new CustomException(ErrorCode.PROJECT_ADMIN_MEMBER_REQUIRED);
 		}
 	}
 
 	private void validateActiveUser(User user) {
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, "활성 사용자만 프로젝트 멤버로 등록할 수 있습니다.");
+			throw new CustomException(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
 		}
 	}
 

@@ -3,6 +3,8 @@ package com.theseus.api.domain.project.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectMemberCreateRequest;
 import com.theseus.api.domain.project.dto.response.ProjectMemberResponse;
@@ -18,10 +20,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest
 @Transactional
@@ -78,9 +78,9 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.NOT_FOUND);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.USER_NOT_FOUND);
 	}
 
 	@Test
@@ -97,9 +97,9 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.CONFLICT);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
 	}
 
 	@Test
@@ -117,9 +117,9 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.CONFLICT);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.DUPLICATE_PROJECT_MEMBER);
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber) {

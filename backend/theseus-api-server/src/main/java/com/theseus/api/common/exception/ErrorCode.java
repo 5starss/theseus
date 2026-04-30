@@ -27,7 +27,42 @@ public enum ErrorCode {
 
     
     // Project
-    PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "PROJ-001", "존재하지 않는 프로젝트입니다.");
+    PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "PROJ-001", "존재하지 않는 프로젝트입니다."),
+    PROJECT_ADMIN_USER_NOT_FOUND(HttpStatus.NOT_FOUND, "PROJ-002", "프로젝트 담당자를 찾을 수 없습니다."),
+    PROJECT_ADMIN_REQUEST_REQUIRED(HttpStatus.BAD_REQUEST, "PROJ-003", "프로젝트 담당자 사번과 이름을 모두 입력해야 합니다."),
+    PROJECT_ADMIN_USER_ACTIVE_REQUIRED(HttpStatus.CONFLICT, "PROJ-004", "활성 사용자만 프로젝트 담당자로 지정할 수 있습니다."),
+    PROJECT_ADMIN_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "PROJ-005", "프로젝트 ADMIN 권한이 필요합니다."),
+    SUPER_ADMIN_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "PROJ-006", "SUPER_ADMIN 권한이 필요합니다."),
+    ACTIVE_PROJECT_REQUIRED(HttpStatus.FORBIDDEN, "PROJ-007", "활성 프로젝트만 접근할 수 있습니다."),
+
+    // ProjectMember
+    PROJECT_MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "PMEM-001", "프로젝트 멤버를 찾을 수 없습니다."),
+    PROJECT_MEMBER_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "PMEM-002", "프로젝트 멤버 권한이 필요합니다."),
+    ACTIVE_PROJECT_MEMBER_REQUIRED(HttpStatus.FORBIDDEN, "PMEM-003", "진행 중인 프로젝트 멤버만 접근할 수 있습니다."),
+    DUPLICATE_PROJECT_MEMBER(HttpStatus.CONFLICT, "PMEM-004", "이미 등록된 프로젝트 멤버입니다."),
+    PROJECT_ADMIN_MEMBER_REQUIRED(HttpStatus.CONFLICT, "PMEM-005", "프로젝트 담당자는 ADMIN/진행중 상태를 유지해야 합니다."),
+    PROJECT_MEMBER_ACTIVE_USER_REQUIRED(HttpStatus.CONFLICT, "PMEM-006", "활성 사용자만 프로젝트 멤버로 등록할 수 있습니다."),
+    INVALID_PROJECT_MEMBER_STATUS(HttpStatus.BAD_REQUEST, "PMEM-007", "지원하지 않는 프로젝트 멤버 상태입니다."),
+
+    // Chat
+    CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT-001", "채팅 세션을 찾을 수 없습니다."),
+    CLOSED_CHAT_SESSION(HttpStatus.CONFLICT, "CHAT-002", "종료된 채팅 세션에는 메시지를 등록할 수 없습니다."),
+    TOOL_CHAT_SESSION_MISMATCH(HttpStatus.BAD_REQUEST, "CHAT-003", "Tool이 해당 채팅 세션에 속하지 않습니다."),
+
+    // Tool
+    TOOL_NOT_FOUND(HttpStatus.NOT_FOUND, "TOOL-001", "Tool을 찾을 수 없습니다."),
+    UNSUPPORTED_TOOL_SCOPE(HttpStatus.BAD_REQUEST, "TOOL-002", "지원하지 않는 Tool 조회 범위입니다."),
+    APPROVED_TOOL_ONLY(HttpStatus.BAD_REQUEST, "TOOL-003", "승인된 Tool만 조회할 수 있습니다."),
+    TOOL_USE_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-004", "Tool 사용 권한이 필요합니다."),
+    TOOL_ACCESS_LEVEL_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-005", "Tool 접근 레벨이 부족합니다."),
+
+    // ToolApproval
+    TOOL_APPROVAL_NOT_FOUND(HttpStatus.NOT_FOUND, "TAPP-001", "Tool 승인 요청을 찾을 수 없습니다."),
+    TOOL_APPROVAL_CREATOR_REQUIRED(HttpStatus.FORBIDDEN, "TAPP-002", "Tool 생성자만 승인 요청할 수 있습니다."),
+    TOOL_APPROVAL_REVIEW_PHASE_REQUIRED(HttpStatus.CONFLICT, "TAPP-003", "REVIEW 단계의 Draft Tool만 승인 요청할 수 있습니다."),
+    TOOL_APPROVAL_REVIEWER_REQUIRED(HttpStatus.FORBIDDEN, "TAPP-004", "프로젝트 ADMIN 또는 MANAGER 권한이 필요합니다."),
+    TOOL_APPROVAL_ALREADY_REVIEWED(HttpStatus.CONFLICT, "TAPP-005", "이미 검토된 Tool 승인 요청입니다."),
+    TOOL_APPROVAL_PENDING_TOOL_REQUIRED(HttpStatus.CONFLICT, "TAPP-006", "승인 대기 중인 Tool만 검토할 수 있습니다.");
 
     private final HttpStatus status;
     private final String code;
