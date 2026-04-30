@@ -1,5 +1,7 @@
 package com.theseus.api.domain.chat.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.dto.request.ChatSessionCreateRequest;
 import com.theseus.api.domain.chat.dto.request.ChatSessionUpdateRequest;
@@ -22,10 +24,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -114,29 +114,29 @@ public class ChatSessionService {
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 
 		return chatSessionRepository.findByIdAndProjectAndProjectMember(sessionId, project, projectMember)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "채팅 세션을 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.CHAT_SESSION_NOT_FOUND));
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증 정보가 없습니다.");
+			throw new CustomException(ErrorCode.UNAUTHORIZED);
 		}
 
 		return userRepository.findById(currentUser.userId())
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 멤버 권한이 필요합니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "진행 중인 프로젝트 멤버만 접근할 수 있습니다.");
+			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;

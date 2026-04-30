@@ -1,5 +1,7 @@
 package com.theseus.api.domain.tool.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.chat.repository.ChatSessionRepository;
@@ -21,9 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.Page;
-import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -119,9 +119,9 @@ class ToolServiceTest {
 			0,
 			20
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_USE_PERMISSION_REQUIRED);
 	}
 
 	@Test
@@ -137,9 +137,9 @@ class ToolServiceTest {
 			fixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_ACCESS_LEVEL_REQUIRED);
 	}
 
 	@Test
@@ -157,9 +157,9 @@ class ToolServiceTest {
 			0,
 			20
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.BAD_REQUEST);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.UNSUPPORTED_TOOL_SCOPE);
 	}
 
 	@Test
@@ -177,9 +177,9 @@ class ToolServiceTest {
 			0,
 			20
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.BAD_REQUEST);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.APPROVED_TOOL_ONLY);
 	}
 
 	@Test
@@ -196,9 +196,9 @@ class ToolServiceTest {
 			fixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(ResponseStatusException.class)
-			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
-			.isEqualTo(HttpStatus.FORBIDDEN);
+			.isInstanceOf(CustomException.class)
+			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber, Integer accessLevel, Boolean canUseTool) {

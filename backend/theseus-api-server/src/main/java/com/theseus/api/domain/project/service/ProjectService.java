@@ -1,5 +1,7 @@
 package com.theseus.api.domain.project.service;
 
+import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectCreateRequest;
 import com.theseus.api.domain.project.dto.request.ProjectUpdateRequest;
@@ -21,10 +23,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -82,7 +82,7 @@ public class ProjectService {
 		validateSuperAdmin(createdByUser);
 
 		User projectAdminUser = getProjectAdminUser(request.getAdminEmployeeNumber(), request.getAdminName());
-		validateActiveUser(projectAdminUser, "활성 사용자만 프로젝트 담당자로 지정할 수 있습니다.");
+		validateActiveUser(projectAdminUser);
 
 		Project project = projectRepository.save(request.toEntity(createdByUser, projectAdminUser));
 		ProjectMember adminMember = createProjectAdminMember(project, projectAdminUser, createdByUser);
@@ -109,7 +109,7 @@ public class ProjectService {
 		}
 
 		User projectAdminUser = getProjectAdminUser(request.getAdminEmployeeNumber(), request.getAdminName());
-		validateActiveUser(projectAdminUser, "활성 사용자만 프로젝트 담당자로 지정할 수 있습니다.");
+		validateActiveUser(projectAdminUser);
 		project.updateProjectAdminUser(projectAdminUser);
 		ProjectMember adminMember = ensureProjectAdminMember(project, projectAdminUser, user);
 
@@ -118,7 +118,7 @@ public class ProjectService {
 
 	public Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember createProjectAdminMember(Project project, User projectAdminUser, User createdByUser) {
@@ -153,7 +153,7 @@ public class ProjectService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "인증 정보가 없습니다.");
+			throw new CustomException(ErrorCode.UNAUTHORIZED);
 		}
 
 		return getUserEntity(currentUser.userId());
@@ -161,17 +161,17 @@ public class ProjectService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getProjectAdminUser(String employeeNumber, String name) {
 		return userRepository.findByEmployeeNumberAndName(employeeNumber, name)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "프로젝트 담당자를 찾을 수 없습니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_USER_NOT_FOUND));
 	}
 
 	private void validateProjectAdminRequest(ProjectUpdateRequest request) {
 		if (request.getAdminEmployeeNumber() == null || request.getAdminName() == null) {
-			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "프로젝트 담당자 사번과 이름을 모두 입력해야 합니다.");
+			throw new CustomException(ErrorCode.PROJECT_ADMIN_REQUEST_REQUIRED);
 		}
 	}
 
@@ -189,36 +189,36 @@ public class ProjectService {
 		}
 
 		if (!ProjectStatus.ACTIVE.equals(project.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active project member permission is required.");
+			throw new CustomException(ErrorCode.ACTIVE_PROJECT_REQUIRED);
 		}
 
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "Project member permission is required."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Active project member permission is required.");
+			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 	}
 
 	private void validateProjectAdmin(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 ADMIN 권한이 필요합니다."));
+			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
 
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			|| !ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "프로젝트 ADMIN 권한이 필요합니다.");
+			throw new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateSuperAdmin(User user) {
 		if (!SystemRole.SUPER_ADMIN.equals(user.getSystemRole())) {
-			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "SUPER_ADMIN 권한이 필요합니다.");
+			throw new CustomException(ErrorCode.SUPER_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
-	private void validateActiveUser(User user, String message) {
+	private void validateActiveUser(User user) {
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new ResponseStatusException(HttpStatus.CONFLICT, message);
+			throw new CustomException(ErrorCode.PROJECT_ADMIN_USER_ACTIVE_REQUIRED);
 		}
 	}
 
