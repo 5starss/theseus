@@ -12,6 +12,7 @@ import com.theseus.api.domain.tool.dto.request.ToolApprovalRejectRequest;
 import com.theseus.api.domain.tool.dto.response.ToolApprovalResponse;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
+import com.theseus.api.domain.tool.entity.ToolApprovalStatus;
 import com.theseus.api.domain.tool.repository.ToolApprovalRepository;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
@@ -19,6 +20,9 @@ import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +38,43 @@ public class ToolApprovalService {
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
+
+	public Page<ToolApprovalResponse> getToolApprovals(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		ToolApprovalStatus approvalStatus,
+		int page,
+		int size
+	) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember reviewer = getActiveProjectMember(project, user);
+		validateToolReviewer(reviewer);
+
+		Pageable pageable = createPageable(page, size);
+		Page<ToolApproval> toolApprovals = approvalStatus == null
+			? toolApprovalRepository.findByProject(project, pageable)
+			: toolApprovalRepository.findByProjectAndApprovalStatus(project, approvalStatus, pageable);
+
+		return toolApprovals
+			.map(ToolApprovalResponse::createFrom);
+	}
+
+	public ToolApprovalResponse getToolApproval(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		Long toolApprovalId
+	) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember reviewer = getActiveProjectMember(project, user);
+		validateToolReviewer(reviewer);
+
+		ToolApproval toolApproval = toolApprovalRepository.findByIdAndToolProject(toolApprovalId, project)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool approval was not found."));
+
+		return ToolApprovalResponse.createFrom(toolApproval);
+	}
 
 	@Transactional
 	public ToolApprovalResponse requestToolApproval(
@@ -178,5 +219,9 @@ public class ToolApprovalService {
 		if (!tool.isPending()) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending Tool can be reviewed.");
 		}
+	}
+
+	private Pageable createPageable(int page, int size) {
+		return PageRequest.of(Math.max(page, 0), Math.max(size, 1));
 	}
 }
