@@ -1,6 +1,9 @@
 package com.theseus.api.domain.tool.service;
 
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
+import com.theseus.api.domain.chat.entity.ChatMessageContentType;
+import com.theseus.api.domain.chat.entity.ChatMessageType;
+import com.theseus.api.domain.chat.service.ChatMessageService;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
@@ -38,6 +41,7 @@ public class ToolApprovalService {
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
+	private final ChatMessageService chatMessageService;
 
 	public Page<ToolApprovalResponse> getToolApprovals(
 		AuthenticatedUser currentUser,
@@ -96,6 +100,13 @@ public class ToolApprovalService {
 			.requestedByProjectMember(projectMember)
 			.build());
 		tool.requestApproval();
+		chatMessageService.saveUserToolMessage(
+			tool.getChatSession(),
+			tool,
+			ChatMessageType.TOOL_APPROVAL_REQUEST,
+			ChatMessageContentType.JSON,
+			createToolApprovalRequestMessageContent(toolApproval)
+		);
 
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
@@ -153,6 +164,17 @@ public class ToolApprovalService {
 			.findFirst()
 			.map(toolApproval -> toolApproval.getRequestNumber() + 1)
 			.orElse(1);
+	}
+
+	private String createToolApprovalRequestMessageContent(ToolApproval toolApproval) {
+		return """
+			{"toolApprovalId":%d,"toolId":%d,"requestNumber":%d,"approvalStatus":"%s"}
+			""".formatted(
+			toolApproval.getId(),
+			toolApproval.getTool().getId(),
+			toolApproval.getRequestNumber(),
+			toolApproval.getApprovalStatus()
+		).trim();
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {

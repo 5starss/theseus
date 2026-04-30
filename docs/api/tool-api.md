@@ -25,6 +25,8 @@
 
 `messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
+Draft Tool의 PLAN은 `tools.structured_plan_json`에 구조화된 JSON으로 저장한다. PLAN JSON은 `version`과 `blocks[].blockId`를 포함해야 한다. `version`은 사용자가 오래된 PLAN에 피드백을 보내는 상황을 막기 위한 기준값이며, `blockId`는 블록별 피드백을 기존 PLAN 블록과 매칭하기 위한 식별자다.
+
 ## Tool 목록 조회
 
 ```http
@@ -209,7 +211,17 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "feedback": "2번 블록에서 입력 파일 형식을 xlsx도 허용하도록 수정해줘."
+  "baseDraftVersion": 1,
+  "feedbackItems": [
+    {
+      "blockId": "input-format",
+      "comment": "입력 파일 형식을 xlsx도 허용하도록 수정해줘."
+    },
+    {
+      "blockId": "error-handling",
+      "comment": "파일 파싱 실패 시 사용자에게 원인을 보여줘."
+    }
+  ]
 }
 ```
 
@@ -234,7 +246,10 @@ Authorization: Bearer {accessToken}
 
 ### 동작
 
-- 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `TEXT`로 저장한다.
+- 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `JSON`으로 저장한다.
+- `baseDraftVersion`은 사용자가 피드백한 PLAN 버전이다.
+- `feedbackItems[].blockId`는 `structured_plan_json.blocks[].blockId`와 매칭한다.
+- 현재 Tool의 PLAN 버전과 `baseDraftVersion`이 다르면 재생성을 시작하지 않는다.
 - 대상 Tool은 AI 재생성 시작 시 `draft_phase = PLAN`으로 변경한다.
 - 재생성마다 새 `runId`를 발급한다.
 - 최종 Assistant 응답은 `TOOL_REGENERATE_RESPONSE`로 저장한다.
@@ -338,7 +353,7 @@ Authorization: Bearer {accessToken}
 - `tool_approvals`에 `approval_status = PENDING`인 승인 요청을 생성한다.
 - `request_number`는 같은 Tool 안에서 1부터 증가한다.
 - `tools.status = PENDING`으로 변경한다.
-- 승인 요청 메시지를 남길 경우 `message_type = TOOL_APPROVAL_REQUEST`로 저장한다.
+- 승인 요청 메시지는 `message_type = TOOL_APPROVAL_REQUEST`, `content_type = JSON`으로 저장한다.
 
 ## 승인 이력 조회
 

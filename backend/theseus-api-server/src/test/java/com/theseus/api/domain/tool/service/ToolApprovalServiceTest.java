@@ -1,7 +1,12 @@
 package com.theseus.api.domain.tool.service;
 
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
+import com.theseus.api.domain.chat.entity.ChatMessage;
+import com.theseus.api.domain.chat.entity.ChatMessageContentType;
+import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
+import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.entity.ChatSession;
+import com.theseus.api.domain.chat.repository.ChatMessageRepository;
 import com.theseus.api.domain.chat.repository.ChatSessionRepository;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
@@ -48,6 +53,9 @@ class ToolApprovalServiceTest {
 
 	@Autowired
 	private ChatSessionRepository chatSessionRepository;
+
+	@Autowired
+	private ChatMessageRepository chatMessageRepository;
 
 	@Autowired
 	private ProjectMemberRepository projectMemberRepository;
@@ -189,6 +197,10 @@ class ToolApprovalServiceTest {
 		// Then
 		Tool savedTool = toolRepository.findById(tool.getId()).orElseThrow();
 		ToolApproval savedToolApproval = toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+		ChatMessage savedMessage = chatMessageRepository.findByChatSessionAndToolOrderByMessageOrderAsc(
+			tool.getChatSession(),
+			tool
+		).getFirst();
 		assertThat(response.getRequestNumber()).isEqualTo(1);
 		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.PENDING);
 		assertThat(response.getToolStatus()).isEqualTo(ToolStatus.PENDING);
@@ -196,6 +208,15 @@ class ToolApprovalServiceTest {
 		assertThat(response.getRequestedAt()).isNotNull();
 		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.PENDING);
 		assertThat(savedToolApproval.getRequestedByProjectMember().getId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(savedMessage.getSenderType()).isEqualTo(ChatMessageSenderType.USER);
+		assertThat(savedMessage.getMessageType()).isEqualTo(ChatMessageType.TOOL_APPROVAL_REQUEST);
+		assertThat(savedMessage.getContentType()).isEqualTo(ChatMessageContentType.JSON);
+		assertThat(savedMessage.getContent()).contains(
+			"\"toolApprovalId\":" + response.getToolApprovalId(),
+			"\"toolId\":" + tool.getId(),
+			"\"requestNumber\":1",
+			"\"approvalStatus\":\"PENDING\""
+		);
 	}
 
 	@Test

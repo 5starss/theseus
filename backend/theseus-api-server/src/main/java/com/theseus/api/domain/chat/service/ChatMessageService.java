@@ -19,6 +19,7 @@ import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -88,6 +89,26 @@ public class ChatMessageService {
 		);
 	}
 
+	@Transactional
+	public ChatMessage saveUserToolMessage(
+		ChatSession chatSession,
+		Tool tool,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
+		validateToolChatSession(chatSession, tool);
+
+		return saveMessage(
+			chatSession,
+			tool,
+			ChatMessageSenderType.USER,
+			messageType,
+			contentType,
+			content
+		);
+	}
+
 	private ChatMessage saveMessage(
 		ChatSession chatSession,
 		Tool tool,
@@ -114,6 +135,12 @@ public class ChatMessageService {
 		return chatMessageRepository.findTopByChatSessionOrderByMessageOrderDesc(chatSession)
 			.map(chatMessage -> chatMessage.getMessageOrder() + 1)
 			.orElse(1);
+	}
+
+	private void validateToolChatSession(ChatSession chatSession, Tool tool) {
+		if (tool == null || !Objects.equals(tool.getChatSession().getId(), chatSession.getId())) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tool does not belong to the chat session.");
+		}
 	}
 
 	private ChatSession getAccessibleChatSession(AuthenticatedUser currentUser, Long projectId, Long sessionId) {
