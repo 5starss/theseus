@@ -8,6 +8,8 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.tool.dto.request.ToolApprovalApproveRequest;
+import com.theseus.api.domain.tool.dto.request.ToolApprovalRejectRequest;
 import com.theseus.api.domain.tool.dto.response.ToolApprovalResponse;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -150,6 +153,120 @@ class ToolApprovalServiceTest {
 			.isEqualTo(HttpStatus.CONFLICT);
 	}
 
+	@Test
+	@DisplayName("Project ADMIN can approve pending ToolApproval")
+	void approveToolApproval() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A140001");
+		ToolApproval toolApproval = createPendingToolApproval(fixture);
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.approveToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolApproval.getId(),
+			createApproveRequest(3, "approved")
+		);
+
+		// Then
+		Tool savedTool = toolRepository.findById(response.getToolId()).orElseThrow();
+		ToolApproval savedToolApproval = toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.APPROVED);
+		assertThat(response.getToolStatus()).isEqualTo(ToolStatus.APPROVED);
+		assertThat(response.getReviewedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(response.getReviewFeedback()).isEqualTo("approved");
+		assertThat(response.getReviewedAt()).isNotNull();
+		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.APPROVED);
+		assertThat(savedTool.getToolGrade()).isEqualTo(3);
+		assertThat(savedToolApproval.getReviewedByProjectMember().getId()).isEqualTo(fixture.projectMember().getId());
+	}
+
+	@Test
+	@DisplayName("Project MANAGER can reject pending ToolApproval")
+	void rejectToolApproval() {
+		// Given
+		ProjectFixture creatorFixture = createProjectFixture("A140011");
+		User managerUser = createUser("A140012");
+		ProjectMember manager = createProjectMember(creatorFixture.project(), managerUser, ProjectRole.MANAGER);
+		ToolApproval toolApproval = createPendingToolApproval(creatorFixture);
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.rejectToolApproval(
+			createAuthenticatedUser(managerUser),
+			creatorFixture.project().getId(),
+			toolApproval.getId(),
+			createRejectRequest("needs revision")
+		);
+
+		// Then
+		Tool savedTool = toolRepository.findById(response.getToolId()).orElseThrow();
+		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.REJECTED);
+		assertThat(response.getToolStatus()).isEqualTo(ToolStatus.REJECTED);
+		assertThat(response.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
+		assertThat(response.getReviewedByProjectMemberId()).isEqualTo(manager.getId());
+		assertThat(response.getReviewFeedback()).isEqualTo("needs revision");
+		assertThat(response.getReviewedAt()).isNotNull();
+		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.REJECTED);
+		assertThat(savedTool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
+	}
+
+	@Test
+	@DisplayName("Project MEMBER cannot approve ToolApproval")
+	void approveToolApprovalFailsWhenReviewerIsMember() {
+		// Given
+		ProjectFixture creatorFixture = createProjectFixture("A140021");
+		User memberUser = createUser("A140022");
+		createProjectMember(creatorFixture.project(), memberUser, ProjectRole.MEMBER);
+		ToolApproval toolApproval = createPendingToolApproval(creatorFixture);
+
+		// When & Then
+		assertThatThrownBy(() -> toolApprovalService.approveToolApproval(
+			createAuthenticatedUser(memberUser),
+			creatorFixture.project().getId(),
+			toolApproval.getId(),
+			createApproveRequest(2, "approved")
+		))
+			.isInstanceOf(ResponseStatusException.class)
+			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
+			.isEqualTo(HttpStatus.FORBIDDEN);
+	}
+
+	@Test
+	@DisplayName("Reviewed ToolApproval cannot be rejected again")
+	void rejectToolApprovalFailsWhenAlreadyReviewed() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A140031");
+		ToolApproval toolApproval = createPendingToolApproval(fixture);
+		toolApprovalService.approveToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolApproval.getId(),
+			createApproveRequest(3, "approved")
+		);
+
+		// When & Then
+		assertThatThrownBy(() -> toolApprovalService.rejectToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolApproval.getId(),
+			createRejectRequest("reject")
+		))
+			.isInstanceOf(ResponseStatusException.class)
+			.extracting(exception -> ((ResponseStatusException) exception).getStatusCode())
+			.isEqualTo(HttpStatus.CONFLICT);
+	}
+
+	private ToolApproval createPendingToolApproval(ProjectFixture fixture) {
+		Tool tool = createReviewPhaseDraftTool(fixture.project(), fixture.projectMember());
+		ToolApprovalResponse response = toolApprovalService.requestToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			tool.getId()
+		);
+
+		return toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+	}
+
 	private Tool createReviewPhaseDraftTool(Project project, ProjectMember projectMember) {
 		Tool tool = createDraftTool(project, projectMember);
 		tool.completeDraftReview("raw markdown", "{\"steps\":[1]}", "{\"version\":1}");
@@ -211,6 +328,21 @@ class ToolApprovalServiceTest {
 			user.getName(),
 			user.getSystemRole()
 		);
+	}
+
+	private ToolApprovalApproveRequest createApproveRequest(Integer toolGrade, String reviewFeedback) {
+		ToolApprovalApproveRequest request = new ToolApprovalApproveRequest();
+		ReflectionTestUtils.setField(request, "toolGrade", toolGrade);
+		ReflectionTestUtils.setField(request, "reviewFeedback", reviewFeedback);
+
+		return request;
+	}
+
+	private ToolApprovalRejectRequest createRejectRequest(String reviewFeedback) {
+		ToolApprovalRejectRequest request = new ToolApprovalRejectRequest();
+		ReflectionTestUtils.setField(request, "reviewFeedback", reviewFeedback);
+
+		return request;
 	}
 
 	private record ProjectFixture(

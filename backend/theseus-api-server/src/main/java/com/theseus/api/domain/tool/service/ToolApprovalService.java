@@ -4,8 +4,11 @@ import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
+import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.tool.dto.request.ToolApprovalApproveRequest;
+import com.theseus.api.domain.tool.dto.request.ToolApprovalRejectRequest;
 import com.theseus.api.domain.tool.dto.response.ToolApprovalResponse;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
@@ -56,6 +59,52 @@ public class ToolApprovalService {
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
 
+	@Transactional
+	public ToolApprovalResponse approveToolApproval(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		Long toolApprovalId,
+		ToolApprovalApproveRequest request
+	) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember reviewer = getActiveProjectMember(project, user);
+		validateToolReviewer(reviewer);
+		ToolApproval toolApproval = getToolApprovalForUpdate(project, toolApprovalId);
+		Tool tool = toolApproval.getTool();
+
+		validateReviewableToolApproval(toolApproval);
+		validatePendingTool(tool);
+
+		toolApproval.approve(reviewer, request.getReviewFeedback());
+		tool.approve(request.getToolGrade());
+
+		return ToolApprovalResponse.createFrom(toolApproval);
+	}
+
+	@Transactional
+	public ToolApprovalResponse rejectToolApproval(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		Long toolApprovalId,
+		ToolApprovalRejectRequest request
+	) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember reviewer = getActiveProjectMember(project, user);
+		validateToolReviewer(reviewer);
+		ToolApproval toolApproval = getToolApprovalForUpdate(project, toolApprovalId);
+		Tool tool = toolApproval.getTool();
+
+		validateReviewableToolApproval(toolApproval);
+		validatePendingTool(tool);
+
+		toolApproval.reject(reviewer, request.getReviewFeedback());
+		tool.reject();
+
+		return ToolApprovalResponse.createFrom(toolApproval);
+	}
+
 	private Integer getNextRequestNumber(Tool tool) {
 		List<ToolApproval> toolApprovals = toolApprovalRepository.findByToolOrderByRequestNumberDescForUpdate(tool);
 
@@ -95,6 +144,11 @@ public class ToolApprovalService {
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool was not found."));
 	}
 
+	private ToolApproval getToolApprovalForUpdate(Project project, Long toolApprovalId) {
+		return toolApprovalRepository.findByIdAndToolProjectForUpdate(toolApprovalId, project)
+			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Tool approval was not found."));
+	}
+
 	private void validateToolCreator(Tool tool, ProjectMember projectMember) {
 		if (!Objects.equals(tool.getCreatedByProjectMember().getId(), projectMember.getId())) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only the Tool creator can request approval.");
@@ -104,6 +158,25 @@ public class ToolApprovalService {
 	private void validateRequestableTool(Tool tool) {
 		if (!tool.canRequestApproval()) {
 			throw new ResponseStatusException(HttpStatus.CONFLICT, "Only REVIEW phase Draft Tool can request approval.");
+		}
+	}
+
+	private void validateToolReviewer(ProjectMember projectMember) {
+		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
+			&& !ProjectRole.MANAGER.equals(projectMember.getProjectRole())) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Project ADMIN or MANAGER permission is required.");
+		}
+	}
+
+	private void validateReviewableToolApproval(ToolApproval toolApproval) {
+		if (!toolApproval.isPending()) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Tool approval request is already reviewed.");
+		}
+	}
+
+	private void validatePendingTool(Tool tool) {
+		if (!tool.isPending()) {
+			throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending Tool can be reviewed.");
 		}
 	}
 }
