@@ -6,7 +6,7 @@ import os
 import requests
 from datetime import datetime
 
-class TimeWeatherInputV2(BaseModel):
+class TimeWeatherToolV2Input(BaseModel):
     location: str = Field(description="The city name to get the weather for, e.g., 'Seoul' or 'London'.")
 
 class TimeWeatherToolV2(BaseTool):
@@ -16,10 +16,15 @@ class TimeWeatherToolV2(BaseTool):
     """
     name = "time_weather_tool_v2"
     description = "Fetches current time and weather, using an API key from a .env file."
-    input_model = TimeWeatherInputV2
+    input_model = TimeWeatherToolV2Input
     permission_level = 1
+    example_queries = [
+        "날씨 알려줘", "오늘 날씨 어때?", "기온 확인해줘",
+        "지금 몇 시야?", "현재 시간 알려줘",
+        "what's the weather", "current time and weather",
+    ]
 
-    async def execute(self, arguments: TimeWeatherInputV2, context: ToolExecutionContext) -> ToolResult:
+    async def execute(self, arguments: TimeWeatherToolV2Input, context: ToolExecutionContext) -> ToolResult:
         load_dotenv()
         api_key = os.getenv("OPENWEATHERMAP_API_KEY")
 

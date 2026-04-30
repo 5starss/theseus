@@ -1,0 +1,37 @@
+"""File writing tool."""
+
+import logging
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+
+from theseus_engine.tools.core.file_utils import _resolve_path, _check_path_security
+
+log = logging.getLogger(__name__)
+
+class WriteFileInput(BaseModel):
+    """Input for creating/overwriting a file."""
+    path: str = Field(description="Path of the file to write")
+    content: str = Field(description="Full text content for the file")
+
+class WriteFileTool(BaseTool):
+    """Creates or overwrites a file in the workspace."""
+    name = "write_file"
+    description = "Create a new file or completely overwrite an existing one."
+    input_model = WriteFileInput
+    permission_level = 2
+
+    async def execute(self, arguments: WriteFileInput, context: ToolExecutionContext) -> ToolResult:
+        path = _resolve_path(context.cwd, arguments.path)
+        
+        security_err = _check_path_security(path, context.cwd)
+        if security_err:
+            return ToolResult(output=security_err, is_error=True)
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(arguments.content, encoding="utf-8")
+            return ToolResult(output=f"Successfully wrote {len(arguments.content)} bytes to {arguments.path}")
+        except Exception as e:
+            return ToolResult(output=f"Error writing file: {e}", is_error=True)

@@ -16,6 +16,11 @@ class ConfigWriterTool(BaseTool):
     description = "Writes a key-value pair to a specified configuration file."
     input_model = ConfigWriterInput
     permission_level = 1
+    example_queries = [
+        ".env 파일에 값 저장해줘", "환경변수 설정해줘",
+        "설정값 변경해줘", "API 키 저장해줘",
+        "write config value", "set env variable",
+    ]
 
     async def execute(self, arguments: ConfigWriterInput, context: ToolExecutionContext) -> ToolResult:
         try:

@@ -16,6 +16,11 @@ class JsonToMarkdownTableTool(BaseTool):
     description = "Converts a JSON string (list of objects) into a Markdown table."
     input_model = JsonToMarkdownInput
     permission_level = 1
+    example_queries = [
+        "JSON을 마크다운 테이블로 변환해줘", "JSON 표로 만들어줘",
+        "데이터 테이블 형식으로 보여줘",
+        "convert JSON to table", "JSON to markdown",
+    ]
 
     async def execute(self, arguments: JsonToMarkdownInput, context: ToolExecutionContext) -> ToolResult:
         """

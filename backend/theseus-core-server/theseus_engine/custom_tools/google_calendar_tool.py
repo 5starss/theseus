@@ -34,6 +34,12 @@ class GoogleCalendarTool(BaseTool):
     name: str = "google_calendar_tool"
     description: str = "A tool to interact with the Google Calendar API to manage calendar events."
     input_model = GoogleCalendarToolInput
+    example_queries = [
+        "구글 캘린더 일정 추가해줘", "일정 만들어줘",
+        "오늘 스케줄 확인해줘", "미팅 등록해줘",
+        "일정 삭제해줘", "calendar event 생성",
+        "add event to calendar", "show my schedule",
+    ]
 
     def _get_credentials(self) -> Credentials:
         """Gets valid user credentials from storage or initiates the OAuth2 flow."""
