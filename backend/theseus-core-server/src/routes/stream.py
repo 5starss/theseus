@@ -1,16 +1,38 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from src.auth.dependencies import get_sse_session_context
-from src.auth.schemas import SessionContext, UsageMetrics
-from src.builder.engine import EngineInitializationError, get_query_engine
-from src.db.postgres import get_db
-from src.db.repositories.billing import BillingOutboxRepository
 import json
 import logging
 
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from src.auth.dependencies import get_sse_session_context
+from src.auth.schemas import SessionContext, UsageMetrics
+from src.builder.engine import (
+    EngineBuildContext,
+    EngineInitializationError,
+    get_query_engine,
+)
+from src.config import settings
+from src.db.postgres import get_db
+from src.db.repositories.billing import BillingOutboxRepository
+from theseus_engine.models.state import AgentMode
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+MOCK_PROJECT_TOOL_PERMISSIONS: dict[str, int] = {
+    "bash": 3,
+    "read_file": 1,
+    "write_file": 2,
+    "edit_file": 2,
+    "glob": 1,
+    "grep": 1,
+    "web_search": 1,
+    "web_fetch": 1,
+    "dummy_echo": 1,
+    "create_tool": 2,
+    "system_reboot": 5,
+}
 
 
 def sse_event(event_type: str, data: dict) -> str:
@@ -30,6 +52,7 @@ def _truncate_tool_output(output: object, max_length: int = 500) -> str:
 async def stream_agent_response(
     session: SessionContext,
     prompt: str,
+    engine_context: EngineBuildContext,
     db: Session,
 ):
     """Request-agnostic SSE handler for a single Theseus engine run."""
@@ -45,7 +68,7 @@ async def stream_agent_response(
     )
 
     try:
-        assembly = get_query_engine(session)
+        assembly = get_query_engine(engine_context)
         usage_data.model_name = assembly.model_name
 
         logger.info(
@@ -106,6 +129,22 @@ async def stream_agent_response(
             outbox_record.id,
         )
 
+
+def _get_project_tool_permissions(session: SessionContext) -> dict[str, int]:
+    if settings.AUTH_MODE == "mock":
+        return dict(MOCK_PROJECT_TOOL_PERMISSIONS)
+
+    logger.error(
+        "Project tool permissions are unavailable for project=%s user=%s",
+        session.project_id,
+        session.user_id,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Project tool permissions are unavailable",
+    )
+
+
 @router.get("/stream")
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
@@ -118,8 +157,23 @@ async def stream_endpoint(
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
+    project_tool_permissions = _get_project_tool_permissions(session)
+    if not project_tool_permissions:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Project tool permissions are unavailable",
+        )
+
+    engine_context = EngineBuildContext(
+        user_level=session.permission_level,
+        project_tool_permissions=project_tool_permissions,
+        mode=AgentMode.AGENT,
+        approval_policy="reject",
+        session_id=f"{session.project_id}:{session.user_id}",
+    )
+
     return StreamingResponse(
-        stream_agent_response(session, prompt, db),
+        stream_agent_response(session, prompt, engine_context, db),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
