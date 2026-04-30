@@ -2,14 +2,23 @@ import { Outlet } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useNavigate } from 'react-router-dom';
+import { authApi } from '@/api/auth';
 
 export default function AdminLayout() {
   const { logout, user } = useAuthStore();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      // Call backend logout API (it will use the token from store via interceptor)
+      await authApi.logout();
+    } catch (error) {
+      console.error('Logout API failed:', error);
+    } finally {
+      // Always clear local state even if API call fails
+      logout();
+      navigate('/login');
+    }
   };
 
   return (
