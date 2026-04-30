@@ -42,6 +42,11 @@ export interface UserCreateRequest {
   status?: 'ACTIVE' | 'INACTIVE';
 }
 
+export interface UserUpdateRequest {
+  name?: string;
+  email?: string;
+}
+
 export const adminApi = {
   /**
    * 사용자 목록 조회
@@ -58,6 +63,22 @@ export const adminApi = {
    */
   createUser: async (data: UserCreateRequest) => {
     const response = await apiClient.post<ApiResponse<UserResponse>>('/api/v1/admin/users', data);
+    return response.data.result;
+  },
+
+  /**
+   * 사용자 기본 정보 수정
+   */
+  updateUser: async (userId: number, data: UserUpdateRequest) => {
+    const response = await apiClient.patch<ApiResponse<UserResponse>>(`/api/v1/admin/users/${userId}`, data);
+    return response.data.result;
+  },
+
+  /**
+   * 사용자 상태 변경
+   */
+  updateUserStatus: async (userId: number, status: 'ACTIVE' | 'INACTIVE') => {
+    const response = await apiClient.patch<ApiResponse<UserResponse>>(`/api/v1/admin/users/${userId}/status`, { status });
     return response.data.result;
   },
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, MoreVertical, Edit, Users, Settings2, Trash2, UserPlus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, MoreVertical, Edit, Users, Settings2, Trash2, UserPlus } from 'lucide-react';
 import { adminApi } from '../../../api/admin';
 import type { UserResponse } from '../../../api/admin';
 import {
@@ -37,6 +37,13 @@ export default function UserManagementSection() {
     name: '',
     email: '',
     password: '',
+  });
+
+  const [isEditUserOpen, setIsEditUserOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editUserForm, setEditUserForm] = useState({
+    name: '',
+    email: '',
   });
 
   // Pagination states
@@ -91,6 +98,42 @@ export default function UserManagementSection() {
     }
   };
 
+  const openEditUserDialog = (user: UserResponse) => {
+    setEditingUserId(user.id);
+    setEditUserForm({
+      name: user.name || '',
+      email: user.email || '',
+    });
+    setIsEditUserOpen(true);
+  };
+
+  const handleEditUser = async () => {
+    if (!editingUserId) return;
+    try {
+      await adminApi.updateUser(editingUserId, {
+        name: editUserForm.name,
+        email: editUserForm.email,
+      });
+      setIsEditUserOpen(false);
+      setEditingUserId(null);
+      fetchUsers();
+    } catch (error) {
+      console.error('Failed to update user:', error);
+      alert('사용자 정보 수정에 실패했습니다.');
+    }
+  };
+
+  const handleStatusToggle = async (userId: number, currentStatus: 'ACTIVE' | 'INACTIVE') => {
+    try {
+      const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      await adminApi.updateUserStatus(userId, newStatus);
+      fetchUsers();
+    } catch (error) {
+      console.error('Failed to update user status:', error);
+      alert('상태 변경에 실패했습니다.');
+    }
+  };
+
   const filteredUsers = users.filter(user =>
     user.name.includes(searchTerm) ||
     user.employeeNumber.includes(searchTerm) ||
@@ -139,51 +182,48 @@ export default function UserManagementSection() {
       </div>
 
       <div className="w-full min-h-[500px]">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader className="bg-[rgba(28,43,60,0.5)] border-b border-[rgba(65,71,81,0.1)] sticky top-0 z-10">
             <TableRow className="border-none hover:bg-transparent">
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px]">사번</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px]">이름</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px]">아이디</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] text-center">이메일</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] text-center">상태</TableHead>
-              <TableHead className="text-right text-white/60 font-medium h-10 px-6 py-2"></TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-9 py-[10px] w-[120px]">사번</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-9 py-[10px] w-[130px]">이름</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-16 py-[10px]">이메일</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] text-center w-[100px]">상태</TableHead>
+              <TableHead className="text-right text-white/60 font-medium h-10 px-6 py-2 w-[80px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-white/40">
-                  로딩 중...
-                </TableCell>
-              </TableRow>
-            ) : filteredUsers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-white/40">
-                  사용자가 없습니다.
-                </TableCell>
-              </TableRow>
+            {filteredUsers.length === 0 ? (
+              !isLoading && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-white/40">
+                    사용자가 없습니다.
+                  </TableCell>
+                </TableRow>
+              )
             ) : (
               filteredUsers.map((user) => (
-                <TableRow key={user.id} className="border-t border-[rgba(65,71,81,0.1)]">
-                  <TableCell className="text-[#a4c9ff] px-6 py-[10px] text-[13px] font-mono">{user.employeeNumber}</TableCell>
-                  <TableCell className="text-[#d4e4fa] px-6 py-[10px] text-[13px]">{user.name}</TableCell>
-                  <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[13px]">{(user.email || '').split('@')[0] || '-'}</TableCell>
-                  <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[13px]">{user.email || '-'}</TableCell>
-                  <TableCell className="px-6 py-[10px] text-right">
+                <TableRow key={user.id} className="border-t border-[rgba(65,71,81,0.1)] h-[57px]">
+                  <TableCell className="text-[#a4c9ff] px-6 py-[10px] text-[14px] font-mono truncate">{user.employeeNumber}</TableCell>
+                  <TableCell className="text-[#d4e4fa] px-6 py-[10px] text-[16px] font-medium truncate">{user.name}</TableCell>
+                  <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[16px] truncate">{user.email || '-'}</TableCell>
+                  <TableCell className="px-6 py-[10px] text-center">
                     {user.status === 'ACTIVE' ? (
                       <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[10px] font-bold text-[#4ade80] uppercase">
-                        active
+                        ACTIVE
                       </span>
                     ) : (
                       <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[10px] font-bold text-[#f87171] uppercase">
-                        offline
+                        INACTIVE
                       </span>
                     )}
                   </TableCell>
                   <TableCell className="px-6 text-right py-3">
                     {isEditing ? (
-                      <button className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400/60 hover:text-red-400">
+                      <button
+                        onClick={() => handleStatusToggle(user.id, user.status)}
+                        className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400/60 hover:text-red-400"
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     ) : (
@@ -192,7 +232,10 @@ export default function UserManagementSection() {
                           <MoreVertical className="w-4 h-4" />
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="bg-[#051424] border-white/10 text-white min-w-[150px]">
-                          <DropdownMenuItem className="hover:bg-white/10 focus:bg-white/10 cursor-pointer gap-2">
+                          <DropdownMenuItem
+                            onClick={() => openEditUserDialog(user)}
+                            className="hover:bg-white/10 focus:bg-white/10 cursor-pointer gap-2"
+                          >
                             <Edit className="w-4 h-4" />
                             <span>정보 수정</span>
                           </DropdownMenuItem>
@@ -200,6 +243,13 @@ export default function UserManagementSection() {
                       </DropdownMenu>
                     )}
                   </TableCell>
+                </TableRow>
+              ))
+            )}
+            {!isLoading && filteredUsers.length > 0 && filteredUsers.length < 8 && (
+              Array.from({ length: 8 - filteredUsers.length }).map((_, index) => (
+                <TableRow key={`empty-${index}`} className="border-t border-[rgba(65,71,81,0.05)] h-[57px] hover:bg-transparent">
+                  <TableCell colSpan={5} />
                 </TableRow>
               ))
             )}
@@ -298,6 +348,55 @@ export default function UserManagementSection() {
               className="px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-md transition-colors text-sm font-medium"
             >
               사용자 추가
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
+        <DialogContent className="bg-[#051424] border-[rgba(65,71,81,0.3)] text-white sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-[#d4e4fa] text-lg font-semibold">사용자 정보 수정</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="editName" className="text-right text-[#a4c9ff] text-sm">
+                이름
+              </Label>
+              <Input
+                id="editName"
+                value={editUserForm.name}
+                onChange={(e) => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
+                placeholder="ex) 홍길동"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="editEmail" className="text-right text-[#a4c9ff] text-sm">
+                이메일
+              </Label>
+              <Input
+                id="editEmail"
+                type="email"
+                value={editUserForm.email}
+                onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
+                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
+                placeholder="ex) hong@ssafy.com"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setIsEditUserOpen(false)}
+              className="px-4 py-2 bg-transparent hover:bg-white/5 border border-[rgba(65,71,81,0.3)] text-[#c1c7d3] rounded-md transition-colors text-sm font-medium"
+            >
+              취소
+            </button>
+            <button
+              onClick={handleEditUser}
+              className="px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-md transition-colors text-sm font-medium"
+            >
+              수정 완료
             </button>
           </DialogFooter>
         </DialogContent>
