@@ -6,14 +6,14 @@ import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.user.entity.User;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 
 @Getter
 public class ProjectMemberCreateRequest {
 
-	@NotNull
-	private Long userId;
+	@NotBlank
+	private String employeeNumber;
 
 	private ProjectRole projectRole = ProjectRole.MEMBER;
 
