@@ -6,33 +6,19 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.auth.dependencies import get_sse_session_context
+from src.auth.permissions import get_project_tool_permissions
 from src.auth.schemas import SessionContext, UsageMetrics
 from src.builder.engine import (
     EngineBuildContext,
     EngineInitializationError,
     get_query_engine,
 )
-from src.config import settings
 from src.db.postgres import get_db
 from src.db.repositories.billing import BillingOutboxRepository
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-MOCK_PROJECT_TOOL_PERMISSIONS: dict[str, int] = {
-    "bash": 3,
-    "read_file": 1,
-    "write_file": 2,
-    "edit_file": 2,
-    "glob": 1,
-    "grep": 1,
-    "web_search": 1,
-    "web_fetch": 1,
-    "dummy_echo": 1,
-    "create_tool": 2,
-    "system_reboot": 5,
-}
 
 
 def sse_event(event_type: str, data: dict) -> str:
@@ -130,21 +116,6 @@ async def stream_agent_response(
         )
 
 
-def _get_project_tool_permissions(session: SessionContext) -> dict[str, int]:
-    if settings.AUTH_MODE == "mock":
-        return dict(MOCK_PROJECT_TOOL_PERMISSIONS)
-
-    logger.error(
-        "Project tool permissions are unavailable for project=%s user=%s",
-        session.project_id,
-        session.user_id,
-    )
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Project tool permissions are unavailable",
-    )
-
-
 @router.get("/stream")
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
@@ -157,12 +128,10 @@ async def stream_endpoint(
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
-    project_tool_permissions = _get_project_tool_permissions(session)
-    if not project_tool_permissions:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Project tool permissions are unavailable",
-        )
+    project_tool_permissions = await get_project_tool_permissions(
+        project_id=session.project_id,
+        user_id=session.user_id,
+    )
 
     engine_context = EngineBuildContext(
         user_level=session.permission_level,

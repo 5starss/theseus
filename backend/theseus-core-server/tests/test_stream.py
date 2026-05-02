@@ -1,7 +1,8 @@
 import unittest
 from dataclasses import dataclass
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.auth.dependencies import get_sse_session_context
@@ -144,15 +145,20 @@ class StreamRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"], "Prompt must not be blank")
 
     def test_stream_endpoint_returns_error_sse_when_engine_init_fails(self):
+        permission_lookup = AsyncMock(return_value={"read_file": 1})
         with patch(
             "src.routes.stream.get_query_engine",
             side_effect=EngineInitializationError("OpenHarness is not available"),
         ):
             with patch(
-                "src.routes.stream.BillingOutboxRepository.enqueue",
-                return_value=FakeOutboxRecord(),
+                "src.routes.stream.get_project_tool_permissions",
+                permission_lookup,
             ):
-                response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+                with patch(
+                    "src.routes.stream.BillingOutboxRepository.enqueue",
+                    return_value=FakeOutboxRecord(),
+                ):
+                    response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: connected", response.text)
@@ -161,15 +167,49 @@ class StreamRouteTests(unittest.TestCase):
             response.text,
         )
 
-    def test_stream_endpoint_fails_fast_when_permissions_unavailable(self):
-        with patch("src.routes.stream.settings.AUTH_MODE", "spring"):
-            response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+    def test_stream_endpoint_allows_empty_permissions_and_emits_engine_error(self):
+        permission_lookup = AsyncMock(return_value={})
+        with patch(
+            "src.routes.stream.get_query_engine",
+            side_effect=EngineInitializationError(
+                "No tools are available for the current server session."
+            ),
+        ):
+            with patch(
+                "src.routes.stream.get_project_tool_permissions",
+                permission_lookup,
+            ):
+                with patch(
+                    "src.routes.stream.BillingOutboxRepository.enqueue",
+                    return_value=FakeOutboxRecord(),
+                ):
+                    response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(
-            response.json()["detail"],
-            "Project tool permissions are unavailable",
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'event: error\ndata: {"message": "No tools are available for the current server session."}',
+            response.text,
         )
+
+    def test_stream_endpoint_propagates_permission_errors(self):
+        scenarios = [
+            (403, "Project access denied"),
+            (502, "Permission service returned invalid data"),
+            (503, "Permission service unavailable"),
+        ]
+
+        for status_code, detail in scenarios:
+            permission_lookup = AsyncMock(
+                side_effect=HTTPException(status_code=status_code, detail=detail)
+            )
+            with patch(
+                "src.routes.stream.get_project_tool_permissions",
+                permission_lookup,
+            ):
+                response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+
+            self.assertEqual(response.status_code, status_code)
+            self.assertEqual(response.json()["detail"], detail)
 
 
 if __name__ == "__main__":

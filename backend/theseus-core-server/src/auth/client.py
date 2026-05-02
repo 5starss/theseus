@@ -1,11 +1,29 @@
-import httpx
-from fastapi import HTTPException, status
-from pydantic import ValidationError
-from src.config import settings
-from src.auth.schemas import UserSession, BillingUsageReport, AgentToolPlanPayload
 import logging
 
+import httpx
+from fastapi import HTTPException, status
+from pydantic import TypeAdapter
+from pydantic import ValidationError
+from src.auth.schemas import UserSession, BillingUsageReport, AgentToolPlanPayload
+from src.config import settings
+
 logger = logging.getLogger(__name__)
+
+
+class PermissionClientError(Exception):
+    """Base error for project tool permission lookups."""
+
+
+class PermissionAccessDeniedError(PermissionClientError):
+    """Raised when the caller cannot access the project."""
+
+
+class PermissionInvalidResponseError(PermissionClientError):
+    """Raised when the backend returns invalid permission payloads."""
+
+
+class PermissionBackendUnavailableError(PermissionClientError):
+    """Raised when the backend cannot serve permission lookups."""
 
 class AuthClient:
     def __init__(self):
@@ -51,6 +69,46 @@ class AuthClient:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Authentication service unavailable"
                 )
+
+
+class PermissionClient:
+    def __init__(self):
+        self.permissions_url = settings.SPRING_BOOT_PROJECT_PERMISSIONS_URL
+        self.timeout = settings.INTERNAL_API_TIMEOUT_SECONDS
+        self._response_adapter = TypeAdapter(dict[str, int])
+
+    async def fetch_project_tool_permissions(
+        self,
+        project_id: str,
+        user_id: str,
+    ) -> dict[str, int]:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    self.permissions_url,
+                    json={"projectId": project_id, "userId": user_id},
+                    timeout=self.timeout,
+                )
+            except httpx.RequestError as exc:
+                logger.error(f"Failed to connect to permission server: {exc}")
+                raise PermissionBackendUnavailableError from exc
+
+        if response.status_code == 200:
+            try:
+                return self._response_adapter.validate_python(response.json())
+            except (ValueError, ValidationError) as exc:
+                logger.error(f"Invalid permission response schema: {exc}")
+                raise PermissionInvalidResponseError from exc
+
+        if response.status_code == 403:
+            raise PermissionAccessDeniedError
+
+        logger.error(
+            "Permission server error: %s - %s",
+            response.status_code,
+            response.text,
+        )
+        raise PermissionBackendUnavailableError
 
 class BillingClient:
     def __init__(self):
@@ -122,5 +180,6 @@ class AgentClient:
                 return False
 
 auth_client = AuthClient()
+permission_client = PermissionClient()
 billing_client = BillingClient()
 agent_client = AgentClient()
