@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     AUTH_MODE: Literal["mock", "spring"] = "mock"
     SPRING_BOOT_INTERNAL_URL: str = "http://localhost:8080"
     SPRING_BOOT_AUTH_VERIFY_URL: str = "http://localhost:8080/api/auth/verify"
+    SPRING_BOOT_PROJECT_PERMISSIONS_URL: str = "http://localhost:8080/api/internal/project/permissions"
     SPRING_BOOT_BILLING_USAGE_URL: str = "http://localhost:8080/api/internal/billing/usage"
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     AUTH_TIMEOUT_SECONDS: int = 5
