@@ -5,6 +5,7 @@ import AdminLayout from '@/layouts/AdminLayout';
 import SuperAdminPage from '@/pages/admin/SuperAdminPage';
 import UserLayout from '@/layouts/UserLayout';
 import ProjectListPage from '@/pages/user/ProjectListPage';
+import ProjectLayout from '@/layouts/ProjectLayout';
 import ProtectedRoute from './ProtectedRoute';
 
 export const router = createBrowserRouter([
@@ -18,6 +19,24 @@ export const router = createBrowserRouter([
           {
             path: '',
             element: <ProjectListPage />,
+          },
+        ],
+      },
+      {
+        path: '/projects/:projectId',
+        element: <ProjectLayout />,
+        children: [
+          {
+            path: 'sessions',
+            element: <div className="p-8 text-white">Sessions Page (To Be Implemented)</div>,
+          },
+          {
+            path: 'tools',
+            element: <div className="p-8 text-white">Tools Page (To Be Implemented)</div>,
+          },
+          {
+            path: 'settings',
+            element: <div className="p-8 text-white">Project Settings Page (To Be Implemented)</div>,
           },
         ],
       },
