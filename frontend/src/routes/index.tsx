@@ -8,6 +8,7 @@ import ProjectListPage from '@/pages/user/ProjectListPage';
 import ProjectLayout from '@/layouts/ProjectLayout';
 import ProtectedRoute from './ProtectedRoute';
 import ChatSessionPage from '@/pages/user/projects/ChatSessionPage';
+import ProjectSettingsPage from '@/pages/user/projects/ProjectSettingsPage';
 
 export const router = createBrowserRouter([
   {
@@ -41,7 +42,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'settings',
-            element: <div className="p-8 text-white">Project Settings Page (To Be Implemented)</div>,
+            element: <ProjectSettingsPage />,
           },
         ],
       },
