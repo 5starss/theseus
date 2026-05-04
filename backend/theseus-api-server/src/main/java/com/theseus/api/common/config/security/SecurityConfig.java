@@ -58,7 +58,7 @@ public class SecurityConfig {
 						.requestMatchers("/api/internal/**").hasRole("INTERNAL")
 						.requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
 						.anyRequest().authenticated())
-				.addFilterBefore(internalApiAuthenticationFilter, JwtAuthenticationFilter.class)
+				.addFilterBefore(internalApiAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
