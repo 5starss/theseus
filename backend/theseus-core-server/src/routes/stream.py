@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,11 @@ from src.builder.engine import (
 )
 from src.db.postgres import get_db
 from src.db.repositories.billing import BillingOutboxRepository
+from src.history.service import (
+    load_history_messages,
+    persist_assistant_message,
+    persist_user_message,
+)
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
@@ -37,12 +42,15 @@ def _truncate_tool_output(output: object, max_length: int = 500) -> str:
 
 async def stream_agent_response(
     session: SessionContext,
+    chat_session_id: int,
     prompt: str,
     engine_context: EngineBuildContext,
     db: Session,
 ):
     """Request-agnostic SSE handler for a single Theseus engine run."""
     usage_data = UsageMetrics(model_name="unknown", prompt_tokens=0, completion_tokens=0, total_tokens=0)
+    assistant_chunks: list[str] = []
+    assistant_completed = False
 
     yield sse_event(
         "connected",
@@ -50,6 +58,7 @@ async def stream_agent_response(
             "message": "Theseus Core Stream Connected",
             "user_id": session.user_id,
             "project_id": session.project_id,
+            "chat_session_id": chat_session_id,
         },
     )
 
@@ -66,6 +75,7 @@ async def stream_agent_response(
 
         async for event in assembly.engine.submit_message(prompt):
             if isinstance(event, assembly.assistant_text_delta_type):
+                assistant_chunks.append(event.text)
                 yield sse_event("chunk", {"content": event.text})
             elif isinstance(event, assembly.tool_execution_started_type):
                 yield sse_event(
@@ -97,6 +107,7 @@ async def stream_agent_response(
                 "model_name": usage_data.model_name,
             },
         )
+        assistant_completed = True
     except EngineInitializationError as exc:
         logger.warning("Theseus engine initialization failed: %s", exc)
         yield sse_event("error", {"message": str(exc)})
@@ -104,6 +115,13 @@ async def stream_agent_response(
         logger.error("Theseus stream error: %s", exc, exc_info=True)
         yield sse_event("error", {"message": str(exc)})
     finally:
+        if assistant_completed:
+            await persist_assistant_message(
+                session=session,
+                chat_session_id=chat_session_id,
+                content="".join(assistant_chunks),
+            )
+
         outbox_record = BillingOutboxRepository(db).enqueue(
             user_id=session.user_id,
             project_id=session.project_id,
@@ -119,6 +137,7 @@ async def stream_agent_response(
 @router.get("/stream")
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
+    chat_session_id: int = Query(..., ge=1),
     session: SessionContext = Depends(get_sse_session_context),
     db: Session = Depends(get_db),
 ):
@@ -133,16 +152,21 @@ async def stream_endpoint(
         user_id=session.user_id,
     )
 
+    history_messages = await load_history_messages(session, chat_session_id)
+
     engine_context = EngineBuildContext(
         user_level=session.permission_level,
         project_tool_permissions=project_tool_permissions,
         mode=AgentMode.AGENT,
         approval_policy="reject",
-        session_id=f"{session.project_id}:{session.user_id}",
+        history_messages=history_messages,
+        session_id=str(chat_session_id),
     )
 
+    await persist_user_message(session, chat_session_id, prompt)
+
     return StreamingResponse(
-        stream_agent_response(session, prompt, engine_context, db),
+        stream_agent_response(session, chat_session_id, prompt, engine_context, db),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

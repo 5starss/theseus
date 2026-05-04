@@ -3,8 +3,8 @@ package com.theseus.api.domain.chat.service;
 import com.theseus.api.common.exception.CustomException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
-import com.theseus.api.domain.chat.dto.request.ChatMessageCreateRequest;
 import com.theseus.api.domain.chat.dto.response.ChatMessageResponse;
+import com.theseus.api.domain.chat.dto.request.ChatMessageCreateRequest;
 import com.theseus.api.domain.chat.entity.ChatMessage;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
@@ -18,6 +18,7 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
@@ -35,6 +36,7 @@ public class ChatMessageService {
 	private final ChatSessionRepository chatSessionRepository;
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
+	private final ToolRepository toolRepository;
 	private final UserRepository userRepository;
 
 	@Transactional
@@ -56,6 +58,32 @@ public class ChatMessageService {
 			request.getContent()
 		);
 
+		return ChatMessageResponse.createFrom(chatMessage);
+	}
+
+	@Transactional
+	public ChatMessageResponse createInternalMessage(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		Long sessionId,
+		Long toolId,
+		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
+		ChatSession chatSession = getAccessibleChatSessionForUpdate(currentUser, projectId, sessionId);
+		validateOpenChatSession(chatSession);
+		Tool tool = resolveTool(chatSession, projectId, toolId);
+
+		ChatMessage chatMessage = saveMessage(
+			chatSession,
+			tool,
+			senderType,
+			messageType,
+			contentType,
+			content
+		);
 		return ChatMessageResponse.createFrom(chatMessage);
 	}
 
@@ -141,6 +169,16 @@ public class ChatMessageService {
 		if (tool == null || !Objects.equals(tool.getChatSession().getId(), chatSession.getId())) {
 			throw new CustomException(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
 		}
+	}
+
+	private Tool resolveTool(ChatSession chatSession, Long projectId, Long toolId) {
+		if (toolId == null) {
+			return null;
+		}
+
+		Project project = getProjectEntity(projectId);
+		return toolRepository.findByIdAndProjectAndChatSession(toolId, project, chatSession)
+			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_CHAT_SESSION_MISMATCH));
 	}
 
 	private ChatSession getAccessibleChatSession(AuthenticatedUser currentUser, Long projectId, Long sessionId) {

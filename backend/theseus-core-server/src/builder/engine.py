@@ -197,6 +197,9 @@ def get_query_engine(
         },
     )
 
+    if build_context.history_messages:
+        engine.load_messages(build_context.history_messages)
+
     return EngineAssembly(
         engine=engine,
         model_name=model_name,
