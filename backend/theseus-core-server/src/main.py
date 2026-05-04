@@ -5,7 +5,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.builder.worker import setup_scheduler
 from src.config import settings
-from src.routes import health, sandbox, stream
+from src.db.postgres import init_db
+from src.routes import health, plan, sandbox, stream
 import logging
 
 # 로깅 설정
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
+    logger.info("Core database schema initialized.")
+
     scheduler = setup_scheduler()
     app.state.billing_scheduler = scheduler
 
@@ -54,6 +58,7 @@ app.add_middleware(
 # 라우터 등록
 app.include_router(health.router, tags=["System"])
 app.include_router(stream.router, prefix="/api/v1", tags=["Streaming"])
+app.include_router(plan.router, prefix="/api/v1", tags=["Plan"])
 app.include_router(sandbox.router, prefix="/api/v1", tags=["Sandbox"])
 
 # 글로벌 예외 처리

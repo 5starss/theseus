@@ -1,6 +1,73 @@
 # Infrastructure Changelog
 
-인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다.
+인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
+
+## [2026-05-04] Plan Server Migration - Phase 1
+
+### Plan 영속 모델 추가 (`src/db/models.py`)
+- Core Server 로컬 DB에 `ToolPlan` 모델을 추가했습니다.
+- 주요 필드는 다음과 같습니다.
+  - `project_id`
+  - `chat_session_id`
+  - `status`
+  - `goal`
+  - `content`
+  - `feedback`
+  - `executing_started_at`
+  - `executing_by_user_id`
+- Plan 상태는 `drafting`, `wait_for_review`, `approved`, `rejected`, `executing`를 사용합니다.
+
+### Plan 전용 패키지 및 스키마 신설 (`src/plan/`)
+- `src/plan/schemas.py`를 추가해 Plan API 입출력 모델을 정의했습니다.
+- `src/plan/service.py`를 추가해 상태 전이, 실행 바인딩, 복구 로직을 분리했습니다.
+- `StructuredPlan`은 기존 `src/auth/schemas.py` 정의를 재사용하도록 연결했습니다.
+
+### Plan 생명주기 API 추가 (`src/routes/plan.py`, `src/main.py`)
+- 다음 엔드포인트를 Core Server에 추가했습니다.
+  - `POST /api/v1/plans`
+  - `GET /api/v1/plans/{plan_id}`
+  - `GET /api/v1/sessions/{chat_session_id}/plans`
+  - `PATCH /api/v1/plans/{plan_id}/submit`
+  - `PATCH /api/v1/plans/{plan_id}/approve`
+  - `PATCH /api/v1/plans/{plan_id}/reject`
+  - `PATCH /api/v1/plans/{plan_id}/execute`
+- `main.py`에 `plan.router`를 등록했습니다.
+
+### 실행 상태 전이 및 동시성 제어 (`src/plan/service.py`)
+- `approved -> executing` 전이만 허용하도록 제한했습니다.
+- 동일 `chat_session_id` 내에서 이미 다른 플랜이 `executing` 상태이면 `409 Conflict`를 반환하도록 구현했습니다.
+- 실행 전환 시 `executing_started_at`, `executing_by_user_id`를 기록하도록 했습니다.
+
+### 스트림 경로 Plan 바인딩 추가 (`src/routes/stream.py`)
+- `/api/v1/stream`에 선택적 `plan_id` 쿼리 파라미터를 추가했습니다.
+- `plan_id`가 주어지면 다음 조건을 이중 검증합니다.
+  - `project_id` 일치
+  - `chat_session_id` 일치
+  - `status == executing`
+- Plan이 바인딩된 경우 엔진 모드를 `Agent`가 아니라 `Plan`으로 전환해 실행하도록 연결했습니다.
+- 스트림 종료 시 `finally`에서 현재 실행 바인딩과 일치하는 경우에만 `executing -> approved`로 복구하도록 구현했습니다.
+
+### `create_tool` 런타임 가드 추가 (`src/builder/engine.py`, `theseus_engine/wrappers/hooks/theseus_hook_executor.py`)
+- `EngineBuildContext`에 `plan_id`, `plan_content`를 추가했습니다.
+- Plan 바인딩이 있는 경우 Theseus 상태 머신을 `Plan/Executing` 프롬프트로 강제 초기화하도록 연결했습니다.
+- Hook executor에 pre-tool guard 주입 지점을 추가했습니다.
+- `create_tool` 호출 시 DB에서 해당 `plan_id`가 여전히 `executing` 상태인지 최종 확인하고, 아니면 hook 단계에서 즉시 차단하도록 구현했습니다.
+
+### DB 스키마 부트스트랩 경로 추가 (`src/db/postgres.py`, `src/main.py`, `scratch/create_db.py`, `README.md`)
+- Alembic이 없는 현재 구조를 유지하면서 `init_db()`를 추가했습니다.
+- 서버 기동 시 `init_db()`가 자동 실행되어 `tool_plans` 포함 전체 메타데이터를 생성하도록 했습니다.
+- 수동 생성용 `scratch/create_db.py`도 동일 경로를 사용하도록 변경했습니다.
+- README에 DB 스키마 초기화 절차를 추가했습니다.
+
+### 테스트 추가 (`tests/test_plan_lifecycle.py`, `tests/test_plan_concurrency.py`, `tests/test_plan_stream.py`)
+- Plan 상태 전이 테스트를 추가했습니다.
+- 동일 세션 내 복수 플랜 실행 전환 시 `409`를 검증하는 테스트를 추가했습니다.
+- `/stream?plan_id=...` 경로의 세션 불일치 차단과 종료 후 `approved` 복구 테스트를 추가했습니다.
+
+### 검증 상태
+- 변경 파일 기준 `py_compile` 문법 검증은 통과했습니다.
+- `unittest` 실실행은 현재 로컬 Python 환경에 `pydantic` 미설치로 완료하지 못했습니다.
+- 실제 DB 연결 및 API 동작 검증은 런타임 의존성 설치 후 추가 확인이 필요합니다.
 
 ## [2026-05-04] Session & History Layer - Phase 1
 

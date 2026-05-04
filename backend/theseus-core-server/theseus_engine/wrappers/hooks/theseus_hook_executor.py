@@ -8,7 +8,7 @@ PRE_TOOL_USE 이벤트 시 Theseus 전용 검증기(Execution/Query)를
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from openharness.hooks.events import HookEvent
 from openharness.hooks.executor import (
@@ -50,11 +50,13 @@ class TheseusHookExecutor(HookExecutor):
         context: HookExecutionContext,
         active_registry: ToolRegistry | None = None,
         full_registry: ToolRegistry | None = None,
+        pre_tool_guard: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(registry, context)
         self._active_registry = active_registry
         self._full_registry = full_registry
         self._retriever = ToolRetriever(full_registry) if full_registry else None
+        self._pre_tool_guard = pre_tool_guard
 
     @theseus_traceable(
         run_type="chain",
@@ -89,6 +91,21 @@ class TheseusHookExecutor(HookExecutor):
             tool_input = payload.get("tool_input", {})
 
             extra_results = list(base_result.results)
+
+            if self._pre_tool_guard is not None:
+                try:
+                    await self._pre_tool_guard(tool_name)
+                except Exception as exc:
+                    log.warning("[TheseusHook] Plan guard blocked tool '%s': %s", tool_name, exc)
+                    extra_results.append(
+                        HookResult(
+                            hook_type="theseus_plan_guard",
+                            success=False,
+                            blocked=True,
+                            reason=str(exc),
+                        )
+                    )
+                    return AggregatedHookResult(results=extra_results)
 
             # Execution 검증기
             exec_ok, exec_msg = ExecutionValidator.validate(

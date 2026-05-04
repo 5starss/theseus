@@ -64,3 +64,24 @@ class BillingOutbox(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class ToolPlan(Base):
+    __tablename__ = "tool_plans"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String(36), index=True, nullable=False)
+    chat_session_id = Column(Integer, index=True, nullable=False)
+    status = Column(String(32), index=True, nullable=False, default="drafting")
+    goal = Column(Text, nullable=False)
+    content = Column(JSONB, nullable=False)
+    feedback = Column(Text, nullable=True)
+    executing_started_at = Column(DateTime(timezone=True), nullable=True)
+    executing_by_user_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
