@@ -1,6 +1,7 @@
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
+from src.auth.client import internal_api_headers, unwrap_api_response
 from src.auth.schemas import SessionContext
 from src.config import settings
 from src.history.schemas import HistoryMessageCreateRequest, HistoryMessageRecord
@@ -48,7 +49,7 @@ class HistoryClient:
 
         try:
             payload = response.json()
-            return self._message_list_adapter.validate_python(payload.get("result", []))
+            return self._message_list_adapter.validate_python(unwrap_api_response(payload) or [])
         except (ValueError, ValidationError) as exc:
             raise HistoryClientError("Invalid history payload received") from exc
 
@@ -61,8 +62,9 @@ class HistoryClient:
             try:
                 response = await client.post(
                     self.history_save_url,
-                    headers=self._auth_headers(session.token),
+                    headers=internal_api_headers(),
                     json={
+                        "userId": session.user_id,
                         "projectId": request.project_id,
                         "chatSessionId": request.chat_session_id,
                         "senderType": request.sender_type,
