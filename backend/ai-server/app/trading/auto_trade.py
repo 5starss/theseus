@@ -304,6 +304,15 @@ class AutoTradeService:
             for ticker in tickers:
                 try:
                     order_card = orchestrate_trading(ticker=ticker, user_id=user_id, account_type=config.account_type, invest_style=config.invest_style, execute_immediately=True, strategy_slot=strategy_slot)
+                    if order_card.get("system_error"):
+                        logger.error("[%s] 시스템 에러 fallback 감지: %s", ticker, order_card.get("system_error_details"))
+                        results.append({
+                            "ticker": ticker,
+                            "status": "failed",
+                            "error": "system_error_fallback",
+                            "details": order_card.get("system_error_details"),
+                        })
+                        continue
                     results.append({"ticker": ticker, "action": order_card.get("order", {}).get("action"), "quantity": order_card.get("order", {}).get("quantity")})
                     decision_records.append({"ticker": ticker, "judge_decision": order_card})
                 except Exception as exc:
