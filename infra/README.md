@@ -1,3 +1,34 @@
 # Infra
 
-로컬 개발, 개발 환경, 운영 환경을 포함한 인프라 구성을 관리하는 디렉토리입니다. 컨테이너, 리버스 프록시, CI, 모니터링, 환경 변수 예시를 영역별로 나눕니다.
+Local, development, and production infrastructure configuration lives here.
+
+## Local Docker Compose
+
+Run the local infra, API server, and core server together:
+
+```bash
+docker compose \
+  -f infra/docker/local/docker-compose.infra.yml \
+  -f infra/docker/local/docker-compose.api.yml \
+  -f infra/docker/local/docker-compose.core.yml \
+  up -d
+```
+
+Kafka UI:
+
+```text
+http://localhost:18080
+```
+
+Check Kafka topics:
+
+```bash
+docker exec -it theseus-local-kafka kafka-topics \
+  --bootstrap-server theseus-local-kafka:29092 \
+  --list
+```
+
+Local Kafka endpoints:
+
+- Container network: `theseus-local-kafka:29092`
+- Host machine: `localhost:19092`
