@@ -12,6 +12,15 @@ export const chatApi = {
     return response.data.result;
   },
 
+  // 채팅 세션 목록 조회
+  getSessions: async (projectId: string, page = 0, size = 20) => {
+    const response = await apiClient.get<ApiResponse<any>>(
+      `/api/v1/projects/${projectId}/sessions`,
+      { params: { page, size } }
+    );
+    return response.data.result;
+  },
+
   // 세션의 기존 채팅 내역 및 상태 조회 (가정)
   getSessionDetails: async (projectId: string, sessionId: string) => {
     const response = await apiClient.get<ApiResponse<any>>(
