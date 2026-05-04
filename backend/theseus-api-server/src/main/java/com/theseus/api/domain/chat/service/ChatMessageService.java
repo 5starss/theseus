@@ -63,7 +63,7 @@ public class ChatMessageService {
 
 	@Transactional
 	public ChatMessageResponse createInternalMessage(
-		AuthenticatedUser currentUser,
+		Long userId,
 		Long projectId,
 		Long sessionId,
 		Long toolId,
@@ -72,7 +72,8 @@ public class ChatMessageService {
 		ChatMessageContentType contentType,
 		String content
 	) {
-		ChatSession chatSession = getAccessibleChatSessionForUpdate(currentUser, projectId, sessionId);
+		User user = getUserEntity(userId);
+		ChatSession chatSession = getAccessibleChatSessionForUpdate(user, projectId, sessionId);
 		validateOpenChatSession(chatSession);
 		Tool tool = resolveTool(chatSession, projectId, toolId);
 
@@ -183,6 +184,10 @@ public class ChatMessageService {
 
 	private ChatSession getAccessibleChatSession(AuthenticatedUser currentUser, Long projectId, Long sessionId) {
 		User user = getCurrentUserEntity(currentUser);
+		return getAccessibleChatSession(user, projectId, sessionId);
+	}
+
+	private ChatSession getAccessibleChatSession(User user, Long projectId, Long sessionId) {
 		Project project = getProjectEntity(projectId);
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 
@@ -192,6 +197,10 @@ public class ChatMessageService {
 
 	private ChatSession getAccessibleChatSessionForUpdate(AuthenticatedUser currentUser, Long projectId, Long sessionId) {
 		User user = getCurrentUserEntity(currentUser);
+		return getAccessibleChatSessionForUpdate(user, projectId, sessionId);
+	}
+
+	private ChatSession getAccessibleChatSessionForUpdate(User user, Long projectId, Long sessionId) {
 		Project project = getProjectEntity(projectId);
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 
@@ -204,7 +213,11 @@ public class ChatMessageService {
 			throw new CustomException(ErrorCode.UNAUTHORIZED);
 		}
 
-		return userRepository.findById(currentUser.userId())
+		return getUserEntity(currentUser.userId());
+	}
+
+	private User getUserEntity(Long userId) {
+		return userRepository.findById(userId)
 			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
 	}
 

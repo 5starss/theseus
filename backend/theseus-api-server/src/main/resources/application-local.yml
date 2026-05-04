@@ -35,3 +35,6 @@ jwt:
   refresh-token-cookie-name: ${JWT_REFRESH_TOKEN_COOKIE_NAME:refreshToken}
   refresh-token-cookie-secure: ${JWT_REFRESH_TOKEN_COOKIE_SECURE:false}
   refresh-token-cookie-same-site: ${JWT_REFRESH_TOKEN_COOKIE_SAME_SITE:Lax}
+
+internal:
+  api-key: ${INTERNAL_API_KEY:theseus-local-internal-api-key}

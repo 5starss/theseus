@@ -9,6 +9,19 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
+INTERNAL_API_KEY_HEADER = "X-Internal-Api-Key"
+
+
+def internal_api_headers() -> dict[str, str]:
+    return {INTERNAL_API_KEY_HEADER: settings.SPRING_BOOT_INTERNAL_API_KEY}
+
+
+def unwrap_api_response(payload: object) -> object:
+    if isinstance(payload, dict) and "isSuccess" in payload and "result" in payload:
+        return payload["result"]
+
+    return payload
+
 
 class PermissionClientError(Exception):
     """Base error for project tool permission lookups."""
@@ -30,22 +43,34 @@ class AuthClient:
         self.verify_url = settings.SPRING_BOOT_AUTH_VERIFY_URL
         self.timeout = settings.AUTH_TIMEOUT_SECONDS
 
-    async def verify_token(self, token: str) -> UserSession:
+    async def verify_token(
+        self,
+        token: str,
+        chat_session_id: str | None = None,
+        project_id: str | None = None,
+    ) -> UserSession:
         """
         Spring Boot 서버에 토큰 검증 요청을 보냅니다.
         """
+        payload: dict[str, str] = {"token": token}
+        if chat_session_id:
+            payload["chatSessionId"] = chat_session_id
+        if project_id:
+            payload["projectId"] = project_id
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     self.verify_url,
-                    json={"token": token},
+                    headers=internal_api_headers(),
+                    json=payload,
                     timeout=self.timeout
                 )
                 
                 if response.status_code == 200:
                     try:
-                        return UserSession(**response.json())
-                    except ValidationError as exc:
+                        return UserSession(**unwrap_api_response(response.json()))
+                    except (TypeError, ValidationError) as exc:
                         logger.error(f"Invalid auth response schema: {exc}")
                         raise HTTPException(
                             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -86,6 +111,7 @@ class PermissionClient:
             try:
                 response = await client.post(
                     self.permissions_url,
+                    headers=internal_api_headers(),
                     json={"projectId": project_id, "userId": user_id},
                     timeout=self.timeout,
                 )
@@ -95,7 +121,7 @@ class PermissionClient:
 
         if response.status_code == 200:
             try:
-                return self._response_adapter.validate_python(response.json())
+                return self._response_adapter.validate_python(unwrap_api_response(response.json()))
             except (ValueError, ValidationError) as exc:
                 logger.error(f"Invalid permission response schema: {exc}")
                 raise PermissionInvalidResponseError from exc

@@ -5,6 +5,7 @@ import httpx
 from fastapi import HTTPException
 
 from src.auth.client import (
+    AuthClient,
     PermissionAccessDeniedError,
     PermissionBackendUnavailableError,
     PermissionClient,
@@ -17,6 +18,7 @@ from src.auth.permissions import (
     PROJECT_ACCESS_DENIED,
     get_project_tool_permissions,
 )
+from src.config import settings
 
 
 class PermissionServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -93,9 +95,31 @@ class PermissionClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permissions, {"read_file": 1, "bash": 3})
         async_client.post.assert_awaited_once_with(
             client.permissions_url,
+            headers={"X-Internal-Api-Key": settings.SPRING_BOOT_INTERNAL_API_KEY},
             json={"projectId": "project-1", "userId": "user-1"},
             timeout=client.timeout,
         )
+
+    async def test_permission_client_accepts_wrapped_api_response(self):
+        response = httpx.Response(
+            200,
+            json={
+                "isSuccess": True,
+                "code": "COMMON-200",
+                "message": "성공입니다.",
+                "result": {"read_file": 1, "bash": 3},
+            },
+        )
+        client = PermissionClient()
+        async_client = AsyncMock()
+        async_client.__aenter__.return_value = async_client
+        async_client.__aexit__.return_value = False
+        async_client.post.return_value = response
+
+        with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
+            permissions = await client.fetch_project_tool_permissions("project-1", "user-1")
+
+        self.assertEqual(permissions, {"read_file": 1, "bash": 3})
 
     async def test_permission_client_raises_invalid_response_for_bad_schema(self):
         response = httpx.Response(200, json={"read_file": "high"})
@@ -132,6 +156,49 @@ class PermissionClientTests(unittest.IsolatedAsyncioTestCase):
         with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
             with self.assertRaises(PermissionBackendUnavailableError):
                 await client.fetch_project_tool_permissions("project-1", "user-1")
+
+
+class AuthClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_auth_client_sends_internal_key_and_context(self):
+        response = httpx.Response(
+            200,
+            json={
+                "isSuccess": True,
+                "code": "COMMON-200",
+                "message": "성공입니다.",
+                "result": {
+                    "user_id": "3",
+                    "project_id": "1",
+                    "permission_level": 2,
+                },
+            },
+        )
+        client = AuthClient()
+        async_client = AsyncMock()
+        async_client.__aenter__.return_value = async_client
+        async_client.__aexit__.return_value = False
+        async_client.post.return_value = response
+
+        with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
+            session = await client.verify_token(
+                "access-token",
+                chat_session_id="10",
+                project_id="1",
+            )
+
+        self.assertEqual(session.user_id, "3")
+        self.assertEqual(session.project_id, "1")
+        self.assertEqual(session.permission_level, 2)
+        async_client.post.assert_awaited_once_with(
+            client.verify_url,
+            headers={"X-Internal-Api-Key": settings.SPRING_BOOT_INTERNAL_API_KEY},
+            json={
+                "token": "access-token",
+                "chatSessionId": "10",
+                "projectId": "1",
+            },
+            timeout=client.timeout,
+        )
 
 
 if __name__ == "__main__":
