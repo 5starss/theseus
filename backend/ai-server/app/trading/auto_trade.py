@@ -303,7 +303,7 @@ class AutoTradeService:
             decision_records = []
             for ticker in tickers:
                 try:
-                    order_card = orchestrate_trading(ticker=ticker, user_id=user_id, account_type=config.account_type, invest_style=config.invest_style, execute_immediately=False, strategy_slot=strategy_slot)
+                    order_card = orchestrate_trading(ticker=ticker, user_id=user_id, account_type=config.account_type, invest_style=config.invest_style, execute_immediately=True, strategy_slot=strategy_slot)
                     results.append({"ticker": ticker, "action": order_card.get("order", {}).get("action"), "quantity": order_card.get("order", {}).get("quantity")})
                     decision_records.append({"ticker": ticker, "judge_decision": order_card})
                 except Exception as exc:

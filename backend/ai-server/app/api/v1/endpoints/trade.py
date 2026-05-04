@@ -84,7 +84,8 @@ async def orchestrate_trade_endpoint(
     ticker: str = Query(..., pattern=TICKER_PATTERN, description="종목 코드"),
     available_cash: int = Query(5000000, description="현재 가용 예수금"),
     user_id: Optional[int] = Query(None, description="자동매매 대상 사용자 ID"),
-    account_type: str = Query("USER", description="주문에 사용할 계좌 타입(USER 또는 AI)")
+    account_type: str = Query("USER", description="주문에 사용할 계좌 타입(USER 또는 AI)"),
+    execute_immediately: bool = Query(False, description="즉시 주문 실행 여부 (주의: 실주문이 나갈 수 있음)")
 ) -> Dict[str, Any]:
     """
     오케스트레이터를 수동 호출하여 특정 종목에 대한 AI 매매 판정(Order Card)을 반환합니다.
@@ -95,6 +96,7 @@ async def orchestrate_trade_endpoint(
             available_cash=available_cash,
             user_id=user_id,
             account_type=account_type,
+            execute_immediately=execute_immediately,
         )
         return _ok_response(order_card=order_card)
     except Exception as e:

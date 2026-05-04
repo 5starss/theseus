@@ -26,3 +26,10 @@ text.md
 /certbot/www/*
 !/certbot/conf/.gitkeep
 !/certbot/www/.gitkeep
+
+.codex
+
+*.pyc
+
+*.pem
+.env*
