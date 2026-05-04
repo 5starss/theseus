@@ -56,4 +56,13 @@ export const projectApi = {
     // 백엔드 응답 구조에 맞춰 result 또는 data 자체를 반환
     return response.data.result || (response.data as unknown as ProjectMemberResponse);
   },
+
+  /**
+   * 프로젝트 정보 수정
+   */
+  updateProject: async (projectId: string | number, data: { name: string; description: string; status: 'ACTIVE' | 'INACTIVE' }) => {
+    // data: ProjectUpdateRequest (name, description, status)
+    const response = await apiClient.patch<ApiResponse<unknown>>(`/api/v1/projects/${projectId}`, data);
+    return response.data.result;
+  },
 };

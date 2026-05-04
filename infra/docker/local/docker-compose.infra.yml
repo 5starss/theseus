@@ -17,7 +17,7 @@ services:
       retries: 10
 
   theseus-local-postgres:
-    image: pgvector/pgvector:pg16 # pgvector extension 사용을 위해 PostgreSQL 이미지를 pgvector 지원 이미지로 변경
+    image: pgvector/pgvector:pg16
     container_name: theseus-local-postgres
     env_file:
       - .env.local
@@ -25,7 +25,7 @@ services:
       - "15432:5432"
     volumes:
       - theseus-local-postgres-data:/var/lib/postgresql/data
-      - ./initdb/postgres:/docker-entrypoint-initdb.d # 초기화 SQL을 마운트해 pgvector extension을 자동 생성
+      - ./initdb/postgres:/docker-entrypoint-initdb.d
     networks:
       - theseus-local-network
     healthcheck:
@@ -33,6 +33,71 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  theseus-local-kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: theseus-local-kafka
+    env_file:
+      - .env.local
+    ports:
+      - "19092:19092"
+    volumes:
+      - theseus-local-kafka-data:/var/lib/kafka/data
+    environment:
+      CLUSTER_ID: 5f55wRIfQ0KiuThOsp0iug
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@theseus-local-kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:19092,CONTROLLER://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://theseus-local-kafka:29092,EXTERNAL://localhost:19092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    networks:
+      - theseus-local-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server theseus-local-kafka:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  theseus-local-kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: theseus-local-kafka-init
+    env_file:
+      - .env.local
+    depends_on:
+      theseus-local-kafka:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        kafka-topics --bootstrap-server theseus-local-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.request --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-local-kafka:29092 --create --if-not-exists --topic theseus.tool-regeneration.request --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-local-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.event --partitions 3 --replication-factor 1
+    networks:
+      - theseus-local-network
+
+  theseus-local-kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: theseus-local-kafka-ui
+    ports:
+      - "18080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: theseus-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: theseus-local-kafka:29092
+    depends_on:
+      theseus-local-kafka:
+        condition: service_healthy
+    networks:
+      - theseus-local-network
 
 networks:
   theseus-local-network:
@@ -43,3 +108,5 @@ volumes:
     name: theseus-local-mysql-data
   theseus-local-postgres-data:
     name: theseus-local-postgres-data
+  theseus-local-kafka-data:
+    name: theseus-local-kafka-data

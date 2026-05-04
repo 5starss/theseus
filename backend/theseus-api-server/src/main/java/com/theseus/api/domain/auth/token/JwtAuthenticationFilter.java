@@ -23,9 +23,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	private static final String AUTHORIZATION_HEADER = "Authorization";
 	private static final String BEARER_PREFIX = "Bearer ";
 	private static final String ROLE_PREFIX = "ROLE_";
+	private static final String INTERNAL_API_PATH_PREFIX = "/api/internal/";
 
 	private final JwtTokenProvider jwtTokenProvider;
 	private final UserRepository userRepository;
+
+	@Override
+	protected boolean shouldNotFilter(HttpServletRequest request) {
+		return request.getRequestURI().startsWith(INTERNAL_API_PATH_PREFIX);
+	}
 
 	@Override
 	protected void doFilterInternal(
