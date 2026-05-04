@@ -2,16 +2,16 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   Sparkles, 
   MessageSquarePlus, 
-  MessageSquare, 
   Wrench, 
   Settings, 
   UserCircle 
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { projectApi, type ProjectMemberResponse } from '@/features/projects/api';
 import { chatApi } from '@/features/projects/api/chat';
 import { useAuthStore } from '@/store/useAuthStore';
+import type { ChatSession } from '@/features/projects/types/chat';
 
 interface SidebarProps {
   projectId?: string;
@@ -21,7 +21,9 @@ export function Sidebar({ projectId }: SidebarProps) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const [projectMember, setProjectMember] = useState<ProjectMemberResponse | null>(null);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   useEffect(() => {
@@ -53,22 +55,32 @@ export function Sidebar({ projectId }: SidebarProps) {
     return () => { cancelled = true; };
   }, [projectId]);
 
-  // TODO: Fetch real sessions
-  const mockSessions = [
-    { id: '1', title: 'API 지연 현상 분석' },
-    { id: '2', title: 'Kafka 연결 설정' },
-    { id: '3', title: '신규 도구 초안' },
-    { id: '4', title: '데이터베이스 정규화 가이드' },
-  ];
+  const fetchSessions = useCallback(async () => {
+    if (!projectId) return;
+    setIsSessionsLoading(true);
+    try {
+      const data = await chatApi.getSessions(projectId);
+      setSessions(data.content);
+    } catch (err) {
+      console.error('Failed to fetch sessions:', err);
+    } finally {
+      setIsSessionsLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   const handleNewChat = async () => {
     if (!projectId) return;
     try {
       const session = await chatApi.createSession(projectId);
-      if (session && session.id) {
-        navigate(`/projects/${projectId}/sessions/${session.id}`);
+      if (session && session.sessionId) {
+        // 세션 목록 갱신
+        await fetchSessions();
+        navigate(`/projects/${projectId}/sessions/${session.sessionId}`);
       } else {
-        // Fallback for UI mock
         navigate(`/projects/${projectId}/sessions/new`);
       }
     } catch (err) {
@@ -126,19 +138,6 @@ export function Sidebar({ projectId }: SidebarProps) {
       {/* Nav Tabs */}
       <nav className="flex flex-col gap-1 mb-8">
         <NavLink 
-          to={`/projects/${projectId}/sessions`}
-          className={({ isActive }) => cn(
-            "flex items-center gap-3 px-6 py-3 transition-colors border-l-4",
-            isActive 
-              ? "bg-[#1e293b] border-blue-400 text-blue-400" 
-              : "border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-300"
-          )}
-        >
-          <MessageSquare className="w-5 h-5" />
-          <span className="text-sm font-medium tracking-[0.35px]">세션</span>
-        </NavLink>
-
-        <NavLink 
           to={`/projects/${projectId}/tools`}
           className={({ isActive }) => cn(
             "flex items-center gap-3 px-6 py-3 transition-colors border-l-4",
@@ -161,21 +160,31 @@ export function Sidebar({ projectId }: SidebarProps) {
           </h3>
         </div>
         <ul className="flex flex-col gap-1">
-          {mockSessions.map((session) => (
-            <li key={session.id}>
-              <NavLink
-                to={`/projects/${projectId}/sessions/${session.id}`}
-                className={({ isActive }) => cn(
-                  "block w-full px-3 py-2 rounded text-xs tracking-[0.35px] truncate transition-colors",
-                  isActive
-                    ? "bg-white/10 text-white font-medium"
-                    : "text-slate-400 hover:bg-white/5 hover:text-slate-300"
-                )}
-              >
-                {session.title}
-              </NavLink>
+          {isSessionsLoading ? (
+            <li className="px-3 py-2 text-[10px] text-slate-500 animate-pulse">
+              세션 목록 로딩 중...
             </li>
-          ))}
+          ) : sessions.length > 0 ? (
+            sessions.map((session) => (
+              <li key={session.sessionId}>
+                <NavLink
+                  to={`/projects/${projectId}/sessions/${session.sessionId}`}
+                  className={({ isActive }) => cn(
+                    "block w-full px-3 py-2 rounded text-xs tracking-[0.35px] truncate transition-colors",
+                    isActive
+                      ? "bg-white/10 text-white font-medium"
+                      : "text-slate-400 hover:bg-white/5 hover:text-slate-300"
+                  )}
+                >
+                  {session.title}
+                </NavLink>
+              </li>
+            ))
+          ) : (
+            <li className="px-3 py-2 text-[10px] text-slate-500 italic">
+              생성된 세션이 없습니다.
+            </li>
+          )}
         </ul>
       </div>
 

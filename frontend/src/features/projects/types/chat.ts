@@ -24,3 +24,14 @@ export interface ProgressInfo {
   message: string;
   percent: number;
 }
+
+export interface ChatSession {
+  sessionId: number;
+  projectId: number;
+  projectMemberId: number;
+  title: string;
+  isClosed: boolean;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
