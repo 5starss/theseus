@@ -34,5 +34,4 @@ class Settings(BaseSettings):
     # Strategy Settings
     DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD: int = 30
 
-
 settings = Settings()

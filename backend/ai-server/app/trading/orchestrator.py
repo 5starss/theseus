@@ -211,7 +211,7 @@ def orchestrate_trading(
     user_id: Optional[int] = None,
     account_type: str = "USER",
     invest_style: str = "LONG",
-    execute_immediately: bool = True,
+    execute_immediately: bool = False,
     score_gap_threshold: int = DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD,
     strategy_slot: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -225,10 +225,10 @@ def orchestrate_trading(
     user_investment_style = str(user_profile.get("investmentStyle") or "GROWTH").upper()
     strategy_profile = build_strategy_profile(invest_style, user_investment_style)
     resolved_slot = resolve_strategy_slot(strategy_slot)
-    
+
     # 2. 계좌 정보 및 실시간 시세 조회
     account_info = get_trading_account_snapshot(user_id=user_id, account_type=account_type)
-    available_cash = int(account_info.get("availableAmt") or available_cash)
+    actual_available_cash = int(account_info.get("availableAmt") or available_cash)
     current_holding = extract_holding_from_snapshot(account_info, ticker)
     curr_price = get_current_price(ticker) or Decimal("0")
 
@@ -237,18 +237,17 @@ def orchestrate_trading(
     mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="news")
     quant_card, quant_state = run_quant_agent(ticker)
     mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="quant")
-    
+
     # 4. 상충 의견 검토 (Rebuttal)
     rebuttal_result = run_rebuttal_agent(
         ticker, news_card, quant_card, score_gap_threshold=score_gap_threshold
     )
-    
+
     # 5. 최종 판정 (Judge Agent)
-    # 정책 한도 내에서 AI가 능동적으로 수량을 결정할 수 있도록 가이드 정보를 계산하여 전달
     signal_conf = _resolve_signal_confidence(news_card, quant_card, quant_state)
     max_buy_qty, _ = cap_buy_quantity(
         requested_qty=999999,
-        available_cash=available_cash,
+        available_cash=actual_available_cash,
         current_holding=current_holding,
         effective_price=int(curr_price),
         user_investment_style=user_investment_style,
@@ -259,7 +258,7 @@ def orchestrate_trading(
     judge_payload = {
         "ticker": ticker,
         "current_price": int(curr_price),
-        "available_cash": available_cash,
+        "available_cash": actual_available_cash,
         "current_holding": current_holding,
         "max_allowed_buy_quantity": max_buy_qty,
         "max_allowed_sell_quantity": max_sell_qty,
@@ -275,24 +274,24 @@ def orchestrate_trading(
         "quant_state_summary": quant_state,
         "rebuttal": rebuttal_result,
     }
-    
+
     order_card = JudgeAgent().generate_order_card(judge_payload)
     mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="judge")
-    
+
     # 6. 현실적 제약 조건 적용 (결과 검증 및 최종 보정)
     order_card = apply_account_constraints(
         order_card,
-        available_cash=available_cash,
+        available_cash=actual_available_cash,
         current_holding=current_holding,
         current_price=curr_price,
         user_investment_style=user_investment_style,
         signal_confidence=signal_conf,
     )
-    
+
     # 7. 메타데이터 후처리
     order_card.update({
         "account_snapshot": build_account_summary(
-            available_cash=available_cash,
+            available_cash=actual_available_cash,
             current_holding=current_holding,
             account_type=account_type,
             user_id=user_id,
@@ -302,7 +301,7 @@ def orchestrate_trading(
         "rebuttal": rebuttal_result,
         "execution_mode": "immediate" if execute_immediately else "deferred"
     })
-    
+
     # 8. 최종 주문 발송 (실행 모드인 경우)
     if execute_immediately:
         order_card["execution_status"] = _execute_finalize(
