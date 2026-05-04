@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     SPRING_BOOT_PROJECT_PERMISSIONS_URL: str = "http://localhost:8080/api/internal/project/permissions"
     SPRING_BOOT_BILLING_USAGE_URL: str = "http://localhost:8080/api/internal/billing/usage"
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
+    SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: str = "http://localhost:8080/api/internal/history/messages"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
     BILLING_OUTBOX_BATCH_SIZE: int = 10

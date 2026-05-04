@@ -38,6 +38,9 @@ class FakeEngine:
         self._events = events
         self.total_usage = total_usage
 
+    def load_messages(self, _messages):
+        return None
+
     async def submit_message(self, prompt: str):
         for event in self._events:
             yield event
@@ -90,6 +93,10 @@ class StreamRouteTests(unittest.TestCase):
         app.dependency_overrides.clear()
 
     def test_stream_endpoint_emits_sse_events(self):
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock()
+
         def fake_get_query_engine(_context):
             events = [
                 FakeAssistantTextDelta(text="hello "),
@@ -108,11 +115,17 @@ class StreamRouteTests(unittest.TestCase):
             )
 
         with patch("src.routes.stream.get_query_engine", side_effect=fake_get_query_engine):
-            with patch(
-                "src.routes.stream.BillingOutboxRepository.enqueue",
-                return_value=FakeOutboxRecord(),
-            ):
-                response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+            with patch("src.routes.stream.load_history_messages", load_history):
+                with patch("src.routes.stream.persist_user_message", persist_user):
+                    with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                        with patch(
+                            "src.routes.stream.BillingOutboxRepository.enqueue",
+                            return_value=FakeOutboxRecord(),
+                        ):
+                            response = self.client.get(
+                                "/api/v1/stream",
+                                params={"prompt": "Hello", "chat_session_id": 123},
+                            )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: connected", response.text)
@@ -124,28 +137,58 @@ class StreamRouteTests(unittest.TestCase):
         )
         self.assertIn("event: complete", response.text)
         self.assertIn('"total_tokens": 18', response.text)
+        load_history.assert_awaited_once()
+        persist_user.assert_awaited_once()
+        persist_assistant.assert_awaited_once()
+        self.assertEqual(persist_assistant.await_args.kwargs["content"], "hello world")
 
     def test_stream_endpoint_returns_422_when_prompt_missing(self):
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock()
+
         with patch(
-            "src.routes.stream.BillingOutboxRepository.enqueue",
-            return_value=FakeOutboxRecord(),
+            "src.routes.stream.load_history_messages",
+            load_history,
         ):
-            response = self.client.get("/api/v1/stream")
+            with patch("src.routes.stream.persist_user_message", persist_user):
+                with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                    with patch(
+                        "src.routes.stream.BillingOutboxRepository.enqueue",
+                        return_value=FakeOutboxRecord(),
+                    ):
+                        response = self.client.get("/api/v1/stream", params={"chat_session_id": 123})
 
         self.assertEqual(response.status_code, 422)
 
     def test_stream_endpoint_returns_422_when_prompt_blank(self):
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock()
+
         with patch(
-            "src.routes.stream.BillingOutboxRepository.enqueue",
-            return_value=FakeOutboxRecord(),
+            "src.routes.stream.load_history_messages",
+            load_history,
         ):
-            response = self.client.get("/api/v1/stream", params={"prompt": "   "})
+            with patch("src.routes.stream.persist_user_message", persist_user):
+                with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                    with patch(
+                        "src.routes.stream.BillingOutboxRepository.enqueue",
+                        return_value=FakeOutboxRecord(),
+                    ):
+                        response = self.client.get(
+                            "/api/v1/stream",
+                            params={"prompt": "   ", "chat_session_id": 123},
+                        )
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"], "Prompt must not be blank")
 
     def test_stream_endpoint_returns_error_sse_when_engine_init_fails(self):
         permission_lookup = AsyncMock(return_value={"read_file": 1})
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock()
         with patch(
             "src.routes.stream.get_query_engine",
             side_effect=EngineInitializationError("OpenHarness is not available"),
@@ -154,11 +197,17 @@ class StreamRouteTests(unittest.TestCase):
                 "src.routes.stream.get_project_tool_permissions",
                 permission_lookup,
             ):
-                with patch(
-                    "src.routes.stream.BillingOutboxRepository.enqueue",
-                    return_value=FakeOutboxRecord(),
-                ):
-                    response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+                with patch("src.routes.stream.load_history_messages", load_history):
+                    with patch("src.routes.stream.persist_user_message", persist_user):
+                        with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                            with patch(
+                                "src.routes.stream.BillingOutboxRepository.enqueue",
+                                return_value=FakeOutboxRecord(),
+                            ):
+                                response = self.client.get(
+                                    "/api/v1/stream",
+                                    params={"prompt": "Hello", "chat_session_id": 123},
+                                )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: connected", response.text)
@@ -166,9 +215,13 @@ class StreamRouteTests(unittest.TestCase):
             'event: error\ndata: {"message": "OpenHarness is not available"}',
             response.text,
         )
+        persist_assistant.assert_not_awaited()
 
     def test_stream_endpoint_allows_empty_permissions_and_emits_engine_error(self):
         permission_lookup = AsyncMock(return_value={})
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock()
         with patch(
             "src.routes.stream.get_query_engine",
             side_effect=EngineInitializationError(
@@ -179,17 +232,24 @@ class StreamRouteTests(unittest.TestCase):
                 "src.routes.stream.get_project_tool_permissions",
                 permission_lookup,
             ):
-                with patch(
-                    "src.routes.stream.BillingOutboxRepository.enqueue",
-                    return_value=FakeOutboxRecord(),
-                ):
-                    response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+                with patch("src.routes.stream.load_history_messages", load_history):
+                    with patch("src.routes.stream.persist_user_message", persist_user):
+                        with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                            with patch(
+                                "src.routes.stream.BillingOutboxRepository.enqueue",
+                                return_value=FakeOutboxRecord(),
+                            ):
+                                response = self.client.get(
+                                    "/api/v1/stream",
+                                    params={"prompt": "Hello", "chat_session_id": 123},
+                                )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
             'event: error\ndata: {"message": "No tools are available for the current server session."}',
             response.text,
         )
+        persist_assistant.assert_not_awaited()
 
     def test_stream_endpoint_propagates_permission_errors(self):
         scenarios = [
@@ -202,14 +262,28 @@ class StreamRouteTests(unittest.TestCase):
             permission_lookup = AsyncMock(
                 side_effect=HTTPException(status_code=status_code, detail=detail)
             )
+            load_history = AsyncMock(return_value=[])
+            persist_user = AsyncMock()
+            persist_assistant = AsyncMock()
             with patch(
                 "src.routes.stream.get_project_tool_permissions",
                 permission_lookup,
             ):
-                response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+                with patch("src.routes.stream.load_history_messages", load_history):
+                    with patch("src.routes.stream.persist_user_message", persist_user):
+                        with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                            response = self.client.get(
+                                "/api/v1/stream",
+                                params={"prompt": "Hello", "chat_session_id": 123},
+                            )
 
             self.assertEqual(response.status_code, status_code)
             self.assertEqual(response.json()["detail"], detail)
+
+    def test_stream_endpoint_returns_422_when_chat_session_id_missing(self):
+        response = self.client.get("/api/v1/stream", params={"prompt": "Hello"})
+
+        self.assertEqual(response.status_code, 422)
 
 
 if __name__ == "__main__":
