@@ -1,11 +1,13 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
+import type { PageResponse } from '@/features/admin/api';
+import type { ChatSession } from '@/features/projects/types/chat';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 
 export const chatApi = {
   // 채팅 세션 생성
   createSession: async (projectId: string) => {
-    const response = await apiClient.post<ApiResponse<any>>(
+    const response = await apiClient.post<ApiResponse<ChatSession>>(
       `/api/v1/projects/${projectId}/sessions`,
       { title: '새로운 대화 세션' }
     );
@@ -13,8 +15,9 @@ export const chatApi = {
   },
 
   // 채팅 세션 목록 조회
-  getSessions: async (projectId: string, page = 0, size = 20) => {
-    const response = await apiClient.get<ApiResponse<any>>(
+  getSessions: async (projectId: string | undefined, page = 0, size = 20) => {
+    if (!projectId) return { content: [], totalElements: 0, totalPages: 0, size: 20 };
+    const response = await apiClient.get<ApiResponse<PageResponse<ChatSession>>>(
       `/api/v1/projects/${projectId}/sessions`,
       { params: { page, size } }
     );
@@ -23,7 +26,7 @@ export const chatApi = {
 
   // 세션의 기존 채팅 내역 및 상태 조회 (가정)
   getSessionDetails: async (projectId: string, sessionId: string) => {
-    const response = await apiClient.get<ApiResponse<any>>(
+    const response = await apiClient.get<ApiResponse<unknown>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}`
     );
     return response.data.result;
@@ -31,7 +34,7 @@ export const chatApi = {
 
   // Tool 생성 승인 요청
   requestToolApproval: async (projectId: string, toolId: string) => {
-    const response = await apiClient.post<ApiResponse<any>>(
+    const response = await apiClient.post<ApiResponse<unknown>>(
       `/api/v1/projects/${projectId}/tools/${toolId}/approval-requests`
     );
     return response.data.result;
@@ -42,9 +45,9 @@ export const chatApi = {
     projectId: string,
     sessionId: string,
     toolId: string | null,
-    payload: any,
-    onMessage: (event: any) => void,
-    onError: (err: any) => void,
+    payload: Record<string, unknown>,
+    onMessage: (event: unknown) => void,
+    onError: (err: unknown) => void,
     onClose: () => void
   ) => {
     const url = toolId
