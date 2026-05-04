@@ -135,12 +135,49 @@ class StreamRouteTests(unittest.TestCase):
             'event: tool_result\ndata: {"tool_name": "glob", "output": "file_a.py\\nfile_b.py"}',
             response.text,
         )
-        self.assertIn("event: complete", response.text)
+        self.assertIn("event: completed", response.text)
         self.assertIn('"total_tokens": 18', response.text)
         load_history.assert_awaited_once()
         persist_user.assert_awaited_once()
         persist_assistant.assert_awaited_once()
         self.assertEqual(persist_assistant.await_args.kwargs["content"], "hello world")
+
+    def test_stream_endpoint_emits_error_when_assistant_message_save_fails(self):
+        load_history = AsyncMock(return_value=[])
+        persist_user = AsyncMock()
+        persist_assistant = AsyncMock(return_value=False)
+
+        def fake_get_query_engine(_context):
+            events = [FakeAssistantTextDelta(text="hello")]
+            return FakeAssembly(
+                engine=FakeEngine(events=events, total_usage=FakeUsage()),
+                model_name="fake-model",
+                allowed_tools=("read_file",),
+                assistant_text_delta_type=FakeAssistantTextDelta,
+                tool_execution_started_type=FakeToolExecutionStarted,
+                tool_execution_completed_type=FakeToolExecutionCompleted,
+                error_event_type=FakeErrorEvent,
+            )
+
+        with patch("src.routes.stream.get_query_engine", side_effect=fake_get_query_engine):
+            with patch("src.routes.stream.load_history_messages", load_history):
+                with patch("src.routes.stream.persist_user_message", persist_user):
+                    with patch("src.routes.stream.persist_assistant_message", persist_assistant):
+                        with patch(
+                            "src.routes.stream.BillingOutboxRepository.enqueue",
+                            return_value=FakeOutboxRecord(),
+                        ):
+                            response = self.client.get(
+                                "/api/v1/stream",
+                                params={"prompt": "Hello", "chat_session_id": 123},
+                            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'event: error\ndata: {"message": "Assistant message persistence failed"}',
+            response.text,
+        )
+        self.assertNotIn("event: completed", response.text)
 
     def test_stream_endpoint_returns_422_when_prompt_missing(self):
         load_history = AsyncMock(return_value=[])

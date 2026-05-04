@@ -50,7 +50,6 @@ async def stream_agent_response(
     """Request-agnostic SSE handler for a single Theseus engine run."""
     usage_data = UsageMetrics(model_name="unknown", prompt_tokens=0, completion_tokens=0, total_tokens=0)
     assistant_chunks: list[str] = []
-    assistant_completed = False
 
     yield sse_event(
         "connected",
@@ -99,15 +98,23 @@ async def stream_agent_response(
             usage_data.completion_tokens = getattr(total_usage, "completion_tokens", 0)
             usage_data.total_tokens = getattr(total_usage, "total_tokens", 0)
 
+        is_assistant_message_saved = await persist_assistant_message(
+            session=session,
+            chat_session_id=chat_session_id,
+            content="".join(assistant_chunks),
+        )
+        if not is_assistant_message_saved:
+            yield sse_event("error", {"message": "Assistant message persistence failed"})
+            return
+
         yield sse_event(
-            "complete",
+            "completed",
             {
                 "status": "done",
                 "total_tokens": usage_data.total_tokens,
                 "model_name": usage_data.model_name,
             },
         )
-        assistant_completed = True
     except EngineInitializationError as exc:
         logger.warning("Theseus engine initialization failed: %s", exc)
         yield sse_event("error", {"message": str(exc)})
@@ -115,13 +122,6 @@ async def stream_agent_response(
         logger.error("Theseus stream error: %s", exc, exc_info=True)
         yield sse_event("error", {"message": str(exc)})
     finally:
-        if assistant_completed:
-            await persist_assistant_message(
-                session=session,
-                chat_session_id=chat_session_id,
-                content="".join(assistant_chunks),
-            )
-
         outbox_record = BillingOutboxRepository(db).enqueue(
             user_id=session.user_id,
             project_id=session.project_id,

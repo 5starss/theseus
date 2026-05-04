@@ -36,7 +36,8 @@ public class SecurityConfig {
             "/api/v1/auth/logout"
     };
 
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final JwtAuthenticationFilter jwtAuthenticationFilter;
+	private final InternalApiAuthenticationFilter internalApiAuthenticationFilter;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -51,12 +52,14 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(SWAGGER_PATHS).permitAll()
-                        .requestMatchers(AUTH_PATHS).permitAll()
-                        .requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
-                        .anyRequest().authenticated())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+				.authorizeHttpRequests(auth -> auth
+						.requestMatchers(SWAGGER_PATHS).permitAll()
+						.requestMatchers(AUTH_PATHS).permitAll()
+						.requestMatchers("/api/internal/**").hasRole("INTERNAL")
+						.requestMatchers("/api/v1/admin/**").hasRole("SUPER_ADMIN")
+						.anyRequest().authenticated())
+				.addFilterBefore(internalApiAuthenticationFilter, JwtAuthenticationFilter.class)
+				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

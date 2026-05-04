@@ -11,6 +11,9 @@ import lombok.Getter;
 public class InternalHistoryMessageCreateRequest {
 
 	@NotNull
+	private Long userId;
+
+	@NotNull
 	private Long projectId;
 
 	@NotNull
