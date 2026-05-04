@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { projectApi, type ProjectMemberResponse } from '@/features/projects/api';
+import { chatApi } from '@/features/projects/api/chat';
 import { useAuthStore } from '@/store/useAuthStore';
 
 interface SidebarProps {
@@ -60,8 +61,20 @@ export function Sidebar({ projectId }: SidebarProps) {
     { id: '4', title: '데이터베이스 정규화 가이드' },
   ];
 
-  const handleNewChat = () => {
-    navigate(`/projects/${projectId}/sessions/new`);
+  const handleNewChat = async () => {
+    if (!projectId) return;
+    try {
+      const session = await chatApi.createSession(projectId);
+      if (session && session.id) {
+        navigate(`/projects/${projectId}/sessions/${session.id}`);
+      } else {
+        // Fallback for UI mock
+        navigate(`/projects/${projectId}/sessions/new`);
+      }
+    } catch (err) {
+      console.error('Failed to create session:', err);
+      alert('세션 생성에 실패했습니다.');
+    }
   };
 
   const isAdmin = projectMember?.projectRole === 'ADMIN';
