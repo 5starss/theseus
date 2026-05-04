@@ -71,6 +71,7 @@ async def get_session_context(
 
 
 async def get_sse_session_context(
+    request: Request,
     token: str = Depends(get_sse_token)
 ) -> SessionContext:
     """
@@ -84,7 +85,11 @@ async def get_sse_session_context(
             token=token
         )
 
-    user_session: UserSession = await auth_client.verify_token(token)
+    user_session: UserSession = await auth_client.verify_token(
+        token,
+        chat_session_id=request.query_params.get("chat_session_id"),
+        project_id=request.query_params.get("project_id"),
+    )
 
     return SessionContext(
         user_id=user_session.user_id,

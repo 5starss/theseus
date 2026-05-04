@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from src.auth.schemas import SessionContext
+from src.config import settings
 from src.history.client import HistoryClientError, history_client
 from src.history.mapper import to_engine_messages
 from src.history.schemas import HistoryMessageCreateRequest
@@ -42,7 +43,7 @@ async def persist_user_message(
     session: SessionContext,
     chat_session_id: int,
     content: str,
-) -> None:
+) -> bool:
     try:
         project_id = int(session.project_id)
     except ValueError:
@@ -50,7 +51,7 @@ async def persist_user_message(
             "User history save skipped because project_id is not numeric: %s",
             session.project_id,
         )
-        return
+        return settings.AUTH_MODE == "mock"
 
     request = HistoryMessageCreateRequest(
         project_id=project_id,
@@ -63,6 +64,7 @@ async def persist_user_message(
 
     try:
         await history_client.save_message(session, request)
+        return True
     except HistoryClientError as exc:
         logger.warning(
             "User history save failed for project=%s session=%s: %s",
@@ -70,15 +72,16 @@ async def persist_user_message(
             chat_session_id,
             exc,
         )
+        return False
 
 
 async def persist_assistant_message(
     session: SessionContext,
     chat_session_id: int,
     content: str,
-) -> None:
+) -> bool:
     if not content.strip():
-        return
+        return True
 
     try:
         project_id = int(session.project_id)
@@ -87,7 +90,7 @@ async def persist_assistant_message(
             "Assistant history save skipped because project_id is not numeric: %s",
             session.project_id,
         )
-        return
+        return settings.AUTH_MODE == "mock"
 
     request = HistoryMessageCreateRequest(
         project_id=project_id,
@@ -100,6 +103,7 @@ async def persist_assistant_message(
 
     try:
         await history_client.save_message(session, request)
+        return True
     except HistoryClientError as exc:
         logger.warning(
             "Assistant history save failed for project=%s session=%s: %s",
@@ -107,3 +111,4 @@ async def persist_assistant_message(
             chat_session_id,
             exc,
         )
+        return False
