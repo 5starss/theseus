@@ -7,6 +7,7 @@ import UserLayout from '@/layouts/UserLayout';
 import ProjectListPage from '@/pages/user/ProjectListPage';
 import ProjectLayout from '@/layouts/ProjectLayout';
 import ProtectedRoute from './ProtectedRoute';
+import ChatSessionPage from '@/pages/user/projects/ChatSessionPage';
 
 export const router = createBrowserRouter([
   {
@@ -28,7 +29,11 @@ export const router = createBrowserRouter([
         children: [
           {
             path: 'sessions',
-            element: <div className="p-8 text-white">Sessions Page (To Be Implemented)</div>,
+            element: <div className="p-8 text-slate-500 h-full flex items-center justify-center">좌측 메뉴에서 대화 세션을 선택하거나 '새 대화'를 시작하세요.</div>,
+          },
+          {
+            path: 'sessions/:sessionId',
+            element: <ChatSessionPage />,
           },
           {
             path: 'tools',
