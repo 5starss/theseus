@@ -155,7 +155,6 @@ class BillingClient:
                 headers = {}
                 if idempotency_key:
                     headers["X-Idempotency-Key"] = idempotency_key
-                headers.update(internal_api_headers())
 
                 response = await client.post(
                     self.usage_url,
@@ -191,7 +190,6 @@ class AgentClient:
             try:
                 response = await client.post(
                     self.save_plan_url,
-                    headers=internal_api_headers(),
                     json=payload.model_dump(mode="json"),
                     timeout=self.timeout
                 )

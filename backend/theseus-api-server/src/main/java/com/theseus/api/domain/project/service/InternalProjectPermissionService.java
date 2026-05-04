@@ -53,14 +53,6 @@ public class InternalProjectPermissionService {
 			"create_tool",
 			Boolean.TRUE.equals(projectMember.getCanCreateTool()) ? 2 : BLOCKED_PERMISSION_LEVEL
 		);
-		permissions.put(
-			"update_tool",
-			Boolean.TRUE.equals(projectMember.getCanUpdateTool()) ? 2 : BLOCKED_PERMISSION_LEVEL
-		);
-		permissions.put(
-			"delete_tool",
-			Boolean.TRUE.equals(projectMember.getCanDeleteTool()) ? 3 : BLOCKED_PERMISSION_LEVEL
-		);
 
 		return permissions;
 	}
