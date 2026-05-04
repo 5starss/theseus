@@ -20,6 +20,7 @@ from src.history.service import (
     persist_assistant_message,
     persist_user_message,
 )
+from src.plan.service import restore_plan_after_stream, validate_executing_plan_binding
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
@@ -122,6 +123,17 @@ async def stream_agent_response(
         logger.error("Theseus stream error: %s", exc, exc_info=True)
         yield sse_event("error", {"message": str(exc)})
     finally:
+        if engine_context.plan_id:
+            try:
+                restore_plan_after_stream(
+                    db,
+                    plan_id=engine_context.plan_id,
+                    project_id=session.project_id,
+                    chat_session_id=chat_session_id,
+                    executing_user_id=session.user_id,
+                )
+            except Exception as exc:
+                logger.error("Plan restoration failed: %s", exc, exc_info=True)
         outbox_record = BillingOutboxRepository(db).enqueue(
             user_id=session.user_id,
             project_id=session.project_id,
@@ -138,6 +150,7 @@ async def stream_agent_response(
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
     chat_session_id: int = Query(..., ge=1),
+    plan_id: str | None = Query(None),
     session: SessionContext = Depends(get_sse_session_context),
     db: Session = Depends(get_db),
 ):
@@ -153,14 +166,26 @@ async def stream_endpoint(
     )
 
     history_messages = await load_history_messages(session, chat_session_id)
+    bound_plan = None
+    mode = AgentMode.AGENT
+    if plan_id:
+        bound_plan = validate_executing_plan_binding(
+            db,
+            plan_id=plan_id,
+            project_id=session.project_id,
+            chat_session_id=chat_session_id,
+        )
+        mode = AgentMode.PLAN
 
     engine_context = EngineBuildContext(
         user_level=session.permission_level,
         project_tool_permissions=project_tool_permissions,
-        mode=AgentMode.AGENT,
+        mode=mode,
         approval_policy="reject",
         history_messages=history_messages,
         session_id=str(chat_session_id),
+        plan_id=plan_id,
+        plan_content=bound_plan.content if bound_plan is not None else None,
     )
 
     await persist_user_message(session, chat_session_id, prompt)

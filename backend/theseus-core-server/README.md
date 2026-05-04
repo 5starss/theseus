@@ -129,6 +129,18 @@ SPRING_BOOT_INTERNAL_URL=http://localhost:8080/internal/billing/usage
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+### 6.5. DB 스키마 초기화
+
+현재 Core Server는 Alembic 기반 마이그레이션이 아니라 SQLAlchemy 메타데이터의
+`create_all()`로 필요한 테이블을 자동 생성합니다. 서버 시작 시 자동으로 실행되며,
+수동 초기화가 필요하면 아래 스크립트를 사용할 수 있습니다.
+
+```bash
+python scratch/create_db.py
+```
+
+이 경로는 `tool_plans`를 포함한 Core Server 로컬 DB 테이블을 생성합니다.
+
 ---
 
 ## 7. 배포/운영 시 특이사항 (Porting Guide)

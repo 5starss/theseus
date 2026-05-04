@@ -2,10 +2,13 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from src.auth.schemas import SessionContext
+from src.db.postgres import SessionLocal
+from src.plan.service import assert_plan_is_executing
 from theseus_engine.models.state import AgentMode, TheseusStateMachine
+from theseus_engine.models.state import PlanPhase
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,8 @@ class EngineBuildContext:
     user_query: str | None = None
     history_messages: list[Any] | None = None
     session_id: str = "default"
+    plan_id: str | None = None
+    plan_content: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -59,6 +64,20 @@ def _resolve_excluded_tools(mode: AgentMode) -> set[str]:
     if mode != AgentMode.PLAN:
         return {"create_tool"}
     return set()
+
+
+async def _enforce_executing_plan_guard(plan_id: str | None, tool_name: str) -> None:
+    if tool_name != "create_tool":
+        return
+    if not plan_id:
+        raise EngineInitializationError("create_tool requires an executing plan")
+    db = SessionLocal()
+    try:
+        assert_plan_is_executing(db, plan_id)
+    except RuntimeError as exc:
+        raise EngineInitializationError(str(exc)) from exc
+    finally:
+        db.close()
 
 
 async def _deny_permission_prompt(tool_name: str, reason: str) -> bool:
@@ -160,6 +179,10 @@ def get_query_engine(
         )
 
     state_machine = TheseusStateMachine(initial_mode=build_context.mode)
+    if build_context.mode == AgentMode.PLAN:
+        state_machine.set_plan_phase(PlanPhase.EXECUTING)
+        if build_context.plan_content is not None:
+            state_machine.plan = str(build_context.plan_content)
     permission_checker = TheseusPermissionChecker(
         settings=PermissionSettings(),
         user_level=build_context.user_level,
@@ -177,6 +200,10 @@ def get_query_engine(
         hook_context,
         active_registry=active_registry,
         full_registry=None,
+        pre_tool_guard=lambda tool_name: _enforce_executing_plan_guard(
+            build_context.plan_id,
+            tool_name,
+        ),
     )
 
     engine = QueryEngine(
@@ -194,6 +221,7 @@ def get_query_engine(
             "tool_permissions": tool_permissions,
             "permission_prompt": _deny_permission_prompt,
             "session_id": build_context.session_id,
+            "plan_id": build_context.plan_id,
         },
     )
 
