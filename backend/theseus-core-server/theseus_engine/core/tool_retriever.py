@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -443,6 +444,9 @@ class ToolRetriever:
         Returns:
             선별된 BaseTool 인스턴스 리스트.
         """
+        from theseus_engine.observability.stats import SessionStats
+        _rag_start = time.monotonic()
+
         self._full_registry = full_registry
         if adaptive:
             k = compute_adaptive_k(query, base_k=k)
@@ -519,11 +523,15 @@ class ToolRetriever:
                     name, score,
                 )
 
+        _rag_ms = (time.monotonic() - _rag_start) * 1000
+        SessionStats.get().observe("rag.retrieval_ms", _rag_ms)
+
         log.info(
-            "[ToolRetriever] 쿼리='%s' → 선택된 %d개 도구: %s",
+            "[ToolRetriever] 쿼리='%s' → 선택된 %d개 도구: %s (%.0fms)",
             query[:40],
             len(selected),
             ", ".join(t.name for t in selected),
+            _rag_ms,
         )
         return selected
 
