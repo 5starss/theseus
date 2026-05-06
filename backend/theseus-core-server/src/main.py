@@ -7,6 +7,7 @@ from src.builder.worker import setup_scheduler
 from src.config import settings
 from src.db.postgres import init_db
 from src.routes import health, plan, sandbox, stream
+from src.tool_generation.consumer import start_tool_generation_consumer
 import logging
 
 # 로깅 설정
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
 
     scheduler = setup_scheduler()
     app.state.billing_scheduler = scheduler
+    app.state.tool_generation_consumer = None
 
     if scheduler is not None:
         scheduler.start()
@@ -33,8 +35,15 @@ async def lifespan(app: FastAPI):
         logger.warning("Billing outbox scheduler is unavailable in this environment.")
 
     try:
+        app.state.tool_generation_consumer = await start_tool_generation_consumer()
+    except Exception as exc:
+        logger.error("Tool generation Kafka consumer startup failed: %s", exc, exc_info=True)
+
+    try:
         yield
     finally:
+        if app.state.tool_generation_consumer is not None:
+            await app.state.tool_generation_consumer.stop()
         if scheduler is not None and scheduler.running:
             scheduler.shutdown(wait=False)
             logger.info("Billing outbox scheduler stopped.")

@@ -67,6 +67,8 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 
 	Optional<Tool> findByIdAndProjectAndStatusNot(Long id, Project project, ToolStatus status);
 
+	Optional<Tool> findByIdAndStatusNot(Long id, ToolStatus status);
+
 	Optional<Tool> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -1,0 +1,1 @@
+"""Tool generation Kafka integration."""
