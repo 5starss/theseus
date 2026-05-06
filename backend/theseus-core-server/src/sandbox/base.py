@@ -13,6 +13,7 @@ class SandboxInput(BaseModel):
     tool_code: str
     payload: Dict[str, Any]
     timeout_seconds: int = 10
+    runner_script_path: Optional[str] = None
 
 
 class SandboxExecutionRequest(BaseModel):
