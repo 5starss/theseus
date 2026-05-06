@@ -40,6 +40,10 @@ class BashTool(BaseTool):
     )
     input_model = BashInput
     permission_level = 3  # 높은 권한 — 셸 접근
+    is_destructive = True  # 셸 실행 — 항상 파괴적 가능성
+
+    def is_read_only(self, arguments) -> bool:
+        return False
 
     async def execute(
         self, arguments: BashInput, context: ToolExecutionContext
