@@ -2,6 +2,194 @@
 
 인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
 
+## [2026-05-06] Sandbox Enforcement + Persistence
+
+### 샌드박스 강제 관문 추가 (`src/tooling/service.py`, `src/tooling/sandbox_gate.py`, `src/tooling/sandbox_gate_runner.py`)
+- `create_tool` 산출물이 `ToolValidator`만 통과했다고 바로 활성화되지 않도록 변경했습니다.
+- 이제 서버 경로에서는 샌드박스 관문을 반드시 통과해야만 `active` 상태로 승격됩니다.
+- `create_tool_for_server(...)` 전체를 async 파이프라인으로 전환해 상태 전이와 샌드박스 실행을 하나의 서버 흐름으로 관리하도록 정리했습니다.
+
+### 상태 전이 및 활성화 분리 (`src/tooling/service.py`)
+- 툴 상태를 다음 단계로 분리했습니다.
+  - `draft_saved`
+  - `validated`
+  - `sandbox_passed`
+  - `active`
+  - `validation_failed`
+  - `sandbox_failed`
+- 파일 저장과 활성화는 이제 별도 단계입니다.
+- 생성 파일은 저장될 수 있지만, 아래 조건을 모두 만족하기 전에는 `active`로 전환되지 않습니다.
+  - `validationResult.success == true`
+  - `sandboxResult.success == true`
+  - `.py`와 `.meta.json` 산출물 존재
+
+### `.meta.json` 영속 레지스트리 SSOT 확정 (`src/tooling/service.py`)
+- 프로젝트별 툴 메타데이터의 단일 소스는 이번 단계에서 `.meta.json`으로 고정했습니다.
+- 메타 파일에는 다음 최신 상태 요약이 저장되도록 확장했습니다.
+  - `status`
+  - `isActive`
+  - `validationResult`
+  - `sandboxResult`
+  - `latestTraceId`
+  - `planId`
+  - `creatorUserId`
+- 같은 `tool_name`으로 재시도할 경우 기존 파일/메타를 overwrite하고 최신 상태만 유지하도록 정리했습니다.
+
+### 샌드박스 smoke gate 계약 고정 (`src/tooling/sandbox_gate_runner.py`, `src/sandbox/docker_executor.py`, `src/sandbox/base.py`)
+- 기존 일반 코드 실행용 sandbox runner와 별도로 `create_tool` 전용 gate runner를 추가했습니다.
+- 샌드박스 게이트는 다음 항목만 확인합니다.
+  - 모듈 import 성공
+  - `BaseTool` subclass 탐지
+  - 툴 클래스 인스턴스화 성공
+  - `name`, `description`, `input_model` 속성 존재
+  - `execute` 시그니처 확인
+- 실제 `execute()` 호출은 부작용 방지를 위해 수행하지 않도록 제한했습니다.
+- 샌드박스 결과는 `sandboxResult.success/status/logs/error/checkedAt/executionTimeMs/exitCode/timedOut` 구조로 메타에 기록됩니다.
+
+### 프로젝트 단위 active-only 자동 로드 (`src/tooling/service.py`, `src/builder/engine.py`)
+- 서버 재기동이나 세션 시작 시 툴 복원 기준을 `.py` 존재 여부가 아니라 `.meta.json` 상태로 변경했습니다.
+- `load_active_tools_for_project()`를 추가하고, 아래 조건을 모두 만족하는 툴만 자동 로드하도록 했습니다.
+  - `status == active`
+  - `isActive == true`
+  - `validationResult.success == true`
+  - `sandboxResult.success == true`
+  - 대응 `.py` 파일 존재
+- 이로써 승인 + 검증 + 샌드박스 성공한 툴만 복원되는 정책이 런타임에 고정됐습니다.
+
+### 감사 로그 및 추적 정보 연결 (`src/tooling/service.py`)
+- 단계별 감사 로그 이벤트를 추가했습니다.
+  - `tool_creation_draft_saved`
+  - `tool_creation_validated`
+  - `tool_creation_sandbox_passed`
+  - `tool_creation_activated`
+  - `tool_creation_failed`
+  - `tool_creation_unexpected_failure`
+- 각 이벤트에는 `project_id`, `plan_id`, `user_id`, `chat_session_id`, `tool_name`, `trace_id`를 남기도록 했습니다.
+- `.meta.json`에는 전체 이벤트 로그를 누적하지 않고 최신 상태 요약과 최근 `trace_id`만 유지하도록 역할을 분리했습니다.
+
+### 테스트 및 검증 (`tests/test_tooling_service.py`)
+- 다음 서버 경로 테스트를 추가했습니다.
+  - 검증 + 샌드박스 성공 시 `active` 전환
+  - 샌드박스 실패 시 파일/메타는 남지만 `active` 미전환
+  - 잘못된 Plan 실행 컨텍스트 차단
+  - `active` 메타만 자동 복원
+- 검증 상태는 다음과 같습니다.
+  - `python3 -m unittest tests.test_tooling_service` 통과
+  - 변경 파일 기준 `python3 -m py_compile ...` 통과
+  - 실제 Docker 샌드박스 통합 실행은 별도 런타임 확인이 추가로 필요합니다.
+
+## [2026-05-06] `create_tool` Server Migration + Sandbox Enforcement
+
+### 서버 전용 `create_tool` orchestration 레이어 분리 (`src/tooling/service.py`, `src/tooling/__init__.py`)
+- `create_tool` 서버 실행 경로를 CLI/TUI 결합 로직에서 분리하고, 서버 전용 orchestration 레이어를 신설했습니다.
+- 서버 경로에서는 `ToolCreatorTool`이 직접 파일 생성/검증/등록을 섞어 처리하지 않고 `create_tool_for_server(...)` async wrapper를 통해 실행되도록 변경했습니다.
+- Plan 실행 컨텍스트, 메타데이터 기록, 샌드박스 게이트, 활성화 정책을 한곳에서 관리할 수 있는 구조로 정리했습니다.
+
+### 프로젝트 단위 저장 정책 및 메타데이터 SSOT 확정 (`src/tooling/service.py`)
+- 커스텀 툴 저장 경로를 `theseus_engine/custom_tools/projects/<project_slug>/`로 고정했습니다.
+- 산출물 파일명 규칙은 다음과 같이 확정했습니다.
+  - `<tool_name>.py`
+  - `<tool_name>.meta.json`
+- `.meta.json`을 이번 단계의 단일 소스(SSOT)로 확정하고 다음 메타데이터를 저장하도록 확장했습니다.
+  - `toolName`
+  - `projectId`
+  - `planId`
+  - `creatorUserId`
+  - `chatSessionId`
+  - `status`
+  - `isActive`
+  - `validationResult`
+  - `sandboxResult`
+  - `approvalHistory`
+  - `latestTraceId`
+- 같은 `tool_name`으로 재시도할 경우 기존 파일/메타를 갱신하고 최신 상태만 유지하도록 정리했습니다.
+
+### `create_tool` 상태 전이 및 활성화 분리 (`src/tooling/service.py`)
+- 툴 생성 생명주기를 다음 상태로 분리했습니다.
+  - `draft_saved`
+  - `validated`
+  - `sandbox_passed`
+  - `active`
+  - `validation_failed`
+  - `sandbox_failed`
+- 이제 파일 저장과 활성화는 분리됩니다.
+- 생성 파일은 저장될 수 있어도, `active` 상태 전환은 아래 조건을 모두 만족할 때만 허용됩니다.
+  - `ToolValidator` 검증 성공
+  - 샌드박스 게이트 성공
+  - `.py`와 `.meta.json` 산출물 존재
+- `validated` 상태는 `ToolValidator` 성공과 그 결과의 메타데이터 반영까지 끝난 상태로 정의했습니다.
+
+### 샌드박스 강제 게이트 추가 (`src/tooling/sandbox_gate.py`, `src/tooling/sandbox_gate_runner.py`, `src/sandbox/base.py`, `src/sandbox/docker_executor.py`)
+- 검증 통과만으로는 툴이 활성화되지 않도록, 샌드박스 실행을 필수 관문으로 추가했습니다.
+- 기존 `main(payload)` 실행용 샌드박스 runner와 별도로 `create_tool` 전용 gate runner를 추가했습니다.
+- 샌드박스 게이트는 다음 조건을 확인합니다.
+  - 모듈 import 성공
+  - `BaseTool` subclass 탐지 성공
+  - `tool_class()` 인스턴스화 성공
+  - `name`, `description`, `input_model` 속성 확인
+  - `execute` 시그니처 확인
+- 실제 `execute()` 호출은 부작용 방지를 위해 수행하지 않도록 제한했습니다.
+- 샌드박스 결과는 `.meta.json`의 `sandboxResult`에 다음 구조로 기록합니다.
+  - `success`
+  - `status`
+  - `logs`
+  - `error`
+  - `checkedAt`
+  - `executionTimeMs`
+  - `exitCode`
+  - `timedOut`
+
+### Plan 실행 컨텍스트 가드 강화 (`src/plan/service.py`, `src/builder/engine.py`, `src/routes/stream.py`)
+- `create_tool` 실행 시 단순히 `plan_id` 존재 여부만 보는 것이 아니라, 다음 실행 컨텍스트를 함께 검증하도록 강화했습니다.
+  - `project_id`
+  - `chat_session_id`
+  - `executing_user_id`
+- `assert_plan_execution_context(...)`를 추가하여 Plan이 실제로 현재 프로젝트/세션/사용자 기준 `executing` 상태인지 확인하도록 했습니다.
+- 서버 엔진 컨텍스트에 `project_id`, `actor_user_id`, `chat_session_id`를 추가하고 `/stream?plan_id=...` 경로에서 이 값을 `create_tool` 실행 메타데이터로 전달하도록 연결했습니다.
+
+### 프로젝트 단위 영속 로더를 `active-only` 정책으로 전환 (`src/tooling/service.py`, `src/builder/engine.py`, `theseus_engine/tools/core/tool_factory.py`)
+- 서버 재기동/세션 시작 시 툴 자동 로드 기준을 `.py` 존재 여부에서 `.meta.json` 상태 기반으로 변경했습니다.
+- `load_active_tools_for_project()`를 추가하고, 다음 조건을 모두 만족할 때만 프로젝트 툴을 복원하도록 했습니다.
+  - `status == active`
+  - `isActive == true`
+  - `validationResult.success == true`
+  - `sandboxResult.success == true`
+  - 대응 `.py` 파일 존재
+- 서버 엔진 조립 시 프로젝트 컨텍스트가 있는 경우 legacy 전체 스캔 대신 project-scoped active loader를 사용하도록 변경했습니다.
+
+### 감사 로그 및 tracing 메타데이터 연결 (`src/tooling/service.py`)
+- `create_tool` 단계별 감사 로그 이벤트를 추가했습니다.
+  - `tool_creation_draft_saved`
+  - `tool_creation_validated`
+  - `tool_creation_sandbox_passed`
+  - `tool_creation_activated`
+  - `tool_creation_failed`
+  - `tool_creation_unexpected_failure`
+- 각 로그에는 다음 운영 추적 필드를 남기도록 했습니다.
+  - `project_id`
+  - `plan_id`
+  - `user_id`
+  - `chat_session_id`
+  - `tool_name`
+  - `trace_id`
+- `.meta.json`에는 전체 이벤트 로그를 누적하지 않고, 최신 상태 요약과 최근 `trace_id`만 유지하도록 역할을 분리했습니다.
+
+### `ToolCreatorTool` 서버 경로 async 연동 (`theseus_engine/tools/core/tool_factory.py`)
+- `create_tool_for_server(...)` 전체가 async 파이프라인으로 전환됨에 따라 `ToolCreatorTool.execute()`에서 서버 경로 호출을 `await`하도록 수정했습니다.
+- 서버 컨텍스트가 있는 경우에만 새 async wrapper를 사용하고, legacy CLI/TUI fallback은 별도 경로로 유지했습니다.
+
+### 테스트 및 검증 (`tests/test_tooling_service.py`)
+- `create_tool` 서버 경로 테스트를 async 기준으로 재작성했습니다.
+- 다음 시나리오를 검증하는 테스트를 추가했습니다.
+  - 검증 + 샌드박스 성공 시 `active` 전환
+  - 샌드박스 실패 시 파일/메타는 남지만 `active` 미전환
+  - 잘못된 Plan 실행 컨텍스트 차단
+  - `active` 상태 메타만 자동 복원
+- 검증 상태는 다음과 같습니다.
+  - `python3 -m unittest tests.test_tooling_service` 통과
+  - 변경 파일 기준 `python3 -m py_compile ...` 통과
+  - 실제 Docker 샌드박스 통합 실행은 이번 변경 후 별도 런타임 검증이 추가로 필요합니다.
+
 ## [2026-05-04] Plan Server Migration - Phase 1
 
 ### Plan 영속 모델 추가 (`src/db/models.py`)

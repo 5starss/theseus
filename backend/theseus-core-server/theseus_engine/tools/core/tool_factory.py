@@ -499,7 +499,7 @@ class ToolCreatorTool(BaseTool):
         if project_id and user_id and chat_session_id is not None and plan_id:
             from src.tooling import ServerToolCreationRequest, create_tool_for_server
 
-            result = create_tool_for_server(
+            result = await create_tool_for_server(
                 ServerToolCreationRequest(
                     tool_name=arguments.tool_name,
                     python_code=arguments.python_code,

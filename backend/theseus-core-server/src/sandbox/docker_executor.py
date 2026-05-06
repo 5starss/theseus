@@ -66,7 +66,11 @@ class DockerExecutor(ToolRunner):
                 encoding="utf-8",
             )
 
-            runner_path = Path(__file__).with_name("sandbox_runner.py")
+            runner_path = (
+                Path(request.runner_script_path)
+                if request.runner_script_path
+                else Path(__file__).with_name("sandbox_runner.py")
+            )
             (input_dir / "sandbox_runner.py").write_text(
                 runner_path.read_text(encoding="utf-8"),
                 encoding="utf-8",
