@@ -9,6 +9,7 @@ import ProjectLayout from '@/layouts/ProjectLayout';
 import ProtectedRoute from './ProtectedRoute';
 import ChatSessionPage from '@/pages/user/projects/ChatSessionPage';
 import ProjectSettingsPage from '@/pages/user/projects/ProjectSettingsPage';
+import ToolListPage from '@/pages/user/projects/ToolListPage';
 
 export const router = createBrowserRouter([
   {
@@ -38,7 +39,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'tools',
-            element: <div className="p-8 text-white">Tools Page (To Be Implemented)</div>,
+            element: <ToolListPage />,
           },
           {
             path: 'settings',
