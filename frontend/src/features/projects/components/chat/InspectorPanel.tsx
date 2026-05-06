@@ -1,6 +1,10 @@
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
+import { chatApi } from '../../api/chat';
 
 export function InspectorPanel() {
+  const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const currentPlan = useChatSessionStore(state => state.currentPlan);
   const progressInfo = useChatSessionStore(state => state.progressInfo);
   const draftPhase = useChatSessionStore(state => state.draftPhase);
@@ -8,15 +12,114 @@ export function InspectorPanel() {
   const setCommentMode = useChatSessionStore(state => state.setCommentMode);
   const draftComments = useChatSessionStore(state => state.draftComments);
   const setDraftComment = useChatSessionStore(state => state.setDraftComment);
+  const clearDraftComments = useChatSessionStore(state => state.clearDraftComments);
+  const currentToolId = useChatSessionStore(state => state.currentToolId);
+  const isGenerating = useChatSessionStore(state => state.isGenerating);
+  const isClosed = useChatSessionStore(state => state.isClosed);
+  const setIsGenerating = useChatSessionStore(state => state.setIsGenerating);
+  const setAbortController = useChatSessionStore(state => state.setAbortController);
+  const addMessage = useChatSessionStore(state => state.addMessage);
+  const updateLastMessageContent = useChatSessionStore(state => state.updateLastMessageContent);
+  const setPlan = useChatSessionStore(state => state.setPlan);
+  const setProgressInfo = useChatSessionStore(state => state.setProgressInfo);
+
+  const [isApproving, setIsApproving] = useState(false);
 
   const handleRequestFeedbackClick = () => {
     if (commentMode) {
-      // 보내기 (regenerate api 호출 로직이 들어가야 함)
-      console.log('Sending feedback:', draftComments);
+      if (!projectId || !sessionId) return;
+      
+      const payload = {
+        message: "수정 요청",
+        comments: draftComments
+      };
+
+      // Add User feedback message
+      addMessage({
+        id: crypto.randomUUID(),
+        sender: 'USER',
+        content: `수정 요청 사항을 전송했습니다.\n${Object.entries(draftComments).map(([k, v]) => `- [${k}] ${v}`).join('\n')}`,
+        createdAt: new Date().toISOString()
+      });
+
+      // Add Assistant loading message
+      addMessage({
+        id: crypto.randomUUID(),
+        sender: 'ASSISTANT',
+        content: '',
+        createdAt: new Date().toISOString()
+      });
+
+      setIsGenerating(true);
       setCommentMode(false);
+
+      const abortCtrl = chatApi.generateToolStream(
+        projectId,
+        sessionId,
+        currentToolId,
+        payload,
+        (ev: unknown) => {
+          try {
+            const event = ev as { data?: string };
+            const data = event.data ? JSON.parse(event.data) : null;
+            if (!data) return;
+  
+            if (data.type === 'chunk' && data.content) {
+              updateLastMessageContent(data.content);
+            } else if (data.type === 'plan') {
+              setPlan(data.plan);
+            } else if (data.type === 'progress') {
+              setProgressInfo(data.progress);
+            }
+          } catch {
+            const event = ev as { data?: string };
+            if (event.data) {
+               updateLastMessageContent(event.data);
+            }
+          }
+        },
+        (err) => {
+          console.error('SSE Error during feedback:', err);
+          setIsGenerating(false);
+          setAbortController(null);
+        },
+        () => {
+          setIsGenerating(false);
+          setAbortController(null);
+          clearDraftComments();
+        }
+      );
+      setAbortController(abortCtrl);
+
     } else {
       // 수정 요청 모드 진입
       setCommentMode(true);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!projectId || !currentToolId) return;
+    setIsApproving(true);
+    try {
+      await chatApi.requestToolApproval(projectId, currentToolId);
+      addMessage({
+        id: crypto.randomUUID(),
+        sender: 'SYSTEM_NOTICE',
+        content: '도구 생성이 성공적으로 승인되었습니다.',
+        createdAt: new Date().toISOString()
+      });
+      // Optionally update phase to 'APPROVED' if managed by client, 
+      // but usually the backend stream or response dictates it.
+    } catch (e) {
+      console.error('Approval failed:', e);
+      addMessage({
+        id: crypto.randomUUID(),
+        sender: 'SYSTEM_NOTICE',
+        content: '승인 요청에 실패했습니다.',
+        createdAt: new Date().toISOString()
+      });
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -56,13 +159,13 @@ export function InspectorPanel() {
       </div>
 
       {/* Step / Plan List */}
-      <div className="flex-1 overflow-y-auto pr-2 space-y-4 -mr-2">
+      <div className="flex-1 overflow-y-auto pr-2 space-y-4 -mr-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
         {currentPlan ? (
           currentPlan.blocks.map(block => (
             <div key={block.blockId} className="bg-slate-800/30 border border-slate-700/50 p-4 rounded text-sm text-slate-300 flex flex-col gap-3">
               <div>
                 <div className="font-medium text-blue-200 mb-1">{block.title}</div>
-                <div className="text-slate-400 leading-relaxed">{block.content}</div>
+                <div className="text-slate-400 leading-relaxed whitespace-pre-wrap">{block.content}</div>
               </div>
               
               {commentMode && (
@@ -87,13 +190,14 @@ export function InspectorPanel() {
       {/* Footer Actions */}
       <div className="pt-8 shrink-0 space-y-3">
         <button 
-          disabled={draftPhase !== 'REVIEW' || commentMode}
+          onClick={handleApprove}
+          disabled={draftPhase !== 'REVIEW' || commentMode || isApproving || isGenerating || isClosed}
           className="w-full bg-blue-400 hover:bg-blue-500 text-[#00315d] font-bold py-3 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          생성 승인
+          {isClosed ? '종료된 세션' : isApproving ? '승인 요청 중...' : '생성 승인'}
         </button>
         <button 
-          disabled={draftPhase !== 'REVIEW'}
+          disabled={draftPhase !== 'REVIEW' || isGenerating || isApproving || isClosed}
           onClick={handleRequestFeedbackClick}
           className={`w-full border py-3 rounded text-sm transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed
             ${commentMode 

@@ -4,14 +4,33 @@ import {
   MessageSquarePlus,
   Wrench,
   Settings,
-  UserCircle
+  UserCircle,
+  MoreVertical,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { projectApi, type ProjectMemberResponse } from '@/features/projects/api';
 import { chatApi } from '@/features/projects/api/chat';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useChatSessionStore } from '../stores/useChatSessionStore';
 import type { ChatSession } from '@/features/projects/types/chat';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 interface SidebarProps {
   projectId?: string;
@@ -26,6 +45,12 @@ export function Sidebar({ projectId }: SidebarProps) {
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fetchTrigger, setFetchTrigger] = useState(0);
+  
+  // Rename Modal States
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [editingSession, setEditingSession] = useState<{ id: number; title: string } | null>(null);
+  const [tempTitle, setTempTitle] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
 
   const refetchSessions = () => setFetchTrigger(n => n + 1);
 
@@ -92,6 +117,62 @@ export function Sidebar({ projectId }: SidebarProps) {
     }
   };
 
+  const handleRenameSession = (sessionId: number, currentTitle: string) => {
+    setEditingSession({ id: sessionId, title: currentTitle });
+    setTempTitle(currentTitle);
+    setIsRenameModalOpen(true);
+  };
+
+  const confirmRename = async () => {
+    if (!tempTitle || !tempTitle.trim() || !editingSession || !projectId) return;
+    if (tempTitle.trim() === editingSession.title) {
+      setIsRenameModalOpen(false);
+      return;
+    }
+
+    setIsRenaming(true);
+    try {
+      await chatApi.updateSessionTitle(projectId, editingSession.id.toString(), tempTitle.trim());
+      setSessions(prev => prev.map(s => s.sessionId === editingSession.id ? { ...s, title: tempTitle.trim() } : s));
+      
+      // 만약 현재 활성화된 세션이라면 전역 스토어도 업데이트
+      const currentActiveSessionId = window.location.pathname.split('/').pop();
+      if (currentActiveSessionId === editingSession.id.toString()) {
+        useChatSessionStore.getState().updateTitle(tempTitle.trim());
+      }
+      setIsRenameModalOpen(false);
+    } catch (err) {
+      console.error('Failed to rename session:', err);
+      alert('이름 수정에 실패했습니다.');
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
+  const handleCloseSession = async (sessionId: number) => {
+    if (!projectId || !window.confirm('이 세션을 종료하시겠습니까?')) return;
+
+    try {
+      await chatApi.closeSession(projectId, sessionId.toString());
+      setSessions(prev => prev.map(s => s.sessionId === sessionId ? { ...s, isClosed: true } : s));
+      
+      // 만약 현재 활성화된 세션이라면 전역 스토어도 업데이트
+      const currentActiveSessionId = window.location.pathname.split('/').pop();
+      if (currentActiveSessionId === sessionId.toString()) {
+        useChatSessionStore.getState().setClosed(true);
+        useChatSessionStore.getState().addMessage({
+          id: crypto.randomUUID(),
+          sender: 'SYSTEM_NOTICE',
+          content: '이 세션이 종료되었습니다.',
+          createdAt: new Date().toISOString()
+        });
+      }
+    } catch (err) {
+      console.error('Failed to close session:', err);
+      alert('세션 종료에 실패했습니다.');
+    }
+  };
+
   const isAdmin = projectMember?.projectRole === 'ADMIN';
   const displayName = projectMember?.name || user?.name || 'User';
 
@@ -110,8 +191,11 @@ export function Sidebar({ projectId }: SidebarProps) {
       ? getRoleLabel(projectMember.projectRole)
       : (errorMessage || 'Access Denied');
 
+  const activeSessions = sessions.filter(s => !s.isClosed);
+
   return (
-    <aside className="w-[260px] h-screen shrink-0 bg-[rgba(17,24,39,0.8)] backdrop-blur-[12px] border-r border-[#1f2937] flex flex-col pt-6 z-20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] relative">
+    <>
+      <aside className="w-[260px] h-screen shrink-0 bg-[rgba(17,24,39,0.8)] backdrop-blur-[12px] border-r border-[#1f2937] flex flex-col pt-6 z-20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] relative">
 
       {/* Brand Section */}
       <div className="px-6 mb-8 flex items-center gap-3">
@@ -167,25 +251,54 @@ export function Sidebar({ projectId }: SidebarProps) {
             <li className="px-3 py-2 text-[10px] text-slate-500 animate-pulse">
               세션 목록 로딩 중...
             </li>
-          ) : sessions.length > 0 ? (
-            sessions.map((session) => (
-              <li key={session.sessionId}>
+          ) : activeSessions.length > 0 ? (
+            activeSessions.map((session) => (
+              <li key={session.sessionId} className="group relative">
                 <NavLink
                   to={`/projects/${projectId}/sessions/${session.sessionId}`}
                   className={({ isActive }) => cn(
-                    "block w-full px-3 py-2 rounded text-xs tracking-[0.35px] truncate transition-colors",
+                    "flex items-center justify-between w-full px-3 py-2 rounded text-xs tracking-[0.35px] transition-colors",
                     isActive
                       ? "bg-white/10 text-white font-medium"
                       : "text-slate-400 hover:bg-white/5 hover:text-slate-300"
                   )}
                 >
-                  {session.title}
+                  <span className="truncate flex-1">{session.title}</span>
                 </NavLink>
+
+                {/* Dropdown Menu Trigger - Visible on hover */}
+                <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="p-1 hover:text-white text-slate-500 rounded transition-colors">
+                        <MoreVertical size={14} />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-[#0b0e14] border-slate-800 text-slate-300 min-w-[100px]">
+                      <DropdownMenuItem 
+                        onClick={() => handleRenameSession(session.sessionId, session.title)}
+                        className="flex items-center gap-2 text-xs focus:bg-white/5 focus:text-white cursor-pointer"
+                      >
+                        <Pencil size={12} />
+                        <span>이름 수정</span>
+                      </DropdownMenuItem>
+                      {!session.isClosed && (
+                        <DropdownMenuItem 
+                          onClick={() => handleCloseSession(session.sessionId)}
+                          className="flex items-center gap-2 text-xs focus:bg-red-500/10 focus:text-red-400 text-red-400/80 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                          <span>세션 종료</span>
+                        </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </li>
             ))
           ) : (
             <li className="px-3 py-2 text-[10px] text-slate-500 italic">
-              생성된 세션이 없습니다.
+              활성 세션이 없습니다.
             </li>
           )}
         </ul>
@@ -222,5 +335,43 @@ export function Sidebar({ projectId }: SidebarProps) {
         </div>
       </div >
     </aside >
+    
+    {/* Rename Modal */}
+    <Dialog open={isRenameModalOpen} onOpenChange={setIsRenameModalOpen}>
+      <DialogContent className="bg-[#0b1424] border-slate-800 text-slate-100 sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle className="text-blue-400 font-['Space_Grotesk']">세션 이름 수정</DialogTitle>
+        </DialogHeader>
+        <div className="py-4">
+          <Input
+            value={tempTitle}
+            onChange={(e) => setTempTitle(e.target.value)}
+            placeholder="세션 이름을 입력하세요"
+            className="bg-slate-900/50 border-slate-700 text-slate-200 focus:border-blue-400"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') confirmRename();
+            }}
+            autoFocus
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            onClick={() => setIsRenameModalOpen(false)}
+            className="text-slate-400 hover:text-slate-100 hover:bg-white/5"
+          >
+            취소
+          </Button>
+          <Button
+            onClick={confirmRename}
+            disabled={isRenaming || !tempTitle.trim() || tempTitle.trim() === editingSession?.title}
+            className="bg-blue-400 hover:bg-blue-500 text-[#003a6b] font-bold"
+          >
+            {isRenaming ? '저장 중...' : '저장'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }

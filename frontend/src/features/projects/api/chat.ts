@@ -24,10 +24,27 @@ export const chatApi = {
     return response.data.result;
   },
 
-  // 세션의 기존 채팅 내역 및 상태 조회 (가정)
+  // 세션의 기존 채팅 내역 및 상태 조회
   getSessionDetails: async (projectId: string, sessionId: string) => {
     const response = await apiClient.get<ApiResponse<unknown>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}`
+    );
+    return response.data.result;
+  },
+
+  // 채팅 세션 제목 수정
+  updateSessionTitle: async (projectId: string, sessionId: string, title: string) => {
+    const response = await apiClient.patch<ApiResponse<ChatSession>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}`,
+      { title }
+    );
+    return response.data.result;
+  },
+
+  // 채팅 세션 종료
+  closeSession: async (projectId: string, sessionId: string) => {
+    const response = await apiClient.patch<ApiResponse<ChatSession>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/close`
     );
     return response.data.result;
   },
