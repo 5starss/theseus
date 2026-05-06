@@ -184,6 +184,9 @@ async def stream_endpoint(
         approval_policy="reject",
         history_messages=history_messages,
         session_id=str(chat_session_id),
+        project_id=session.project_id,
+        actor_user_id=session.user_id,
+        chat_session_id=chat_session_id,
         plan_id=plan_id,
         plan_content=bound_plan.content if bound_plan is not None else None,
     )

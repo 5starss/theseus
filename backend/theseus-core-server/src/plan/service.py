@@ -186,3 +186,21 @@ def assert_plan_is_executing(db: Session, plan_id: str) -> ToolPlan:
     if plan.status != PLAN_STATUS_EXECUTING:
         raise RuntimeError("Plan is not in executing state")
     return plan
+
+
+def assert_plan_execution_context(
+    db: Session,
+    *,
+    plan_id: str,
+    project_id: str,
+    chat_session_id: int,
+    executing_user_id: str,
+) -> ToolPlan:
+    plan = assert_plan_is_executing(db, plan_id)
+    if plan.project_id != project_id:
+        raise RuntimeError("Plan does not belong to this project")
+    if plan.chat_session_id != chat_session_id:
+        raise RuntimeError("Plan does not belong to this chat session")
+    if plan.executing_by_user_id != executing_user_id:
+        raise RuntimeError("Plan is executing under a different user")
+    return plan
