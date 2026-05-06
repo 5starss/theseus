@@ -44,6 +44,58 @@ _FS_DESTRUCTIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# ------------------------------------------------------------------
+# Bash 전용 위험 패턴
+# ------------------------------------------------------------------
+
+# 파일시스템 파괴 명령어 (rm -rf, dd, mkfs 등)
+_BASH_DESTRUCTIVE_PATTERN = re.compile(
+    r"(rm\s+-[a-z]*r[a-z]*f"           # rm -rf
+    r"|rm\s+-[a-z]*f[a-z]*r"           # rm -fr
+    r"|rm\s+--force\s+-r"
+    r"|\bdd\s+if="                      # dd if=/dev/zero of=...
+    r"|\bmkfs\."                        # mkfs.ext4, mkfs.vfat 등
+    r"|\bformat\s+[a-z]:"              # Windows: format C:
+    r"|\bshred\s+"
+    r"|\bwipefs\s+)",
+    re.IGNORECASE,
+)
+
+# 원격 코드 실행 패턴 (curl|bash, eval 등)
+_BASH_RCE_PATTERN = re.compile(
+    r"(curl\s+.+\|\s*(ba)?sh"
+    r"|wget\s+.+\|\s*(ba)?sh"
+    r"|curl\s+.+\|\s*python3?"
+    r"|wget\s+.+\|\s*python3?"
+    r"|\beval\s*\$\("                  # eval $(...)
+    r"|\beval\s+`"                     # eval `...`
+    r"|python3?\s+-c\s+['\"]import"   # python -c "import os; os.system(...)"
+    r"|\bbase64\s+-d\s+.*\|\s*(ba)?sh)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# 권한 상승 패턴 (sudo 파괴 명령, chmod 777 등)
+_BASH_PRIVILEGE_PATTERN = re.compile(
+    r"(\bsudo\s+(rm|dd|mkfs|wipefs|shred)"
+    r"|\bsudo\s+chmod\s+-[a-z]*R[a-z]*\s+777"
+    r"|\bchmod\s+-[a-z]*R[a-z]*\s+777"
+    r"|\bchown\s+-[a-z]*R[a-z]*\s+root"
+    r"|\bsu\s*-\s*root)",
+    re.IGNORECASE,
+)
+
+# 시스템 경로 탈출 / 덮어쓰기 패턴
+_BASH_PATH_TRAVERSAL_PATTERN = re.compile(
+    r"(>\s*/etc/"
+    r"|>\s*/bin/"
+    r"|>\s*/usr/"
+    r"|>\s*/boot/"
+    r"|>\s*/sys/"
+    r"|>\s*/proc/"
+    r"|\.\./\.\./\.\./)",              # 3단계 이상 상위 탐색
+    re.IGNORECASE,
+)
+
 
 class ExecutionValidator:
     """도구 실행 인자에서 상태 변경(Mutating) 작업을 탐지합니다.
@@ -111,6 +163,34 @@ class ExecutionValidator:
                 f"[Execution] Tool '{tool_name}' arguments contain "
                 f"destructive filesystem operations (remove/rmtree etc.) detected."
             )
+
+        # bash 툴 전용 위험 패턴 검사
+        if tool_name == "bash":
+            command = str(tool_input.get("command", ""))
+
+            if _BASH_DESTRUCTIVE_PATTERN.search(command):
+                warnings.append(
+                    f"[Bash] 파일시스템 파괴 명령어 패턴 감지 "
+                    f"(rm -rf / dd / mkfs 등): '{command[:80]}'"
+                )
+
+            if _BASH_RCE_PATTERN.search(command):
+                warnings.append(
+                    f"[Bash] 원격 코드 실행 패턴 감지 "
+                    f"(curl|bash / eval 등): '{command[:80]}'"
+                )
+
+            if _BASH_PRIVILEGE_PATTERN.search(command):
+                warnings.append(
+                    f"[Bash] 권한 상승 위험 명령어 감지 "
+                    f"(sudo rm / chmod 777 등): '{command[:80]}'"
+                )
+
+            if _BASH_PATH_TRAVERSAL_PATTERN.search(command):
+                warnings.append(
+                    f"[Bash] 시스템 경로 탈출/덮어쓰기 패턴 감지 "
+                    f"(> /etc/ 등): '{command[:80]}'"
+                )
 
         if warnings:
             detail = "\n".join(f"  - {w}" for w in warnings)
