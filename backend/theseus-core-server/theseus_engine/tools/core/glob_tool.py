@@ -21,6 +21,10 @@ class GlobTool(BaseTool):
     description = "Find files in the workspace matching a glob pattern. Recursive search supported with '**'."
     input_model = GlobInput
     permission_level = 1
+    is_destructive = False
+
+    def is_read_only(self, arguments) -> bool:
+        return True
 
     async def execute(self, arguments: GlobInput, context: ToolExecutionContext) -> ToolResult:
         search_root = _resolve_path(context.cwd, arguments.root)

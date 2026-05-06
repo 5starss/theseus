@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
 
-from theseus_engine.tools.core.file_utils import _resolve_path, _check_path_security
+from theseus_engine.tools.core.file_utils import _resolve_path, _check_path_security, _strip_markdown_links
 
 log = logging.getLogger(__name__)
 
@@ -21,7 +21,11 @@ class EditFileTool(BaseTool):
     """Edits a file by replacing a specific string."""
     name = "edit_file"
     description = "Edit an existing file by replacing a specific text block with new content. Use unique 'old_str' for precision."
+    is_destructive = True  # 파일 내용 변경
     input_model = EditFileInput
+
+    def is_read_only(self, arguments) -> bool:
+        return False
     permission_level = 2
 
     async def execute(self, arguments: EditFileInput, context: ToolExecutionContext) -> ToolResult:
@@ -36,11 +40,18 @@ class EditFileTool(BaseTool):
 
         try:
             content = path.read_text(encoding="utf-8")
-            if arguments.old_str not in content:
+            old_str = arguments.old_str
+            new_str = arguments.new_str
+            # 코드 파일의 경우 old_str/new_str의 마크다운 링크 제거 후 매칭
+            if path.suffix in (".py", ".ts", ".js", ".tsx", ".jsx", ".sh"):
+                old_str = _strip_markdown_links(old_str)
+                new_str = _strip_markdown_links(new_str)
+                content = _strip_markdown_links(content)
+            if old_str not in content:
                 return ToolResult(output=f"Error: The provided 'old_str' was not found in {arguments.path}. Ensure exact match including whitespace.", is_error=True)
-            
+
             count = 1 if not arguments.replace_all else -1
-            updated = content.replace(arguments.old_str, arguments.new_str, count)
+            updated = content.replace(old_str, new_str, count)
             
             path.write_text(updated, encoding="utf-8")
             actual_replaces = content.count(arguments.old_str) if arguments.replace_all else 1

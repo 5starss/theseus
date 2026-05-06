@@ -24,6 +24,10 @@ class GrepTool(BaseTool):
     description = "Search for a pattern in file contents within the workspace."
     input_model = GrepInput
     permission_level = 1
+    is_destructive = False
+
+    def is_read_only(self, arguments) -> bool:
+        return True
 
     async def execute(self, arguments: GrepInput, context: ToolExecutionContext) -> ToolResult:
         search_path = _resolve_path(context.cwd, arguments.path)

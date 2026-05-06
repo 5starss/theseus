@@ -7,6 +7,7 @@ This module provides three core capabilities:
 """
 
 import os
+import re
 import ast
 import logging
 import inspect
@@ -333,7 +334,6 @@ class ToolValidator:
 def load_custom_tools(
     registry: ToolRegistry,
     tool_permissions: Optional[Dict[str, int]] = None,
-    project_id: str | None = None,
 ) -> List[str]:
     """custom_tools/ 폴더 내의 모든 .py 파일을 스캔하여 ToolRegistry에 자동 등록합니다.
 
@@ -348,15 +348,6 @@ def load_custom_tools(
     Returns:
         성공적으로 로드된 툴 이름 목록.
     """
-    if project_id:
-        from src.tooling import load_custom_tools_for_project
-
-        return load_custom_tools_for_project(
-            registry,
-            project_id=project_id,
-            tool_permissions=tool_permissions,
-        )
-
     loaded: List[str] = []
 
     if not os.path.isdir(CUSTOM_TOOLS_DIR):
@@ -486,6 +477,10 @@ class ToolCreatorTool(BaseTool):
         "THEN call the newly created tool in your next response."
     )
     input_model = ToolCreatorInput
+    permission_level = 2
+
+    def is_read_only(self, arguments) -> bool:
+        return False
 
     async def execute(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
@@ -528,14 +523,29 @@ class ToolCreatorTool(BaseTool):
         os.makedirs(CUSTOM_TOOLS_DIR, exist_ok=True)
         file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{arguments.tool_name}.py")
 
-        try:
-            code = inject_permission_level(
-                arguments.python_code,
-                arguments.permission_level,
+        # 0. permission_level을 코드에 자동 삽입 (클래스 속성이 없는 경우)
+        code = arguments.python_code
+        if "permission_level" not in code:
+            # 정규식: 클래스 내부의 'name = "..."' 패턴을 안전하게 타겟팅
+            pattern = r'(\n\s+)name\s*=\s*(["\'][^"\']+["\'])'
+            replacement = (
+                r'\g<1>permission_level = '
+                + str(arguments.permission_level)
+                + r'\g<1>name = \2'
             )
-        except Exception as exc:
-            return ToolResult(output=str(exc), is_error=True)
+            new_code = re.sub(pattern, replacement, code, count=1)
+            if new_code == code:
+                return ToolResult(
+                    output=(
+                        "❌ Could not find 'name = ...' attribute inside the class. "
+                        "Auto-injection of permission_level failed. "
+                        "Please include permission_level explicitly in your code."
+                    ),
+                    is_error=True,
+                )
+            code = new_code
 
+        # 1. 코드 문법 검증
         is_valid_code, code_msg = ToolValidator.validate_code(code)
         if not is_valid_code:
             return ToolResult(
@@ -543,32 +553,48 @@ class ToolCreatorTool(BaseTool):
                 is_error=True,
             )
 
+        # 2. 파일 저장
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
 
+        # 3. 모듈 로드 및 구조(Schema) 검증
         is_valid_module, mod_msg, tool_class = ToolValidator.validate_and_load_module(
             arguments.tool_name, file_path
         )
         if not is_valid_module:
+            # 검증 실패 시 생성된 파일 롤백(삭제)
             os.remove(file_path)
             return ToolResult(
                 output=f"❌ Tool specification validation failed (file rolled back):\n{mod_msg}",
                 is_error=True,
             )
 
+        # 4. 런타임 ToolRegistry 및 RBAC에 즉시 등록
         registry = context.metadata.get("tool_registry")
         tool_permissions = context.metadata.get("tool_permissions")
         level = getattr(tool_class, "permission_level", arguments.permission_level)
 
         if registry is not None and tool_class is not None:
             try:
-                registry.register(tool_class())
+                instance = tool_class()
+                registry.register(instance)
+
+                # RBAC 권한 맵에도 등록
                 if tool_permissions is not None:
                     tool_permissions[tool_class.name] = level
-            except Exception as exc:
+
                 return ToolResult(
                     output=(
-                        f"✅ Tool file saved, but runtime registration failed: {exc}\n"
+                        f"✅ Tool '{tool_class.name}' created, validated, and registered!\n"
+                        f"File: {file_path}\n"
+                        f"Permission level: {level}\n"
+                        f"⚡ This tool is immediately available in the current session."
+                    )
+                )
+            except Exception as e:
+                return ToolResult(
+                    output=(
+                        f"✅ Tool file saved, but runtime registration failed: {e}\n"
                         f"File: {file_path}\n"
                         f"The tool will be auto-loaded on the next session start."
                     )
@@ -579,6 +605,7 @@ class ToolCreatorTool(BaseTool):
                 f"✅ Tool '{tool_class.name}' created and validated!\n"
                 f"File: {file_path}\n"
                 f"Permission level: {level}\n"
-                f"⚠️ Legacy mode created the tool outside the server wrapper."
+                f"⚠️ Could not access runtime registry for auto-registration. "
+                f"The tool will be auto-loaded on the next session start."
             )
         )

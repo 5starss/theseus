@@ -21,7 +21,11 @@ class ReadFileTool(BaseTool):
     name = "read_file"
     description = "Read a text file from the local repository. Returns content with line numbers."
     input_model = ReadFileInput
+    is_destructive = False
     permission_level = 1
+
+    def is_read_only(self, arguments) -> bool:
+        return True
 
     async def execute(self, arguments: ReadFileInput, context: ToolExecutionContext) -> ToolResult:
         path = _resolve_path(context.cwd, arguments.path)

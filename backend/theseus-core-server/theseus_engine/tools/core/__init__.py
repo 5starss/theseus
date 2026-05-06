@@ -67,6 +67,16 @@ from theseus_engine.tools.core.worktree_tools import (
 )
 from theseus_engine.tools.core.brief_tool import BriefTool
 
+# ── Tool Discovery (RAG 폴백) ─────────────────────────────────────
+from theseus_engine.tools.core.tool_search_tool import ToolSearchTool
+
+# ── Agent Memory (3-scope) ───────────────────────────────────────
+from theseus_engine.tools.core.memory_tools import (
+    MemoryWriteTool,
+    MemoryReadTool,
+    MemoryListTool,
+)
+
 # ── Interactive & Knowledge ──────────────────────────────────────
 from theseus_engine.tools.core.interactive_tools import AskUserTool
 from theseus_engine.tools.core.knowledge_tools import (
@@ -83,6 +93,7 @@ ALL_CORE_TOOLS = [
     SystemRebootTool,
     # Meta
     ToolCreatorTool,
+    ToolSearchTool,
     # File
     ReadFileTool,
     WriteFileTool,
@@ -122,4 +133,8 @@ ALL_CORE_TOOLS = [
     IngestDocumentTool,
     # Project management
     TodoWriteTool,
+    # Memory
+    MemoryWriteTool,
+    MemoryReadTool,
+    MemoryListTool,
 ]
