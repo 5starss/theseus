@@ -22,6 +22,7 @@ public class ToolSummaryResponse {
 	private String displayDescription;
 	private ToolStatus status;
 	private ToolDraftPhase draftPhase;
+	private Long draftVersion;
 	private Integer toolGrade;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
@@ -39,6 +40,7 @@ public class ToolSummaryResponse {
 			.displayDescription(tool.getDisplayDescription())
 			.status(tool.getStatus())
 			.draftPhase(tool.getDraftPhase())
+			.draftVersion(tool.getDraftVersion())
 			.toolGrade(tool.getToolGrade())
 			.createdAt(tool.getCreatedAt())
 			.updatedAt(tool.getUpdatedAt())

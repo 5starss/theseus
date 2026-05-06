@@ -80,6 +80,9 @@ public class Tool {
 	@Column(name = "draft_phase", nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'PLAN'")
 	private ToolDraftPhase draftPhase;
 
+	@Column(name = "draft_version", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
+	private Long draftVersion;
+
 	@Column(name = "tool_grade", columnDefinition = "INT UNSIGNED")
 	private Integer toolGrade;
 
@@ -108,6 +111,7 @@ public class Tool {
 		String displayDescription,
 		ToolStatus status,
 		ToolDraftPhase draftPhase,
+		Long draftVersion,
 		Integer toolGrade,
 		String rawMarkdown,
 		String structuredPlanJson,
@@ -124,6 +128,7 @@ public class Tool {
 		this.displayDescription = displayDescription;
 		this.status = status == null ? ToolStatus.DRAFT : status;
 		this.draftPhase = draftPhase == null ? ToolDraftPhase.PLAN : draftPhase;
+		this.draftVersion = draftVersion == null ? 0L : draftVersion;
 		this.toolGrade = toolGrade;
 		this.rawMarkdown = rawMarkdown;
 		this.structuredPlanJson = structuredPlanJson;
@@ -161,6 +166,7 @@ public class Tool {
 		String draftSnapshot
 	) {
 		updateDraft(rawMarkdown, structuredPlanJson, draftSnapshot, ToolDraftPhase.REVIEW);
+		increaseDraftVersion();
 	}
 
 	public void markAsPlan() {
@@ -242,6 +248,9 @@ public class Tool {
 		LocalDateTime now = LocalDateTime.now();
 		createdAt = now;
 		updatedAt = now;
+		if (draftVersion == null) {
+			draftVersion = 0L;
+		}
 	}
 
 	@PreUpdate
@@ -255,5 +264,9 @@ public class Tool {
 		}
 
 		return fileName;
+	}
+
+	private void increaseDraftVersion() {
+		draftVersion = draftVersion == null ? 1L : draftVersion + 1;
 	}
 }

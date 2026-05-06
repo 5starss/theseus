@@ -28,6 +28,7 @@ import com.theseus.api.domain.toolgeneration.event.ToolRegenerationRequestEvent;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -110,6 +111,7 @@ public class ToolGenerationService {
 		Tool tool = getToolForUpdate(toolId, project, chatSession);
 		validateRegenerationPermission(projectMember, tool);
 		validateRegeneratableTool(tool);
+		validateDraftVersion(tool, request.getBaseDraftVersion());
 		tool.startRegeneration();
 
 		chatMessageService.saveUserToolMessage(
@@ -254,6 +256,12 @@ public class ToolGenerationService {
 	private void validateRegeneratableTool(Tool tool) {
 		if (!tool.canRegenerate() || ToolStatus.DELETED.equals(tool.getStatus())) {
 			throw BusinessException.of(ErrorCode.TOOL_REGENERATION_STATUS_REQUIRED);
+		}
+	}
+
+	private void validateDraftVersion(Tool tool, Long baseDraftVersion) {
+		if (!Objects.equals(tool.getDraftVersion(), baseDraftVersion)) {
+			throw BusinessException.of(ErrorCode.TOOL_DRAFT_VERSION_MISMATCH);
 		}
 	}
 

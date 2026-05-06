@@ -76,6 +76,7 @@ class ToolGenerationEventServiceTest {
 		assertThat(tool.getRawMarkdown()).isEqualTo("## PLAN v1");
 		assertThat(tool.getStructuredPlanJson()).isEqualTo("{\"version\":1,\"blocks\":[]}");
 		assertThat(tool.getDraftSnapshot()).isEqualTo("{\"source\":\"core\"}");
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
 		verify(chatMessageService).saveAssistantMessage(
 			tool.getChatSession(),
 			tool,
@@ -98,6 +99,7 @@ class ToolGenerationEventServiceTest {
 		toolGenerationEventService.handleCompleted(event);
 
 		// Then
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
 		verify(chatMessageService).saveAssistantMessage(
 			tool.getChatSession(),
 			tool,
@@ -121,6 +123,7 @@ class ToolGenerationEventServiceTest {
 
 		// Then
 		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
+		assertThat(tool.getDraftVersion()).isZero();
 		verify(chatMessageService).saveSystemNoticeMessage(
 			same(tool.getChatSession()),
 			same(tool),

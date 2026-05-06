@@ -17,6 +17,7 @@ public class InternalToolDraftResponse {
 	private JsonNode structuredPlanJson;
 	private JsonNode draftSnapshot;
 	private ToolDraftPhase draftPhase;
+	private Long draftVersion;
 
 	public static InternalToolDraftResponse createOf(
 		Tool tool,
@@ -31,6 +32,7 @@ public class InternalToolDraftResponse {
 			.structuredPlanJson(structuredPlanJson)
 			.draftSnapshot(draftSnapshot)
 			.draftPhase(tool.getDraftPhase())
+			.draftVersion(tool.getDraftVersion())
 			.build();
 	}
 }

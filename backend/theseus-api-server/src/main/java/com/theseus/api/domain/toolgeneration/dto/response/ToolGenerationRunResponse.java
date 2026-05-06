@@ -16,6 +16,7 @@ public class ToolGenerationRunResponse {
 	private Long sessionId;
 	private ToolStatus status;
 	private ToolDraftPhase draftPhase;
+	private Long draftVersion;
 	private String sseUrl;
 
 	public static ToolGenerationRunResponse createOf(String runId, Tool tool) {
@@ -26,6 +27,7 @@ public class ToolGenerationRunResponse {
 			.sessionId(tool.getChatSession().getId())
 			.status(tool.getStatus())
 			.draftPhase(tool.getDraftPhase())
+			.draftVersion(tool.getDraftVersion())
 			.sseUrl("/api/v1/tool-runs/" + runId + "/events")
 			.build();
 	}
