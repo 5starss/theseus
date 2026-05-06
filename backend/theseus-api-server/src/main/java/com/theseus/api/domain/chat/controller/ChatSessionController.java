@@ -9,6 +9,10 @@ import com.theseus.api.domain.chat.dto.response.ChatSessionDetailResponse;
 import com.theseus.api.domain.chat.dto.response.ChatSessionPageResponse;
 import com.theseus.api.domain.chat.dto.response.ChatSessionResponse;
 import com.theseus.api.domain.chat.service.ChatSessionService;
+import com.theseus.api.domain.toolgeneration.dto.request.ToolGenerationRequest;
+import com.theseus.api.domain.toolgeneration.dto.request.ToolRegenerationRequest;
+import com.theseus.api.domain.toolgeneration.dto.response.ToolGenerationRunResponse;
+import com.theseus.api.domain.toolgeneration.service.ToolGenerationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -32,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChatSessionController {
 
 	private final ChatSessionService chatSessionService;
+	private final ToolGenerationService toolGenerationService;
 
 	@Operation(summary = "채팅 세션 생성", description = "프로젝트 멤버가 Tool 생성을 진행할 채팅 세션을 생성합니다.")
 	@PostMapping
@@ -88,5 +93,41 @@ public class ChatSessionController {
 	) {
 		ChatSessionResponse response = chatSessionService.closeChatSession(currentUser, projectId, sessionId);
 		return ApiResponse.onSuccess(SuccessCode.OK, response);
+	}
+
+	@Operation(summary = "Draft Tool 생성 요청", description = "채팅 세션 기반 Draft Tool을 생성하고 Kafka에 생성 요청을 발행합니다.")
+	@PostMapping("/{sessionId}/tools/generate")
+	public ResponseEntity<ApiResponse<ToolGenerationRunResponse>> generateTool(
+		@AuthenticationPrincipal AuthenticatedUser currentUser,
+		@PathVariable Long projectId,
+		@PathVariable Long sessionId,
+		@Valid @RequestBody ToolGenerationRequest request
+	) {
+		ToolGenerationRunResponse response = toolGenerationService.generateTool(
+			currentUser,
+			projectId,
+			sessionId,
+			request
+		);
+		return ApiResponse.onSuccess(SuccessCode.ACCEPTED, response);
+	}
+
+	@Operation(summary = "Draft Tool 재생성 요청", description = "채팅 세션의 기존 Draft Tool을 PLAN 단계로 되돌리고 Kafka에 재생성 요청을 발행합니다.")
+	@PatchMapping("/{sessionId}/tools/{toolId}/regenerate")
+	public ResponseEntity<ApiResponse<ToolGenerationRunResponse>> regenerateTool(
+		@AuthenticationPrincipal AuthenticatedUser currentUser,
+		@PathVariable Long projectId,
+		@PathVariable Long sessionId,
+		@PathVariable Long toolId,
+		@Valid @RequestBody ToolRegenerationRequest request
+	) {
+		ToolGenerationRunResponse response = toolGenerationService.regenerateTool(
+			currentUser,
+			projectId,
+			sessionId,
+			toolId,
+			request
+		);
+		return ApiResponse.onSuccess(SuccessCode.ACCEPTED, response);
 	}
 }

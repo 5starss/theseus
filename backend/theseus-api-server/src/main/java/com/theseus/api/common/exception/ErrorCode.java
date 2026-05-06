@@ -56,6 +56,10 @@ public enum ErrorCode {
     APPROVED_TOOL_ONLY(HttpStatus.BAD_REQUEST, "TOOL-003", "승인된 Tool만 조회할 수 있습니다."),
     TOOL_USE_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-004", "Tool 사용 권한이 필요합니다."),
     TOOL_ACCESS_LEVEL_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-005", "Tool 접근 레벨이 부족합니다."),
+    TOOL_CREATE_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-006", "Tool 생성 권한이 필요합니다."),
+    TOOL_UPDATE_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-007", "Tool 수정 권한이 필요합니다."),
+    DUPLICATE_TOOL_FILE_NAME(HttpStatus.CONFLICT, "TOOL-008", "이미 존재하는 Tool 파일명입니다."),
+    TOOL_REGENERATION_STATUS_REQUIRED(HttpStatus.CONFLICT, "TOOL-009", "DRAFT 또는 REJECTED Tool만 재생성할 수 있습니다."),
 
     // ToolApproval
     TOOL_APPROVAL_NOT_FOUND(HttpStatus.NOT_FOUND, "TAPP-001", "Tool 승인 요청을 찾을 수 없습니다."),
