@@ -5,8 +5,11 @@ import { Lock } from 'lucide-react';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
 
+import { useProjectStore } from '../../stores/useProjectStore';
+
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
+  const { currentProject } = useProjectStore();
   const {
     messages,
     addMessage,
@@ -110,10 +113,10 @@ export function ChatArea() {
 
       {/* Top App Bar (Workspace Info) */}
       <div className="h-14 border-b border-slate-800 bg-[#0b0e14]/60 backdrop-blur flex items-center justify-between px-6 z-20">
-        <div className="flex items-center">
-          <span className="text-xs font-bold text-slate-500">WORKSPACE</span>
-          <span className="mx-2 text-slate-600">/</span>
-          <span className="text-xs font-medium text-blue-400">{title || '새 세션'}</span>
+        <div className="flex items-center gap-1">
+          <span className="text-base font-bold text-blue-400 uppercase tracking-wider">{currentProject?.projectName || 'Loading...'}</span>
+          <span className="mx-1.5 text-slate-600">/</span>
+          <span className="text-sm font-medium text-slate-400">{title || '새 세션'}</span>
           {isClosed && (
             <div className="ml-3 flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-[10px] text-red-400 font-bold uppercase tracking-wider">
               <Lock size={10} />
