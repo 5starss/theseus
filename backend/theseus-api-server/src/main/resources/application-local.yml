@@ -27,6 +27,15 @@ spring:
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
       retries: 3
+    consumer:
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:theseus-api-tool-generation}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: com.theseus.api.domain.toolgeneration.event,java.util,java.lang,com.fasterxml.jackson.databind
+        spring.json.value.default.type: com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent
+        spring.json.use.type.headers: false
 
 theseus:
   kafka:

@@ -138,6 +138,26 @@ public class ChatMessageService {
 		);
 	}
 
+	@Transactional
+	public ChatMessage saveSystemNoticeMessage(
+		ChatSession chatSession,
+		Tool tool,
+		String content
+	) {
+		if (tool != null) {
+			validateToolChatSession(chatSession, tool);
+		}
+
+		return saveMessage(
+			chatSession,
+			tool,
+			ChatMessageSenderType.SYSTEM,
+			ChatMessageType.SYSTEM_NOTICE,
+			ChatMessageContentType.TEXT,
+			content
+		);
+	}
+
 	private ChatMessage saveMessage(
 		ChatSession chatSession,
 		Tool tool,
