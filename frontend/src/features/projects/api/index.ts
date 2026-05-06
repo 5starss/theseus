@@ -1,6 +1,6 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
-import type { PageResponse } from '@/features/admin/api';
+import type { PageResponse, ProjectResponse } from '@/features/admin/api';
 
 export interface MyProjectResponse {
   projectId: number;
@@ -55,6 +55,14 @@ export const projectApi = {
     const response = await apiClient.get<ApiResponse<ProjectMemberResponse>>(`/api/v1/projects/${projectId}/me`);
     // 백엔드 응답 구조에 맞춰 result 또는 data 자체를 반환
     return response.data.result || (response.data as unknown as ProjectMemberResponse);
+  },
+
+  /**
+   * 프로젝트 상세 조회
+   */
+  getProject: async (projectId: string | number) => {
+    const response = await apiClient.get<ApiResponse<ProjectResponse>>(`/api/v1/projects/${projectId}`);
+    return response.data.result;
   },
 
   /**

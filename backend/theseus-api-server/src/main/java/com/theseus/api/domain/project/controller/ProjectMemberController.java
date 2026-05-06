@@ -32,14 +32,14 @@ public class ProjectMemberController {
 
     private final ProjectMemberService projectMemberService;
 
-    @Operation(summary = "프로젝트 멤버 목록 조회", description = "프로젝트에 속한 멤버 목록을 조회합니다. status가 없으면 진행 중인 멤버만 조회합니다.")
+    @Operation(summary = "프로젝트 멤버 목록 조회", description = "프로젝트에 속한 멤버 목록을 조회합니다. status가 'ALL'이면 전체 조회, 없으면 진행 중인 멤버만 조회합니다.")
     @GetMapping("/members")
     public ResponseEntity<ApiResponse<List<ProjectMemberResponse>>> getProjectMembers(
             @AuthenticationPrincipal AuthenticatedUser currentUser,
             @PathVariable Long projectId,
             @RequestParam(required = false) String status
     ) {
-        ProjectMemberStatus memberStatus = parseMemberStatus(status);
+        ProjectMemberStatus memberStatus = "ALL".equalsIgnoreCase(status) ? null : parseMemberStatus(status);
         List<ProjectMemberResponse> responses = projectMemberService.getProjectMembers(currentUser, projectId, memberStatus);
         return ApiResponse.onSuccess(SuccessCode.OK, responses);
     }

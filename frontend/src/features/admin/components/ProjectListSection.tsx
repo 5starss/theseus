@@ -129,18 +129,18 @@ export default function ProjectListSection() {
         <Table className="table-fixed">
           <TableHeader className="bg-[rgba(28,43,60,0.5)] border-b border-[rgba(65,71,81,0.1)] sticky top-0 z-10">
             <TableRow className="border-none hover:bg-transparent">
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[200px]">프로젝트 명</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[120px]">담당자 사번</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[130px]">담당자 이름</TableHead>
-              <TableHead className="text-[#c1c7d3] font-medium text-[12px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] text-center w-[100px]">상태</TableHead>
-              <TableHead className="text-right text-white/60 font-medium h-10 px-6 py-2 w-[80px]"></TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[14px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[180px]">프로젝트 명</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[14px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[140px]">담당자 사번</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[14px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] w-[150px]">담당자 이름</TableHead>
+              <TableHead className="text-[#c1c7d3] font-medium text-[14px] tracking-[1.2px] uppercase h-[40px] px-6 py-[10px] text-center w-[80px]">상태</TableHead>
+              <TableHead className="text-right text-white/60 font-medium h-10 px-6 py-2 w-[83px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredProjects.length === 0 ? (
               !isLoading && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-white/40">
+                  <TableCell colSpan={5} className="text-center py-8 text-white/40">
                     프로젝트가 없습니다.
                   </TableCell>
                 </TableRow>
@@ -148,9 +148,9 @@ export default function ProjectListSection() {
             ) : (
               filteredProjects.map((project) => (
                 <TableRow key={project.projectId} className="border-t border-[rgba(65,71,81,0.1)] h-[57px]">
-                  <TableCell className="text-[#d4e4fa] px-6 py-[10px] text-[15px] font-medium truncate">{project.name}</TableCell>
-                  <TableCell className="text-[#a4c9ff] px-6 py-[10px] text-[14px] font-mono truncate">{project.projectAdminEmployeeNumber}</TableCell>
-                  <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[16px] font-medium truncate">{project.projectAdminName}</TableCell>
+                  <TableCell className="text-[#d4e4fa] px-6 py-[10px] text-[14px] font-medium truncate whitespace-nowrap">{project.name}</TableCell>
+                  <TableCell className="text-[#a4c9ff] px-6 py-[10px] text-[15px] font-mono truncate whitespace-nowrap">{project.projectAdminEmployeeNumber}</TableCell>
+                  <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[15px] font-medium truncate whitespace-nowrap">{project.projectAdminName}</TableCell>
                   <TableCell className="px-6 py-[10px] text-center">
                     {project.status === 'ACTIVE' ? (
                       <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[10px] font-bold text-[#4ade80] uppercase">
@@ -162,32 +162,33 @@ export default function ProjectListSection() {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="px-6 text-right py-3">
-                    {isEditing ? (
-                      <button
-                        onClick={() => handleStatusToggle(project.projectId, project.status)}
-                        className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400/60 hover:text-red-400"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    ) : (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger className="p-2 hover:bg-white/10 rounded-md transition-colors outline-none text-white/60">
-                          <MoreVertical className="w-4 h-4" />
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="bg-[#051424] border-white/10 text-white min-w-[150px]">
-                          <DropdownMenuItem 
-                            className="hover:bg-white/10 focus:bg-white/10 cursor-pointer gap-2"
-                            onClick={() => {
-                              setSelectedProject(project);
-                              setIsEditModalOpen(true);
-                            }}
-                          >
-                            <Edit className="w-4 h-4" />
-                            <span>프로젝트 수정</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                  <TableCell className="px-6 text-center py-3">
+                    {isEditing && (
+                      <div className="flex items-center justify-center gap-1">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger className="p-2 hover:bg-white/10 rounded-md transition-colors outline-none text-white/60">
+                            <MoreVertical className="w-4 h-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="bg-[#051424] border-white/10 text-white min-w-[150px]">
+                            <DropdownMenuItem
+                              className="hover:bg-white/10 focus:bg-white/10 cursor-pointer gap-2"
+                              onClick={() => {
+                                setSelectedProject(project);
+                                setIsEditModalOpen(true);
+                              }}
+                            >
+                              <Edit className="w-4 h-4" />
+                              <span>프로젝트 수정</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <button
+                          onClick={() => handleStatusToggle(project.projectId, project.status)}
+                          className="p-2 hover:bg-red-500/10 rounded-md transition-colors text-red-400/60 hover:text-red-400"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -196,7 +197,7 @@ export default function ProjectListSection() {
             {!isLoading && filteredProjects.length > 0 && filteredProjects.length < 8 && (
               Array.from({ length: 8 - filteredProjects.length }).map((_, index) => (
                 <TableRow key={`empty-${index}`} className="border-t border-[rgba(65,71,81,0.05)] h-[57px] hover:bg-transparent">
-                  <TableCell colSpan={6} />
+                  <TableCell colSpan={5} />
                 </TableRow>
               ))
             )}
@@ -231,7 +232,7 @@ export default function ProjectListSection() {
         onClose={() => setIsAddModalOpen(false)}
         onSuccess={refetch}
       />
-      
+
       <EditProjectModal
         isOpen={isEditModalOpen}
         onClose={() => {

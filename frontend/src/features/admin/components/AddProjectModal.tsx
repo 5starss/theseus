@@ -33,7 +33,7 @@ export default function AddProjectModal({ isOpen, onClose, onSuccess }: AddProje
     try {
       console.log('Searching for employeeNumber:', trimmedId);
       const user = await adminApi.searchUserByEmployeeNumber(trimmedId);
-      if (user) {
+      if (user && user.systemRole !== 'SUPER_ADMIN') {
         setSearchedUser(user);
       } else {
         alert('사용자를 찾을 수 없습니다.');
