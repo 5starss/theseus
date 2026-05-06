@@ -11,10 +11,20 @@ services:
       CORE_POSTGRES_HOST: theseus-local-postgres
       CORE_POSTGRES_PORT: 5432
       CORE_POSTGRES_DSN: postgresql://root:root@theseus-local-postgres:5432/theseus_core
+      SPRING_BOOT_INTERNAL_URL: http://theseus-api-server:8080
+      SPRING_BOOT_AUTH_VERIFY_URL: http://theseus-api-server:8080/api/internal/auth/verify
+      SPRING_BOOT_PROJECT_PERMISSIONS_URL: http://theseus-api-server:8080/api/internal/project/permissions
+      SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
+      SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
+      SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
+      SPRING_BOOT_INTERNAL_TOOL_DRAFT_URL: http://theseus-api-server:8080/api/internal/tools/{tool_id}/draft
+      CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-local-kafka:29092
     ports:
       - "8086:8086"
     depends_on:
       theseus-local-postgres:
+        condition: service_healthy
+      theseus-local-kafka:
         condition: service_healthy
     networks:
       - theseus-local-network
