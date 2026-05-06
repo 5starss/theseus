@@ -1,13 +1,17 @@
 package com.theseus.api.domain.toolgeneration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
@@ -115,6 +119,7 @@ class ToolGenerationServiceTest {
 		assertThat(response.getToolId()).isEqualTo(40L);
 		assertThat(response.getStatus()).isEqualTo(ToolStatus.DRAFT);
 		assertThat(response.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
+		assertThat(response.getDraftVersion()).isZero();
 		ArgumentCaptor<Tool> toolCaptor = ArgumentCaptor.forClass(Tool.class);
 		verify(chatMessageService).saveUserToolMessage(
 			same(chatSession),
@@ -164,6 +169,7 @@ class ToolGenerationServiceTest {
 		assertThat(response.getToolId()).isEqualTo(tool.getId());
 		assertThat(response.getStatus()).isEqualTo(ToolStatus.DRAFT);
 		assertThat(response.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
+		assertThat(response.getDraftVersion()).isEqualTo(1L);
 		verify(chatMessageService).saveUserToolMessage(
 			chatSession,
 			tool,
@@ -179,6 +185,42 @@ class ToolGenerationServiceTest {
 		assertThat(event.regeneration()).isTrue();
 		assertThat(event.payload()).isInstanceOf(ToolRegenerationRequestEvent.class);
 		assertThat(((ToolRegenerationRequestEvent) event.payload()).baseDraftVersion()).isEqualTo(1L);
+	}
+
+	@Test
+	void regenerateToolFailsBeforeSideEffectsWhenBaseDraftVersionMismatch() {
+		ProjectFixture fixture = createProjectFixture(false, false);
+		ChatSession chatSession = createChatSession(32L, fixture.project(), fixture.projectMember());
+		Tool tool = createTool(42L, fixture.project(), chatSession, fixture.projectMember(), ToolStatus.REJECTED, 2L);
+		ToolRegenerationRequest request = createRegenerationRequest();
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolRepository.findByIdAndProjectAndChatSessionForUpdate(tool.getId(), fixture.project(), chatSession))
+			.thenReturn(Optional.of(tool));
+
+		assertThatThrownBy(() -> toolGenerationService.regenerateTool(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			tool.getId(),
+			request
+		))
+			.isInstanceOfSatisfying(BusinessException.class, exception ->
+				assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TOOL_DRAFT_VERSION_MISMATCH)
+			);
+
+		assertThat(tool.getStatus()).isEqualTo(ToolStatus.REJECTED);
+		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
+		assertThat(tool.getDraftVersion()).isEqualTo(2L);
+		verifyNoInteractions(chatMessageService, eventPublisher);
 	}
 
 	private ToolGenerationRequest createGenerationRequest(String fileName, String userMessage) {
@@ -243,6 +285,17 @@ class ToolGenerationServiceTest {
 		ProjectMember projectMember,
 		ToolStatus status
 	) {
+		return createTool(id, project, chatSession, projectMember, status, 1L);
+	}
+
+	private Tool createTool(
+		Long id,
+		Project project,
+		ChatSession chatSession,
+		ProjectMember projectMember,
+		ToolStatus status,
+		Long draftVersion
+	) {
 		Tool tool = Tool.builder()
 			.project(project)
 			.chatSession(chatSession)
@@ -250,6 +303,7 @@ class ToolGenerationServiceTest {
 			.fileName("sales-summary-tool")
 			.status(status)
 			.draftPhase(ToolDraftPhase.REVIEW)
+			.draftVersion(draftVersion)
 			.build();
 		ReflectionTestUtils.setField(tool, "id", id);
 		return tool;

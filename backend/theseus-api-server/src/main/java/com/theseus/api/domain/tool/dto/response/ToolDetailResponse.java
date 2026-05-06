@@ -22,6 +22,7 @@ public class ToolDetailResponse {
 	private String displayDescription;
 	private ToolStatus status;
 	private ToolDraftPhase draftPhase;
+	private Long draftVersion;
 	private Integer toolGrade;
 	private String rawMarkdown;
 	private String structuredPlanJson;
@@ -42,6 +43,7 @@ public class ToolDetailResponse {
 			.displayDescription(tool.getDisplayDescription())
 			.status(tool.getStatus())
 			.draftPhase(tool.getDraftPhase())
+			.draftVersion(tool.getDraftVersion())
 			.toolGrade(tool.getToolGrade())
 			.rawMarkdown(tool.getRawMarkdown())
 			.structuredPlanJson(tool.getStructuredPlanJson())

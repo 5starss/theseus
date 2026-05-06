@@ -179,6 +179,7 @@ CREATE TABLE tools (
     display_description TEXT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
     draft_phase VARCHAR(30) NOT NULL DEFAULT 'PLAN',
+    draft_version BIGINT NOT NULL DEFAULT 0,
     tool_grade INT UNSIGNED NULL,
     raw_markdown LONGTEXT NULL,
     structured_plan_json LONGTEXT NULL,

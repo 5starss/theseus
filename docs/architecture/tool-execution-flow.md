@@ -41,7 +41,7 @@ DB는 최종 상태의 기준 저장소다.
 
 | 테이블 | 역할 |
 | --- | --- |
-| `tools` | Tool 본체, 상태, Draft 데이터 |
+| `tools` | Tool 본체, 상태, Draft 데이터, `draft_version` |
 | `chat_sessions` | 대화 세션 |
 | `chat_messages` | 최종 사용자 메시지, 최종 Assistant 메시지, 시스템 안내 |
 | `tool_approvals` | 승인 요청과 검토 이력 |
@@ -98,7 +98,7 @@ Kafka는 비동기 저장과 상태 변경을 담당한다.
 | 이벤트 | 생산자 | 소비자 | 역할 |
 | --- | --- | --- | --- |
 | `CHAT_USER_MESSAGE_REQUESTED` | BE | Chat Consumer | 사용자 메시지를 `chat_messages`에 저장한다. |
-| `TOOL_GENERATION_COMPLETED` | BE | Tool Consumer | 최종 Assistant 메시지 저장, Tool Draft 데이터 갱신, `draft_phase = REVIEW` 변경을 처리한다. |
+| `TOOL_GENERATION_COMPLETED` | BE | Tool Consumer | 최종 Assistant 메시지 저장, Tool Draft 데이터 갱신, `draft_phase = REVIEW` 변경, `draft_version` 증가를 처리한다. |
 | `TOOL_GENERATION_FAILED` | BE | Tool Consumer | 실패 상태 기록, 필요 시 시스템 메시지 저장, Redis 실패 이벤트 발행을 처리한다. |
 
 Kafka Consumer가 `message_order`를 배정한다. 같은 `chat_session_id`에서 다음 순서를 계산하고 저장하는 과정은 트랜잭션으로 처리한다. `(chat_session_id, message_order)` unique constraint는 마지막 방어선이다.
@@ -118,7 +118,7 @@ sequenceDiagram
     FE->>BE: POST /projects/{projectId}/sessions/{sessionId}/tools/generate
     BE->>BE: Access Token 검증
     BE->>BE: 프로젝트 멤버, canCreateTool 검증
-    BE->>DB: Tool DRAFT / PLAN 생성
+    BE->>DB: Tool DRAFT / PLAN 생성(draft_version = 0)
     BE->>BE: runId 생성
     BE->>Redis: run 상태 등록, TTL 설정
     BE->>Kafka: CHAT_USER_MESSAGE_REQUESTED 발행
@@ -136,6 +136,7 @@ sequenceDiagram
     Consumer->>DB: ASSISTANT chat_messages 저장
     Consumer->>DB: Tool draft 데이터 갱신
     Consumer->>DB: Tool draft_phase = REVIEW
+    Consumer->>DB: Tool draft_version 증가
     Consumer->>Redis: completed 이벤트 publish
     Redis-->>BE: SSE 담당 BE가 completed subscribe
     BE-->>FE: SSE completed 전달
@@ -163,7 +164,7 @@ Content-Type: application/json
 1. Access Token 검증
 2. 프로젝트 접근 권한 검증
 3. Tool 생성 권한 검증
-4. `tools.status = DRAFT`, `tools.draft_phase = PLAN` 생성
+4. `tools.status = DRAFT`, `tools.draft_phase = PLAN`, `tools.draft_version = 0` 생성
 5. `runId` 생성
 6. Redis에 run 상태 등록
 7. Kafka에 USER 메시지 저장 이벤트 발행
@@ -268,7 +269,8 @@ Kafka Consumer는 아래 작업을 하나의 트랜잭션으로 처리한다.
 4. `tools.structured_plan_json` 갱신
 5. `tools.draft_snapshot` 갱신
 6. `tools.draft_phase = REVIEW` 변경
-7. Redis에 `completed` 이벤트 발행
+7. `tools.draft_version` 1 증가
+8. Redis에 `completed` 이벤트 발행
 
 FE가 `completed`를 받으면 최종 메시지는 DB 조회 가능한 상태여야 한다.
 
@@ -276,8 +278,11 @@ FE가 `completed`를 받으면 최종 메시지는 DB 조회 가능한 상태여
 
 재생성은 동일한 Tool을 대상으로 새 `runId`를 발급한다.
 
+FE는 현재 Tool 조회 응답의 `draftVersion`을 `baseDraftVersion`으로 전송한다. BE는 `baseDraftVersion`과 `tools.draft_version`이 일치할 때만 재생성을 시작한다. 값이 다르면 오래된 PLAN에 대한 피드백으로 보고 USER 피드백 메시지 저장, Tool 상태 변경, Kafka 발행을 수행하지 않는다.
+
 ```text
 USER TOOL_FEEDBACK
+-> baseDraftVersion과 tools.draft_version 비교
 -> Tool draft_phase = PLAN
 -> runId 생성
 -> Redis run 상태 등록
@@ -287,6 +292,7 @@ USER TOOL_FEEDBACK
 -> Kafka TOOL_GENERATION_COMPLETED
 -> ASSISTANT TOOL_REGENERATE_RESPONSE 저장
 -> Tool draft_phase = REVIEW
+-> Tool draft_version 증가
 -> completed SSE
 ```
 

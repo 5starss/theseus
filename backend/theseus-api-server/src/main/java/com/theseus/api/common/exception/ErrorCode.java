@@ -62,6 +62,7 @@ public enum ErrorCode {
     DUPLICATE_TOOL_FILE_NAME(HttpStatus.CONFLICT, "TOOL-008", "이미 존재하는 Tool 파일명입니다."),
     TOOL_REGENERATION_STATUS_REQUIRED(HttpStatus.CONFLICT, "TOOL-009", "DRAFT 또는 REJECTED Tool만 재생성할 수 있습니다."),
     TOOL_FILE_NAME_REQUIRED(HttpStatus.BAD_REQUEST, "TOOL-010", "Tool 파일명은 비어 있을 수 없습니다."),
+    TOOL_DRAFT_VERSION_MISMATCH(HttpStatus.CONFLICT, "TOOL-011", "최신 Tool PLAN 버전과 일치하지 않습니다."),
 
     // ToolApproval
     TOOL_APPROVAL_NOT_FOUND(HttpStatus.NOT_FOUND, "TAPP-001", "Tool 승인 요청을 찾을 수 없습니다."),

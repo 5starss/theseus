@@ -23,6 +23,7 @@ class ToolTest {
 		// Then
 		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DRAFT);
 		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
+		assertThat(tool.getDraftVersion()).isZero();
 		assertThat(tool.canRegenerate()).isTrue();
 		assertThat(tool.canRequestApproval()).isFalse();
 	}
@@ -41,7 +42,31 @@ class ToolTest {
 		assertThat(tool.getStructuredPlanJson()).isEqualTo("{\"steps\":[]}");
 		assertThat(tool.getDraftSnapshot()).isEqualTo("{\"version\":1}");
 		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
 		assertThat(tool.canRequestApproval()).isTrue();
+	}
+
+	@Test
+	@DisplayName("PLAN 전환은 draftVersion을 증가시키지 않는다")
+	void planTransitionsDoNotIncreaseDraftVersion() {
+		// Given
+		Tool tool = createTool(null);
+
+		// When & Then
+		tool.startRegeneration();
+		assertThat(tool.getDraftVersion()).isZero();
+
+		tool.markAsPlan();
+		assertThat(tool.getDraftVersion()).isZero();
+
+		tool.completeDraftReview("raw markdown", "{\"steps\":[]}", "{\"version\":1}");
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
+
+		tool.startRegeneration();
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
+
+		tool.markAsPlan();
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
 	}
 
 	@Test

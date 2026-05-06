@@ -25,7 +25,7 @@
 
 `messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
-Draft Tool의 PLAN은 `tools.structured_plan_json`에 구조화된 JSON으로 저장한다. PLAN JSON은 `version`과 `blocks[].blockId`를 포함해야 한다. `version`은 사용자가 오래된 PLAN에 피드백을 보내는 상황을 막기 위한 기준값이며, `blockId`는 블록별 피드백을 기존 PLAN 블록과 매칭하기 위한 식별자다.
+Draft Tool의 PLAN은 `tools.structured_plan_json`에 구조화된 JSON으로 저장한다. PLAN JSON은 `version`과 `blocks[].blockId`를 포함할 수 있다. 오래된 PLAN 피드백 여부는 `structured_plan_json.version`이 아니라 `tools.draft_version`을 기준으로 검증한다. `blockId`는 블록별 피드백을 기존 PLAN 블록과 매칭하기 위한 식별자다.
 
 ## Tool 목록 조회
 
@@ -78,6 +78,7 @@ Authorization: Bearer {accessToken}
         "displayDescription": "CSV 매출 데이터를 요약합니다.",
         "status": "APPROVED",
         "draftPhase": "REVIEW",
+        "draftVersion": 1,
         "toolGrade": 2,
         "createdAt": "2026-04-30T10:00:00",
         "updatedAt": "2026-04-30T10:10:00"
@@ -126,6 +127,7 @@ Authorization: Bearer {accessToken}
     "displayDescription": "CSV 매출 데이터를 요약합니다.",
     "status": "APPROVED",
     "draftPhase": "REVIEW",
+    "draftVersion": 1,
     "toolGrade": 2,
     "rawMarkdown": "## Tool Plan...",
     "structuredPlanJson": "{\"steps\":[]}",
@@ -174,6 +176,7 @@ Authorization: Bearer {accessToken}
     "sessionId": 10,
     "status": "DRAFT",
     "draftPhase": "PLAN",
+    "draftVersion": 0,
     "sseUrl": "/api/v1/tool-runs/3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11/events"
   }
 }
@@ -239,6 +242,7 @@ Authorization: Bearer {accessToken}
     "sessionId": 10,
     "status": "DRAFT",
     "draftPhase": "PLAN",
+    "draftVersion": 1,
     "sseUrl": "/api/v1/tool-runs/74bd2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d22/events"
   }
 }
@@ -247,9 +251,9 @@ Authorization: Bearer {accessToken}
 ### 동작
 
 - 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `JSON`으로 저장한다.
-- `baseDraftVersion`은 사용자가 피드백한 PLAN 버전이다.
+- `baseDraftVersion`은 사용자가 피드백한 시점의 `tools.draft_version` 값이다.
 - `feedbackItems[].blockId`는 `structured_plan_json.blocks[].blockId`와 매칭한다.
-- 현재 Tool의 PLAN 버전과 `baseDraftVersion`이 다르면 재생성을 시작하지 않는다.
+- 현재 Tool의 `tools.draft_version`과 `baseDraftVersion`이 다르면 재생성을 시작하지 않는다.
 - 대상 Tool은 AI 재생성 시작 시 `draft_phase = PLAN`으로 변경한다.
 - 재생성마다 새 `runId`를 발급한다.
 - 최종 Assistant 응답은 `TOOL_REGENERATE_RESPONSE`로 저장한다.
