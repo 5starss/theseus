@@ -278,10 +278,12 @@ FE가 `completed`를 받으면 최종 메시지는 DB 조회 가능한 상태여
 
 재생성은 동일한 Tool을 대상으로 새 `runId`를 발급한다.
 
-FE는 현재 Tool 조회 응답의 `draftVersion`을 `baseDraftVersion`으로 전송한다. BE는 `baseDraftVersion`과 `tools.draft_version`이 일치할 때만 재생성을 시작한다. 값이 다르면 오래된 PLAN에 대한 피드백으로 보고 USER 피드백 메시지 저장, Tool 상태 변경, Kafka 발행을 수행하지 않는다.
+FE는 현재 Tool 조회 응답의 `draftVersion`을 `baseDraftVersion`으로 전송한다. BE는 Tool이 `DRAFT / REVIEW` 또는 `REJECTED / REVIEW` 상태이고, `baseDraftVersion`과 `tools.draft_version`이 일치할 때만 재생성을 시작한다. 값이 다르면 오래된 PLAN에 대한 피드백으로 보고 USER 피드백 메시지 저장, Tool 상태 변경, Kafka 발행을 수행하지 않는다.
 
 ```text
 USER TOOL_FEEDBACK
+-> Tool status in (DRAFT, REJECTED) 검증
+-> Tool draft_phase = REVIEW 검증
 -> baseDraftVersion과 tools.draft_version 비교
 -> Tool draft_phase = PLAN
 -> runId 생성

@@ -232,7 +232,8 @@ public class Tool {
 	}
 
 	public boolean canRegenerate() {
-		return ToolStatus.DRAFT.equals(status) || ToolStatus.REJECTED.equals(status);
+		return (ToolStatus.DRAFT.equals(status) || ToolStatus.REJECTED.equals(status))
+			&& ToolDraftPhase.REVIEW.equals(draftPhase);
 	}
 
 	public boolean isAccessibleWithAccessLevel(Integer accessLevel) {
