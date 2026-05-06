@@ -1,6 +1,6 @@
 package com.theseus.api.domain.project.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectMemberCreateRequest;
@@ -68,7 +68,7 @@ public class ProjectMemberService {
 		validateActiveUser(targetUser);
 
 		if (projectMemberRepository.existsByProjectAndUser(project, targetUser)) {
-			throw new CustomException(ErrorCode.DUPLICATE_PROJECT_MEMBER);
+			throw BusinessException.of(ErrorCode.DUPLICATE_PROJECT_MEMBER);
 		}
 
 		ProjectMember projectMember = projectMemberRepository.save(request.toEntity(project, targetUser, user));
@@ -104,32 +104,32 @@ public class ProjectMemberService {
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getProjectMemberEntity(Project project, Long projectMemberId) {
 		return projectMemberRepository.findByProjectAndId(project, projectMemberId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
 	}
 
 	private ProjectMember getProjectMember(Project project, User user) {
 		return projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_NOT_FOUND));
 	}
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getUserEntityByEmployeeNumber(String employeeNumber) {
 		return userRepository.findByEmployeeNumber(employeeNumber)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return getUserEntity(currentUser.userId());
@@ -137,20 +137,20 @@ public class ProjectMemberService {
 
 	private void validateProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateProjectAdmin(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
 
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			|| !ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
@@ -163,13 +163,13 @@ public class ProjectMemberService {
 		ProjectMemberStatus nextStatus = request.getStatus() == null ? projectMember.getStatus() : request.getStatus();
 
 		if (!ProjectRole.ADMIN.equals(nextRole) || !ProjectMemberStatus.IN_PROGRESS.equals(nextStatus)) {
-			throw new CustomException(ErrorCode.PROJECT_ADMIN_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_MEMBER_REQUIRED);
 		}
 	}
 
 	private void validateActiveUser(User user) {
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
 		}
 	}
 

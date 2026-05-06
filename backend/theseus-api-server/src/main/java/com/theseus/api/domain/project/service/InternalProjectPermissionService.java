@@ -1,6 +1,6 @@
 package com.theseus.api.domain.project.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.project.dto.request.InternalProjectPermissionRequest;
 import com.theseus.api.domain.project.entity.Project;
@@ -45,7 +45,7 @@ public class InternalProjectPermissionService {
 		ProjectMember projectMember = getActiveProjectMember(request.getProjectId(), request.getUserId());
 
 		if (!Boolean.TRUE.equals(projectMember.getCanUseTool())) {
-			throw new CustomException(ErrorCode.TOOL_USE_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_USE_PERMISSION_REQUIRED);
 		}
 
 		Map<String, Integer> permissions = new LinkedHashMap<>(DEFAULT_TOOL_PERMISSIONS);
@@ -59,19 +59,19 @@ public class InternalProjectPermissionService {
 
 	private ProjectMember getActiveProjectMember(Long projectId, Long userId) {
 		Project project = projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 		User user = userRepository.findById(userId)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
 		}
 
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;

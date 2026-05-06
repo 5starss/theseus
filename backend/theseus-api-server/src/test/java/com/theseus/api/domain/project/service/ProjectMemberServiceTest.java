@@ -3,7 +3,7 @@ package com.theseus.api.domain.project.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectMemberCreateRequest;
@@ -78,8 +78,8 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.USER_NOT_FOUND);
 	}
 
@@ -97,8 +97,8 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.PROJECT_MEMBER_ACTIVE_USER_REQUIRED);
 	}
 
@@ -117,8 +117,8 @@ class ProjectMemberServiceTest {
 			fixture.project().getId(),
 			request
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.DUPLICATE_PROJECT_MEMBER);
 	}
 

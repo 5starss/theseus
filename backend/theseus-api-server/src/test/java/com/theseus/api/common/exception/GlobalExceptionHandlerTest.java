@@ -21,42 +21,41 @@ class GlobalExceptionHandlerTest {
 		.build();
 
 	@Test
-	@DisplayName("ResponseStatusException의 HTTP 상태와 메시지를 실패 응답에 반영한다")
-	void handleResponseStatusExceptionWithReason() throws Exception {
+	@DisplayName("BusinessException 발생 시 code와 message만 실패 응답으로 반환한다")
+	void handleBusinessException() throws Exception {
 		// Given
-		String path = "/conflict";
+		String path = "/business-exception";
 
 		// When & Then
 		mockMvc.perform(get(path))
-			.andExpect(status().isConflict())
-			.andExpect(jsonPath("$.isSuccess").value(false))
-			.andExpect(jsonPath("$.code").value("HTTP-409"))
-			.andExpect(jsonPath("$.message").value("종료된 채팅 세션에는 메시지를 등록할 수 없습니다."));
+			.andExpect(status().isUnauthorized())
+			.andExpect(jsonPath("$.code").value(ErrorCode.LOGIN_FAILED.getCode()))
+			.andExpect(jsonPath("$.message").value(ErrorCode.LOGIN_FAILED.getMessage()))
+			.andExpect(jsonPath("$.isSuccess").doesNotExist())
+			.andExpect(jsonPath("$.result").doesNotExist());
 	}
 
 	@Test
-	@DisplayName("ResponseStatusException 메시지가 없으면 HTTP 기본 사유 문구를 사용한다")
-	void handleResponseStatusExceptionWithoutReason() throws Exception {
+	@DisplayName("ResponseStatusException은 ErrorCode 기반 실패 응답으로 변환한다")
+	void handleResponseStatusException() throws Exception {
 		// Given
 		String path = "/forbidden";
 
 		// When & Then
 		mockMvc.perform(get(path))
 			.andExpect(status().isForbidden())
-			.andExpect(jsonPath("$.isSuccess").value(false))
-			.andExpect(jsonPath("$.code").value("HTTP-403"))
-			.andExpect(jsonPath("$.message").value("Forbidden"));
+			.andExpect(jsonPath("$.code").value(ErrorCode.HANDLE_ACCESS_DENIED.getCode()))
+			.andExpect(jsonPath("$.message").value(ErrorCode.HANDLE_ACCESS_DENIED.getMessage()))
+			.andExpect(jsonPath("$.isSuccess").doesNotExist())
+			.andExpect(jsonPath("$.result").doesNotExist());
 	}
 
 	@RestController
 	private static class TestController {
 
-		@GetMapping("/conflict")
-		void conflict() {
-			throw new ResponseStatusException(
-				HttpStatus.CONFLICT,
-				"종료된 채팅 세션에는 메시지를 등록할 수 없습니다."
-			);
+		@GetMapping("/business-exception")
+		void businessException() {
+			throw BusinessException.of(ErrorCode.LOGIN_FAILED);
 		}
 
 		@GetMapping("/forbidden")

@@ -1,5 +1,6 @@
 package com.theseus.api.domain.auth.token;
 
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import io.jsonwebtoken.JwtException;
@@ -63,7 +64,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 			jwtTokenProvider.validateToken(token);
 			Long userId = jwtTokenProvider.getUserId(token);
 			userRepository.findById(userId).ifPresent(this::setAuthentication);
-		} catch (JwtException | IllegalArgumentException exception) {
+		} catch (JwtException | IllegalArgumentException | BusinessException exception) {
 			SecurityContextHolder.clearContext();
 		}
 	}

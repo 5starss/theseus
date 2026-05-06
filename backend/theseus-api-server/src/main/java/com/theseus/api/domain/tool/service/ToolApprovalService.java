@@ -1,6 +1,6 @@
 package com.theseus.api.domain.tool.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
@@ -75,7 +75,7 @@ public class ToolApprovalService {
 		validateToolReviewer(reviewer);
 
 		ToolApproval toolApproval = toolApprovalRepository.findByIdAndToolProject(toolApprovalId, project)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
 
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
@@ -179,24 +179,24 @@ public class ToolApprovalService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return userRepository.findById(currentUser.userId())
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;
@@ -204,42 +204,42 @@ public class ToolApprovalService {
 
 	private Tool getToolForUpdate(Project project, Long toolId) {
 		return toolRepository.findByIdAndProjectForUpdate(toolId, project)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));
 	}
 
 	private ToolApproval getToolApprovalForUpdate(Project project, Long toolApprovalId) {
 		return toolApprovalRepository.findByIdAndToolProjectForUpdate(toolApprovalId, project)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
 	}
 
 	private void validateToolCreator(Tool tool, ProjectMember projectMember) {
 		if (!Objects.equals(tool.getCreatedByProjectMember().getId(), projectMember.getId())) {
-			throw new CustomException(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
 		}
 	}
 
 	private void validateRequestableTool(Tool tool) {
 		if (!tool.canRequestApproval()) {
-			throw new CustomException(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
 		}
 	}
 
 	private void validateToolReviewer(ProjectMember projectMember) {
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			&& !ProjectRole.MANAGER.equals(projectMember.getProjectRole())) {
-			throw new CustomException(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 		}
 	}
 
 	private void validateReviewableToolApproval(ToolApproval toolApproval) {
 		if (!toolApproval.isPending()) {
-			throw new CustomException(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
 		}
 	}
 
 	private void validatePendingTool(Tool tool) {
 		if (!tool.isPending()) {
-			throw new CustomException(ErrorCode.TOOL_APPROVAL_PENDING_TOOL_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_PENDING_TOOL_REQUIRED);
 		}
 	}
 

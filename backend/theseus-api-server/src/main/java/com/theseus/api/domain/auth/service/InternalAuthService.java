@@ -1,6 +1,6 @@
 package com.theseus.api.domain.auth.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.dto.request.InternalAuthVerifyRequest;
 import com.theseus.api.domain.auth.dto.response.InternalAuthVerifyResponse;
@@ -53,15 +53,15 @@ public class InternalAuthService {
 			Long userId = jwtTokenProvider.getUserId(token);
 
 			return userRepository.findById(userId)
-				.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
-		} catch (JwtException | IllegalArgumentException exception) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED, exception);
+				.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
+		} catch (JwtException | IllegalArgumentException | BusinessException exception) {
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED, exception);
 		}
 	}
 
 	private void validateActiveUser(User user) {
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 	}
 
@@ -82,15 +82,15 @@ public class InternalAuthService {
 
 	private ProjectContext resolveProjectContextByChatSession(User user, InternalAuthVerifyRequest request) {
 		ChatSession chatSession = chatSessionRepository.findById(request.getChatSessionId())
-			.orElseThrow(() -> new CustomException(ErrorCode.CHAT_SESSION_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.CHAT_SESSION_NOT_FOUND));
 		ProjectMember projectMember = chatSession.getProjectMember();
 
 		if (!projectMember.getUser().getId().equals(user.getId())) {
-			throw new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 		}
 
 		if (request.getProjectId() != null && !chatSession.getProject().getId().equals(request.getProjectId())) {
-			throw new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 		}
 
 		validateActiveProjectMember(projectMember);
@@ -103,9 +103,9 @@ public class InternalAuthService {
 
 	private ProjectContext resolveProjectContextByProject(User user, Long projectId) {
 		Project project = projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		validateActiveProjectMember(projectMember);
 
@@ -114,7 +114,7 @@ public class InternalAuthService {
 
 	private void validateActiveProjectMember(ProjectMember projectMember) {
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 	}
 

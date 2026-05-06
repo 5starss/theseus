@@ -1,5 +1,6 @@
 package com.theseus.api.domain.auth.token;
 
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
 import org.junit.jupiter.api.DisplayName;
@@ -57,7 +58,7 @@ class JwtTokenProviderTest {
 
 		// When & Then
 		assertThatThrownBy(() -> jwtTokenProvider.validateToken(refreshToken))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(BusinessException.class);
 	}
 
 	@Test
@@ -69,7 +70,7 @@ class JwtTokenProviderTest {
 
 		// When & Then
 		assertThatThrownBy(() -> jwtTokenProvider.validateRefreshToken(accessToken))
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(BusinessException.class);
 	}
 
 	private User createUser() {

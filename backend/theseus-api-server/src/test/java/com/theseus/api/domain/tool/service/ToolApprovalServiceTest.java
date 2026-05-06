@@ -1,6 +1,6 @@
 package com.theseus.api.domain.tool.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessage;
@@ -156,8 +156,8 @@ class ToolApprovalServiceTest {
 			0,
 			20
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 	}
 
@@ -175,8 +175,8 @@ class ToolApprovalServiceTest {
 			fixture.project().getId(),
 			toolApproval.getId()
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED);
 	}
 
@@ -266,8 +266,8 @@ class ToolApprovalServiceTest {
 			creatorFixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
 	}
 
@@ -284,8 +284,8 @@ class ToolApprovalServiceTest {
 			fixture.project().getId(),
 			tool.getId()
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
 	}
 
@@ -362,8 +362,8 @@ class ToolApprovalServiceTest {
 			toolApproval.getId(),
 			createApproveRequest(2, "approved")
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.TOOL_APPROVAL_REVIEWER_REQUIRED);
 	}
 
@@ -387,8 +387,8 @@ class ToolApprovalServiceTest {
 			toolApproval.getId(),
 			createRejectRequest("reject")
 		))
-			.isInstanceOf(CustomException.class)
-			.extracting(exception -> ((CustomException) exception).getErrorCode())
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
 			.isEqualTo(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
 	}
 

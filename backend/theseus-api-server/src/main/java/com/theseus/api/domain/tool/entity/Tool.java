@@ -1,5 +1,7 @@
 package com.theseus.api.domain.tool.entity;
 
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
@@ -249,7 +251,7 @@ public class Tool {
 
 	private String validateFileName(String fileName) {
 		if (fileName == null || fileName.isBlank()) {
-			throw new IllegalArgumentException("fileName must not be blank");
+			throw BusinessException.of(ErrorCode.TOOL_FILE_NAME_REQUIRED);
 		}
 
 		return fileName;
