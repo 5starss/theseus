@@ -20,8 +20,7 @@ def main(payload):
             timeout_seconds=5
         )
         
-        loop = asyncio.get_event_loop()
-        output = loop.run_until_complete(self.executor.execute(request))
+        output = asyncio.run(self.executor.execute(request))
         self.assertTrue(output.success)
         self.assertEqual(output.result["sum"], 30)
 
@@ -40,8 +39,7 @@ def main(payload):
             timeout_seconds=2
         )
         
-        loop = asyncio.get_event_loop()
-        output = loop.run_until_complete(self.executor.execute(request))
+        output = asyncio.run(self.executor.execute(request))
         self.assertFalse(output.success)
         self.assertTrue(output.timed_out)
         self.assertEqual(output.error_message, "Execution timeout")
@@ -61,12 +59,11 @@ def main(payload):
             timeout_seconds=5
         )
         
-        loop = asyncio.get_event_loop()
-        output = loop.run_until_complete(self.executor.execute(request))
+        output = asyncio.run(self.executor.execute(request))
         self.assertFalse(output.success)
         error_info = output.stderr or str(output.error_message) or ""
         self.assertTrue(
-            any(msg in error_info for msg in ["URLError", "Temporary failure", "name resolution", "Network is unreachable"]),
+            any(msg in error_info for msg in ["URLError", "Temporary failure", "name resolution", "Network is unreachable", "Name or service not known", "getaddrinfo failed"]),
             f"Expected network error, but got: {error_info}"
         )
 
