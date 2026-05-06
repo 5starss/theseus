@@ -17,7 +17,7 @@ from openharness.ui.runtime import build_runtime, start_runtime, handle_line
 from openharness.engine.query import MaxTurnsExceeded
 from openharness.commands.registry import SlashCommand, CommandResult
 
-from theseus_engine.models.state import TheseusStateMachine, AgentMode
+from theseus_engine.models.state import TheseusStateMachine, AgentMode, CoordinatorPhase
 from theseus_engine.models.sessions import load_session_history, save_session_history, list_sessions, get_session_path
 from theseus_engine.core.engine_builder import setup_engine
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
@@ -67,7 +67,7 @@ class TheseusInput(Input):
         cmd_name = parts[0][1:].lower()
         args = " ".join(parts[1:])
 
-        theseus_cmds = {"plan", "agent", "ask", "session", "clear"}
+        theseus_cmds = {"plan", "agent", "ask", "coordinator", "session", "clear"}
 
         if cmd_name in theseus_cmds:
             # [핵심] 이벤트가 App(OpenHarness)으로 버블링되는 것을 완벽히 차단
@@ -82,6 +82,8 @@ class TheseusInput(Input):
                 await app._cmd_agent(args, None)
             elif cmd_name == "ask":
                 await app._cmd_ask(args, None)
+            elif cmd_name == "coordinator":
+                await app._cmd_coordinator(args, None)
             elif cmd_name == "session":
                 await app._cmd_session(args, None)
             elif cmd_name == "clear":
@@ -198,6 +200,7 @@ class TheseusTUI(OpenHarnessTerminalApp):
             SlashCommand(name="plan", description="Switch to Theseus PLAN mode", handler=self._cmd_plan),
             SlashCommand(name="agent", description="Switch to Theseus AGENT mode", handler=self._cmd_agent),
             SlashCommand(name="ask", description="Switch to Theseus ASK mode", handler=self._cmd_ask),
+            SlashCommand(name="coordinator", description="Switch to Theseus COORDINATOR mode (parallel sub-agent orchestration)", handler=self._cmd_coordinator),
             SlashCommand(name="session", description="Manage sessions (/session [list|new|switch] [name])", handler=self._cmd_session),
             SlashCommand(name="clear", description="Clear session history", handler=self._cmd_clear),
         ]
@@ -221,6 +224,10 @@ class TheseusTUI(OpenHarnessTerminalApp):
     async def _cmd_ask(self, args: str, context: object) -> object:
         self.action_switch_ask()
         return CommandResult(message="Switched to ASK mode.")
+
+    async def _cmd_coordinator(self, args: str, context: object) -> object:
+        self.action_switch_coordinator()
+        return CommandResult(message="Switched to COORDINATOR mode.")
 
     async def _cmd_clear(self, args: str, context: object) -> object:
         self._bundle.engine.clear()
@@ -282,19 +289,31 @@ class TheseusTUI(OpenHarnessTerminalApp):
         self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
         all_tool_names = {t.name for t in self._bundle.tool_registry.list_tools()}
         self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, 
+            self._bundle.tool_registry, self.project_tool_permissions,
             self.user_level, exclude_tools=all_tool_names
         )
         self._sync_permission_mode()
         self._append_line("system> Switched to [bold blue]ASK[/bold blue] mode.")
         self._refresh_sidebars(force=True)
-        
+
+    def action_switch_coordinator(self) -> None:
+        self.theseus_sm.switch_mode(AgentMode.COORDINATOR)
+        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
+        self._bundle.engine._tool_registry = build_filtered_registry(
+            self._bundle.tool_registry, self.project_tool_permissions,
+            self.user_level, exclude_tools={"create_tool"}
+        )
+        self._sync_permission_mode()
+        self._append_line("system> Switched to [bold magenta]COORDINATOR[/bold magenta] mode.")
+        self._refresh_sidebars(force=True)
+
     def _sync_permission_mode(self) -> None:
         if not self._bundle: return
         mode_mapping = {
-            AgentMode.AGENT: PermissionMode.FULL_AUTO, # TheseusPermissionChecker handles our safety overrides
+            AgentMode.AGENT: PermissionMode.FULL_AUTO,
             AgentMode.PLAN: PermissionMode.PLAN,
             AgentMode.ASK: PermissionMode.DEFAULT,
+            AgentMode.COORDINATOR: PermissionMode.FULL_AUTO,
         }
         target_mode = mode_mapping.get(self.theseus_sm.mode, PermissionMode.FULL_AUTO)
         self._bundle.engine._permission_checker._settings.mode = target_mode
@@ -320,6 +339,7 @@ class TheseusTUI(OpenHarnessTerminalApp):
                     "plan": self._cmd_plan,
                     "agent": self._cmd_agent,
                     "ask": self._cmd_ask,
+                    "coordinator": self._cmd_coordinator,
                     "session": self._cmd_session,
                     "clear": self._cmd_clear,
                 }
