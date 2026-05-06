@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import com.theseus.api.common.kafka.KafkaTopicProperties;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -36,6 +37,7 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
+	@DisplayName("Tool 생성 요청은 generation request topic으로 발행된다")
 	void sendToolGenerationRequestSendsToGenerationRequestTopic() {
 		String key = "request-1";
 		TestKafkaEvent event = new TestKafkaEvent("generate");
@@ -48,6 +50,7 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
+	@DisplayName("Tool 재생성 요청은 regeneration request topic으로 발행된다")
 	void sendToolRegenerationRequestSendsToRegenerationRequestTopic() {
 		String key = "request-2";
 		TestKafkaEvent event = new TestKafkaEvent("regenerate");
@@ -60,6 +63,7 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
+	@DisplayName("Kafka 발행 실패는 호출부로 예외를 전파하지 않는다")
 	void sendDoesNotThrowWhenKafkaSendCompletesExceptionally() {
 		String key = "request-3";
 		TestKafkaEvent event = new TestKafkaEvent("failed");
