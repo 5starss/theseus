@@ -44,7 +44,7 @@ export default function EditProjectModal({ isOpen, onClose, onSuccess, project }
     setIsSearching(true);
     try {
       const user = await adminApi.searchUserByEmployeeNumber(trimmedId);
-      if (user) {
+      if (user && user.systemRole !== 'SUPER_ADMIN') {
         setFormState(prev => ({ ...prev, searchedUser: user }));
       } else {
         alert('사용자를 찾을 수 없습니다.');

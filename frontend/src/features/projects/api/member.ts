@@ -7,10 +7,10 @@ export const memberApi = {
   /**
    * 프로젝트 멤버 목록 조회
    */
-  getMembers: async (projectId: string | number, page = 0, size = 20) => {
+  getMembers: async (projectId: string | number, page = 0, size = 20, status?: string) => {
     const response = await apiClient.get<ApiResponse<ProjectMemberResponse[]>>(
       `/api/v1/projects/${projectId}/members`,
-      { params: { page, size } }
+      { params: { page, size, status } }
     );
     return response.data.result;
   },

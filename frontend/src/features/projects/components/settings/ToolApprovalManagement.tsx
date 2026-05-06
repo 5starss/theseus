@@ -99,11 +99,11 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   };
 
   return (
-    <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl shadow-blue-500/5">
-      <CardHeader className="flex flex-row items-center justify-between border-b border-slate-800/50 mb-6">
-        <div>
-          <CardTitle className="text-white font-['Space_Grotesk'] mb-1">도구 승인 대기열</CardTitle>
-          <CardDescription className="text-slate-400">멤버들이 생성 요청한 도구를 검토하고 승인합니다.</CardDescription>
+    <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl shadow-blue-500/5 overflow-x-auto">
+      <CardHeader className="flex flex-row items-center justify-between border-b border-slate-800/50 mb-6 min-w-[900px]">
+        <div className="min-w-max">
+          <CardTitle className="text-white font-['Space_Grotesk'] mb-1 whitespace-nowrap">도구 승인 대기열</CardTitle>
+          <CardDescription className="text-slate-400 whitespace-nowrap">멤버들이 생성 요청한 도구를 검토하고 승인합니다.</CardDescription>
         </div>
 
         <div className="flex items-center gap-3">
@@ -126,8 +126,8 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
         {isLoading ? (
           <div className="py-12 text-center text-slate-500 animate-pulse">요청 목록을 불러오는 중...</div>
         ) : (
-          <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/20">
-            <Table>
+          <div className="border border-slate-800 rounded-lg overflow-x-auto bg-slate-950/20">
+            <Table className="min-w-[900px]">
               <TableHeader className="bg-slate-950/50">
                 <TableRow className="border-slate-800 hover:bg-transparent">
                   <TableHead className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">도구 이름 / 유형</TableHead>

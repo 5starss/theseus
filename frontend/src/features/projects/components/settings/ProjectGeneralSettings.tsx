@@ -23,13 +23,11 @@ export function ProjectGeneralSettings({ projectId }: ProjectGeneralSettingsProp
     const fetchProjectData = async () => {
       try {
         setIsLoading(true);
-        // 참고: 현재는 멤버 권한과 프로젝트 이름만 반환하는 getProjectMe API만 사용 가능합니다.
-        // 프로젝트 설명(description)이나 상태(status) 정보가 필요한 경우 별도의 상세 조회 API가 필요할 수 있습니다.
-        // 우선은 getProjectMe를 통해 가능한 기본 정보를 가져오고, 상세 정보 API가 준비될 때까지는
-        // 임시로 처리하거나 가능한 정보만 사용합니다. 최소한 이름 정보는 getProjectMe에서 가져옵니다.
-        const res = await projectApi.getProjectMe(projectId);
+        const res = await projectApi.getProject(projectId);
         if (cancelled) return;
-        setName(res.projectName);
+        setName(res.name);
+        setDescription(res.description || '');
+        setIsActive(res.status === 'ACTIVE');
       } catch (err) {
         if (!cancelled) console.error('Failed to load project details', err);
       } finally {
@@ -62,12 +60,13 @@ export function ProjectGeneralSettings({ projectId }: ProjectGeneralSettingsProp
   }
 
   return (
-    <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl shadow-blue-500/5">
-      <CardHeader>
-        <CardTitle className="text-white font-['Space_Grotesk']">일반 설정</CardTitle>
-        <CardDescription className="text-slate-400">프로젝트의 기본 정보를 수정합니다.</CardDescription>
+    <Card className="bg-slate-900/40 backdrop-blur-xl border-slate-800 shadow-2xl shadow-blue-500/5 overflow-x-auto">
+      <CardHeader className="min-w-[500px]">
+        <CardTitle className="text-white font-['Space_Grotesk'] whitespace-nowrap">일반 설정</CardTitle>
+        <CardDescription className="text-slate-400 whitespace-nowrap">프로젝트의 기본 정보를 수정합니다.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 overflow-x-auto">
+        <div className="min-w-[500px] space-y-6">
         <div className="space-y-2">
           <Label htmlFor="projectName" className="text-slate-300 font-medium tracking-wide uppercase text-[10px]">프로젝트 이름</Label>
           <Input
@@ -101,8 +100,9 @@ export function ProjectGeneralSettings({ projectId }: ProjectGeneralSettingsProp
             className="data-[state=checked]:bg-blue-400"
           />
         </div>
+      </div>
       </CardContent>
-      <CardFooter className="flex justify-end border-t border-slate-800 p-6">
+      <CardFooter className="flex justify-end border-t border-slate-800 p-6 min-w-[500px]">
         <Button
           onClick={handleSave}
           disabled={isSaving}
