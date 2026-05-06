@@ -9,9 +9,22 @@ interface ChatSessionState {
   progressInfo: ProgressInfo | null;
   commentMode: boolean;
   draftComments: Record<string, string>; // blockId -> comment
+  currentToolId: string | null;
+  abortController: AbortController | null;
+  title: string;
+  isClosed: boolean;
 
   // Actions
+  initSession: (data: {
+    messages: ChatMessage[];
+    plan: StructuredPlan | null;
+    phase: DraftPhase;
+    toolId: string | null;
+    title: string;
+    isClosed: boolean;
+  }) => void;
   addMessage: (msg: ChatMessage) => void;
+  updateLastMessageContent: (chunk: string) => void;
   setPlan: (plan: StructuredPlan) => void;
   setDraftPhase: (phase: DraftPhase) => void;
   setIsGenerating: (isGen: boolean) => void;
@@ -19,9 +32,13 @@ interface ChatSessionState {
   setCommentMode: (mode: boolean) => void;
   setDraftComment: (blockId: string, comment: string) => void;
   clearDraftComments: () => void;
+  setAbortController: (ctrl: AbortController | null) => void;
+  abortGeneration: () => void;
+  updateTitle: (title: string) => void;
+  setClosed: (isClosed: boolean) => void;
 }
 
-export const useChatSessionStore = create<ChatSessionState>((set) => ({
+export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   messages: [],
   currentPlan: null,
   draftPhase: null,
@@ -29,8 +46,36 @@ export const useChatSessionStore = create<ChatSessionState>((set) => ({
   progressInfo: null,
   commentMode: false,
   draftComments: {},
+  currentToolId: null,
+  abortController: null,
+  title: '',
+  isClosed: false,
+
+  initSession: ({ messages, plan, phase, toolId, title, isClosed }) => set({
+    messages,
+    currentPlan: plan,
+    draftPhase: phase,
+    currentToolId: toolId,
+    title,
+    isClosed,
+    isGenerating: false,
+    progressInfo: null,
+    commentMode: false,
+    draftComments: {},
+    abortController: null,
+  }),
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+  
+  updateLastMessageContent: (chunk) => set((state) => {
+    const messages = [...state.messages];
+    if (messages.length > 0) {
+      const last = messages[messages.length - 1];
+      messages[messages.length - 1] = { ...last, content: last.content + chunk };
+    }
+    return { messages };
+  }),
+
   setPlan: (plan) => set({ currentPlan: plan }),
   setDraftPhase: (phase) => set({ draftPhase: phase }),
   setIsGenerating: (isGen) => set({ isGenerating: isGen }),
@@ -41,4 +86,16 @@ export const useChatSessionStore = create<ChatSessionState>((set) => ({
       draftComments: { ...state.draftComments, [blockId]: comment },
     })),
   clearDraftComments: () => set({ draftComments: {} }),
+  
+  setAbortController: (ctrl) => set({ abortController: ctrl }),
+  abortGeneration: () => {
+    const ctrl = get().abortController;
+    if (ctrl) {
+      ctrl.abort();
+    }
+    set({ isGenerating: false, abortController: null });
+  },
+
+  updateTitle: (title) => set({ title }),
+  setClosed: (isClosed) => set({ isClosed }),
 }));
