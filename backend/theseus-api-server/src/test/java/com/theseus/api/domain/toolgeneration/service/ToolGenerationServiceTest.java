@@ -33,12 +33,14 @@ import com.theseus.api.domain.toolgeneration.dto.request.ToolRegenerationRequest
 import com.theseus.api.domain.toolgeneration.dto.response.ToolGenerationRunResponse;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationKafkaPublishEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationRequestEvent;
+import com.theseus.api.domain.toolgeneration.event.ToolPermissionPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolRegenerationRequestEvent;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -88,6 +90,7 @@ class ToolGenerationServiceTest {
 	}
 
 	@Test
+	@DisplayName("Tool 생성 요청은 Draft Tool과 USER 메시지를 저장하고 Core 계약에 맞는 Kafka payload를 발행한다")
 	void generateToolCreatesDraftToolAndPublishesKafkaEvent() {
 		ProjectFixture fixture = createProjectFixture(true, false);
 		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember());
@@ -136,10 +139,25 @@ class ToolGenerationServiceTest {
 		ToolGenerationKafkaPublishEvent event = eventCaptor.getValue();
 		assertThat(event.regeneration()).isFalse();
 		assertThat(event.payload()).isInstanceOf(ToolGenerationRequestEvent.class);
-		assertThat(((ToolGenerationRequestEvent) event.payload()).fileName()).isEqualTo("sales-summary-tool");
+		assertThat(event.key()).isNotBlank();
+
+		ToolGenerationRequestEvent payload = (ToolGenerationRequestEvent) event.payload();
+		assertThat(payload.eventType()).isEqualTo("TOOL_GENERATION_REQUESTED");
+		assertThat(payload.runId()).isEqualTo(event.key());
+		assertThat(payload.projectId()).isEqualTo(fixture.project().getId());
+		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
+		assertThat(payload.toolId()).isEqualTo(40L);
+		assertThat(payload.requestedByUserId()).isEqualTo(fixture.user().getId());
+		assertThat(payload.requestedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(payload.prompt()).isEqualTo("make a sales summary tool");
+		assertThat(payload.fileName()).isEqualTo("sales-summary-tool");
+		assertThat(payload.projectRole()).isEqualTo(ProjectRole.MEMBER);
+		assertThat(payload.requestedAt()).isNotNull();
+		assertToolPermissionPayload(payload.toolPermission(), true, true, false, false);
 	}
 
 	@Test
+	@DisplayName("Tool 재생성 요청은 피드백 메시지를 저장하고 Core 계약에 맞는 Kafka payload를 발행한다")
 	void regenerateToolMovesToolToPlanAndPublishesKafkaEvent() {
 		ProjectFixture fixture = createProjectFixture(false, false);
 		ChatSession chatSession = createChatSession(31L, fixture.project(), fixture.projectMember());
@@ -170,6 +188,7 @@ class ToolGenerationServiceTest {
 		assertThat(response.getStatus()).isEqualTo(ToolStatus.DRAFT);
 		assertThat(response.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
 		assertThat(response.getDraftVersion()).isEqualTo(1L);
+		assertThat(tool.getDraftVersion()).isEqualTo(1L);
 		verify(chatMessageService).saveUserToolMessage(
 			chatSession,
 			tool,
@@ -184,10 +203,27 @@ class ToolGenerationServiceTest {
 		ToolGenerationKafkaPublishEvent event = eventCaptor.getValue();
 		assertThat(event.regeneration()).isTrue();
 		assertThat(event.payload()).isInstanceOf(ToolRegenerationRequestEvent.class);
-		assertThat(((ToolRegenerationRequestEvent) event.payload()).baseDraftVersion()).isEqualTo(1L);
+		assertThat(event.key()).isNotBlank();
+
+		ToolRegenerationRequestEvent payload = (ToolRegenerationRequestEvent) event.payload();
+		assertThat(payload.eventType()).isEqualTo("TOOL_REGENERATION_REQUESTED");
+		assertThat(payload.runId()).isEqualTo(event.key());
+		assertThat(payload.projectId()).isEqualTo(fixture.project().getId());
+		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
+		assertThat(payload.toolId()).isEqualTo(tool.getId());
+		assertThat(payload.requestedByUserId()).isEqualTo(fixture.user().getId());
+		assertThat(payload.requestedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(payload.baseDraftVersion()).isEqualTo(1L);
+		assertThat(payload.feedbackItems()).hasSize(1);
+		assertThat(payload.feedbackItems().get(0).getBlockId()).isEqualTo("input-format");
+		assertThat(payload.feedbackItems().get(0).getComment()).isEqualTo("allow xlsx");
+		assertThat(payload.projectRole()).isEqualTo(ProjectRole.MEMBER);
+		assertThat(payload.requestedAt()).isNotNull();
+		assertToolPermissionPayload(payload.toolPermission(), false, true, false, false);
 	}
 
 	@Test
+	@DisplayName("baseDraftVersion이 현재 draftVersion과 다르면 부수 효과 없이 재생성을 거부한다")
 	void regenerateToolFailsBeforeSideEffectsWhenBaseDraftVersionMismatch() {
 		ProjectFixture fixture = createProjectFixture(false, false);
 		ChatSession chatSession = createChatSession(32L, fixture.project(), fixture.projectMember());
@@ -307,6 +343,19 @@ class ToolGenerationServiceTest {
 			.build();
 		ReflectionTestUtils.setField(tool, "id", id);
 		return tool;
+	}
+
+	private void assertToolPermissionPayload(
+		ToolPermissionPayload payload,
+		Boolean canCreateTool,
+		Boolean canUseTool,
+		Boolean canUpdateTool,
+		Boolean canDeleteTool
+	) {
+		assertThat(payload.canCreateTool()).isEqualTo(canCreateTool);
+		assertThat(payload.canUseTool()).isEqualTo(canUseTool);
+		assertThat(payload.canUpdateTool()).isEqualTo(canUpdateTool);
+		assertThat(payload.canDeleteTool()).isEqualTo(canDeleteTool);
 	}
 
 	private AuthenticatedUser createAuthenticatedUser(User user) {
