@@ -209,6 +209,7 @@ Authorization: Bearer {accessToken}
 
 - Tool 생성자 또는 `can_update_tool = true`인 프로젝트 멤버
 - `tools.status = DRAFT` 또는 `REJECTED`
+- `tools.draft_phase = REVIEW`
 
 ### Request Body
 
@@ -253,6 +254,7 @@ Authorization: Bearer {accessToken}
 - 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `JSON`으로 저장한다.
 - `baseDraftVersion`은 사용자가 피드백한 시점의 `tools.draft_version` 값이다.
 - `feedbackItems[].blockId`는 `structured_plan_json.blocks[].blockId`와 매칭한다.
+- 완성된 PLAN을 확인한 뒤 피드백하는 흐름이므로 `draft_phase = REVIEW`인 Tool만 재생성할 수 있다.
 - 현재 Tool의 `tools.draft_version`과 `baseDraftVersion`이 다르면 재생성을 시작하지 않는다.
 - 대상 Tool은 AI 재생성 시작 시 `draft_phase = PLAN`으로 변경한다.
 - 재생성마다 새 `runId`를 발급한다.

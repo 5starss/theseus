@@ -16,6 +16,7 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.toolgeneration.dto.request.ToolGenerationRequest;
@@ -254,8 +255,11 @@ public class ToolGenerationService {
 	}
 
 	private void validateRegeneratableTool(Tool tool) {
-		if (!tool.canRegenerate() || ToolStatus.DELETED.equals(tool.getStatus())) {
+		if (!ToolStatus.DRAFT.equals(tool.getStatus()) && !ToolStatus.REJECTED.equals(tool.getStatus())) {
 			throw BusinessException.of(ErrorCode.TOOL_REGENERATION_STATUS_REQUIRED);
+		}
+		if (!ToolDraftPhase.REVIEW.equals(tool.getDraftPhase())) {
+			throw BusinessException.of(ErrorCode.TOOL_DRAFT_REVIEW_PHASE_REQUIRED);
 		}
 	}
 

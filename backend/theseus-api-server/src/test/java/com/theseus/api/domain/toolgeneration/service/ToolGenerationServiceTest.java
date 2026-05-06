@@ -259,6 +259,51 @@ class ToolGenerationServiceTest {
 		verifyNoInteractions(chatMessageService, eventPublisher);
 	}
 
+	@Test
+	@DisplayName("Tool이 PLAN 단계이면 부수 효과 없이 재생성을 거부한다")
+	void regenerateToolFailsBeforeSideEffectsWhenDraftPhaseIsPlan() {
+		ProjectFixture fixture = createProjectFixture(false, false);
+		ChatSession chatSession = createChatSession(33L, fixture.project(), fixture.projectMember());
+		Tool tool = createTool(
+			43L,
+			fixture.project(),
+			chatSession,
+			fixture.projectMember(),
+			ToolStatus.DRAFT,
+			ToolDraftPhase.PLAN,
+			0L
+		);
+		ToolRegenerationRequest request = createRegenerationRequest(0L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolRepository.findByIdAndProjectAndChatSessionForUpdate(tool.getId(), fixture.project(), chatSession))
+			.thenReturn(Optional.of(tool));
+
+		assertThatThrownBy(() -> toolGenerationService.regenerateTool(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			tool.getId(),
+			request
+		))
+			.isInstanceOfSatisfying(BusinessException.class, exception ->
+				assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TOOL_DRAFT_REVIEW_PHASE_REQUIRED)
+			);
+
+		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DRAFT);
+		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
+		assertThat(tool.getDraftVersion()).isZero();
+		verifyNoInteractions(chatMessageService, eventPublisher);
+	}
+
 	private ToolGenerationRequest createGenerationRequest(String fileName, String userMessage) {
 		ToolGenerationRequest request = new ToolGenerationRequest();
 		ReflectionTestUtils.setField(request, "fileName", fileName);
@@ -267,12 +312,16 @@ class ToolGenerationServiceTest {
 	}
 
 	private ToolRegenerationRequest createRegenerationRequest() {
+		return createRegenerationRequest(1L);
+	}
+
+	private ToolRegenerationRequest createRegenerationRequest(Long baseDraftVersion) {
 		ToolFeedbackItemRequest feedbackItem = new ToolFeedbackItemRequest();
 		ReflectionTestUtils.setField(feedbackItem, "blockId", "input-format");
 		ReflectionTestUtils.setField(feedbackItem, "comment", "allow xlsx");
 
 		ToolRegenerationRequest request = new ToolRegenerationRequest();
-		ReflectionTestUtils.setField(request, "baseDraftVersion", 1L);
+		ReflectionTestUtils.setField(request, "baseDraftVersion", baseDraftVersion);
 		ReflectionTestUtils.setField(request, "feedbackItems", List.of(feedbackItem));
 		return request;
 	}
@@ -332,13 +381,25 @@ class ToolGenerationServiceTest {
 		ToolStatus status,
 		Long draftVersion
 	) {
+		return createTool(id, project, chatSession, projectMember, status, ToolDraftPhase.REVIEW, draftVersion);
+	}
+
+	private Tool createTool(
+		Long id,
+		Project project,
+		ChatSession chatSession,
+		ProjectMember projectMember,
+		ToolStatus status,
+		ToolDraftPhase draftPhase,
+		Long draftVersion
+	) {
 		Tool tool = Tool.builder()
 			.project(project)
 			.chatSession(chatSession)
 			.createdByProjectMember(projectMember)
 			.fileName("sales-summary-tool")
 			.status(status)
-			.draftPhase(ToolDraftPhase.REVIEW)
+			.draftPhase(draftPhase)
 			.draftVersion(draftVersion)
 			.build();
 		ReflectionTestUtils.setField(tool, "id", id);
