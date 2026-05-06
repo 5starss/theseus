@@ -67,7 +67,11 @@ public enum ErrorCode {
     TOOL_APPROVAL_REVIEW_PHASE_REQUIRED(HttpStatus.CONFLICT, "TAPP-003", "REVIEW 단계의 Draft Tool만 승인 요청할 수 있습니다."),
     TOOL_APPROVAL_REVIEWER_REQUIRED(HttpStatus.FORBIDDEN, "TAPP-004", "프로젝트 ADMIN 또는 MANAGER 권한이 필요합니다."),
     TOOL_APPROVAL_ALREADY_REVIEWED(HttpStatus.CONFLICT, "TAPP-005", "이미 검토된 Tool 승인 요청입니다."),
-    TOOL_APPROVAL_PENDING_TOOL_REQUIRED(HttpStatus.CONFLICT, "TAPP-006", "승인 대기 중인 Tool만 검토할 수 있습니다.");
+    TOOL_APPROVAL_PENDING_TOOL_REQUIRED(HttpStatus.CONFLICT, "TAPP-006", "승인 대기 중인 Tool만 검토할 수 있습니다."),
+
+    // Billing
+    BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),
+    BILLING_USAGE_PAYLOAD_INVALID(HttpStatus.BAD_REQUEST, "BILL-002", "유효하지 않은 Billing 사용량 요청입니다.");
 
     private final HttpStatus status;
     private final String code;
