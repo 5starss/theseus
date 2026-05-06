@@ -71,8 +71,8 @@ class FakeOutboxRecord:
 
 def mock_session() -> SessionContext:
     return SessionContext(
-        user_id="test-user",
-        project_id="test-project",
+        user_id=9999,
+        project_id=8888,
         permission_level=1,
         token="test-token",
     )

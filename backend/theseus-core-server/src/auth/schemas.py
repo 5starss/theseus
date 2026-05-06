@@ -1,24 +1,47 @@
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator
+
+
+def _coerce_int(value: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid integer identifier")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    raise ValueError("identifier must be an integer or numeric string")
 
 class UserSession(BaseModel):
     """
     Spring Boot 인증 서버에서 토큰 검증 후 반환하는 세션 정보 모델
     """
-    user_id: str
-    project_id: str
+    user_id: int
+    project_id: int
     permission_level: int = Field(default=1, description="1: Read, 2: Write, 3: Admin")
     expires_at: Optional[datetime] = None
+
+    @field_validator("user_id", "project_id", mode="before")
+    @classmethod
+    def validate_identifier(cls, value: object) -> int:
+        return _coerce_int(value)
 
 class SessionContext(BaseModel):
     """
     FastAPI 내부적으로 의존성 주입을 통해 전달될 세션 컨텍스트
     """
-    user_id: str
-    project_id: str
+    user_id: int
+    project_id: int
     permission_level: int
     token: str
+
+    @field_validator("user_id", "project_id", mode="before")
+    @classmethod
+    def validate_identifier(cls, value: object) -> int:
+        return _coerce_int(value)
 
 class UsageMetrics(BaseModel):
     """
@@ -33,10 +56,15 @@ class BillingUsageReport(BaseModel):
     """
     Spring Boot Billing API로 전송할 최종 과금 보고서 모델
     """
-    user_id: str
-    project_id: str
+    user_id: int
+    project_id: int
     usage: UsageMetrics
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+    @field_validator("user_id", "project_id", mode="before")
+    @classmethod
+    def validate_identifier(cls, value: object) -> int:
+        return _coerce_int(value)
 
 # --- Tool Plan Storage Schemas ---
 

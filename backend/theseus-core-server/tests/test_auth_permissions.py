@@ -5,12 +5,15 @@ import httpx
 from fastapi import HTTPException
 
 from src.auth.client import (
+    AgentClient,
     AuthClient,
+    BillingClient,
     PermissionAccessDeniedError,
     PermissionBackendUnavailableError,
     PermissionClient,
     PermissionInvalidResponseError,
 )
+from src.auth.schemas import AgentToolPlanPayload, BillingUsageReport, StructuredPlan, UsageMetrics
 from src.auth.permissions import (
     MOCK_PROJECT_TOOL_PERMISSIONS,
     PERMISSION_SERVICE_INVALID_DATA,
@@ -186,8 +189,8 @@ class AuthClientTests(unittest.IsolatedAsyncioTestCase):
                 project_id="1",
             )
 
-        self.assertEqual(session.user_id, "3")
-        self.assertEqual(session.project_id, "1")
+        self.assertEqual(session.user_id, 3)
+        self.assertEqual(session.project_id, 1)
         self.assertEqual(session.permission_level, 2)
         async_client.post.assert_awaited_once_with(
             client.verify_url,
@@ -197,6 +200,99 @@ class AuthClientTests(unittest.IsolatedAsyncioTestCase):
                 "chatSessionId": "10",
                 "projectId": "1",
             },
+            timeout=client.timeout,
+        )
+
+    async def test_auth_client_returns_502_for_non_numeric_identifier_response(self):
+        response = httpx.Response(
+            200,
+            json={
+                "isSuccess": True,
+                "code": "COMMON-200",
+                "message": "성공입니다.",
+                "result": {
+                    "user_id": "abc",
+                    "project_id": "1",
+                    "permission_level": 2,
+                },
+            },
+        )
+        client = AuthClient()
+        async_client = AsyncMock()
+        async_client.__aenter__.return_value = async_client
+        async_client.__aexit__.return_value = False
+        async_client.post.return_value = response
+
+        with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
+            with self.assertRaises(HTTPException) as context:
+                await client.verify_token("access-token")
+
+        self.assertEqual(context.exception.status_code, 502)
+        self.assertEqual(
+            context.exception.detail,
+            "Authentication service returned invalid session data",
+        )
+
+
+class InternalClientHeaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_billing_client_sends_internal_key_and_idempotency_key(self):
+        response = httpx.Response(200, json={"ok": True})
+        client = BillingClient()
+        async_client = AsyncMock()
+        async_client.__aenter__.return_value = async_client
+        async_client.__aexit__.return_value = False
+        async_client.post.return_value = response
+        report = BillingUsageReport(
+            user_id=3,
+            project_id=1,
+            usage=UsageMetrics(prompt_tokens=1, completion_tokens=2, total_tokens=3, model_name="gpt"),
+        )
+
+        with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
+            ok = await client.report_usage(report, idempotency_key="idem-1")
+
+        self.assertTrue(ok)
+        async_client.post.assert_awaited_once_with(
+            client.usage_url,
+            json=report.model_dump(mode="json"),
+            headers={
+                "X-Internal-Api-Key": settings.SPRING_BOOT_INTERNAL_API_KEY,
+                "X-Idempotency-Key": "idem-1",
+            },
+            timeout=client.timeout,
+        )
+
+    async def test_agent_client_sends_internal_key(self):
+        response = httpx.Response(201, json={"ok": True})
+        client = AgentClient()
+        async_client = AsyncMock()
+        async_client.__aenter__.return_value = async_client
+        async_client.__aexit__.return_value = False
+        async_client.post.return_value = response
+        payload = AgentToolPlanPayload(
+            projectMemberId=1,
+            chatSessionId=10,
+            toolName="weather_tool",
+            rawMarkdown="## Plan",
+            structuredPlan=StructuredPlan(
+                goal="goal",
+                overview=["a"],
+                approach="approach",
+                keyDecisions=["x"],
+                steps=[],
+                risks=["r"],
+                successCriteria=["done"],
+            ),
+        )
+
+        with patch("src.auth.client.httpx.AsyncClient", return_value=async_client):
+            ok = await client.save_tool_plan(payload)
+
+        self.assertTrue(ok)
+        async_client.post.assert_awaited_once_with(
+            client.save_plan_url,
+            headers={"X-Internal-Api-Key": settings.SPRING_BOOT_INTERNAL_API_KEY},
+            json=payload.model_dump(mode="json"),
             timeout=client.timeout,
         )
 

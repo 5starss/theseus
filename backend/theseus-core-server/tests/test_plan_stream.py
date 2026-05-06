@@ -59,8 +59,8 @@ class FakeAssembly:
 
 def mock_session() -> SessionContext:
     return SessionContext(
-        user_id="test-user",
-        project_id="test-project",
+        user_id=9999,
+        project_id=8888,
         permission_level=3,
         token="test-token",
     )
@@ -97,12 +97,12 @@ class PlanStreamTests(unittest.TestCase):
 
     def test_stream_rejects_plan_from_other_session(self):
         plan = ToolPlan(
-            project_id="test-project",
+            project_id="8888",
             chat_session_id=999,
             status=PLAN_STATUS_EXECUTING,
             goal="a",
             content={"goal": "a", "overview": [], "approach": "a", "keyDecisions": [], "steps": [], "risks": [], "successCriteria": []},
-            executing_by_user_id="test-user",
+            executing_by_user_id="9999",
         )
         self.db.add(plan)
         self.db.commit()
@@ -116,12 +116,12 @@ class PlanStreamTests(unittest.TestCase):
 
     def test_stream_restores_plan_to_approved(self):
         plan = ToolPlan(
-            project_id="test-project",
+            project_id="8888",
             chat_session_id=123,
             status=PLAN_STATUS_EXECUTING,
             goal="a",
             content={"goal": "a", "overview": [], "approach": "a", "keyDecisions": [], "steps": [], "risks": [], "successCriteria": []},
-            executing_by_user_id="test-user",
+            executing_by_user_id="9999",
         )
         self.db.add(plan)
         self.db.commit()
