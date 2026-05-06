@@ -53,8 +53,8 @@ async def get_session_context(
     if settings.AUTH_MODE == "mock":
         # Mock 모드: 고정 데이터 반환
         return SessionContext(
-            user_id="dev-user",
-            project_id="dev-project",
+            user_id=9999,
+            project_id=8888,
             permission_level=3,  # Admin 권한 부여
             token=token
         )
@@ -79,8 +79,8 @@ async def get_sse_session_context(
     """
     if settings.AUTH_MODE == "mock":
         return SessionContext(
-            user_id="dev-user",
-            project_id="dev-project",
+            user_id=9999,
+            project_id=8888,
             permission_level=3,
             token=token
         )

@@ -152,7 +152,7 @@ class BillingClient:
         """
         async with httpx.AsyncClient() as client:
             try:
-                headers = {}
+                headers = internal_api_headers()
                 if idempotency_key:
                     headers["X-Idempotency-Key"] = idempotency_key
 
@@ -190,6 +190,7 @@ class AgentClient:
             try:
                 response = await client.post(
                     self.save_plan_url,
+                    headers=internal_api_headers(),
                     json=payload.model_dump(mode="json"),
                     timeout=self.timeout
                 )

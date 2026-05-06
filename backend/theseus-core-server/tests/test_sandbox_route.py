@@ -11,8 +11,8 @@ from src.sandbox.base import SandboxUnavailableError
 
 def admin_session() -> SessionContext:
     return SessionContext(
-        user_id="admin-user",
-        project_id="project-1",
+        user_id=9999,
+        project_id=8888,
         permission_level=3,
         token="admin-token",
     )
@@ -20,8 +20,8 @@ def admin_session() -> SessionContext:
 
 def low_permission_session() -> SessionContext:
     return SessionContext(
-        user_id="basic-user",
-        project_id="project-1",
+        user_id=1111,
+        project_id=8888,
         permission_level=1,
         token="basic-token",
     )

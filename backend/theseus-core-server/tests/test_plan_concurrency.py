@@ -14,8 +14,8 @@ from src.plan.service import PLAN_STATUS_APPROVED
 
 def mock_session() -> SessionContext:
     return SessionContext(
-        user_id="test-user",
-        project_id="test-project",
+        user_id=9999,
+        project_id=8888,
         permission_level=3,
         token="test-token",
     )
@@ -52,14 +52,14 @@ class PlanConcurrencyTests(unittest.TestCase):
 
     def test_only_one_plan_can_execute_per_chat_session(self):
         plan_a = ToolPlan(
-            project_id="test-project",
+            project_id="8888",
             chat_session_id=321,
             status=PLAN_STATUS_APPROVED,
             goal="a",
             content={"goal": "a", "overview": [], "approach": "a", "keyDecisions": [], "steps": [], "risks": [], "successCriteria": []},
         )
         plan_b = ToolPlan(
-            project_id="test-project",
+            project_id="8888",
             chat_session_id=321,
             status=PLAN_STATUS_APPROVED,
             goal="b",

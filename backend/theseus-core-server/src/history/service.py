@@ -44,17 +44,8 @@ async def persist_user_message(
     chat_session_id: int,
     content: str,
 ) -> bool:
-    try:
-        project_id = int(session.project_id)
-    except ValueError:
-        logger.warning(
-            "User history save skipped because project_id is not numeric: %s",
-            session.project_id,
-        )
-        return settings.AUTH_MODE == "mock"
-
     request = HistoryMessageCreateRequest(
-        project_id=project_id,
+        project_id=session.project_id,
         chat_session_id=chat_session_id,
         sender_type="USER",
         content=content,
@@ -83,17 +74,8 @@ async def persist_assistant_message(
     if not content.strip():
         return True
 
-    try:
-        project_id = int(session.project_id)
-    except ValueError:
-        logger.warning(
-            "Assistant history save skipped because project_id is not numeric: %s",
-            session.project_id,
-        )
-        return settings.AUTH_MODE == "mock"
-
     request = HistoryMessageCreateRequest(
-        project_id=project_id,
+        project_id=session.project_id,
         chat_session_id=chat_session_id,
         sender_type="ASSISTANT",
         content=content,

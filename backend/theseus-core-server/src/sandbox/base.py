@@ -8,7 +8,7 @@ class SandboxUnavailableError(RuntimeError):
 
 
 class SandboxInput(BaseModel):
-    project_id: str
+    project_id: int | str
     tool_name: str
     tool_code: str
     payload: Dict[str, Any]

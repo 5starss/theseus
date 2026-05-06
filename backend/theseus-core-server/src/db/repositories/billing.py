@@ -20,13 +20,13 @@ class BillingOutboxRepository:
 
     def enqueue(
         self,
-        user_id: str,
-        project_id: str,
+        user_id: int,
+        project_id: int,
         usage: UsageMetrics,
     ) -> BillingOutbox:
         record = BillingOutbox(
-            user_id=user_id,
-            project_id=project_id,
+            user_id=str(user_id),
+            project_id=str(project_id),
             usage_data=usage.model_dump(mode="json"),
             status=OUTBOX_STATUS_PENDING,
             retry_count=0,
