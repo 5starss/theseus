@@ -20,6 +20,20 @@ spring:
       hibernate:
         format_sql: false
         highlight_sql: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+
+theseus:
+  kafka:
+    topics:
+      tool-generation-request: ${KAFKA_TOPIC_TOOL_GENERATION_REQUEST:theseus.tool-generation.request}
+      tool-regeneration-request: ${KAFKA_TOPIC_TOOL_REGENERATION_REQUEST:theseus.tool-regeneration.request}
+      tool-generation-event: ${KAFKA_TOPIC_TOOL_GENERATION_EVENT:theseus.tool-generation.event}
 
 springdoc:
   api-docs:
