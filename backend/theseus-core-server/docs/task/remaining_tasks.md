@@ -9,7 +9,7 @@
 AI가 스스로 코드를 작성하는 메타-툴링 파이프라인을 안전하고 완벽하게 구축하기 위한 검증기(Validator) 4종 구현 및 관측성 작업입니다. (`theseus_engine/validators/`에 위치)
 
 * **🟢 1.1. Analysis 검증기 (완료)**: `ast` 모듈을 통한 코드 정적 분석. `AnalysisValidator`로 독립 모듈화 완료. `tool_factory.py`에서 위임 호출.
-* **🟢 1.2. Execution & Query 검증기 (완료)**: Regex 기반(기본) + LLM 기반(토글) 이중 검증 구현. `TheseusHookExecutor`를 통해 `PRE_TOOL_USE` Hook에 연결.
+* **🟢 1.2. Execution & Query 검증기 (완료)**: Regex 기반(기본) + LLM 기반(토글) 이중 검증 구현. `TheseusHookExecutor`를 통해 `PRE_TOOL_USE` Hook에 연결. (보안 훅 런타임 오류 및 'bool' object is not callable 에러 해결 완료)
 * **🟢 1.3. Suggestion 검증기 (완료)**: LLM 기반 코드 리뷰 Stub 구현. 향후 `TheseusLLMClient` 연동 예정.
 * **🟢 1.4. 관측성(Observability) 연동 명세 (완료)**: LangSmith 연동 및 `@theseus_traceable` 데코레이터를 통한 에이전트 궤적 추적 시스템 구축. API 키 미설정 시 자동 bypass(no-op).
   * **[Task 1] 핵심 엔진 트레이싱**: `query.py`의 `run_query`, `_execute_tool_call` 등 핵심 에이전트 루프에 `@traceable` 데코레이터를 적용하여 LLM 호출부터 도구 실행까지의 전체 사이클 추적.
@@ -21,6 +21,7 @@ AI가 스스로 코드를 작성하는 메타-툴링 파이프라인을 안전�
   * **[Task 2] 키워드 리랭킹**: 시맨틱 검색 보완을 위해 사용자 쿼리 키워드 매칭 보너스 점수 시스템 도입.
   * **[Task 3] Runtime Discovery Hook**: `POST_TOOL_USE` 훅을 통해 도구 실행 결과에서 단서를 찾아 연관 도구를 즉시 레지스트리에 주입하는 시스템 구축.
   * **[Task 4] Pydantic 규격 정합성**: `model_rebuild()` 및 `Optional` 임포트 전수 조사를 통한 런타임 스키마 에러 해결.
+  * **[Task 5] 동적 기능 토글**: `THESEUS_DYNAMIC_TOOL_RETRIEVAL` 환경 변수 및 `enable_dynamic_tools` 파라미터를 통해 동적 도구 검색/주입 기능을 온오프할 수 있는 제어권 확보.
 
 ---
 
