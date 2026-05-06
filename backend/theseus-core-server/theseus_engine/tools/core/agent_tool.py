@@ -3,13 +3,16 @@
 메인 에이전트가 하위 에이전트를 스폰하여 복잡한 작업을
 병렬로 위임할 수 있게 합니다. Theseus의 자체 태스크 매니저를 사용하여
 OpenHarness의 coordinator/swarm 의존성 없이 독립적으로 동작합니다.
+
+Feature 2 개선: max_rbac_level 상속, inherit_context 플래그,
+timeout_seconds 지원, THESEUS_SUBAGENT 환경 변수 전달.
 """
 
 from __future__ import annotations
 
 import os
-import json
 import logging
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,9 +35,24 @@ class AgentInput(BaseModel):
             "Be specific — the sub-agent has no context from the current conversation."
         )
     )
-    model: str | None = Field(
+    model: Optional[str] = Field(
         default=None,
         description="Override model for the sub-agent (defaults to parent's model)",
+    )
+    max_rbac_level: Optional[int] = Field(
+        default=None,
+        description=(
+            "최대 RBAC 권한 레벨 (1-5). 부모의 레벨을 초과할 수 없습니다. "
+            "미지정 시 부모 레벨을 상속합니다."
+        ),
+    )
+    inherit_context: bool = Field(
+        default=False,
+        description="True이면 현재 작업 디렉터리와 환경 설정을 서브 에이전트에게 전달합니다.",
+    )
+    timeout_seconds: Optional[int] = Field(
+        default=300,
+        description="서브 에이전트 실행 타임아웃 (초). 기본값 300초.",
     )
 
 
@@ -62,29 +80,47 @@ class AgentTool(BaseTool):
         manager = get_task_manager()
         cwd = str(context.cwd)
 
-        # 사용할 모델 결정
-        model = (
-            arguments.model
-            or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+        # 부모 RBAC 레벨 결정 (context.metadata에서 상속)
+        parent_rbac = 3
+        if context.metadata and isinstance(context.metadata, dict):
+            parent_rbac = context.metadata.get("user_rbac_level", 3)
+
+        # 서브 에이전트 RBAC 레벨: 부모 레벨을 초과할 수 없음
+        sub_rbac = min(
+            arguments.max_rbac_level if arguments.max_rbac_level is not None else parent_rbac,
+            parent_rbac,
         )
 
-        # 서브 에이전트에게 전달할 프롬프트를 환경 변수로 인코딩
-        # theseus_cli.py --auto 모드로 단일 프롬프트 실행
-        escaped_prompt = arguments.prompt.replace('"', '\\"')
+        # 사용할 모델 결정
+        model = arguments.model or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
 
-        # 서브 에이전트를 별도 프로세스로 실행
-        # Python의 -c 옵션을 사용하여 theseus_cli의 자동 모드를 호출
+        # 에이전트 모드 컨텍스트 (coordinator 또는 일반)
+        agent_mode = (
+            context.metadata.get("agent_mode", "normal")
+            if context.metadata and isinstance(context.metadata, dict)
+            else "normal"
+        )
+
+        escaped_prompt = arguments.prompt.replace('"', '\\"').replace("'", "\\'")
+
+        # THESEUS_SUBAGENT=1 환경 변수로 서브 에이전트임을 표시
+        env_overrides = f"os.environ['THESEUS_SUBAGENT'] = '1'; "
+        env_overrides += f"os.environ['OPENHARNESS_MODEL'] = '{model}'; "
+        if arguments.inherit_context:
+            env_overrides += f"os.environ['THESEUS_AGENT_MODE'] = '{agent_mode}'; "
+
         agent_script = (
             "import sys, os; "
             "sys.path.insert(0, os.getcwd()); "
             "from dotenv import load_dotenv; load_dotenv(); "
+            f"{env_overrides}"
             "import asyncio; "
             "from theseus_engine.core.engine_builder import setup_engine; "
             "from theseus_engine.models.state import TheseusStateMachine; "
             "async def run(): "
             "    sm = TheseusStateMachine(); "
-            f"    engine, _ = setup_engine(sm, 3, {{}}, lambda x: asyncio.sleep(0)); "
-            f"    result = await engine.query('''{escaped_prompt}'''); "
+            f"    engine, _ = setup_engine(sm, {sub_rbac}, {{}}, lambda x: asyncio.sleep(0)); "
+            f"    result = await engine.query('{escaped_prompt}'); "
             "    print(result.text if hasattr(result, 'text') else str(result)); "
             "asyncio.run(run())"
         )
@@ -98,20 +134,28 @@ class AgentTool(BaseTool):
                 cwd=cwd,
             )
 
+            log.info(
+                "[AgentTool] 서브 에이전트 스폰: task=%s, rbac=%d (parent=%d), model=%s",
+                task.id, sub_rbac, parent_rbac, model,
+            )
+
             return ToolResult(
                 output=(
-                    f"✅ 서브 에이전트 스폰 완료\n"
+                    f"서브 에이전트 스폰 완료\n"
                     f"Task ID: {task.id}\n"
                     f"Model: {model}\n"
+                    f"RBAC Level: {sub_rbac} (parent: {parent_rbac})\n"
                     f"Description: {arguments.description}\n"
                     f"Prompt: {arguments.prompt[:200]}{'...' if len(arguments.prompt) > 200 else ''}\n\n"
-                    f"📋 결과 확인: task_output(task_id='{task.id}')\n"
-                    f"🛑 중지: task_stop(task_id='{task.id}')"
+                    f"결과 확인: task_output(task_id='{task.id}')\n"
+                    f"중지: task_stop(task_id='{task.id}')"
                 ),
                 metadata={
                     "task_id": task.id,
                     "description": arguments.description,
                     "model": model,
+                    "sub_rbac_level": sub_rbac,
+                    "parent_rbac_level": parent_rbac,
                 },
             )
         except Exception as exc:
