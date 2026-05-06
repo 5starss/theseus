@@ -182,7 +182,7 @@ uv.lock
 
 
 .openharness
-# OpenHarness/
+OpenHarness/
 .theseus_sessions/
 .theseus_history.json
 test_log.txt
@@ -190,3 +190,6 @@ temp/
 
 debug_dumps/
 OpenHarness/
+
+# Theseus local memory (not shared)
+.theseus/memory-local/

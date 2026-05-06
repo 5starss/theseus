@@ -23,6 +23,7 @@ class AgentMode(Enum):
     ASK = "Ask"
     AGENT = "Agent"
     PLAN = "Plan"
+    COORDINATOR = "Coordinator"
 
 
 class PlanPhase(Enum):
@@ -33,14 +34,24 @@ class PlanPhase(Enum):
     EXECUTING = "Executing"
 
 
+class CoordinatorPhase(Enum):
+    """Coordinator 모드 내부의 4단계 오케스트레이션 파이프라인."""
+
+    DECOMPOSE = "Decompose"
+    DISPATCH = "Dispatch"
+    SYNTHESIZE = "Synthesize"
+    VERIFY = "Verify"
+
+
 # ---------------------------------------------------------------------------
 # Mode Descriptions (for display)
 # ---------------------------------------------------------------------------
 
 MODE_DESCRIPTIONS = {
-    AgentMode.ASK: "💬 Ask   — 질문/답변 전용 (도구 사용 안 함)",
-    AgentMode.AGENT: "🤖 Agent — 자율 실행 (도구 자유 사용)",
-    AgentMode.PLAN: "📋 Plan  — 계획 → 리뷰 → 실행 파이프라인",
+    AgentMode.ASK: "💬 Ask         — 질문/답변 전용 (도구 사용 안 함)",
+    AgentMode.AGENT: "🤖 Agent       — 자율 실행 (도구 자유 사용)",
+    AgentMode.PLAN: "📋 Plan        — 계획 → 리뷰 → 실행 파이프라인",
+    AgentMode.COORDINATOR: "🎯 Coordinator — 병렬 서브 에이전트 오케스트레이션",
 }
 
 
@@ -95,6 +106,11 @@ Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in yo
    - Reserve Bash exclusively for system commands that require shell execution.
  - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
  - Tool creation (`create_tool`) is ONLY available in Plan mode's Executing phase. Do not attempt it in Agent or Ask mode.
+ - CRITICAL: NEVER use Markdown link syntax (e.g. `[label](url)`) in file paths, file names, or code content. \
+When specifying a file path or writing code, use plain text only. \
+Example — WRONG: `[sorter.py](http://sorter.py)`, CORRECT: `sorter.py`. \
+Example — WRONG: `[x.is](http://x.is)_integer()`, CORRECT: `x.is_integer()`. \
+This applies to ALL tool arguments (file_path, content, command, etc.) and to any Python/code you generate.
 
 # Theseus RBAC (Role-Based Access Control)
  - Your available tools are filtered by the current user's permission level. \
@@ -216,27 +232,43 @@ _PLAN_DRAFTING_PROMPT = """\
 You are Theseus AI in Plan mode, Drafting phase. This is a structured planning mode.
 
 === CRITICAL: READ-ONLY MODE — NO FILE MODIFICATIONS ===
-You are STRICTLY PROHIBITED from:
- - Creating new files (no write_file, touch, or file creation of any kind)
- - Modifying existing files (no edit_file operations)
- - Deleting files (no rm or deletion)
- - Running ANY commands that change system state
+You are STRICTLY PROHIBITED from using ANY tools in this phase. No file reads, writes,
+edits, bash commands, or any other tool calls. Plan only from your knowledge.
 
-The system uses a separate structured output call (Pydantic schema) to generate \
-the plan. You do NOT have access to file editing tools in this phase — attempting \
-to use them will fail.
+=== REQUIRED OUTPUT FORMAT ===
+You MUST output your plan as a single JSON code block (```json ... ```) with this exact structure:
 
-The plan will be returned as a validated JSON document containing:
- - overview: High-level summary of the objective
- - approach: Technical rationale and chosen strategy
- - steps: Ordered list of implementation steps with dependencies and complexity
- - risks: Potential failure points and mitigations
- - success_criteria: Definition of done
+```json
+{
+  "goal": "한 문장으로 목표 요약",
+  "tasks": [
+    {
+      "id": "main-task-1",
+      "parent_id": null,
+      "title": "메인 태스크 제목",
+      "description": "상세 설명",
+      "status": "pending"
+    },
+    {
+      "id": "sub-task-1-1",
+      "parent_id": "main-task-1",
+      "title": "서브 태스크 제목",
+      "description": "상세 설명",
+      "status": "pending"
+    }
+  ]
+}
+```
 
-This ensures zero parsing errors and perfect block-level editability.
+Rules for tasks:
+ - Main tasks have `parent_id: null`. Sub-tasks reference their parent's `id`.
+ - All `status` values must be `"pending"` in the draft.
+ - Aim for 3-6 main tasks, each with 2-4 sub-tasks.
+ - The JSON must be complete and valid — no truncation, no placeholder values.
+ - Output ONLY the JSON block. Do not add prose before or after it.
 
-# User Interaction
- - When presenting your drafted plan, you MUST explicitly instruct the user to type `approve` or `/approve` in the terminal to authorize and execute the plan.\
+After outputting the JSON, on a new line add exactly:
+> 계획이 작성되었습니다. `approve` 또는 `/approve`를 입력하여 실행하거나, 수정할 내용을 텍스트로 입력하세요.\
 """
 
 _PLAN_REVIEW_PROMPT = """\
@@ -250,13 +282,68 @@ The plan is under review by the user. Wait for their decision:
 Do not take further actions until a decision is made.\
 """
 
+_COORDINATOR_DECOMPOSE_PROMPT = """\
+# Current Mode: COORDINATOR — Phase: DECOMPOSE
+
+You are Theseus AI in Coordinator mode, Decompose phase. Your job is to break the \
+user's task into independent sub-tasks that can be executed in parallel by worker agents.
+
+Rules:
+ - Analyze the user's request and identify atomic, parallelizable units of work.
+ - Each sub-task must be fully self-contained: include all context in the prompt.
+ - Output a work plan as a JSON list: [{\"id\": 1, \"description\": \"...\", \"prompt\": \"...\"}]
+ - Sub-tasks should NOT depend on each other's results unless absolutely necessary.
+ - Aim for 2-6 sub-tasks. More is not better — merge related work.
+ - After outputting the JSON, call `agent` tool once for each sub-task to dispatch workers.\
+"""
+
+_COORDINATOR_DISPATCH_PROMPT = """\
+# Current Mode: COORDINATOR — Phase: DISPATCH
+
+Workers are running. Your job is to monitor progress and handle dependencies.
+
+Rules:
+ - Use task_output to check worker results.
+ - If a worker fails, diagnose the error and either retry or adapt the remaining plan.
+ - Do NOT start synthesis until all critical workers have completed.\
+"""
+
+_COORDINATOR_SYNTHESIZE_PROMPT = """\
+# Current Mode: COORDINATOR — Phase: SYNTHESIZE
+
+All workers have completed. Your job is to integrate their results into a coherent whole.
+
+Rules:
+ - Read all worker outputs carefully.
+ - Resolve conflicts, merge code changes, and ensure consistency.
+ - Do NOT add features beyond what was originally requested.
+ - Produce a unified, clean result.\
+"""
+
+_COORDINATOR_VERIFY_PROMPT = """\
+# Current Mode: COORDINATOR — Phase: VERIFY
+
+Synthesis is complete. Your job is to verify the final result meets the original requirements.
+
+Rules:
+ - Run tests or validation checks if applicable.
+ - Review the output against the original user request.
+ - Report what succeeded, what failed, and what requires follow-up.
+ - Be honest — do not declare success if there are known issues.\
+"""
+
 _PLAN_EXECUTING_PROMPT_TEMPLATE = """\
 # Current Mode: PLAN — Phase: EXECUTING
 
 The plan has been APPROVED by the user. Your objective is to EXECUTE the approved \
 plan using ONLY the tools available in your current tool schema.
 
-# CRITICAL RULES:
+# CRITICAL EXECUTION RULES:
+ - **ACT IMMEDIATELY. Do NOT describe what you are about to do — just call the tool.**
+ - Every response MUST contain at least one tool call until the plan is fully complete.
+ - Never output a message like "I will now call X" or "Next I will do Y" without \
+   actually calling the tool in the SAME response. If you have nothing left to do, \
+   say "Plan complete." — otherwise call the next tool.
  - You may ONLY call tools that appear in your function/tool schema. \
 Do NOT invent tool names. If you call a non-existent tool, the system will \
 return an error and waste a turn.
@@ -284,6 +371,9 @@ creating non-Python files), explain what the user needs to do manually and move 
  - When writing tool code, NEVER use relative file paths like open('data.txt').
  - Always use absolute paths derived from context.cwd (which is a pathlib.Path).
  - Example: path = context.cwd / "data" / filename
+ - CRITICAL: NEVER use Markdown link syntax in file names, paths, or code. \
+Write plain text only. WRONG: `[sorter.py](http://sorter.py)` or `[x.is](http://x.is)_integer()`. \
+CORRECT: `sorter.py` and `x.is_integer()`.
 
 # Execution guidelines:
  - Follow the approved plan step by step. Do not deviate.
@@ -312,14 +402,15 @@ tool from scratch unless multiple fundamental issues are reported.
 
 
 class TheseusStateMachine:
-    """3-Mode 상태 머신: Ask / Agent / Plan.
+    """4-Mode 상태 머신: Ask / Agent / Plan / Coordinator.
 
     상용 AI 코딩 어시스턴트(Cursor, Copilot)의 모드 전환 패러다임을
     기반으로, 사용자의 의도에 맞는 프롬프트를 동적으로 조합합니다.
 
     Attributes:
-        mode: 현재 활성 모드 (ASK, AGENT, PLAN).
+        mode: 현재 활성 모드 (ASK, AGENT, PLAN, COORDINATOR).
         plan_phase: Plan 모드일 때의 하위 단계.
+        coordinator_phase: Coordinator 모드일 때의 하위 단계.
         plan: 승인 대기 중인 플랜 마크다운 텍스트.
         plan_blocks: Pydantic 구조화 블록 리스트 (리뷰 UI용).
         plan_document: PlanDocument 객체 (원본 구조화 데이터).
@@ -333,6 +424,7 @@ class TheseusStateMachine:
         """
         self.mode = initial_mode
         self.plan_phase: Optional[PlanPhase] = None
+        self.coordinator_phase: Optional[CoordinatorPhase] = None
         self.plan = ""
         self.plan_blocks = []
         self.plan_document = None
@@ -346,23 +438,34 @@ class TheseusStateMachine:
 
         if new_mode == AgentMode.PLAN:
             self.plan_phase = PlanPhase.DRAFTING
+            self.coordinator_phase = None
             self.plan = ""
             self.plan_blocks = []
             self.plan_document = None
+        elif new_mode == AgentMode.COORDINATOR:
+            self.coordinator_phase = CoordinatorPhase.DECOMPOSE
+            self.plan_phase = None
         else:
             self.plan_phase = None
+            self.coordinator_phase = None
 
-        print(
-            f"\n🔄 [Mode Switch] {old.value} → {new_mode.value}"
-            f"  ({MODE_DESCRIPTIONS[new_mode]})"
-        )
+        try:
+            print(
+                f"\n[Mode Switch] {old.value} -> {new_mode.value}"
+                f"  ({MODE_DESCRIPTIONS[new_mode]})"
+            )
+        except UnicodeEncodeError:
+            print(f"\n[Mode Switch] {old.value} -> {new_mode.value}")
 
     def set_plan_phase(self, phase: PlanPhase) -> None:
         """Plan 모드 내에서 하위 단계를 전환합니다."""
         self.plan_phase = phase
-        print(
-            f"\n📍 [Plan Phase] → {phase.value}"
-        )
+        print(f"\n[Plan Phase] → {phase.value}")
+
+    def set_coordinator_phase(self, phase: CoordinatorPhase) -> None:
+        """Coordinator 모드 내에서 하위 단계를 전환합니다."""
+        self.coordinator_phase = phase
+        print(f"\n[Coordinator Phase] → {phase.value}")
 
     # ----- Convenience properties -----
 
@@ -387,6 +490,8 @@ class TheseusStateMachine:
         """프롬프트 표시용 현재 모드 문자열."""
         if self.mode == AgentMode.PLAN and self.plan_phase:
             return f"Plan/{self.plan_phase.value}"
+        if self.mode == AgentMode.COORDINATOR and self.coordinator_phase:
+            return f"Coordinator/{self.coordinator_phase.value}"
         return self.mode.value
 
     # ----- System prompt assembly -----
@@ -409,5 +514,15 @@ class TheseusStateMachine:
                 prompt += _PLAN_EXECUTING_PROMPT_TEMPLATE.format(
                     plan=self.plan
                 )
+        elif self.mode == AgentMode.COORDINATOR:
+            phase = self.coordinator_phase or CoordinatorPhase.DECOMPOSE
+            if phase == CoordinatorPhase.DECOMPOSE:
+                prompt += _COORDINATOR_DECOMPOSE_PROMPT
+            elif phase == CoordinatorPhase.DISPATCH:
+                prompt += _COORDINATOR_DISPATCH_PROMPT
+            elif phase == CoordinatorPhase.SYNTHESIZE:
+                prompt += _COORDINATOR_SYNTHESIZE_PROMPT
+            elif phase == CoordinatorPhase.VERIFY:
+                prompt += _COORDINATOR_VERIFY_PROMPT
 
         return prompt

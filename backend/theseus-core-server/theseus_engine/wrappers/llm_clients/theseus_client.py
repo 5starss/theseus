@@ -297,4 +297,14 @@ class TheseusLLMClient(SupportsStreamingMessages):
         )
 
         async for event in self._backend.stream_message(modified_request):
+            if isinstance(event, ApiMessageCompleteEvent) and event.usage:
+                try:
+                    from theseus_engine.engine.cost_tracker import CostTracker
+                    CostTracker.get_or_create().record_usage(
+                        model=actual_model,
+                        input_tokens=event.usage.input_tokens,
+                        output_tokens=event.usage.output_tokens,
+                    )
+                except Exception:
+                    pass
             yield event
