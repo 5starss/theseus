@@ -1,5 +1,6 @@
 package com.theseus.api.domain.tool.entity;
 
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
@@ -76,7 +77,7 @@ class ToolApprovalTest {
 
 		// When & Then
 		assertThatThrownBy(() -> toolApproval.reject(reviewer, "reject", LocalDateTime.of(2026, 4, 29, 10, 1)))
-			.isInstanceOf(IllegalStateException.class);
+			.isInstanceOf(BusinessException.class);
 	}
 
 	@Test
@@ -93,7 +94,7 @@ class ToolApprovalTest {
 			.requestNumber(0)
 			.requestedByProjectMember(projectMember)
 			.build())
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(BusinessException.class);
 	}
 
 	private ToolApproval createToolApproval() {

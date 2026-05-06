@@ -1,5 +1,7 @@
 package com.theseus.api.domain.tool.entity;
 
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -150,13 +152,13 @@ public class ToolApproval {
 
 	private void validatePending() {
 		if (!isPending()) {
-			throw new IllegalStateException("tool approval is already reviewed");
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_ALREADY_REVIEWED);
 		}
 	}
 
 	private Integer validateRequestNumber(Integer requestNumber) {
 		if (requestNumber == null || requestNumber < 1) {
-			throw new IllegalArgumentException("requestNumber must be greater than zero");
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_REQUEST_NUMBER_INVALID);
 		}
 
 		return requestNumber;

@@ -1,5 +1,7 @@
 package com.theseus.api.domain.project.entity;
 
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import java.util.Arrays;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -14,8 +16,8 @@ public enum ProjectMemberStatus {
 
 	public static ProjectMemberStatus createFrom(String text) {
 		return Arrays.stream(values())
-			.filter(status -> status.text.equals(text))
+			.filter(status -> status.name().equals(text) || status.text.equals(text))
 			.findFirst()
-			.orElseThrow(() -> new IllegalArgumentException("지원하지 않는 프로젝트 멤버 상태입니다."));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.INVALID_PROJECT_MEMBER_STATUS));
 	}
 }

@@ -2,7 +2,7 @@ package com.theseus.api.domain.billing.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.billing.dto.request.BillingUsageCreateRequest;
 import com.theseus.api.domain.billing.dto.request.BillingUsageMetricsRequest;
@@ -48,9 +48,9 @@ public class BillingUsageService {
 	private BillingUsageResponse createNewUsage(BillingUsageCreateRequest request, String idempotencyKey) {
 		BillingUsageMetricsRequest usage = request.getUsage();
 		User user = userRepository.findById(request.getUserId())
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 		Project project = projectRepository.findById(request.getProjectId())
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 
 		BillingUsage billingUsage = BillingUsage.builder()
 			.user(user)
@@ -69,7 +69,7 @@ public class BillingUsageService {
 
 	private void validateRequest(BillingUsageCreateRequest request) {
 		if (request == null || request.getUserId() == null || request.getProjectId() == null || request.getUsage() == null) {
-			throw new CustomException(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID);
+			throw BusinessException.of(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID);
 		}
 	}
 
@@ -86,7 +86,7 @@ public class BillingUsageService {
 			return 0L;
 		}
 		if (token < 0) {
-			throw new CustomException(ErrorCode.BILLING_USAGE_TOKEN_INVALID);
+			throw BusinessException.of(ErrorCode.BILLING_USAGE_TOKEN_INVALID);
 		}
 
 		return token;
@@ -117,7 +117,7 @@ public class BillingUsageService {
 		try {
 			return LocalDateTime.parse(timestamp);
 		} catch (DateTimeParseException exception) {
-			throw new CustomException(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID, exception);
+			throw BusinessException.of(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID, exception);
 		}
 	}
 
@@ -125,7 +125,7 @@ public class BillingUsageService {
 		try {
 			return objectMapper.writeValueAsString(usage);
 		} catch (JsonProcessingException exception) {
-			throw new CustomException(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID, exception);
+			throw BusinessException.of(ErrorCode.BILLING_USAGE_PAYLOAD_INVALID, exception);
 		}
 	}
 }

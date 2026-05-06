@@ -9,7 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.billing.dto.request.BillingUsageCreateRequest;
 import com.theseus.api.domain.billing.dto.request.BillingUsageMetricsRequest;
@@ -171,7 +171,7 @@ class BillingUsageServiceTest {
 
 		// When & Then
 		assertThatThrownBy(() -> billingUsageService.createUsage(request, null))
-			.isInstanceOf(CustomException.class)
+			.isInstanceOf(BusinessException.class)
 			.extracting("errorCode")
 			.isEqualTo(ErrorCode.BILLING_USAGE_TOKEN_INVALID);
 		verify(billingUsageRepository, never()).save(any(BillingUsage.class));
@@ -186,7 +186,7 @@ class BillingUsageServiceTest {
 
 		// When & Then
 		assertThatThrownBy(() -> billingUsageService.createUsage(request, null))
-			.isInstanceOf(CustomException.class)
+			.isInstanceOf(BusinessException.class)
 			.extracting("errorCode")
 			.isEqualTo(ErrorCode.USER_NOT_FOUND);
 		verifyNoInteractions(projectRepository);
@@ -203,7 +203,7 @@ class BillingUsageServiceTest {
 
 		// When & Then
 		assertThatThrownBy(() -> billingUsageService.createUsage(request, null))
-			.isInstanceOf(CustomException.class)
+			.isInstanceOf(BusinessException.class)
 			.extracting("errorCode")
 			.isEqualTo(ErrorCode.PROJECT_NOT_FOUND);
 		verify(billingUsageRepository, never()).save(any(BillingUsage.class));

@@ -1,5 +1,6 @@
 package com.theseus.api.domain.tool.entity;
 
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
@@ -97,7 +98,7 @@ class ToolTest {
 			.createdByProjectMember(projectMember)
 			.fileName(" ")
 			.build())
-			.isInstanceOf(IllegalArgumentException.class);
+			.isInstanceOf(BusinessException.class);
 	}
 
 	private Tool createTool(Integer toolGrade) {

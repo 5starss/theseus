@@ -1,6 +1,6 @@
 package com.theseus.api.domain.auth.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.dto.request.LoginRequest;
 import com.theseus.api.domain.auth.dto.response.LoginResponse;
@@ -78,12 +78,12 @@ public class AuthService {
 	private User findLoginUser(String loginId) {
 		return userRepository.findByEmployeeNumber(loginId)
 			.or(() -> userRepository.findByEmail(loginId))
-			.orElseThrow(() -> new CustomException(ErrorCode.LOGIN_FAILED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.LOGIN_FAILED));
 	}
 
 	private void validatePassword(String password, User user) {
 		if (!passwordEncoder.matches(password, user.getPassword())) {
-			throw new CustomException(ErrorCode.LOGIN_FAILED);
+			throw BusinessException.of(ErrorCode.LOGIN_FAILED);
 		}
 	}
 
@@ -108,17 +108,17 @@ public class AuthService {
 
 	private RefreshToken getSavedRefreshToken(String refreshToken) {
 		if (refreshToken == null || refreshToken.isBlank()) {
-			throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
+			throw BusinessException.of(ErrorCode.INVALID_REFRESH_TOKEN);
 		}
 
 		return refreshTokenRepository.findByTokenHash(hashToken(refreshToken))
-			.orElseThrow(() -> new CustomException(ErrorCode.INVALID_REFRESH_TOKEN));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.INVALID_REFRESH_TOKEN));
 	}
 
 	private void validateRefreshToken(String refreshToken, RefreshToken savedRefreshToken) {
 		if (savedRefreshToken.isExpired(LocalDateTime.now())) {
 			refreshTokenRepository.delete(savedRefreshToken);
-			throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
+			throw BusinessException.of(ErrorCode.INVALID_REFRESH_TOKEN);
 		}
 
 		try {
@@ -127,10 +127,10 @@ public class AuthService {
 
 			if (!savedRefreshToken.getUser().getId().equals(tokenUserId)) {
 				refreshTokenRepository.delete(savedRefreshToken);
-				throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN);
+				throw BusinessException.of(ErrorCode.INVALID_REFRESH_TOKEN);
 			}
-		} catch (JwtException | IllegalArgumentException exception) {
-			throw new CustomException(ErrorCode.INVALID_REFRESH_TOKEN, exception);
+		} catch (JwtException | IllegalArgumentException | BusinessException exception) {
+			throw BusinessException.of(ErrorCode.INVALID_REFRESH_TOKEN, exception);
 		}
 	}
 
@@ -141,7 +141,7 @@ public class AuthService {
 
 			return HexFormat.of().formatHex(digest);
 		} catch (NoSuchAlgorithmException exception) {
-			throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, exception);
+			throw BusinessException.of(ErrorCode.INTERNAL_SERVER_ERROR, exception);
 		}
 	}
 }

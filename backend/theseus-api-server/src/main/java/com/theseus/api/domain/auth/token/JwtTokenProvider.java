@@ -1,5 +1,7 @@
 package com.theseus.api.domain.auth.token;
 
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.user.entity.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -85,7 +87,7 @@ public class JwtTokenProvider {
 		Claims claims = parseClaims(token);
 
 		if (!tokenType.equals(claims.get(TOKEN_TYPE_CLAIM, String.class))) {
-			throw new IllegalArgumentException("지원하지 않는 토큰 타입입니다.");
+			throw BusinessException.of(ErrorCode.INVALID_TOKEN_TYPE);
 		}
 	}
 

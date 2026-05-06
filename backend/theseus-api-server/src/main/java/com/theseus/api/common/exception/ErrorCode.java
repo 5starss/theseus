@@ -19,6 +19,7 @@ public enum ErrorCode {
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "AUTH-002", "아이디 또는 비밀번호가 올바르지 않습니다."),
     INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "AUTH-003", "유효하지 않은 Refresh Token입니다."),
     INTERNAL_API_UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "AUTH-004", "내부 API 인증에 실패했습니다."),
+    INVALID_TOKEN_TYPE(HttpStatus.UNAUTHORIZED, "AUTH-005", "지원하지 않는 토큰 타입입니다."),
     
     // User
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER-001", "존재하지 않는 사용자입니다."),
@@ -60,6 +61,7 @@ public enum ErrorCode {
     TOOL_UPDATE_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "TOOL-007", "Tool 수정 권한이 필요합니다."),
     DUPLICATE_TOOL_FILE_NAME(HttpStatus.CONFLICT, "TOOL-008", "이미 존재하는 Tool 파일명입니다."),
     TOOL_REGENERATION_STATUS_REQUIRED(HttpStatus.CONFLICT, "TOOL-009", "DRAFT 또는 REJECTED Tool만 재생성할 수 있습니다."),
+    TOOL_FILE_NAME_REQUIRED(HttpStatus.BAD_REQUEST, "TOOL-010", "Tool 파일명은 비어 있을 수 없습니다."),
 
     // ToolApproval
     TOOL_APPROVAL_NOT_FOUND(HttpStatus.NOT_FOUND, "TAPP-001", "Tool 승인 요청을 찾을 수 없습니다."),
@@ -68,6 +70,10 @@ public enum ErrorCode {
     TOOL_APPROVAL_REVIEWER_REQUIRED(HttpStatus.FORBIDDEN, "TAPP-004", "프로젝트 ADMIN 또는 MANAGER 권한이 필요합니다."),
     TOOL_APPROVAL_ALREADY_REVIEWED(HttpStatus.CONFLICT, "TAPP-005", "이미 검토된 Tool 승인 요청입니다."),
     TOOL_APPROVAL_PENDING_TOOL_REQUIRED(HttpStatus.CONFLICT, "TAPP-006", "승인 대기 중인 Tool만 검토할 수 있습니다."),
+    TOOL_APPROVAL_REQUEST_NUMBER_INVALID(HttpStatus.BAD_REQUEST, "TAPP-007", "Tool 승인 요청 번호는 1 이상이어야 합니다."),
+
+    // ToolGeneration
+    TOOL_GENERATION_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TGEN-001", "유효하지 않은 Tool 생성 이벤트입니다."),
 
     // Billing
     BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),

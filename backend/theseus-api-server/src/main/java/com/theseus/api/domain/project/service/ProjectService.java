@@ -1,6 +1,6 @@
 package com.theseus.api.domain.project.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.dto.request.ProjectCreateRequest;
@@ -118,7 +118,7 @@ public class ProjectService {
 
 	public Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember createProjectAdminMember(Project project, User projectAdminUser, User createdByUser) {
@@ -153,7 +153,7 @@ public class ProjectService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return getUserEntity(currentUser.userId());
@@ -161,17 +161,17 @@ public class ProjectService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private User getProjectAdminUser(String employeeNumber, String name) {
 		return userRepository.findByEmployeeNumberAndName(employeeNumber, name)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_ADMIN_USER_NOT_FOUND));
 	}
 
 	private void validateProjectAdminRequest(ProjectUpdateRequest request) {
 		if (request.getAdminEmployeeNumber() == null || request.getAdminName() == null) {
-			throw new CustomException(ErrorCode.PROJECT_ADMIN_REQUEST_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_REQUEST_REQUIRED);
 		}
 	}
 
@@ -189,36 +189,36 @@ public class ProjectService {
 		}
 
 		if (!ProjectStatus.ACTIVE.equals(project.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_REQUIRED);
 		}
 
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 	}
 
 	private void validateProjectAdmin(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED));
 
 		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())
 			|| !ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateSuperAdmin(User user) {
 		if (!SystemRole.SUPER_ADMIN.equals(user.getSystemRole())) {
-			throw new CustomException(ErrorCode.SUPER_ADMIN_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.SUPER_ADMIN_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateActiveUser(User user) {
 		if (!UserStatus.ACTIVE.equals(user.getStatus())) {
-			throw new CustomException(ErrorCode.PROJECT_ADMIN_USER_ACTIVE_REQUIRED);
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_USER_ACTIVE_REQUIRED);
 		}
 	}
 

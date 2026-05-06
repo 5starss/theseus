@@ -1,7 +1,5 @@
 package com.theseus.api.domain.project.controller;
 
-import com.theseus.api.common.exception.CustomException;
-import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.common.response.ApiResponse;
 import com.theseus.api.common.response.status.SuccessCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
@@ -84,14 +82,6 @@ public class ProjectMemberController {
             return ProjectMemberStatus.IN_PROGRESS;
         }
 
-        try {
-            return ProjectMemberStatus.valueOf(status);
-        } catch (IllegalArgumentException ignored) {
-            try {
-                return ProjectMemberStatus.createFrom(status);
-            } catch (IllegalArgumentException exception) {
-                throw new CustomException(ErrorCode.INVALID_PROJECT_MEMBER_STATUS);
-            }
-        }
+        return ProjectMemberStatus.createFrom(status);
     }
 }

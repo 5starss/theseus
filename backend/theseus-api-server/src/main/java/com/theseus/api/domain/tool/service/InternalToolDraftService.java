@@ -3,7 +3,7 @@ package com.theseus.api.domain.tool.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.tool.dto.response.InternalToolDraftResponse;
 import com.theseus.api.domain.tool.entity.Tool;
@@ -23,7 +23,7 @@ public class InternalToolDraftService {
 
 	public InternalToolDraftResponse getToolDraft(Long toolId) {
 		Tool tool = toolRepository.findByIdAndStatusNot(toolId, ToolStatus.DELETED)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));
 
 		return InternalToolDraftResponse.createOf(
 			tool,
@@ -40,7 +40,7 @@ public class InternalToolDraftService {
 		try {
 			return objectMapper.readTree(value);
 		} catch (JsonProcessingException exception) {
-			throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR, exception);
+			throw BusinessException.of(ErrorCode.INTERNAL_SERVER_ERROR, exception);
 		}
 	}
 }

@@ -1,6 +1,6 @@
 package com.theseus.api.domain.chat.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.dto.response.ChatMessageResponse;
@@ -188,7 +188,7 @@ public class ChatMessageService {
 
 	private void validateToolChatSession(ChatSession chatSession, Tool tool) {
 		if (tool == null || !Objects.equals(tool.getChatSession().getId(), chatSession.getId())) {
-			throw new CustomException(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
+			throw BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
 		}
 	}
 
@@ -199,7 +199,7 @@ public class ChatMessageService {
 
 		Project project = getProjectEntity(projectId);
 		return toolRepository.findByIdAndProjectAndChatSession(toolId, project, chatSession)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_CHAT_SESSION_MISMATCH));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH));
 	}
 
 	private ChatSession getAccessibleChatSession(AuthenticatedUser currentUser, Long projectId, Long sessionId) {
@@ -212,7 +212,7 @@ public class ChatMessageService {
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 
 		return chatSessionRepository.findByIdAndProjectAndProjectMember(sessionId, project, projectMember)
-			.orElseThrow(() -> new CustomException(ErrorCode.CHAT_SESSION_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.CHAT_SESSION_NOT_FOUND));
 	}
 
 	private ChatSession getAccessibleChatSessionForUpdate(AuthenticatedUser currentUser, Long projectId, Long sessionId) {
@@ -225,12 +225,12 @@ public class ChatMessageService {
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 
 		return chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(sessionId, project, projectMember)
-			.orElseThrow(() -> new CustomException(ErrorCode.CHAT_SESSION_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.CHAT_SESSION_NOT_FOUND));
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return getUserEntity(currentUser.userId());
@@ -238,20 +238,20 @@ public class ChatMessageService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;
@@ -259,7 +259,7 @@ public class ChatMessageService {
 
 	private void validateOpenChatSession(ChatSession chatSession) {
 		if (chatSession.isClosed()) {
-			throw new CustomException(ErrorCode.CLOSED_CHAT_SESSION);
+			throw BusinessException.of(ErrorCode.CLOSED_CHAT_SESSION);
 		}
 	}
 }

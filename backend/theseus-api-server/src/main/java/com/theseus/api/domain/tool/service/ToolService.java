@@ -1,6 +1,6 @@
 package com.theseus.api.domain.tool.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.entity.Project;
@@ -79,24 +79,24 @@ public class ToolService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return userRepository.findById(currentUser.userId())
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;
@@ -104,30 +104,30 @@ public class ToolService {
 
 	private Tool getToolEntity(Project project, Long toolId) {
 		return toolRepository.findByIdAndProjectAndStatusNot(toolId, project, ToolStatus.DELETED)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));
 	}
 
 	private void validateAccessibleScope(String scope) {
 		if (!ACCESSIBLE_SCOPE.equals(scope)) {
-			throw new CustomException(ErrorCode.UNSUPPORTED_TOOL_SCOPE);
+			throw BusinessException.of(ErrorCode.UNSUPPORTED_TOOL_SCOPE);
 		}
 	}
 
 	private void validateApprovedStatus(ToolStatus status) {
 		if (!ToolStatus.APPROVED.equals(status)) {
-			throw new CustomException(ErrorCode.APPROVED_TOOL_ONLY);
+			throw BusinessException.of(ErrorCode.APPROVED_TOOL_ONLY);
 		}
 	}
 
 	private void validateToolUsePermission(ProjectMember projectMember) {
 		if (!Boolean.TRUE.equals(projectMember.getCanUseTool())) {
-			throw new CustomException(ErrorCode.TOOL_USE_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_USE_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateAccessibleTool(ProjectMember projectMember, Tool tool) {
 		if (!tool.isAccessibleWithAccessLevel(projectMember.getAccessLevel())) {
-			throw new CustomException(ErrorCode.TOOL_ACCESS_LEVEL_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_ACCESS_LEVEL_REQUIRED);
 		}
 	}
 

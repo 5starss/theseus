@@ -3,6 +3,8 @@ package com.theseus.api.domain.toolgeneration.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.service.ChatMessageService;
@@ -118,31 +120,40 @@ public class ToolGenerationEventService {
 
 	private ToolGenerationDraftPayload requireToolDraft(ToolGenerationEvent event) {
 		if (event.getToolDraft() == null) {
-			throw new IllegalArgumentException("Tool generation completed event must contain toolDraft.");
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID);
 		}
 		return event.getToolDraft();
 	}
 
 	private ToolGenerationAssistantMessagePayload requireAssistantMessage(ToolGenerationEvent event) {
 		if (event.getAssistantMessage() == null) {
-			throw new IllegalArgumentException("Tool generation completed event must contain assistantMessage.");
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID);
 		}
 		return event.getAssistantMessage();
 	}
 
 	private ChatMessageType resolveAssistantMessageType(String messageType) {
-		ChatMessageType resolvedMessageType = ChatMessageType.valueOf(messageType);
+		ChatMessageType resolvedMessageType;
+		try {
+			resolvedMessageType = ChatMessageType.valueOf(messageType);
+		} catch (IllegalArgumentException exception) {
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID, exception);
+		}
 		if (
 			!ChatMessageType.TOOL_DRAFT_RESPONSE.equals(resolvedMessageType)
 				&& !ChatMessageType.TOOL_REGENERATE_RESPONSE.equals(resolvedMessageType)
 		) {
-			throw new IllegalArgumentException("Unsupported assistant messageType: " + messageType);
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID);
 		}
 		return resolvedMessageType;
 	}
 
 	private ChatMessageContentType resolveContentType(String contentType) {
-		return ChatMessageContentType.valueOf(contentType);
+		try {
+			return ChatMessageContentType.valueOf(contentType);
+		} catch (IllegalArgumentException exception) {
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID, exception);
+		}
 	}
 
 	private String resolveAssistantContent(
@@ -155,7 +166,7 @@ public class ToolGenerationEventService {
 		if (toolDraft.getRawMarkdown() != null && !toolDraft.getRawMarkdown().isBlank()) {
 			return toolDraft.getRawMarkdown();
 		}
-		throw new IllegalArgumentException("Tool generation completed event must contain assistant content.");
+		throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID);
 	}
 
 	private String writeJsonNodeAsString(JsonNode jsonNode) {
@@ -166,7 +177,7 @@ public class ToolGenerationEventService {
 		try {
 			return objectMapper.writeValueAsString(jsonNode);
 		} catch (JsonProcessingException exception) {
-			throw new IllegalArgumentException("Invalid Tool generation JSON payload.", exception);
+			throw BusinessException.of(ErrorCode.TOOL_GENERATION_EVENT_INVALID, exception);
 		}
 	}
 

@@ -2,7 +2,7 @@ package com.theseus.api.domain.toolgeneration.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
@@ -189,24 +189,24 @@ public class ToolGenerationService {
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
-			throw new CustomException(ErrorCode.UNAUTHORIZED);
+			throw BusinessException.of(ErrorCode.UNAUTHORIZED);
 		}
 
 		return userRepository.findById(currentUser.userId())
-			.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));
 	}
 
 	private ProjectMember getActiveProjectMember(Project project, User user) {
 		ProjectMember projectMember = projectMemberRepository.findByProjectAndUser(project, user)
-			.orElseThrow(() -> new CustomException(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_MEMBER_PERMISSION_REQUIRED));
 
 		if (!ProjectMemberStatus.IN_PROGRESS.equals(projectMember.getStatus())) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_MEMBER_REQUIRED);
 		}
 
 		return projectMember;
@@ -218,42 +218,42 @@ public class ToolGenerationService {
 		ProjectMember projectMember
 	) {
 		return chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(sessionId, project, projectMember)
-			.orElseThrow(() -> new CustomException(ErrorCode.CHAT_SESSION_NOT_FOUND));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.CHAT_SESSION_NOT_FOUND));
 	}
 
 	private Tool getToolForUpdate(Long toolId, Project project, ChatSession chatSession) {
 		return toolRepository.findByIdAndProjectAndChatSessionForUpdate(toolId, project, chatSession)
-			.orElseThrow(() -> new CustomException(ErrorCode.TOOL_CHAT_SESSION_MISMATCH));
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH));
 	}
 
 	private void validateOpenChatSession(ChatSession chatSession) {
 		if (chatSession.isClosed()) {
-			throw new CustomException(ErrorCode.CLOSED_CHAT_SESSION);
+			throw BusinessException.of(ErrorCode.CLOSED_CHAT_SESSION);
 		}
 	}
 
 	private void validateToolCreatePermission(ProjectMember projectMember) {
 		if (!Boolean.TRUE.equals(projectMember.getCanCreateTool())) {
-			throw new CustomException(ErrorCode.TOOL_CREATE_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_CREATE_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateRegenerationPermission(ProjectMember projectMember, Tool tool) {
 		boolean isCreator = tool.getCreatedByProjectMember().getId().equals(projectMember.getId());
 		if (!isCreator && !Boolean.TRUE.equals(projectMember.getCanUpdateTool())) {
-			throw new CustomException(ErrorCode.TOOL_UPDATE_PERMISSION_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_UPDATE_PERMISSION_REQUIRED);
 		}
 	}
 
 	private void validateUniqueFileName(Project project, String fileName) {
 		if (toolRepository.existsByProjectAndFileName(project, fileName)) {
-			throw new CustomException(ErrorCode.DUPLICATE_TOOL_FILE_NAME);
+			throw BusinessException.of(ErrorCode.DUPLICATE_TOOL_FILE_NAME);
 		}
 	}
 
 	private void validateRegeneratableTool(Tool tool) {
 		if (!tool.canRegenerate() || ToolStatus.DELETED.equals(tool.getStatus())) {
-			throw new CustomException(ErrorCode.TOOL_REGENERATION_STATUS_REQUIRED);
+			throw BusinessException.of(ErrorCode.TOOL_REGENERATION_STATUS_REQUIRED);
 		}
 	}
 
@@ -261,7 +261,7 @@ public class ToolGenerationService {
 		try {
 			return objectMapper.writeValueAsString(request);
 		} catch (JsonProcessingException exception) {
-			throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+			throw BusinessException.of(ErrorCode.INVALID_INPUT_VALUE);
 		}
 	}
 

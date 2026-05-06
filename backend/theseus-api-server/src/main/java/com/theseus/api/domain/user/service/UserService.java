@@ -1,6 +1,6 @@
 package com.theseus.api.domain.user.service;
 
-import com.theseus.api.common.exception.CustomException;
+import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.project.entity.ProjectStatus;
 import com.theseus.api.domain.project.repository.ProjectRepository;
@@ -41,7 +41,7 @@ public class UserService {
 
 	public UserResponse getUserByEmployeeNumber(String employeeNumber) {
 		User user = userRepository.findByEmployeeNumber(employeeNumber)
-				.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+				.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 		return UserResponse.createFrom(user);
 	}
 
@@ -84,27 +84,27 @@ public class UserService {
 
 	private User getUserEntity(Long userId) {
 		return userRepository.findById(userId)
-				.orElseThrow(() -> new CustomException(ErrorCode.USER_NOT_FOUND));
+				.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 	}
 
 	private void validateCreateRequest(UserCreateRequest request) {
 		if (userRepository.existsByEmployeeNumber(request.getEmployeeNumber())) {
-			throw new CustomException(ErrorCode.DUPLICATE_EMPLOYEE_NUMBER);
+			throw BusinessException.of(ErrorCode.DUPLICATE_EMPLOYEE_NUMBER);
 		}
 		if (request.getEmail() != null && userRepository.existsByEmail(request.getEmail())) {
-			throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
+			throw BusinessException.of(ErrorCode.DUPLICATE_EMAIL);
 		}
 	}
 
 	private void validateEmailDuplication(Long userId, String email) {
 		if (email != null && userRepository.existsByEmailAndIdNot(email, userId)) {
-			throw new CustomException(ErrorCode.DUPLICATE_EMAIL);
+			throw BusinessException.of(ErrorCode.DUPLICATE_EMAIL);
 		}
 	}
 
 	private void validateCanDeactivateUser(User user) {
 		if (projectRepository.existsByProjectAdminUserAndStatus(user, ProjectStatus.ACTIVE)) {
-			throw new CustomException(ErrorCode.ACTIVE_PROJECT_ADMIN_USER);
+			throw BusinessException.of(ErrorCode.ACTIVE_PROJECT_ADMIN_USER);
 		}
 	}
 }
