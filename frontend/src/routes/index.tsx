@@ -10,6 +10,7 @@ import ProtectedRoute from './ProtectedRoute';
 import ChatSessionPage from '@/pages/user/projects/ChatSessionPage';
 import ProjectSettingsPage from '@/pages/user/projects/ProjectSettingsPage';
 import ToolListPage from '@/pages/user/projects/ToolListPage';
+import ProjectIndexPage from '@/pages/user/projects/ProjectIndexPage';
 
 export const router = createBrowserRouter([
   {
@@ -29,6 +30,10 @@ export const router = createBrowserRouter([
         path: '/projects/:projectId',
         element: <ProjectLayout />,
         children: [
+          {
+            index: true,
+            element: <ProjectIndexPage />,
+          },
           {
             path: 'sessions',
             element: <div className="p-8 text-slate-500 h-full flex items-center justify-center">좌측 메뉴에서 대화 세션을 선택하거나 '새 대화'를 시작하세요.</div>,

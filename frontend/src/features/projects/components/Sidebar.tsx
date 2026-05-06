@@ -40,10 +40,9 @@ interface SidebarProps {
 export function Sidebar({ projectId }: SidebarProps) {
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { currentProject: projectMember, isLoading: isProjectLoading, errorMessage: projectErrorMessage } = useProjectStore();
+  const { currentProject: projectMember, isLoading: isProjectLoading, errorMessage: projectErrorMessage, sessionFetchTrigger, refreshSessions } = useProjectStore();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [isSessionsLoading, setIsSessionsLoading] = useState(false);
-  const [fetchTrigger, setFetchTrigger] = useState(0);
 
   // Rename Modal States
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
@@ -51,7 +50,6 @@ export function Sidebar({ projectId }: SidebarProps) {
   const [tempTitle, setTempTitle] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
 
-  const refetchSessions = () => setFetchTrigger(n => n + 1);
 
 
   useEffect(() => {
@@ -70,7 +68,7 @@ export function Sidebar({ projectId }: SidebarProps) {
     };
     load();
     return () => { cancelled = true; };
-  }, [projectId, fetchTrigger]);
+  }, [projectId, sessionFetchTrigger]);
 
   const handleNewChat = async () => {
     if (!projectId) return;
@@ -78,7 +76,7 @@ export function Sidebar({ projectId }: SidebarProps) {
       const session = await chatApi.createSession(projectId);
       if (session && session.sessionId) {
         // 세션 목록 갱신
-        refetchSessions();
+        refreshSessions();
         navigate(`/projects/${projectId}/sessions/${session.sessionId}`);
       } else {
         navigate(`/projects/${projectId}/sessions/new`);
