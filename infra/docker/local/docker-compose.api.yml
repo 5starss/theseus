@@ -9,10 +9,17 @@ services:
       - .env.local
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://theseus-local-mysql:3306/theseus
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: theseus-local-kafka:29092
+      SPRING_DATA_REDIS_HOST: theseus-local-redis
+      SPRING_DATA_REDIS_PORT: 6379
     ports:
       - "8080:8080"
     depends_on:
       theseus-local-mysql:
+        condition: service_healthy
+      theseus-local-kafka:
+        condition: service_healthy
+      theseus-local-redis:
         condition: service_healthy
     networks:
       - theseus-local-network

@@ -4,7 +4,33 @@ Local, development, and production infrastructure configuration lives here.
 
 ## Local Docker Compose
 
-Run the local infra, API server, and core server together:
+Recommended backend development flow:
+
+1. Run local infra with Docker Compose.
+2. Run Spring Boot API Server from the IDE.
+3. Use the host machine endpoints from the API Server.
+
+Run local infra only:
+
+```bash
+docker compose \
+  -f infra/docker/local/docker-compose.infra.yml \
+  up -d
+```
+
+Run the API Server from the IDE with:
+
+```text
+SPRING_DATASOURCE_URL=jdbc:mysql://localhost:13306/theseus
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+SPRING_DATA_REDIS_HOST=localhost
+SPRING_DATA_REDIS_PORT=16379
+```
+
+Do not run `theseus-local-api-server` while running the API Server from the IDE,
+because both processes use port `8080` by default.
+
+Run the local infra, API server, and core server together only for full Docker integration checks:
 
 ```bash
 docker compose \

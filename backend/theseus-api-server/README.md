@@ -1,12 +1,32 @@
-# Theseus API 서버
+# Theseus API Server
 
-테세우스의 Spring Boot 기반 API 서버입니다.
+Spring Boot based API Server for Theseus.
 
-## 로컬 Kafka Producer 설정
+## Local Development
 
-Kafka Producer 설정은 Spring 설정 파일과 환경 변수에서 로드합니다.
+Recommended flow:
 
-- Docker Compose 내부 실행 기준 bootstrap server: `theseus-local-kafka:29092`
-- IDE 직접 실행 기준 bootstrap server: `localhost:19092`
+1. Run MySQL, Kafka, Redis with Docker Compose.
+2. Run the API Server from the IDE for debugging and fast restart.
+3. Use host machine endpoints from the IDE process.
 
-`local` profile은 `SPRING_KAFKA_BOOTSTRAP_SERVERS` 환경 변수를 우선 사용하며, 값이 없으면 `localhost:19092`를 기본값으로 사용합니다.
+```text
+SPRING_DATASOURCE_URL=jdbc:mysql://localhost:13306/theseus
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+SPRING_DATA_REDIS_HOST=localhost
+SPRING_DATA_REDIS_PORT=16379
+```
+
+Docker Compose internal endpoints are different:
+
+- Kafka: `theseus-local-kafka:29092`
+- Redis: `theseus-local-redis:6379`
+
+Use the internal endpoints only when the API Server itself runs as a Docker
+container. If the API Server runs from the IDE, use `localhost` endpoints.
+
+Stop the API Server container before starting the API Server from the IDE:
+
+```bash
+docker stop theseus-local-api-server
+```
