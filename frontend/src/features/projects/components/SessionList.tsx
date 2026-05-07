@@ -96,8 +96,8 @@ export function SessionList({ projectId, children }: SessionListProps) {
       if (currentActiveSessionId === sessionId.toString()) {
         useChatSessionStore.getState().setClosed(true);
         useChatSessionStore.getState().addMessage({
-          id: crypto.randomUUID(),
-          sender: 'SYSTEM_NOTICE',
+          messageId: crypto.randomUUID(),
+          senderType: 'SYSTEM_NOTICE',
           content: '이 세션이 종료되었습니다.',
           createdAt: new Date().toISOString()
         });

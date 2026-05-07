@@ -36,16 +36,16 @@ export function InspectorPanel() {
 
       // Add User feedback message
       addMessage({
-        id: crypto.randomUUID(),
-        sender: 'USER',
+        messageId: crypto.randomUUID(),
+        senderType: 'USER',
         content: `수정 요청 사항을 전송했습니다.\n${Object.entries(draftComments).map(([k, v]) => `- [${k}] ${v}`).join('\n')}`,
         createdAt: new Date().toISOString()
       });
 
       // Add Assistant loading message
       addMessage({
-        id: crypto.randomUUID(),
-        sender: 'ASSISTANT',
+        messageId: crypto.randomUUID(),
+        senderType: 'ASSISTANT',
         content: '',
         createdAt: new Date().toISOString()
       });
@@ -103,8 +103,8 @@ export function InspectorPanel() {
     try {
       await chatApi.requestToolApproval(projectId, currentToolId);
       addMessage({
-        id: crypto.randomUUID(),
-        sender: 'SYSTEM_NOTICE',
+        messageId: crypto.randomUUID(),
+        senderType: 'SYSTEM_NOTICE',
         content: '도구 생성이 성공적으로 승인되었습니다.',
         createdAt: new Date().toISOString()
       });
@@ -113,8 +113,8 @@ export function InspectorPanel() {
     } catch (e) {
       console.error('Approval failed:', e);
       addMessage({
-        id: crypto.randomUUID(),
-        sender: 'SYSTEM_NOTICE',
+        messageId: crypto.randomUUID(),
+        senderType: 'SYSTEM_NOTICE',
         content: '승인 요청에 실패했습니다.',
         createdAt: new Date().toISOString()
       });
