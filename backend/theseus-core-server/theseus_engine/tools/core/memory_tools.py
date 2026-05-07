@@ -1,8 +1,8 @@
-"""Theseus 3단계 Agent Memory 도구들.
+"""Theseus 3-scope Agent Memory tools.
 
-MemoryWriteTool  — 메모리 파일 작성 (user/project/local 스코프)
-MemoryReadTool   — 메모리 파일 읽기
-MemoryListTool   — 스코프별 메모리 목록 조회
+MemoryWriteTool  — Write memory files (user/project/local scope)
+MemoryReadTool   — Read memory files
+MemoryListTool   — List memory files per scope
 """
 
 from __future__ import annotations
@@ -15,17 +15,17 @@ from theseus_engine.memory.scoped_memory import MemoryScope, ScopedMemory
 
 
 class MemoryWriteInput(BaseModel):
-    scope: str = Field(default="local", description="메모리 스코프: 'user', 'project', 'local'")
-    filename: str = Field(description="파일명 (.md 확장자 자동 추가)")
-    content: str = Field(description="저장할 내용")
+    scope: str = Field(default="local", description="Memory scope: 'user', 'project', 'local'")
+    filename: str = Field(description="Filename (.md extension added automatically)")
+    content: str = Field(description="Content to save")
 
 
 class MemoryWriteTool(BaseTool):
     name = "memory_write"
     description = (
-        "에이전트 메모리를 파일로 저장합니다. "
-        "scope: 'user'(전역), 'project'(프로젝트), 'local'(로컬전용). "
-        "filename에 .md 확장자는 자동 추가됩니다."
+        "Save agent memory to a file. "
+        "scope: 'user' (global), 'project' (shared), 'local' (local-only). "
+        "The .md extension is added automatically to the filename."
     )
     input_model = MemoryWriteInput
     is_destructive = False
@@ -39,23 +39,23 @@ class MemoryWriteTool(BaseTool):
             scope = MemoryScope(arguments.scope.lower())
         except ValueError:
             return ToolResult(
-                output=f"오류: scope은 'user', 'project', 'local' 중 하나여야 합니다. 입력: '{arguments.scope}'",
+                output=f"Error: scope must be one of 'user', 'project', 'local'. Got: '{arguments.scope}'",
                 is_error=True,
             )
         mem = ScopedMemory(cwd=context.cwd)
         path = mem.write(scope, arguments.filename, arguments.content)
-        return ToolResult(output=f"저장됨: {path}")
+        return ToolResult(output=f"Saved: {path}")
 
 
 class MemoryReadInput(BaseModel):
-    scope: str = Field(default="local", description="메모리 스코프: 'user', 'project', 'local'")
-    filename: str = Field(description="읽을 파일명")
+    scope: str = Field(default="local", description="Memory scope: 'user', 'project', 'local'")
+    filename: str = Field(description="Filename to read")
 
 
 class MemoryReadTool(BaseTool):
     name = "memory_read"
     description = (
-        "저장된 에이전트 메모리 파일을 읽습니다. "
+        "Read a saved agent memory file. "
         "scope: 'user', 'project', 'local'."
     )
     input_model = MemoryReadInput
@@ -70,28 +70,28 @@ class MemoryReadTool(BaseTool):
             scope = MemoryScope(arguments.scope.lower())
         except ValueError:
             return ToolResult(
-                output="오류: scope은 'user', 'project', 'local' 중 하나여야 합니다.",
+                output="Error: scope must be one of 'user', 'project', 'local'.",
                 is_error=True,
             )
         mem = ScopedMemory(cwd=context.cwd)
         content = mem.read(scope, arguments.filename)
         if content is None:
             return ToolResult(
-                output=f"'{arguments.scope}/{arguments.filename}' 파일이 존재하지 않습니다.",
+                output=f"File not found: '{arguments.scope}/{arguments.filename}'",
                 is_error=True,
             )
         return ToolResult(output=content)
 
 
 class MemoryListInput(BaseModel):
-    scope: str = Field(default="all", description="메모리 스코프: 'user', 'project', 'local', 'all'")
+    scope: str = Field(default="all", description="Memory scope: 'user', 'project', 'local', 'all'")
 
 
 class MemoryListTool(BaseTool):
     name = "memory_list"
     description = (
-        "저장된 에이전트 메모리 목록을 조회합니다. "
-        "scope: 'user', 'project', 'local', 'all'(기본값: 전체)."
+        "List saved agent memory files. "
+        "scope: 'user', 'project', 'local', 'all' (default: all scopes)."
     )
     input_model = MemoryListInput
     is_destructive = False
@@ -111,15 +111,15 @@ class MemoryListTool(BaseTool):
                 scopes = [MemoryScope(scope_str)]
             except ValueError:
                 return ToolResult(
-                    output="오류: scope은 'user', 'project', 'local', 'all' 중 하나여야 합니다.",
+                    output="Error: scope must be one of 'user', 'project', 'local', 'all'.",
                     is_error=True,
                 )
 
         lines: list[str] = []
         for scope in scopes:
             files = mem.list_files(scope)
-            lines.append(f"[{scope.value}] {len(files)}개 파일")
+            lines.append(f"[{scope.value}] {len(files)} files")
             for f in files:
                 lines.append(f"  - {f}")
 
-        return ToolResult(output="\n".join(lines) if lines else "메모리 파일이 없습니다.")
+        return ToolResult(output="\n".join(lines) if lines else "No memory files found.")

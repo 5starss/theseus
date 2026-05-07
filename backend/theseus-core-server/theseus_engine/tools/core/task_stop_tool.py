@@ -31,7 +31,7 @@ class TaskStopTool(BaseTool):
         try:
             task = await get_task_manager().stop_task(arguments.task_id)
             return ToolResult(
-                output=f"✅ 태스크 중지 완료: {task.id} ({task.description})"
+                output=f"✅ Task stopped: {task.id} ({task.description})"
             )
         except ValueError as exc:
             return ToolResult(output=str(exc), is_error=True)

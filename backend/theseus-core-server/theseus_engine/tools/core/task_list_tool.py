@@ -33,7 +33,7 @@ class TaskListTool(BaseTool):
     ) -> ToolResult:
         tasks = get_task_manager().list_tasks(status=arguments.status)
         if not tasks:
-            return ToolResult(output="(실행 중인 태스크 없음)")
+            return ToolResult(output="(No running tasks)")
         lines = [
             f"{t.id}  [{t.status:>9}]  {t.type}  {t.description}"
             for t in tasks

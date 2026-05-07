@@ -2,6 +2,8 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
+> **최종 업데이트**: 2025-05-07 — Plan VERIFYING 단계 추가, DRAFTING 읽기 도구 허용, REVIEW 반복 승인 루프 적용
+
 ---
 
 ## 1. 핵심 시스템 프롬프트 (Core System Prompts)
@@ -10,18 +12,106 @@
 
 **중앙 프롬프트 오케스트레이터**. 모든 시스템 프롬프트 상수를 포함하며, 현재 에이전트 모드에 기반하여 최종 시스템 프롬프트를 동적으로 조립하는 `TheseusStateMachine` 클래스를 포함합니다.
 
+#### 1.1 글로벌 프롬프트
+
 | 프롬프트 상수 | 역할 | 설명 |
 |---|---|---|
-| `_BASE_SYSTEM_PROMPT` | 글로벌 규칙 | 테세우스의 정체성, 페르소나, 환경 정보, 작업/도구/코드 규칙, RBAC 인지, 검증 파이프라인 인지, 컨텍스트 관리. **모든** 모드에 공통 적용됩니다. |
-| `_AGENT_PROMPT` | 에이전트 모드 | 자율 실행 규칙. 자유로운 도구 사용, 모드 전환 안내 (필요시 Plan/Ask 모드 제안). |
-| `_ASK_PROMPT` | 질문(Ask) 모드 | 지식 기반 응답 전용 규칙. 도구 사용을 엄격히 금지합니다. |
-| `_PLAN_DRAFTING_PROMPT` | 계획(Plan) → 초안 작성 단계 | 읽기 전용(READ-ONLY) 제약. 금지된 작업(파일 생성, 수정, 삭제, 상태 변경 등)의 명시적 목록을 포함합니다. |
-| `_PLAN_EXECUTING_PROMPT_TEMPLATE` | 계획(Plan) → 실행 단계 | 사용자 승인된 계획 컨텍스트 하에서의 실행 규칙. `create_tool` 검증 복구를 위한 메타-툴링 피드백 루프 규칙을 포함합니다. |
+| `_BASE_SYSTEM_PROMPT` | 글로벌 규칙 | 테세우스의 정체성, 페르소나, 환경 정보, 작업/도구/코드 규칙, RBAC 인지, 검증 파이프라인 인지, 에러 루프 방지, 컨텍스트 관리. **모든** 모드에 공통 적용됩니다. |
+| `_get_environment_section()` | 런타임 환경 | OS, 아키텍처, 셸, CWD, Python 버전, Git 브랜치 등을 동적으로 감지하여 프롬프트에 주입합니다. |
 | `MODE_DESCRIPTIONS` | 표시 레이블 | TUI 사이드바에 표시되는 사람이 읽을 수 있는 모드 설명. |
+
+#### 1.2 모드별 프롬프트
+
+| 프롬프트 상수 | 모드 | 역할 | 주요 규칙 |
+|---|---|---|---|
+| `_ASK_PROMPT` | Ask | 질문/답변 전용 | 도구 사용 엄격 금지. 지식 기반 응답만 제공. |
+| `_AGENT_PROMPT` | Agent | 자율 실행 | 도구 자유 사용. 모드 전환 가이드(Plan/Ask 제안) 포함. `create_tool` 금지. |
+
+#### 1.3 Plan 모드 프롬프트 (4단계 파이프라인)
+
+| 프롬프트 상수 | 단계 | 역할 | 주요 규칙 |
+|---|---|---|---|
+| `_PLAN_DRAFTING_PROMPT` | Drafting | 코드베이스 조사 + 제안서 작성 | **읽기 도구 허용** (`read_file`, `glob`, `grep`, 읽기 전용 bash). Research→Analyze→Plan 3단계 워크플로우. **Tier 분류** (T1 Quick Win / T2 Strategic / T3 Architecture). 확장된 JSON 스키마: `context{problem_analysis, affected_files, risks}`, `tasks[]{tier, problem, solution, target_files, integration_points, expected_effect}`, `verification{test_commands, manual_checks, success_criteria}`, `action_plan{immediate, sequential_dependencies, estimated_turns}`. |
+| `_PLAN_REVIEW_PROMPT` | WaitForReview | 반복 승인 루프 | 사용자의 approve/edit/질문/cancel 처리. 수정 시 변경점 표시 + 업데이트된 계획 재제시. 승인까지 반복. 조사 위해 읽기 도구 사용 가능. |
+| `_PLAN_EXECUTING_PROMPT_TEMPLATE` | Executing | 승인된 계획 실행 | Tier/action_plan 기반 실행 순서 결정. 즉시 도구 호출 강제. `create_tool` 2턴 규칙. 진행 상황 보고(`[Progress] task-N complete (N/total)`). 예상외 복잡도 발견 시 중단 의무. |
+| `_PLAN_VERIFYING_PROMPT` | Verifying | 실행 결과 검증 | 테스트 실행, 변경 파일 리뷰, 회귀 확인, 계획 완료율 확인. 구조화된 검증 결과 출력 (Tests/Changes/Issues/Plan completion). 사소한 수정만 허용, 근본적 문제 시 Drafting 회귀 권고. |
+
+#### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
+
+| 프롬프트 상수 | 단계 | 역할 | 주요 규칙 |
+|---|---|---|---|
+| `_COORDINATOR_DECOMPOSE_PROMPT` | Decompose | 작업 분해 | 병렬 실행 가능한 독립적 서브태스크로 분해. 2-6개 서브태스크 권장. JSON 리스트 출력. |
+| `_COORDINATOR_DISPATCH_PROMPT` | Dispatch | 워커 모니터링 | `task_output`으로 워커 결과 확인. 실패 시 진단/재시도. 합성 전 완료 대기. |
+| `_COORDINATOR_SYNTHESIZE_PROMPT` | Synthesize | 결과 통합 | 워커 출력 통합. 충돌 해결, 코드 병합, 일관성 확보. 초과 기능 추가 금지. |
+| `_COORDINATOR_VERIFY_PROMPT` | Verify | 최종 검증 | 테스트/검증 수행. 원래 요구사항 대비 결과 비교. 정직한 보고. |
 
 ---
 
-## 2. 검증기 프롬프트 (Validator Prompts)
+## 2. 프롬프트 조립 파이프라인
+
+`TheseusStateMachine.get_system_prompt()` 메서드가 현재 모드/단계에 따라 프롬프트를 동적으로 조합합니다:
+
+```
+최종 프롬프트 = _BASE_SYSTEM_PROMPT + _get_environment_section() + 모드별 프롬프트
+```
+
+### 상태 전환 흐름
+
+```
+[Agent] ←→ [Ask]
+  ↕
+[Plan]
+  └→ Drafting (읽기 도구로 코드베이스 조사 → 제안서 스타일 JSON 출력)
+  └→ WaitForReview (반복 승인 루프: approve/edit/feedback/cancel)
+  └→ Executing (Tier 순서로 계획 단계별 실행 + Progress 보고)
+  └→ Verifying (테스트 실행 + 변경 검증 + 구조화된 결과 보고)
+  ↕
+[Coordinator]
+  └→ Decompose → Dispatch → Synthesize → Verify
+```
+
+### Plan JSON 스키마 레퍼런스
+
+DRAFTING 단계에서 LLM이 출력하는 JSON의 구조입니다. `_display_plan()`과 `_extract_plan_json()`이 이 스키마를 파싱합니다.
+
+```
+{
+  goal:     string            -- 한 문장 목표 요약
+  context: {                  -- 코드베이스 조사 결과
+    current_state:   string
+    problem_analysis: string
+    affected_files:  [string]
+    risks:           string
+  }
+  tasks: [{                   -- 계층적 태스크 목록
+    id:                string       -- 고유 ID (e.g. "task-1", "task-1-1")
+    parent_id:         string|null  -- null = 메인 태스크
+    tier:              "T1"|"T2"|"T3"  -- Impact/Effort 분류 (메인만)
+    title:             string
+    problem:           string       -- 해결할 문제 (메인만)
+    solution:          string       -- 해결 방안 (메인만)
+    target_files:      [string]     -- 수정 대상 파일 경로
+    integration_points: string      -- 기존 코드 연동 지점 (선택)
+    expected_effect:   string       -- 예상 효과 (메인만)
+    description:       string       -- 상세 설명
+    status:            "pending"|"running"|"done"|"failed"
+  }]
+  verification: {             -- 검증 계획
+    test_commands:    [string]
+    manual_checks:    [string]
+    success_criteria: string
+  }
+  action_plan: {              -- 실행 순서 계획
+    immediate:               [string]  -- 즉시 착수할 태스크 ID
+    sequential_dependencies: string    -- 순서 의존성 (선택)
+    estimated_turns:         string    -- 예상 소요 턴 수
+  }
+}
+```
+
+---
+
+## 3. 검증기 프롬프트 (Validator Prompts)
 
 ### `theseus_engine/validators/suggestion_validator.py`
 
@@ -31,7 +121,7 @@
 
 ---
 
-## 3. 도구 설명 (Tool Descriptions, LLM-facing)
+## 4. 도구 설명 (Tool Descriptions, LLM-facing)
 
 이것들은 도구 호출 API 스키마의 일부로서 LLM에 직접 전달되는 도구 클래스의 `description` 속성입니다.
 
@@ -40,6 +130,14 @@
 | 도구 | 설명 역할 |
 |---|---|
 | `ToolCreatorTool.description` | 새로운 도구를 언제, 어떻게 생성할지 LLM에 지시합니다. 중요 제약 사항 포함: Plan 모드의 실행(Executing) 단계에서만 사용 가능, 도구를 생성한 턴과 같은 턴에서 해당 도구를 호출할 수 없음. |
+
+### `theseus_engine/tools/core/`
+
+| 도구 파일 | 설명 역할 |
+|---|---|
+| `agent_tool.py` | 서브 에이전트 디스패치 도구. Coordinator 모드에서 병렬 워커 생성에 사용. |
+| `bash_tool.py` | 셸 명령 실행 도구. RBAC 및 ExecutionValidator 검증 대상. |
+| `tool_search_tool.py` | 동적 도구 검색 도구. 사용 가능한 도구 목록을 런타임에 조회. |
 
 ### `theseus_engine/tools/tools.py`
 
@@ -50,7 +148,7 @@
 
 ---
 
-## 4. RBAC 권한 메시지 (RBAC Permission Messages)
+## 5. RBAC 권한 메시지 (RBAC Permission Messages)
 
 ### `theseus_engine/models/rbac.py`
 
@@ -62,11 +160,21 @@
 
 ---
 
-## 5. 관측성 프롬프트 (Observability Prompts)
+## 6. 관측성 프롬프트 (Observability Prompts)
 
 ### `theseus_engine/observability/tracer.py`
 
 LLM 프롬프트는 없지만, LangSmith 관측성 기능의 활성화 여부를 결정하는 **트레이싱 설정 로직**을 포함합니다. 미설정 시의 바이패스 메커니즘(no-op)이 이곳에 문서화되어 있습니다.
+
+---
+
+## 7. 컨텍스트 관리 (Context Management)
+
+### `theseus_engine/core/context_compressor.py`
+
+| 기능 | 설명 |
+|---|---|
+| `ContextCompressor` | 대화 히스토리가 컨텍스트 윈도우 한계에 도달했을 때 자동으로 이전 메시지를 압축합니다. 시스템 프롬프트의 "The system will automatically compress prior messages" 규칙과 연동됩니다. |
 
 ---
 
@@ -76,23 +184,53 @@ LLM 프롬프트는 없지만, LangSmith 관측성 기능의 활성화 여부를
 graph TB
     subgraph "Prompt Assembly Pipeline"
         BASE["_BASE_SYSTEM_PROMPT<br/>(글로벌 규칙)"]
+        ENV["_get_environment_section()<br/>(런타임 환경)"]
         
         BASE --> AGENT["_AGENT_PROMPT<br/>(자율 모드)"]
         BASE --> ASK["_ASK_PROMPT<br/>(질문/답변 전용)"]
-        BASE --> PLAN_D["_PLAN_DRAFTING_PROMPT<br/>(읽기 전용 계획)"]
-        BASE --> PLAN_E["_PLAN_EXECUTING_PROMPT_TEMPLATE<br/>(가이드 기반 실행)"]
+        
+        subgraph "Plan Mode (4-Phase)"
+            PLAN_D["_PLAN_DRAFTING_PROMPT<br/>(읽기 도구 허용 + 계획 수립)"]
+            PLAN_R["_PLAN_REVIEW_PROMPT<br/>(반복 승인 루프)"]
+            PLAN_E["_PLAN_EXECUTING_PROMPT_TEMPLATE<br/>(가이드 기반 실행)"]
+            PLAN_V["_PLAN_VERIFYING_PROMPT<br/>(테스트 + 검증)"]
+            PLAN_D --> PLAN_R --> PLAN_E --> PLAN_V
+        end
+        
+        subgraph "Coordinator Mode (4-Phase)"
+            COORD_D["_COORDINATOR_DECOMPOSE_PROMPT"]
+            COORD_P["_COORDINATOR_DISPATCH_PROMPT"]
+            COORD_S["_COORDINATOR_SYNTHESIZE_PROMPT"]
+            COORD_V["_COORDINATOR_VERIFY_PROMPT"]
+            COORD_D --> COORD_P --> COORD_S --> COORD_V
+        end
+        
+        BASE --> PLAN_D
+        BASE --> COORD_D
     end
     
     subgraph "Tool Descriptions"
         TD1["ToolCreatorTool.description"]
-        TD2["DummyTool.description"]
-        TD3["SystemRebootTool.description"]
+        TD2["AgentTool.description"]
+        TD3["BashTool.description"]
+        TD4["ToolSearchTool.description"]
     end
     
-    subgraph "Security Messages"
+    subgraph "Security Layer"
         RBAC["RBAC Checker Messages"]
-        VAL["Validator Warning Messages"]
+        VAL["ExecutionValidator / QueryValidator"]
+        HOOK["TheseusHook Executor"]
     end
     
     SM["TheseusStateMachine.get_system_prompt()"] --> |"조립(Assembles)"| BASE
+    SM --> |"주입(Injects)"| ENV
 ```
+
+---
+
+## 변경 이력
+
+| 날짜 | 변경 내용 |
+|---|---|
+| 2025-05-07 | Plan JSON 스키마 대폭 확장 (tier, problem, solution, target_files, expected_effect, context, verification, action_plan). 제안서 스타일 `_display_plan` 리디자인. Plan 모드 VERIFYING 단계 추가. DRAFTING에 Research→Analyze→Plan 워크플로우 및 읽기 도구 허용. REVIEW 반복 승인 루프 적용. EXECUTING에 Tier 기반 실행 순서. Coordinator 모드 프롬프트 문서화. 도구 설명에 core 도구 추가. 컨텍스트 관리 섹션 추가. |
+| 2025-04-xx | 초기 버전. 4-Mode 아키텍처 문서화. |

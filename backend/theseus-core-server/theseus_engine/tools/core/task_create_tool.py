@@ -40,14 +40,14 @@ class TaskCreateTool(BaseTool):
             )
             return ToolResult(
                 output=(
-                    f"✅ 백그라운드 태스크 생성 완료\n"
+                    f"✅ Background task created\n"
                     f"ID: {task.id}\n"
                     f"Command: {arguments.command}\n"
                     f"Description: {arguments.description}\n"
-                    f"task_output 도구로 출력을 확인하세요."
+                    f"Use task_output tool to check results."
                 )
             )
         except Exception as exc:
             return ToolResult(
-                output=f"태스크 생성 실패: {exc}", is_error=True
+                output=f"Task creation failed: {exc}", is_error=True
             )

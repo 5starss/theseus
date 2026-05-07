@@ -31,7 +31,7 @@ class TaskGetTool(BaseTool):
         task = get_task_manager().get_task(arguments.task_id)
         if task is None:
             return ToolResult(
-                output=f"태스크를 찾을 수 없습니다: {arguments.task_id}",
+                output=f"Task not found: {arguments.task_id}",
                 is_error=True,
             )
         return ToolResult(output=str(task))

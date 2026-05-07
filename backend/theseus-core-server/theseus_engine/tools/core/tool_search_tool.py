@@ -1,8 +1,8 @@
-"""ToolSearchTool: RAG 폴백 전략을 위한 런타임 툴 탐색 및 주입 도구.
+"""ToolSearchTool: Runtime tool discovery and injection for RAG fallback.
 
-RAG(Top-K) 검색이 실패하여 적합한 툴을 찾지 못했을 때 활성화된다.
-모델이 이 툴을 호출하면 full_registry에서 시맨틱 검색을 수행하고,
-매칭된 툴을 active_registry에 즉시 주입하여 다음 턴부터 사용 가능하게 한다.
+Activated when RAG (Top-K) search fails to find suitable tools.
+When invoked, performs semantic search on full_registry and injects
+matched tools into active_registry for immediate use from the next turn.
 """
 
 from __future__ import annotations
@@ -19,40 +19,40 @@ log = logging.getLogger(__name__)
 
 
 class ToolSearchInput(BaseModel):
-    """ToolSearchTool 입력 모델."""
+    """Input model for ToolSearchTool."""
 
     query: str = Field(
         description=(
-            "찾고 싶은 툴에 대한 자연어 설명. "
-            "예: 'URL에서 웹 페이지 내용 가져오기', '파일 내 텍스트 검색', "
-            "'git 명령어 실행'"
+            "Natural language description of the tool you need. "
+            "e.g., 'fetch web page content from URL', 'search text in files', "
+            "'execute git commands'"
         )
     )
     top_k: int = Field(
         default=5,
         ge=1,
         le=10,
-        description="반환할 최대 툴 수 (1~10, 기본값 5).",
+        description="Maximum number of tools to return (1-10, default 5).",
     )
 
 
 class ToolSearchTool(BaseTool):
-    """사용 가능한 툴을 검색하고 현재 세션에 즉시 주입하는 메타 툴.
+    """Meta-tool that searches available tools and injects them into the current session.
 
-    RAG 기반 Top-K 선별이 실패했을 때 자동으로 활성화된다.
-    모델이 이 툴을 호출하면:
-      1. full_registry에서 쿼리와 가장 유사한 툴을 검색한다.
-      2. 매칭된 툴을 active_registry에 즉시 등록(주입)한다.
-      3. 주입된 툴의 이름, 설명, 입력 스키마를 반환한다.
-    이후 턴부터 주입된 툴을 바로 호출할 수 있다.
+    Automatically activated when RAG-based Top-K selection fails.
+    When invoked:
+      1. Searches full_registry for tools most similar to the query.
+      2. Immediately registers (injects) matched tools into active_registry.
+      3. Returns names, descriptions, and input schemas of injected tools.
+    Injected tools are callable from the next turn onward.
     """
 
     name = "tool_search"
     description = (
-        "사용 가능한 툴을 자연어로 검색하고 현재 세션에 즉시 추가합니다. "
-        "필요한 기능을 수행하는 툴을 찾지 못했을 때 사용하세요. "
-        "이 툴로 추가된 툴은 다음 응답부터 즉시 호출 가능합니다. "
-        "예시: tool_search(query='웹 페이지 내용 가져오기')"
+        "Search for available tools using natural language and add them to the "
+        "current session. Use this when you cannot find a tool for the needed "
+        "functionality. Tools added via this tool are immediately callable "
+        "from your next response. Example: tool_search(query='fetch web page content')"
     )
     input_model = ToolSearchInput
     permission_level = 1
@@ -80,8 +80,8 @@ class ToolSearchTool(BaseTool):
         if full_registry is None:
             return ToolResult(
                 output=(
-                    "tool_search: full_registry에 접근할 수 없습니다. "
-                    "engine_builder의 tool_metadata 설정을 확인하세요."
+                    "tool_search: Cannot access full_registry. "
+                    "Check engine_builder tool_metadata configuration."
                 ),
                 is_error=True,
             )
@@ -91,24 +91,24 @@ class ToolSearchTool(BaseTool):
             from theseus_engine.core.tool_retriever import ToolRetriever
 
             retriever = ToolRetriever(full_registry)
-            matched_tools = retriever.retrieve_top_k(
+            matched_tools = await retriever.retrieve_top_k(
                 arguments.query,
                 full_registry,
                 k=arguments.top_k,
                 adaptive=False,
             )
         except Exception as e:
-            log.error("[ToolSearchTool] 검색 중 오류: %s", e)
+            log.error("[ToolSearchTool] Search error: %s", e)
             return ToolResult(
-                output=f"툴 검색 중 오류가 발생했습니다: {e}",
+                output=f"Error during tool search: {e}",
                 is_error=True,
             )
 
         if not matched_tools:
             return ToolResult(
                 output=(
-                    f"'{arguments.query}'에 매칭되는 툴을 찾지 못했습니다. "
-                    "다른 키워드로 다시 검색해보세요."
+                    f"No tools matching '{arguments.query}' found. "
+                    "Try searching with different keywords."
                 )
             )
 
@@ -123,7 +123,7 @@ class ToolSearchTool(BaseTool):
                     active_registry.register(tool)
                     injected.append(tool.name)
                     log.info(
-                        "[ToolSearchTool] 툴 '%s'을 active_registry에 주입했습니다.",
+                        "[ToolSearchTool] Injected tool '%s' into active_registry.",
                         tool.name,
                     )
                 else:
@@ -143,17 +143,17 @@ class ToolSearchTool(BaseTool):
                     for k, v in props.items()
                 )
             except Exception:
-                param_summary = "(스키마 없음)"
+                param_summary = "(no schema)"
 
-            status = "✅ 새로 추가됨" if tool.name in injected else "ℹ️ 이미 사용 가능"
+            status = "✅ Newly added" if tool.name in injected else "ℹ️ Already available"
             tool_details.append(
                 f"  {status} **{tool.name}**\n"
-                f"    설명: {tool.description}\n"
-                f"    입력: {param_summary}"
+                f"    Description: {tool.description}\n"
+                f"    Input: {param_summary}"
             )
 
         lines = [
-            f"'{arguments.query}' 검색 결과: {len(matched_tools)}개 툴 발견",
+            f"Search results for '{arguments.query}': {len(matched_tools)} tools found",
             "",
         ]
         lines.extend(tool_details)
@@ -161,8 +161,8 @@ class ToolSearchTool(BaseTool):
         if injected:
             lines.append("")
             lines.append(
-                f"⚡ {len(injected)}개 툴이 현재 세션에 추가되었습니다. "
-                f"다음 응답부터 즉시 호출할 수 있습니다."
+                f"⚡ {len(injected)} tools added to current session. "
+                f"Available from your next response."
             )
 
         return ToolResult(output="\n".join(lines))

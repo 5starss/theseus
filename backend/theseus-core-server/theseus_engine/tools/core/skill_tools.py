@@ -32,7 +32,7 @@ class SkillReadTool(BaseTool):
         registry = load_skill_registry(context.cwd)
         skill = registry.get(arguments.name)
         if not skill:
-            return ToolResult(output=f"스킬을 찾을 수 없습니다: {arguments.name}", is_error=True)
+            return ToolResult(output=f"Skill not found: {arguments.name}", is_error=True)
         
         return ToolResult(output=f"--- SKILL: {skill.name} ---\n{skill.content}")
 
@@ -76,10 +76,10 @@ class SkillSaveTool(BaseTool):
         try:
             skill_file.write_text(markdown_content, encoding="utf-8")
             return ToolResult(
-                output=f"✅ 스킬 저장 완료: {arguments.name}\n저장 위치: {skill_file}"
+                output=f"✅ Skill saved: {arguments.name}\nPath: {skill_file}"
             )
         except Exception as exc:
-            return ToolResult(output=f"스킬 저장 실패: {exc}", is_error=True)
+            return ToolResult(output=f"Skill save failed: {exc}", is_error=True)
 
 
 class SkillListInput(BaseModel):
@@ -100,7 +100,7 @@ class SkillListTool(BaseTool):
         registry = load_skill_registry(context.cwd)
         skills = registry.list_skills()
         if not skills:
-            return ToolResult(output="(저장된 스킬이 없습니다)")
+            return ToolResult(output="(No saved skills)")
         
         lines = [
             f"- {s.name}: {s.description}"

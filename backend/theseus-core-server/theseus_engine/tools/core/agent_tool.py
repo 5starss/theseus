@@ -1,11 +1,11 @@
 """Sub-agent delegation tool for Theseus.
 
-메인 에이전트가 하위 에이전트를 스폰하여 복잡한 작업을
-병렬로 위임할 수 있게 합니다. Theseus의 자체 태스크 매니저를 사용하여
-OpenHarness의 coordinator/swarm 의존성 없이 독립적으로 동작합니다.
+Allows the main agent to spawn sub-agents for parallel delegation
+of complex tasks. Uses Theseus's own task manager, independent
+of OpenHarness coordinator/swarm dependencies.
 
-Feature 2 개선: max_rbac_level 상속, inherit_context 플래그,
-timeout_seconds 지원, THESEUS_SUBAGENT 환경 변수 전달.
+Feature 2 improvements: max_rbac_level inheritance, inherit_context flag,
+timeout_seconds support, THESEUS_SUBAGENT env variable propagation.
 """
 
 from __future__ import annotations
@@ -42,17 +42,17 @@ class AgentInput(BaseModel):
     max_rbac_level: Optional[int] = Field(
         default=None,
         description=(
-            "최대 RBAC 권한 레벨 (1-5). 부모의 레벨을 초과할 수 없습니다. "
-            "미지정 시 부모 레벨을 상속합니다."
+            "Maximum RBAC permission level (1-5). Cannot exceed the parent's level. "
+            "If unspecified, inherits the parent's level."
         ),
     )
     inherit_context: bool = Field(
         default=False,
-        description="True이면 현재 작업 디렉터리와 환경 설정을 서브 에이전트에게 전달합니다.",
+        description="If true, pass the current working directory and environment settings to the sub-agent.",
     )
     timeout_seconds: Optional[int] = Field(
         default=300,
-        description="서브 에이전트 실행 타임아웃 (초). 기본값 300초.",
+        description="Sub-agent execution timeout in seconds. Default: 300.",
     )
 
 
@@ -119,7 +119,7 @@ class AgentTool(BaseTool):
             "from theseus_engine.models.state import TheseusStateMachine; "
             "async def run(): "
             "    sm = TheseusStateMachine(); "
-            f"    engine, _ = setup_engine(sm, {sub_rbac}, {{}}, lambda x: asyncio.sleep(0)); "
+            f"    engine, _ = await setup_engine(sm, {sub_rbac}, {{}}, lambda x: asyncio.sleep(0)); "
             f"    result = await engine.query('{escaped_prompt}'); "
             "    print(result.text if hasattr(result, 'text') else str(result)); "
             "asyncio.run(run())"
@@ -135,20 +135,20 @@ class AgentTool(BaseTool):
             )
 
             log.info(
-                "[AgentTool] 서브 에이전트 스폰: task=%s, rbac=%d (parent=%d), model=%s",
+                "[AgentTool] Sub-agent spawned: task=%s, rbac=%d (parent=%d), model=%s",
                 task.id, sub_rbac, parent_rbac, model,
             )
 
             return ToolResult(
                 output=(
-                    f"서브 에이전트 스폰 완료\n"
+                    f"Sub-agent spawned successfully\n"
                     f"Task ID: {task.id}\n"
                     f"Model: {model}\n"
                     f"RBAC Level: {sub_rbac} (parent: {parent_rbac})\n"
                     f"Description: {arguments.description}\n"
                     f"Prompt: {arguments.prompt[:200]}{'...' if len(arguments.prompt) > 200 else ''}\n\n"
-                    f"결과 확인: task_output(task_id='{task.id}')\n"
-                    f"중지: task_stop(task_id='{task.id}')"
+                    f"Check results: task_output(task_id='{task.id}')\n"
+                    f"Stop: task_stop(task_id='{task.id}')"
                 ),
                 metadata={
                     "task_id": task.id,
@@ -161,6 +161,6 @@ class AgentTool(BaseTool):
         except Exception as exc:
             log.error("Sub-agent spawn failed: %s", exc)
             return ToolResult(
-                output=f"서브 에이전트 스폰 실패: {exc}",
+                output=f"Sub-agent spawn failed: {exc}",
                 is_error=True,
             )

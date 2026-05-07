@@ -52,7 +52,7 @@ class WebSearchTool(BaseTool):
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             return ToolResult(
-                output=f"web_search 실패: {exc}", is_error=True
+                output=f"web_search failed: {exc}", is_error=True
             )
 
         results = _parse_search_results(
@@ -60,7 +60,7 @@ class WebSearchTool(BaseTool):
         )
         if not results:
             return ToolResult(
-                output="검색 결과가 없습니다.", is_error=True
+                output="No search results found.", is_error=True
             )
 
         lines = [f"Search results for: {arguments.query}"]
