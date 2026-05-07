@@ -35,7 +35,7 @@ THESEUS_DYNAMIC_TOOL_RETRIEVAL = (
     os.getenv("THESEUS_DYNAMIC_TOOL_RETRIEVAL", "true").lower() == "true"
 )
 
-def setup_engine(
+async def setup_engine(
     sm: TheseusStateMachine,
     user_level: int,
     project_tool_permissions: dict,
@@ -45,10 +45,13 @@ def setup_engine(
     history_messages: Optional[list] = None,
     api_client: Optional[TheseusLLMClient] = None,
     enable_dynamic_tools: bool = THESEUS_DYNAMIC_TOOL_RETRIEVAL,
+    reset_stats: bool = False,
 ):
-    # 세션 시작 시 통계 및 비용 추적기 초기화
-    SessionStats.reset()
-    tracker = CostTracker.reset()
+    # 통계 및 비용 추적기는 세션 시작 시 1회만 리셋 (매 턴 리셋 방지)
+    if reset_stats:
+        SessionStats.reset()
+        CostTracker.reset()
+    tracker = CostTracker.get_or_create()
 
     # 3단계 메모리 컨텍스트 로드
     scoped_memory = ScopedMemory(cwd=Path.cwd())
@@ -79,7 +82,7 @@ def setup_engine(
         try:
             print(f"🔍 질의 기반 도구 최적화 중 (Top-{top_k})...")
             retriever = ToolRetriever(full_registry)
-            selected_tools = retriever.retrieve_top_k(
+            selected_tools = await retriever.retrieve_top_k(
                 user_query,
                 full_registry,
                 k=top_k,
@@ -139,26 +142,16 @@ def setup_engine(
     if enable_hooks:
         hook_registry = HookRegistry()
         # AgentHook 추가 (파일 수정 감시 - read_file 제외)
-        agent_hook = AgentHookDefinition(
-            prompt=(
-                "You are a security auditor. Does this file modification look safe, non-destructive, and not malicious? "
-                "Return strict JSON: {\"ok\": true} or {\"ok\": false, \"reason\": \"...\"}. "
-                "IMPORTANT: DO NOT use markdown backticks or any other formatting. Output raw JSON only. "
-                "Arguments: $ARGUMENTS"
-            ),
-            matcher="*_file", # Matches write_file, edit_file (and potentially others, but glob is limited)
-            block_on_failure=True
+        # write_file, edit_file 개별 등록 (read_file 제외)
+        _audit_prompt = (
+            "You are a security auditor. Does this file modification look safe, non-destructive, and not malicious? "
+            "Return strict JSON: {\"ok\": true} or {\"ok\": false, \"reason\": \"...\"}. "
+            "IMPORTANT: DO NOT use markdown backticks or any other formatting. Output raw JSON only. "
+            "Arguments: $ARGUMENTS"
         )
-        hook_registry.register(HookEvent.PRE_TOOL_USE, agent_hook)
-
-        # read_file은 감시 대상에서 제외하기 위해 별도 처리 (fnmatch는 exclusion이 어려움)
-        # 만약 *_file이 read_file을 포함한다면, TheseusHookExecutor에서 필터링하거나
-        # 여기서 구체적인 이름으로 여러 개 등록합니다.
-        # 여기서는 가장 확실하게 개별 등록하겠습니다.
-        hook_registry = HookRegistry() # Reset to avoid duplicate *file hook if it existed
         for tool_to_audit in ["write_file", "edit_file"]:
             h = AgentHookDefinition(
-                prompt=agent_hook.prompt,
+                prompt=_audit_prompt,
                 matcher=tool_to_audit,
                 block_on_failure=True
             )

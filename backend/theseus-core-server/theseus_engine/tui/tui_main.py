@@ -32,12 +32,6 @@ from theseus_engine.core.engine_builder import (
     setup_engine, get_tracing_tags, get_tracing_metadata,
 )
 
-# --- Gemini thought_signature Monkey-Patch ---
-# OpenHarness 코어를 수정하지 않고, 런타임에 OpenAICompatibleClient의
-# _stream_once 를 Gemini thought_signature 처리 버전으로 교체합니다.
-from theseus_engine.wrappers.llm_clients.gemini_patch import apply_gemini_patch
-apply_gemini_patch()
-
 
 
 class TheseusInput(Input):
@@ -155,7 +149,7 @@ class TheseusTUI(OpenHarnessTerminalApp):
             self._bundle.engine.load_messages(history)
             self._append_line(f"system> Loaded {len(history)} messages from session [bold]'{self.current_session}'[/bold].")
         
-        self._customize_runtime()
+        await self._customize_runtime()
         await start_runtime(self._bundle)
         
         self.query_one("#composer").focus()
@@ -165,12 +159,12 @@ class TheseusTUI(OpenHarnessTerminalApp):
         if self._config.prompt:
             self.call_later(lambda: asyncio.create_task(self._process_line(self._config.prompt or "")))
 
-    def _customize_runtime(self):
+    async def _customize_runtime(self):
         if not self._bundle: return
-        
+
         # We reuse part of the engine_builder logic here conceptually, but inject directly into Textual bundle
         from theseus_engine.core.engine_builder import setup_engine
-        engine, full_registry = setup_engine(self.theseus_sm, self.user_level, self.project_tool_permissions, self._ask_permission)
+        engine, full_registry = await setup_engine(self.theseus_sm, self.user_level, self.project_tool_permissions, self._ask_permission)
         
         # Replace bundle components with Theseus configured ones
         self._bundle.engine._permission_checker = engine._permission_checker

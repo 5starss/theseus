@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -283,3 +284,7 @@ class CostTracker:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
         except OSError as e:
             log.warning("[CostTracker] 비용 로그 저장 실패: %s", e)
+
+    async def save_async(self) -> None:
+        """save()의 비동기 버전 — 이벤트 루프를 차단하지 않습니다."""
+        await asyncio.to_thread(self.save)

@@ -90,35 +90,20 @@ async def _build_summary(old_msgs: list, api_client, model: Optional[str]) -> st
     if api_client is None:
         return f"[이전 대화 요약 — {len(old_msgs)}개 메시지]\n{raw_text}"
 
-    # LLM 요약 시도
+    # LLM 요약 시도 (이미 async 컨텍스트이므로 직접 await)
     try:
-        import asyncio
-
         prompt = (
             "다음은 AI 에이전트와의 이전 대화 기록입니다. "
             "핵심 결정 사항, 완료된 작업, 중요한 파일/도구 사용 내역을 "
             "간결하게 3~5문장으로 요약해주세요.\n\n"
             f"{raw_text}"
         )
-
-        async def _call():
-            response = await api_client.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                model=model,
-                max_tokens=400,
-            )
-            return response.choices[0].message.content or raw_text
-
-        try:
-            loop = asyncio.get_running_loop()
-            # 이미 실행 중인 루프가 있으면 구조적 요약으로 fallback
-            # (asyncio.run()은 중첩 불가)
-            log.debug("[ContextCompressor] 실행 중인 이벤트 루프 감지 — 구조적 요약 사용")
-            return f"[이전 대화 요약 — {len(old_msgs)}개 메시지]\n{raw_text}"
-        except RuntimeError:
-            return asyncio.run(_call())
-
-
+        response = await api_client.chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            model=model,
+            max_tokens=400,
+        )
+        return response.choices[0].message.content or raw_text
     except Exception as e:
         log.debug("[ContextCompressor] LLM 요약 실패, 구조적 요약 사용: %s", e)
         return f"[이전 대화 요약 — {len(old_msgs)}개 메시지]\n{raw_text}"
