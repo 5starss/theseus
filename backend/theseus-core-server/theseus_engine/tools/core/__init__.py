@@ -30,6 +30,7 @@ from theseus_engine.tools.core.grep_tool import GrepTool
 # ── Web Operations ───────────────────────────────────────────────
 from theseus_engine.tools.core.web_fetch_tool import WebFetchTool
 from theseus_engine.tools.core.web_search_tool import WebSearchTool
+from theseus_engine.tools.core.deep_research_tool import DeepResearchTool
 
 # ── System & Shell ───────────────────────────────────────────────
 from theseus_engine.tools.core.bash_tool import BashTool
@@ -103,6 +104,7 @@ ALL_CORE_TOOLS = [
     # Web
     WebFetchTool,
     WebSearchTool,
+    DeepResearchTool,
     # Shell
     BashTool,
     # Code Intelligence
