@@ -1,8 +1,7 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
 import type { PageResponse } from '@/features/admin/api';
-import type { ChatSession } from '@/features/projects/types/chat';
-import { fetchEventSource } from '@microsoft/fetch-event-source';
+import type { ChatSession, ToolGenerationRunResponse } from '@/features/projects/types/chat';
 
 export const chatApi = {
   // 채팅 세션 생성
@@ -57,56 +56,30 @@ export const chatApi = {
     return response.data.result;
   },
 
-  // SSE를 통한 Tool 생성 (Generate / Regenerate)
-  generateToolStream: (
+  // Tool 생성 (HTTP POST) — 응답의 sseUrl로 별도 SSE 구독 필요
+  generateTool: async (
     projectId: string,
     sessionId: string,
-    toolId: string | null,
-    payload: Record<string, unknown>,
-    onMessage: (event: unknown) => void,
-    onError: (err: unknown) => void,
-    onClose: () => void
-  ) => {
-    const url = toolId
-      ? `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/regenerate` // PATCH for regenerate? Wait, fetchEventSource supports custom methods.
-      : `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/generate`;
+    payload: { userMessage: string; fileName: string }
+  ): Promise<ToolGenerationRunResponse> => {
+    const response = await apiClient.post<ApiResponse<ToolGenerationRunResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/generate`,
+      payload
+    );
+    return response.data.result;
+  },
 
-    const method = toolId ? 'PATCH' : 'POST';
-
-    // 토큰 가져오기 (localStorage 등에서)
-    const authStorage = localStorage.getItem('auth-storage');
-    let token = '';
-    if (authStorage) {
-      try {
-        const parsed = JSON.parse(authStorage);
-        token = parsed.state?.accessToken || '';
-      } catch (e) {
-        console.error('Failed to parse auth token', e);
-      }
-    }
-
-    const abortController = new AbortController();
-
-    fetchEventSource(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal: abortController.signal,
-      onmessage(ev) {
-        onMessage(ev);
-      },
-      onerror(err) {
-        onError(err);
-        throw err; // To stop retrying
-      },
-      onclose() {
-        onClose();
-      }
-    });
-
-    return abortController;
-  }
+  // Tool 재생성 (HTTP PATCH) — 응답의 sseUrl로 별도 SSE 구독 필요
+  regenerateTool: async (
+    projectId: string,
+    sessionId: string,
+    toolId: string,
+    payload: { baseDraftVersion: number; feedbackItems: Array<{ blockId: string; comment: string }> }
+  ): Promise<ToolGenerationRunResponse> => {
+    const response = await apiClient.patch<ApiResponse<ToolGenerationRunResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/regenerate`,
+      payload
+    );
+    return response.data.result;
+  },
 };

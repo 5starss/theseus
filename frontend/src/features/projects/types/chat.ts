@@ -39,3 +39,32 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
 }
+
+// Tool 생성/재생성 HTTP 응답
+export interface ToolGenerationRunResponse {
+  runId: string;
+  toolId: number;
+  projectId: number;
+  sessionId: number;
+  status: string;
+  draftPhase: string;
+  draftVersion: number;
+  sseUrl: string;
+}
+
+// SSE 이벤트 데이터 구조
+export interface ToolGenerationSseEvent {
+  eventType: 'connected' | 'progress' | 'chunk' | 'completed' | 'failed';
+  projectId: number;
+  chatSessionId: number;
+  toolId: number;
+  status?: string;
+  draftPhase?: string;
+  progressRate?: number;
+  message?: string;
+  content?: string;
+  draftVersion?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt: string;
+}

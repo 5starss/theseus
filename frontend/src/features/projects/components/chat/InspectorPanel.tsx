@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
+import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 
 export function InspectorPanel() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -14,35 +16,38 @@ export function InspectorPanel() {
   const setDraftComment = useChatSessionStore(state => state.setDraftComment);
   const clearDraftComments = useChatSessionStore(state => state.clearDraftComments);
   const currentToolId = useChatSessionStore(state => state.currentToolId);
+  const draftVersion = useChatSessionStore(state => state.draftVersion);
   const isGenerating = useChatSessionStore(state => state.isGenerating);
   const isClosed = useChatSessionStore(state => state.isClosed);
   const setIsGenerating = useChatSessionStore(state => state.setIsGenerating);
-  const setAbortController = useChatSessionStore(state => state.setAbortController);
   const addMessage = useChatSessionStore(state => state.addMessage);
-  const updateLastMessageContent = useChatSessionStore(state => state.updateLastMessageContent);
-  const setPlan = useChatSessionStore(state => state.setPlan);
-  const setProgressInfo = useChatSessionStore(state => state.setProgressInfo);
 
+  const { connectSSE } = useToolGenerationSSE();
   const [isApproving, setIsApproving] = useState(false);
 
-  const handleRequestFeedbackClick = () => {
+  const handleRequestFeedbackClick = async () => {
     if (commentMode) {
-      if (!projectId || !sessionId) return;
-      
-      const payload = {
-        message: "수정 요청",
-        comments: draftComments
-      };
+      if (!projectId || !sessionId || !currentToolId) return;
 
-      // Add User feedback message
+      // draftComments를 feedbackItems 형식으로 변환
+      const feedbackItems = Object.entries(draftComments)
+        .filter(([, comment]) => comment.trim())
+        .map(([blockId, comment]) => ({ blockId, comment }));
+
+      if (feedbackItems.length === 0) {
+        toast.warning('수정 요청 사항을 하나 이상 입력해주세요.');
+        return;
+      }
+
+      // 사용자 피드백 메시지 추가
       addMessage({
         messageId: crypto.randomUUID(),
         senderType: 'USER',
-        content: `수정 요청 사항을 전송했습니다.\n${Object.entries(draftComments).map(([k, v]) => `- [${k}] ${v}`).join('\n')}`,
+        content: `수정 요청 사항을 전송했습니다.\n${feedbackItems.map(item => `- [${item.blockId}] ${item.comment}`).join('\n')}`,
         createdAt: new Date().toISOString()
       });
 
-      // Add Assistant loading message
+      // 어시스턴트 로딩 메시지 추가
       addMessage({
         messageId: crypto.randomUUID(),
         senderType: 'ASSISTANT',
@@ -53,44 +58,25 @@ export function InspectorPanel() {
       setIsGenerating(true);
       setCommentMode(false);
 
-      const abortCtrl = chatApi.generateToolStream(
-        projectId,
-        sessionId,
-        currentToolId,
-        payload,
-        (ev: unknown) => {
-          try {
-            const event = ev as { data?: string };
-            const data = event.data ? JSON.parse(event.data) : null;
-            if (!data) return;
-  
-            if (data.type === 'chunk' && data.content) {
-              updateLastMessageContent(data.content);
-            } else if (data.type === 'plan') {
-              setPlan(data.plan);
-            } else if (data.type === 'progress') {
-              setProgressInfo(data.progress);
-            }
-          } catch {
-            const event = ev as { data?: string };
-            if (event.data) {
-               updateLastMessageContent(event.data);
-            }
+      try {
+        const result = await chatApi.regenerateTool(
+          projectId,
+          sessionId,
+          currentToolId,
+          {
+            baseDraftVersion: draftVersion,
+            feedbackItems
           }
-        },
-        (err) => {
-          console.error('SSE Error during feedback:', err);
-          setIsGenerating(false);
-          setAbortController(null);
-        },
-        () => {
-          setIsGenerating(false);
-          setAbortController(null);
-          clearDraftComments();
-        }
-      );
-      setAbortController(abortCtrl);
+        );
 
+        // SSE 구독 시작
+        connectSSE(result.sseUrl, result.toolId);
+        clearDraftComments();
+      } catch (err) {
+        console.error('Regeneration request failed:', err);
+        setIsGenerating(false);
+        toast.error('수정 요청에 실패했습니다.');
+      }
     } else {
       // 수정 요청 모드 진입
       setCommentMode(true);
@@ -108,8 +94,7 @@ export function InspectorPanel() {
         content: '도구 생성이 성공적으로 승인되었습니다.',
         createdAt: new Date().toISOString()
       });
-      // Optionally update phase to 'APPROVED' if managed by client, 
-      // but usually the backend stream or response dictates it.
+      toast.success('승인 요청이 완료되었습니다.');
     } catch (e) {
       console.error('Approval failed:', e);
       addMessage({
@@ -118,6 +103,7 @@ export function InspectorPanel() {
         content: '승인 요청에 실패했습니다.',
         createdAt: new Date().toISOString()
       });
+      toast.error('승인 요청에 실패했습니다.');
     } finally {
       setIsApproving(false);
     }

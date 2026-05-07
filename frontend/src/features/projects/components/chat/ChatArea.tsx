@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
+import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
-
+import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 
 export function ChatArea() {
@@ -13,19 +14,18 @@ export function ChatArea() {
   const {
     messages,
     addMessage,
-    updateLastMessageContent,
     isGenerating,
     setIsGenerating,
-    setAbortController,
     currentToolId,
-    setPlan,
-    setProgressInfo,
+    setCurrentToolId,
+    setDraftVersion,
     title,
     isClosed
   } = useChatSessionStore();
 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { connectSSE } = useToolGenerationSSE();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -35,7 +35,7 @@ export function ChatArea() {
     scrollToBottom();
   }, [messages, isGenerating]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim() || isGenerating || !projectId || !sessionId) return;
 
     const userMessage = input.trim();
@@ -50,7 +50,7 @@ export function ChatArea() {
       createdAt: new Date().toISOString()
     });
 
-    // 어시스턴트 임시 메시지 추가
+    // 어시스턴트 임시 메시지 추가 (SSE chunk가 여기에 append됨)
     addMessage({
       messageId: crypto.randomUUID(),
       senderType: 'ASSISTANT',
@@ -58,45 +58,41 @@ export function ChatArea() {
       createdAt: new Date().toISOString()
     });
 
-    const abortCtrl = chatApi.generateToolStream(
-      projectId,
-      sessionId,
-      currentToolId,
-      { message: userMessage },
-      (ev: unknown) => {
-        try {
-          const event = ev as { data?: string };
-          const data = event.data ? JSON.parse(event.data) : null;
-          if (!data) return;
+    try {
+      let result;
 
-          // 임의의 SSE 규격 적용
-          if (data.type === 'chunk' && data.content) {
-            updateLastMessageContent(data.content);
-          } else if (data.type === 'plan') {
-            setPlan(data.plan);
-          } else if (data.type === 'progress') {
-            setProgressInfo(data.progress);
+      if (currentToolId) {
+        // 재생성 — 기존 Tool에 대한 추가 요청
+        result = await chatApi.regenerateTool(
+          projectId,
+          sessionId,
+          currentToolId,
+          {
+            baseDraftVersion: useChatSessionStore.getState().draftVersion,
+            feedbackItems: [{ blockId: 'user-input', comment: userMessage }]
           }
-        } catch {
-          // JSON 파싱 실패 시 일반 텍스트로 간주하여 처리 (또는 무시)
-          const event = ev as { data?: string };
-          if (event.data) {
-            updateLastMessageContent(event.data);
-          }
-        }
-      },
-      (err) => {
-        console.error('SSE Error:', err);
-        setIsGenerating(false);
-        setAbortController(null);
-      },
-      () => {
-        setIsGenerating(false);
-        setAbortController(null);
+        );
+      } else {
+        // 신규 생성 — fileName 자동 생성 (옵션 B)
+        const fileName = `tool_${Date.now()}`;
+        result = await chatApi.generateTool(
+          projectId,
+          sessionId,
+          { userMessage, fileName }
+        );
       }
-    );
 
-    setAbortController(abortCtrl);
+      // 응답에서 toolId와 draftVersion을 store에 저장
+      setCurrentToolId(String(result.toolId));
+      setDraftVersion(result.draftVersion);
+
+      // sseUrl로 SSE 구독 시작
+      connectSSE(result.sseUrl, result.toolId);
+    } catch (err) {
+      console.error('Tool generation request failed:', err);
+      setIsGenerating(false);
+      toast.error('Tool 생성 요청에 실패했습니다.');
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -181,5 +177,3 @@ export function ChatArea() {
     </div>
   );
 }
-
-
