@@ -226,6 +226,12 @@ event: chunk
 data: {"eventType":"chunk","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","content":"## Tool Plan\n\n1. CSV 업로드..."}
 ```
 
+### 5-1. 상태 복구
+
+SSE 연결 실패, 브라우저 새로고침, 채팅방 재진입 시 FE는 `GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/generation-state`로 현재 Tool 생성 상태를 조회한다.
+
+BE는 Redis `tool:generation:{toolId}:state`를 우선 조회한다. Redis 상태가 없거나 조회에 실패하면 DB Tool 상태를 기반으로 fallback 응답을 생성한다. DB fallback은 `PLAN -> GENERATING`, `DRAFT / REVIEW -> REVIEW`, `PENDING`, `APPROVED`, `REJECTED`, `DELETED` 상태를 반환한다. `FAILED`는 Redis 상태가 남아 있을 때만 반환한다.
+
 ### 6. AI 완료
 
 AI 서버가 완료 신호를 보내면 BE는 전체 응답을 취합한다. 완료 신호 수신만으로 FE에 `completed`를 보내지 않는다.

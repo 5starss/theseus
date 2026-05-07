@@ -75,6 +75,7 @@
 | Tool Approval | Tool 승인 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/approve` |
 | Tool Approval | Tool 반려 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/reject` |
 | Tool Generation | AI 생성 이벤트 구독 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events` |
+| Tool Generation | AI 생성 상태 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/generation-state` |
 
 ## Auth
 

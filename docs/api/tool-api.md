@@ -316,8 +316,56 @@ data: {"eventType":"failed","projectId":1,"chatSessionId":10,"toolId":7,"status"
 - 별도 `runId` 상태 조회 API는 제공하지 않는다.
 - FE는 `GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events`로 다시 연결한다.
 - BE는 Redis의 `tool:generation:{toolId}:state` 최신 상태가 있으면 연결 직후 최초 상태 이벤트로 전송한다.
-- Redis TTL이 만료되면 FE는 Tool 상세 조회와 ChatMessage 목록 조회로 최종 DB 상태를 복구한다.
+- SSE 연결 실패, 새로고침, 채팅방 재진입 시 FE는 Tool 생성 상태 조회 API로 현재 상태를 복구한다.
+- Redis TTL이 만료되면 BE는 DB Tool 상태 기반 fallback 응답을 반환한다.
 - `runId`는 Kafka/Core 이벤트 추적용 실행 ID이며 FE SSE 구독/복구 기준이 아니다.
+
+## AI 생성 상태 조회
+
+```http
+GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/generation-state
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 해당 프로젝트의 활성 프로젝트 멤버
+- `sessionId`가 해당 `projectId`에 속해야 한다.
+- `toolId`가 해당 `projectId`와 `sessionId`에 속해야 한다.
+
+### 응답
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "projectId": 1,
+    "chatSessionId": 10,
+    "toolId": 7,
+    "eventType": "progress",
+    "status": "GENERATING",
+    "draftPhase": "PLAN",
+    "progressRate": 65,
+    "message": "PLAN 명세를 작성하고 있습니다.",
+    "content": null,
+    "draftVersion": 1,
+    "errorCode": null,
+    "errorMessage": null,
+    "updatedAt": "2026-05-07T10:30:00"
+  }
+}
+```
+
+### 동작
+
+- Redis `tool:generation:{toolId}:state` 최신 상태가 있으면 Redis 값을 우선 반환한다.
+- Redis 상태가 없거나 조회에 실패하면 DB의 `tools.status`, `tools.draft_phase`, `tools.draft_version`, `tools.updated_at` 기준으로 fallback 응답을 반환한다.
+- DB fallback의 `eventType`은 `state`다.
+- DB fallback 상태 매핑은 `PLAN -> GENERATING`, `DRAFT / REVIEW -> REVIEW`, `PENDING -> PENDING`, `APPROVED -> APPROVED`, `REJECTED -> REJECTED`, `DELETED -> DELETED`다.
+- `FAILED`는 Redis 상태가 남아 있을 때만 반환한다.
 
 ## Tool 승인 요청
 
