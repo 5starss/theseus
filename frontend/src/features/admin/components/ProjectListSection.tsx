@@ -17,6 +17,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { StatusBadge } from '@/components/StatusBadge';
+import { Pagination } from '@/components/Pagination';
 import AddProjectModal from './AddProjectModal';
 import EditProjectModal from './EditProjectModal';
 
@@ -152,15 +154,7 @@ export default function ProjectListSection() {
                   <TableCell className="text-[#a4c9ff] px-6 py-[10px] text-[15px] font-mono truncate whitespace-nowrap">{project.projectAdminEmployeeNumber}</TableCell>
                   <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[15px] font-medium truncate whitespace-nowrap">{project.projectAdminName}</TableCell>
                   <TableCell className="px-6 py-[10px] text-center">
-                    {project.status === 'ACTIVE' ? (
-                      <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[10px] font-bold text-[#4ade80] uppercase">
-                        ACTIVE
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[10px] font-bold text-[#f87171] uppercase">
-                        INACTIVE
-                      </span>
-                    )}
+                    <StatusBadge status={project.status} />
                   </TableCell>
                   <TableCell className="px-6 text-center py-3">
                     {isEditing && (
@@ -205,27 +199,14 @@ export default function ProjectListSection() {
         </Table>
       </div>
 
-      {/* Footer / Pagination Placeholder */}
-      <div className="h-[65px] px-4 border-t border-[rgba(65,71,81,0.1)] flex items-center justify-between shrink-0">
-        <span className="text-xs text-white/40">Total {totalElements} projects</span>
-        <div className="flex items-center gap-1">
-          <button
-            disabled={page === 0}
-            onClick={() => setPage(p => p - 1)}
-            className="px-2 py-1 text-xs text-white/60 hover:text-white disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <span className="text-xs text-white/60 px-2">{page + 1} / {totalPages || 1}</span>
-          <button
-            disabled={page >= (totalPages || 1) - 1}
-            onClick={() => setPage(p => p + 1)}
-            className="px-2 py-1 text-xs text-white/60 hover:text-white disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      </div>
+      {/* Footer / Pagination */}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalElements={totalElements}
+        onPageChange={setPage}
+        itemName="projects"
+      />
 
       <AddProjectModal
         isOpen={isAddModalOpen}
