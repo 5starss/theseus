@@ -30,6 +30,8 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, Long> 
 
 	Optional<ChatSession> findByIdAndProjectMember(Long id, ProjectMember projectMember);
 
+	Optional<ChatSession> findByIdAndProject(Long id, Project project);
+
 	Optional<ChatSession> findByIdAndProjectAndProjectMember(
 		Long id,
 		Project project,

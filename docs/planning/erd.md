@@ -51,7 +51,7 @@
 
 `message_type`은 메시지의 업무 흐름 분류다. `content_type`은 메시지 본문의 렌더링 또는 파싱 형식이다. 숫자, 배열, 객체 같은 구조화된 값은 `content_type = JSON`으로 저장한다.
 
-AI 생성 중 progress/chunk는 `chat_messages`에 저장하지 않는다. Redis에 누적하고 SSE로 전달한다. 최종 USER, ASSISTANT, SYSTEM 메시지만 DB에 저장한다.
+AI 생성 중 progress/chunk는 `chat_messages`에 저장하지 않는다. Redis `tool:generation:{toolId}:state`에 최신 상태로 저장하고 SSE로 전달한다. 최종 USER, ASSISTANT, SYSTEM 메시지만 DB에 저장한다.
 
 ## Tool Draft State
 
@@ -72,13 +72,13 @@ APPROVED or REJECTED
 
 ## Async Run
 
-AI 생성 1회는 `runId`로 식별한다. `runId`는 DB 영구 테이블의 기본키가 아니라 Redis에 TTL 기반으로 저장되는 실행 ID다.
+AI 생성 1회는 `runId`로 식별한다. `runId`는 DB 영구 테이블의 기본키가 아니라 Kafka/Core 이벤트 추적용 실행 ID다. FE SSE 구독과 Redis 상태 복구 기준은 `toolId`다.
 
 | 구성 요소 | 역할 |
 | --- | --- |
-| Redis | run 상태, progress/chunk 누적, SSE 재연결 복구 |
+| Redis | `tool:generation:{toolId}:state` 최신 상태, progress/chunk 최신값, SSE 재연결 복구 |
 | Kafka | USER/ASSISTANT 메시지 저장 이벤트, Tool draft 상태 변경 이벤트 |
-| SSE | Redis 이벤트를 FE에 실시간 중계 |
+| SSE | Redis 최신 상태와 Kafka Consumer 수신 이벤트를 FE에 실시간 중계 |
 
 `completed` 이벤트는 AI 생성 완료 시점이 아니라 Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool을 `REVIEW`로 변경한 뒤 발행한다.
 

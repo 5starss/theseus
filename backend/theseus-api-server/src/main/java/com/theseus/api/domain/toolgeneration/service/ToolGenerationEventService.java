@@ -11,11 +11,14 @@ import com.theseus.api.domain.chat.service.ChatMessageService;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolGenerationSseEvent;
 import com.theseus.api.domain.toolgeneration.dto.ToolGenerationState;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationAssistantMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationDraftPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent;
 import com.theseus.api.domain.toolgeneration.redis.ToolGenerationStateStore;
+import com.theseus.api.domain.toolgeneration.sse.ToolGenerationSseEmitterRegistry;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +48,7 @@ public class ToolGenerationEventService {
 	private final ChatMessageService chatMessageService;
 	private final ObjectMapper objectMapper;
 	private final ToolGenerationStateStore toolGenerationStateStore;
+	private final ToolGenerationSseEmitterRegistry toolGenerationSseEmitterRegistry;
 
 	public void handleProgress(ToolGenerationEvent event) {
 		if (!hasRequiredStateIds(event)) {
@@ -59,7 +63,7 @@ public class ToolGenerationEventService {
 		}
 
 		ToolGenerationState state = createProgressState(event);
-		saveStateSafely(EVENT_TYPE_PROGRESS, state, () -> toolGenerationStateStore.saveProgress(state));
+		saveStateAndSend(EVENT_TYPE_PROGRESS, state, () -> toolGenerationStateStore.saveProgress(state));
 	}
 
 	public void handleChunk(ToolGenerationEvent event) {
@@ -75,7 +79,7 @@ public class ToolGenerationEventService {
 		}
 
 		ToolGenerationState state = createChunkState(event);
-		saveStateSafely(EVENT_TYPE_CHUNK, state, () -> toolGenerationStateStore.saveChunk(state));
+		saveStateAndSend(EVENT_TYPE_CHUNK, state, () -> toolGenerationStateStore.saveChunk(state));
 	}
 
 	@Transactional
@@ -113,7 +117,12 @@ public class ToolGenerationEventService {
 		);
 
 		ToolGenerationState state = createCompletedState(event, tool);
-		saveStateAfterCommit(EVENT_TYPE_COMPLETED, state, () -> toolGenerationStateStore.saveCompleted(state));
+		saveStateAfterCommit(() -> {
+			if (saveStateSafely(EVENT_TYPE_COMPLETED, state, () -> toolGenerationStateStore.saveCompleted(state))) {
+				sendStateToSse(state);
+				completeSse(state);
+			}
+		});
 
 		log.info(
 			">>>> Tool generation completed event handled. runId={}, chatSessionId={}, toolId={}",
@@ -147,7 +156,12 @@ public class ToolGenerationEventService {
 		);
 
 		ToolGenerationState state = createFailedState(event);
-		saveStateAfterCommit(EVENT_TYPE_FAILED, state, () -> toolGenerationStateStore.saveFailed(state));
+		saveStateAfterCommit(() -> {
+			if (saveStateSafely(EVENT_TYPE_FAILED, state, () -> toolGenerationStateStore.saveFailed(state))) {
+				sendStateToSse(state);
+				completeSse(state);
+			}
+		});
 
 		log.warn(
 			">>>> Tool generation failed event handled. runId={}, chatSessionId={}, toolId={}, code={}, message={}",
@@ -175,6 +189,7 @@ public class ToolGenerationEventService {
 			.draftPhase(ToolDraftPhase.PLAN.name())
 			.message(event.getMessage())
 			.progressRate(event.getProgressRate())
+			.updatedAt(LocalDateTime.now())
 			.build();
 	}
 
@@ -187,6 +202,7 @@ public class ToolGenerationEventService {
 			.status(STATUS_GENERATING)
 			.draftPhase(ToolDraftPhase.PLAN.name())
 			.content(event.getContent())
+			.updatedAt(LocalDateTime.now())
 			.build();
 	}
 
@@ -200,6 +216,7 @@ public class ToolGenerationEventService {
 			.draftPhase(ToolDraftPhase.REVIEW.name())
 			.draftVersion(toInteger(tool.getDraftVersion()))
 			.message(COMPLETED_MESSAGE)
+			.updatedAt(LocalDateTime.now())
 			.build();
 	}
 
@@ -212,6 +229,7 @@ public class ToolGenerationEventService {
 			.status(STATUS_FAILED)
 			.errorCode(event.getCode())
 			.errorMessage(event.getMessage())
+			.updatedAt(LocalDateTime.now())
 			.build();
 	}
 
@@ -219,24 +237,30 @@ public class ToolGenerationEventService {
 		return value == null ? null : value.intValue();
 	}
 
-	private void saveStateAfterCommit(String eventType, ToolGenerationState state, Runnable saveAction) {
-		Runnable safeSaveAction = () -> saveStateSafely(eventType, state, saveAction);
+	private void saveStateAndSend(String eventType, ToolGenerationState state, Runnable saveAction) {
+		if (saveStateSafely(eventType, state, saveAction)) {
+			sendStateToSse(state);
+		}
+	}
+
+	private void saveStateAfterCommit(Runnable saveAction) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-			safeSaveAction.run();
+			saveAction.run();
 			return;
 		}
 
 		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
 			@Override
 			public void afterCommit() {
-				safeSaveAction.run();
+				saveAction.run();
 			}
 		});
 	}
 
-	private void saveStateSafely(String eventType, ToolGenerationState state, Runnable saveAction) {
+	private boolean saveStateSafely(String eventType, ToolGenerationState state, Runnable saveAction) {
 		try {
 			saveAction.run();
+			return true;
 		} catch (RuntimeException exception) {
 			log.warn(
 				">>>> Failed to save Tool generation Redis state. eventType={}, toolId={}",
@@ -244,7 +268,25 @@ public class ToolGenerationEventService {
 				state.getToolId(),
 				exception
 			);
+			return false;
 		}
+	}
+
+	private void sendStateToSse(ToolGenerationState state) {
+		toolGenerationSseEmitterRegistry.sendToTool(
+			state.getProjectId(),
+			state.getChatSessionId(),
+			state.getToolId(),
+			ToolGenerationSseEvent.createFrom(state)
+		);
+	}
+
+	private void completeSse(ToolGenerationState state) {
+		toolGenerationSseEmitterRegistry.complete(
+			state.getProjectId(),
+			state.getChatSessionId(),
+			state.getToolId()
+		);
 	}
 
 	private Optional<Tool> findEventTool(ToolGenerationEvent event) {

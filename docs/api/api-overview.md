@@ -74,8 +74,7 @@
 | Tool Approval | 승인 요청 상세 조회 | `GET` | `/api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}` |
 | Tool Approval | Tool 승인 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/approve` |
 | Tool Approval | Tool 반려 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/reject` |
-| Tool Run | AI 생성 이벤트 구독 | `GET` | `/api/v1/tool-runs/{runId}/events` |
-| Tool Run | AI 생성 run 상태 조회 | `GET` | `/api/v1/tool-runs/{runId}` |
+| Tool Generation | AI 생성 이벤트 구독 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events` |
 
 ## Auth
 
@@ -135,16 +134,18 @@
 
 ## Tool
 
-- Draft Tool 생성과 재생성은 `runId` 기반 비동기 생성 흐름을 사용한다.
+- Draft Tool 생성과 재생성은 `runId` 기반 Kafka/Core 실행 추적과 `toolId` 기반 SSE 구독 흐름을 사용한다.
 - BE는 권한 검증 후 Tool을 `DRAFT / PLAN` 상태로 만들고 AI 생성 run을 시작한다.
-- AI progress/chunk는 Redis에 누적하고 SSE로 FE에 전달한다.
+- AI progress/chunk는 Redis `tool:generation:{toolId}:state` 최신 상태로 저장하고 SSE로 FE에 전달한다.
 - AI 완료 후 Kafka Consumer가 최종 ASSISTANT 메시지 저장, Tool draft 데이터 갱신, `draft_phase = REVIEW` 전환을 처리한다.
 - 승인 요청은 `DRAFT / REVIEW` 상태에서만 가능하다.
 - 승인되면 `tools.status = APPROVED`, 반려되면 `tools.status = REJECTED`로 변경한다.
 
-## Tool Run
+## Tool Generation
 
-- `runId`는 AI 생성 1회를 식별한다.
+- `runId`는 AI 생성 1회를 식별하는 Kafka/Core 실행 추적 ID다.
 - `runId`는 `chatSessionId`가 아니다.
-- Redis는 run 상태, 진행 이벤트, 재연결 복구 정보를 TTL 기반으로 저장한다.
+- FE SSE 구독과 새로고침 복구 기준은 `projectId/sessionId/toolId`다.
+- Redis는 `tool:generation:{toolId}:state`에 최신 진행 상태를 TTL 기반으로 저장한다.
+- SSE 연결 직후 Redis 최신 상태가 있으면 최초 상태 이벤트를 전송한다.
 - SSE `completed` 이벤트는 DB 저장과 Tool 상태 변경이 끝난 뒤에만 전달한다.

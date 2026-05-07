@@ -46,7 +46,7 @@ class ToolGenerationStateStoreTest {
 		store = new ToolGenerationStateStore(
 			stringRedisTemplate,
 			objectMapper,
-			new ToolGenerationStateProperties(30)
+			new ToolGenerationStateProperties(30, 1800000)
 		);
 		lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
 	}

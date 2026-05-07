@@ -21,7 +21,6 @@
 | `senderType` | `USER`, `ASSISTANT`, `SYSTEM` |
 | `messageType` | `CHAT`, `TOOL_DRAFT_REQUEST`, `TOOL_DRAFT_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_REGENERATE_RESPONSE`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE` |
 | `contentType` | `TEXT`, `MARKDOWN`, `JSON` |
-| `runStatus` | `RUNNING`, `PERSISTING`, `COMPLETED`, `FAILED` |
 
 `messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
 
@@ -177,7 +176,7 @@ Authorization: Bearer {accessToken}
     "status": "DRAFT",
     "draftPhase": "PLAN",
     "draftVersion": 0,
-    "sseUrl": "/api/v1/tool-runs/3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11/events"
+    "sseUrl": "/api/v1/projects/1/sessions/10/tools/7/events"
   }
 }
 ```
@@ -187,10 +186,10 @@ Authorization: Bearer {accessToken}
 - BE가 Access Token, 프로젝트 멤버, Tool 생성 권한을 검증한다.
 - BE가 `tools.status = DRAFT`, `tools.draft_phase = PLAN`인 Tool을 생성한다.
 - BE가 AI 생성 실행 ID인 `runId`를 생성한다.
-- BE가 Redis에 run 상태를 등록하고 TTL을 설정한다.
+- Redis 진행 상태와 SSE 복구 기준은 `toolId`다.
 - BE가 Kafka에 USER 메시지 저장 이벤트를 발행한다.
 - BE가 AI 서버에 `runId`, `projectId`, `chatSessionId`, `toolId`, `prompt`를 포함해 생성 요청한다.
-- AI progress/chunk는 Redis에 누적하고 SSE로 FE에 전달한다.
+- AI progress/chunk는 `tool:generation:{toolId}:state`에 최신 상태로 저장하고 SSE로 FE에 전달한다.
 - AI 완료 후 BE가 전체 응답을 취합하고 Kafka에 완료 이벤트를 발행한다.
 - Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool draft 데이터를 갱신한다.
 - Kafka Consumer가 `tools.draft_phase = REVIEW`로 변경한다.
@@ -244,7 +243,7 @@ Authorization: Bearer {accessToken}
     "status": "DRAFT",
     "draftPhase": "PLAN",
     "draftVersion": 1,
-    "sseUrl": "/api/v1/tool-runs/74bd2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d22/events"
+    "sseUrl": "/api/v1/projects/1/sessions/10/tools/7/events"
   }
 }
 ```
@@ -264,81 +263,61 @@ Authorization: Bearer {accessToken}
 ## AI 생성 이벤트 구독
 
 ```http
-GET /api/v1/tool-runs/{runId}/events
+GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events
 Accept: text/event-stream
 Authorization: Bearer {accessToken}
-Last-Event-ID: {lastEventSeq}
 ```
 
 ### 권한
 
-- run 생성 요청자
-- 해당 프로젝트 접근 권한을 가진 프로젝트 멤버
+- 해당 프로젝트의 활성 프로젝트 멤버
+- `sessionId`가 해당 `projectId`에 속해야 한다.
+- `toolId`가 해당 `projectId`와 `sessionId`에 속해야 한다.
+
+연결 직후 `connected` 이벤트를 전송한다. Redis에 `tool:generation:{toolId}:state` 최신 상태가 있으면 현재 상태 이벤트를 최초 1회 전송한다. 주기적 `heartbeat` 이벤트는 후속 이슈에서 구현한다.
+
+### Event: connected
+
+```text
+event: connected
+data: {"eventType":"connected","projectId":1,"chatSessionId":10,"toolId":7,"message":"connected"}
+```
 
 ### Event: progress
 
 ```text
 event: progress
-id: 19
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","message":"입력 파일 구조를 분석하고 있습니다."}
+data: {"eventType":"progress","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","progressRate":35,"message":"입력 파일 구조를 분석하고 있습니다."}
 ```
 
 ### Event: chunk
 
 ```text
 event: chunk
-id: 20
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","content":"## Tool Plan\n\n1. CSV 업로드..."}
+data: {"eventType":"chunk","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","content":"## Tool Plan\n\n1. CSV 업로드..."}
 ```
 
 ### Event: completed
 
 ```text
 event: completed
-id: 21
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","toolId":7,"draftPhase":"REVIEW"}
+data: {"eventType":"completed","projectId":1,"chatSessionId":10,"toolId":7,"status":"COMPLETED","draftPhase":"REVIEW","draftVersion":1}
 ```
 
 ### Event: failed
 
 ```text
 event: failed
-id: 21
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","code":"AI_GENERATION_FAILED","message":"Tool 초안 생성에 실패했습니다."}
+data: {"eventType":"failed","projectId":1,"chatSessionId":10,"toolId":7,"status":"FAILED","errorCode":"AI_GENERATION_FAILED","errorMessage":"Tool 초안 생성에 실패했습니다."}
 ```
 
-## AI 생성 run 상태 조회
+## AI 생성 상태 복구
 
-```http
-GET /api/v1/tool-runs/{runId}
-Accept: application/json
-Authorization: Bearer {accessToken}
-```
-
-### Response Body
-
-```json
-{
-  "isSuccess": true,
-  "code": 200,
-  "message": "AI 생성 상태 조회에 성공하였습니다.",
-  "result": {
-    "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
-    "projectId": 1,
-    "chatSessionId": 10,
-    "toolId": 7,
-    "status": "RUNNING",
-    "lastEventSeq": 18,
-    "progressText": "입력 파일 구조를 분석하고 있습니다."
-  }
-}
-```
-
-### 동작
-
-- Redis TTL이 남아 있으면 Redis 기준 상태를 반환한다.
-- Redis TTL이 만료되었으면 DB의 최종 Tool/Message 상태를 조회한다.
-- Redis와 DB 모두 복구할 수 없으면 재생성 요청이 필요하다.
+- 별도 `runId` 상태 조회 API는 제공하지 않는다.
+- FE는 `GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events`로 다시 연결한다.
+- BE는 Redis의 `tool:generation:{toolId}:state` 최신 상태가 있으면 연결 직후 최초 상태 이벤트로 전송한다.
+- Redis TTL이 만료되면 FE는 Tool 상세 조회와 ChatMessage 목록 조회로 최종 DB 상태를 복구한다.
+- `runId`는 Kafka/Core 이벤트 추적용 실행 ID이며 FE SSE 구독/복구 기준이 아니다.
 
 ## Tool 승인 요청
 
