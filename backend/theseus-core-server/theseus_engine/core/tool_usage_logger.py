@@ -12,6 +12,7 @@ ToolRetriever의 few-shot 쿼리를 자동으로 보강합니다.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -30,8 +31,17 @@ _LOG_FILE = _LOG_DIR / "tool_usage.jsonl"
 _MAX_FEEDBACK_QUERIES_PER_TOOL = 10
 
 
+def _write_record_sync(record: dict) -> None:
+    """동기 파일 쓰기 헬퍼 — asyncio.to_thread()에서 호출됩니다."""
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with _LOG_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
 def record_tool_call(user_query: str, tool_name: str) -> None:
-    """도구 호출 이벤트를 JSONL 로그에 기록합니다.
+    """도구 호출 이벤트를 JSONL 로그에 기록합니다 (동기 컨텍스트용).
+
+    async 컨텍스트에서는 record_tool_call_async()를 사용하세요.
 
     Args:
         user_query: 도구 호출을 유발한 사용자 쿼리.
@@ -40,14 +50,34 @@ def record_tool_call(user_query: str, tool_name: str) -> None:
     if not user_query or not tool_name:
         return
     try:
-        _LOG_DIR.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.utcnow().isoformat(),
             "query": user_query[:200],
             "tool": tool_name,
         }
-        with _LOG_FILE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        _write_record_sync(record)
+    except OSError as e:
+        log.debug("[ToolUsageLogger] 로그 기록 실패: %s", e)
+
+
+async def record_tool_call_async(user_query: str, tool_name: str) -> None:
+    """도구 호출 이벤트를 비동기로 JSONL 로그에 기록합니다.
+
+    이벤트 루프를 차단하지 않도록 파일 I/O를 스레드 풀에 위임합니다.
+
+    Args:
+        user_query: 도구 호출을 유발한 사용자 쿼리.
+        tool_name: 실제 호출된 도구 이름.
+    """
+    if not user_query or not tool_name:
+        return
+    try:
+        record = {
+            "ts": datetime.utcnow().isoformat(),
+            "query": user_query[:200],
+            "tool": tool_name,
+        }
+        await asyncio.to_thread(_write_record_sync, record)
     except OSError as e:
         log.debug("[ToolUsageLogger] 로그 기록 실패: %s", e)
 

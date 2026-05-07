@@ -14,10 +14,12 @@ numpy 코사인 유사도를 사용하여 경량으로 동작합니다.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
-from typing import Dict, List, Optional
+from functools import lru_cache
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from openharness.tools.base import BaseTool, ToolRegistry
@@ -106,6 +108,7 @@ ESSENTIAL_TOOL_NAMES = {
     "grep",
     "bash",
     "ask_user",
+    "create_tool",
 }
 
 # 유사도 점수가 이 값 미만인 도구는 반환하지 않음
@@ -232,6 +235,7 @@ class ToolRetriever:
     """
 
     _instance: Optional["ToolRetriever"] = None
+    _init_lock: asyncio.Lock = None  # 인스턴스 생성 전 None, 첫 사용 시 초기화
 
     # --- Singleton ---------------------------------------------------
     def __new__(cls, full_registry: ToolRegistry):  # noqa: ARG003
@@ -249,10 +253,22 @@ class ToolRetriever:
         self._model = None          # SentenceTransformer (lazy)
         self._tool_names: List[str] = []
         self._tool_embeddings: Optional[np.ndarray] = None
+        self._index_lock: Optional[asyncio.Lock] = None  # 재인덱싱용 Lock (async 컨텍스트에서 초기화)
+
+        # 쿼리 임베딩 결과 캐시 (query_text → np.ndarray), 최대 128개
+        self._query_cache: Dict[str, np.ndarray] = {}
+        self._query_cache_order: List[str] = []
+        self._QUERY_CACHE_MAX = 128
 
         # 피드백 로그를 TOOL_EXAMPLE_QUERIES에 병합 (런타임 보강)
         self._effective_examples = self._load_effective_examples()
         self._is_ready = True
+
+    def _get_index_lock(self) -> asyncio.Lock:
+        """이벤트 루프 컨텍스트 안에서 Lock을 지연 초기화합니다."""
+        if self._index_lock is None:
+            self._index_lock = asyncio.Lock()
+        return self._index_lock
 
     @staticmethod
     def _load_effective_examples() -> Dict[str, List[str]]:
@@ -302,6 +318,19 @@ class ToolRetriever:
             raise
 
 
+    # --- query embedding cache ----------------------------------------
+    def _get_cached_query_vec(self, query_text: str) -> Optional[np.ndarray]:
+        return self._query_cache.get(query_text)
+
+    def _put_cached_query_vec(self, query_text: str, vec: np.ndarray) -> None:
+        if query_text in self._query_cache:
+            self._query_cache_order.remove(query_text)
+        elif len(self._query_cache) >= self._QUERY_CACHE_MAX:
+            oldest = self._query_cache_order.pop(0)
+            del self._query_cache[oldest]
+        self._query_cache[query_text] = vec
+        self._query_cache_order.append(query_text)
+
     # --- indexing -----------------------------------------------------
     def _build_passage_text(self, tool: BaseTool) -> str:
         """도구의 임베딩용 passage 텍스트를 구성합니다.
@@ -337,46 +366,61 @@ class ToolRetriever:
             f"{example_str}"
         )
 
-    def _ensure_indexed(self) -> None:
-        """등록된 도구 목록과 인덱싱된 목록을 비교하여 필요 시 재인덱싱을 수행합니다."""
+    async def _ensure_indexed(self) -> None:
+        """등록된 도구 목록과 인덱싱된 목록을 비교하여 필요 시 재인덱싱을 수행합니다.
+
+        asyncio.Lock으로 보호되어 병렬 실행 시 중복 인덱싱을 방지합니다.
+        """
         current_tools = self._full_registry.list_tools()
-        
-        # 이미 인덱싱된 도구들과 현재 레지스트리의 도구들이 일치하는지 확인
-        if self._tool_embeddings is not None:
-            if len(current_tools) == len(self._tool_names):
-                # 개수가 같으면 일단 동일하다고 가정 (더 엄격한 체크가 필요할 수도 있음)
-                return
-            else:
-                log.info("[ToolRetriever] 도구 변경 감지 (%d -> %d), 재인덱싱을 시작합니다.", 
-                         len(self._tool_names), len(current_tools))
 
-        self._load_model()
-
-        texts: List[str] = []
-        names: List[str] = []
-        for tool in current_tools:
-            texts.append(self._build_passage_text(tool))
-            names.append(tool.name)
-
-        if not texts:
-            log.warning(
-                "[ToolRetriever] 등록된 도구가 없습니다.",
-            )
-            self._tool_names = []
-            self._tool_embeddings = np.empty((0, 384))
+        # 빠른 경로: 도구 이름 집합이 동일하면 재인덱싱 불필요
+        # len() 비교만으로는 A 삭제 + B 추가처럼 개수가 같은 교체를 감지 못하므로 set 비교 사용
+        if (
+            self._tool_embeddings is not None
+            and set(t.name for t in current_tools) == set(self._tool_names)
+        ):
             return
 
-        embeddings = self._model.encode(
-            texts,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-        self._tool_embeddings = np.array(embeddings)
-        self._tool_names = names
-        log.info(
-            "[ToolRetriever] %d개 도구 인메모리 인덱싱 완료.",
-            len(names),
-        )
+        async with self._get_index_lock():
+            # Lock 획득 후 재확인 (double-checked locking)
+            current_tools = self._full_registry.list_tools()
+            if (
+                self._tool_embeddings is not None
+                and set(t.name for t in current_tools) == set(self._tool_names)
+            ):
+                return
+
+            log.info(
+                "[ToolRetriever] 도구 변경 감지 (%d → %d), 재인덱싱 시작.",
+                len(self._tool_names), len(current_tools),
+            )
+
+            self._load_model()
+
+            texts: List[str] = []
+            names: List[str] = []
+            for tool in current_tools:
+                texts.append(self._build_passage_text(tool))
+                names.append(tool.name)
+
+            if not texts:
+                log.warning("[ToolRetriever] 등록된 도구가 없습니다.")
+                self._tool_names = []
+                self._tool_embeddings = np.empty((0, 384))
+                return
+
+            embeddings = await asyncio.to_thread(
+                self._model.encode,
+                texts,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            self._tool_embeddings = np.array(embeddings)
+            self._tool_names = names
+            # 도구 목록이 바뀌면 쿼리 캐시 무효화
+            self._query_cache.clear()
+            self._query_cache_order.clear()
+            log.info("[ToolRetriever] %d개 도구 인메모리 인덱싱 완료.", len(names))
 
     # --- history tool extraction ------------------------------------
     @staticmethod
@@ -418,7 +462,7 @@ class ToolRetriever:
         return used
 
     # --- retrieval ----------------------------------------------------
-    def retrieve_top_k(
+    async def retrieve_top_k(
         self,
         query: str,
         full_registry: ToolRegistry,
@@ -452,7 +496,7 @@ class ToolRetriever:
             k = compute_adaptive_k(query, base_k=k)
             log.info("[ToolRetriever] Adaptive K → %d (query: '%s')", k, query[:40])
 
-        self._ensure_indexed()
+        await self._ensure_indexed()
 
         # 1. 필수 도구 확보 (k 슬롯과 무관)
         selected: List[BaseTool] = []
@@ -483,13 +527,17 @@ class ToolRetriever:
         if self._tool_embeddings.shape[0] == 0:
             return selected
 
-        # 4. E5 비대칭 검색: query: 프리픽스 부착
+        # 4. E5 비대칭 검색: query: 프리픽스 부착 (캐시 우선)
         query_text = f"query: {query}"
-        query_vec = self._model.encode(
-            query_text,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
+        query_vec = self._get_cached_query_vec(query_text)
+        if query_vec is None:
+            query_vec = await asyncio.to_thread(
+                self._model.encode,
+                query_text,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            self._put_cached_query_vec(query_text, query_vec)
         # 코사인 유사도 (정규화된 벡터의 내적)
         scores = self._tool_embeddings @ query_vec
 

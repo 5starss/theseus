@@ -51,7 +51,7 @@ async def main():
     user_level = 5
     
     sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
-    engine, full_registry = setup_engine(sm, user_level, project_tool_permissions, custom_permission_prompt)
+    engine, full_registry = await setup_engine(sm, user_level, project_tool_permissions, custom_permission_prompt)
     
     current_session = "default"
     print(f"✅ Active session: '{current_session}'")
