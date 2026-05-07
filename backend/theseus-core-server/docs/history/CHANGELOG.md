@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 🚀 Session 30 (2026-05-07)
+- **`state.py` 프롬프트 감사 및 불일치 전면 수정**:
+    - **검증(Verifying) 완료 키워드 명시**: `_PLAN_VERIFYING_PROMPT`에 "Verification complete." 출력 지시를 추가하여, 검증 완료 후 에이전트가 "사용자 결정 대기" 상태로 무한 정지하던 버그의 근본 원인을 해결했습니다.
+    - **웹 리서치 도구 허용 범위 확대**: `_PLAN_DRAFTING_PROMPT`의 읽기 전용 허용 도구에 `web_search`, `web_fetch`, `deep_research`를 추가하여 초기 계획 수립 시 리서치 역량을 강화했습니다.
+    - **`deep_research` 활용 가이드라인**: Base 프롬프트에 단일 턴 매크로 검색 도구인 `deep_research`의 우선 사용을 유도하는 지시를 추가했습니다.
+    - **불필요한 따옴표 노이즈 제거**: `_BASE_SYSTEM_PROMPT` 마지막 줄에 남아있던 이스케이프 따옴표(`\"`)를 제거하여 프롬프트 품질을 향상시켰습니다.
+    - **`is_plan_executing` 프로퍼티 추가**: `TheseusStateMachine`에 누락되었던 실행 단계 확인용 편의 프로퍼티를 추가했습니다.
+- **런타임 크래시 및 의존성 버그 수정**:
+    - `theseus_cli.py` 모듈화 과정에서 발생한 **Git 머지 충돌 마커 잔존 버그**를 찾아내 제거하고, 검증 단계 전환 영어 키워드 로직으로 통일하여 런타임 오류를 차단했습니다.
+    - `requirements.txt`가 알 수 없는 이유로 손실된 것을 정상 복구하고, Session 26의 `DeepResearchTool` 의존성(`markdownify`, `beautifulsoup4`)이 누락되지 않도록 반영했습니다.
 ### 🗂️ `theseus_cli.py` 모듈 분리 리팩토링 — `theseus_cli/` 패키지 신설 (2026-05-07)
 
 893줄짜리 단일 파일을 역할별 5개 모듈로 분리하여 God Object 문제를 해결하고 테스트·확장성을 확보했습니다.

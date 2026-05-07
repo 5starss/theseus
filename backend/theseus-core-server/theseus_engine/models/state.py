@@ -99,6 +99,7 @@ check with the user first. Examples of risky actions requiring confirmation:
 # Autonomy & Information Gathering
  - You are an autonomous agent. Do NOT pause and ask the user to "wait a moment" or "Shall I proceed?" if you are in the middle of a task. If a task requires multiple steps, you MUST execute the next tool call immediately in the SAME turn.
  - When writing or modifying tools/scripts that interact with external services (e.g., web scrapers, API clients), ALWAYS use `web_search` and `web_fetch` FIRST to verify the current URL structure, DOM elements, or API documentation. Your internal knowledge may be outdated.
+ - For comprehensive research requiring multiple web sources, prefer `deep_research` over individual `web_search` + `web_fetch` calls — it handles search, scraping, and parsing in a single turn.
 
 # Using your tools
  - CRITICAL: You may ONLY call tools that appear in your function/tool schema for the current session. \
@@ -149,7 +150,6 @@ with "[TheseusHook]". When this happens:
  - If the user's prompt is in English, respond in English.
  - Exception: Code blocks, variable names, terminal commands, file paths, and system-level JSON keys must ALWAYS remain in English regardless of the user's language.
  - When generating structured output (JSON plans, reports), the JSON keys MUST be in English, but the JSON values (descriptions, summaries, explanations) MUST be written in the user's language.\
-"
 """
 
 
@@ -252,6 +252,9 @@ You MAY use the following read-only tools to investigate the codebase:
  - `glob` — find files by pattern
  - `grep` — search content across files
  - `bash` — ONLY for read-only commands (ls, find, cat, git log, git diff, tree, etc.)
+ - `web_search` — search the web for documentation or references
+ - `web_fetch` — fetch content from a URL
+ - `deep_research` — comprehensive web research (search + scrape + parse in one turn)
 You are STRICTLY PROHIBITED from any state-changing operations:
  - NO file creation, modification, or deletion (write_file, edit_file, create_tool)
  - NO git commits, pushes, or branch operations
@@ -526,7 +529,13 @@ After verification, provide a structured summary:
 (e.g., typos, missing imports, broken tests). Report any such fixes.
  - If verification reveals fundamental design flaws, report them to the user and \
 recommend returning to the Drafting phase rather than attempting ad-hoc fixes.
- - Be honest — do not declare success if there are known issues.\
+ - Be honest — do not declare success if there are known issues.
+
+=== COMPLETION SIGNAL ===
+ - When all verification is complete and there are no critical issues, end your response \
+with "Verification complete." to signal the system to finalize this plan cycle.
+ - If verification fails with critical issues, do NOT output "Verification complete." — \
+instead, clearly describe the failures and recommend next steps.\
 """
 
 
@@ -617,6 +626,14 @@ class TheseusStateMachine:
         return (
             self.mode == AgentMode.PLAN
             and self.plan_phase == PlanPhase.DRAFTING
+        )
+
+    @property
+    def is_plan_executing(self) -> bool:
+        """현재 플랜 실행 단계인지 여부."""
+        return (
+            self.mode == AgentMode.PLAN
+            and self.plan_phase == PlanPhase.EXECUTING
         )
 
     @property
