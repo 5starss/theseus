@@ -54,18 +54,29 @@ class ToolGenerationEventConsumerTest {
 	}
 
 	@Test
-	@DisplayName("progress와 chunk 이벤트는 DB 저장 없이 로그 처리로 건너뛴다.")
-	void skipProgressAndChunkEvents() {
+	@DisplayName("progress 이벤트를 받으면 진행 상태 처리 서비스로 위임한다.")
+	void consumeProgressEvent() {
 		// Given
-		ToolGenerationEvent progressEvent = createEvent("progress");
-		ToolGenerationEvent chunkEvent = createEvent("chunk");
+		ToolGenerationEvent event = createEvent("progress");
 
 		// When
-		consumer.consume(progressEvent);
-		consumer.consume(chunkEvent);
+		consumer.consume(event);
 
 		// Then
-		verifyNoInteractions(toolGenerationEventService);
+		verify(toolGenerationEventService).handleProgress(event);
+	}
+
+	@Test
+	@DisplayName("chunk 이벤트를 받으면 chunk 상태 처리 서비스로 위임한다.")
+	void consumeChunkEvent() {
+		// Given
+		ToolGenerationEvent event = createEvent("chunk");
+
+		// When
+		consumer.consume(event);
+
+		// Then
+		verify(toolGenerationEventService).handleChunk(event);
 	}
 
 	@Test

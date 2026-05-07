@@ -20,15 +20,18 @@ import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolGenerationState;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationAssistantMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationDraftPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent;
+import com.theseus.api.domain.toolgeneration.redis.ToolGenerationStateStore;
 import com.theseus.api.domain.user.entity.User;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -46,6 +49,9 @@ class ToolGenerationEventServiceTest {
 	@Mock
 	private ChatMessageService chatMessageService;
 
+	@Mock
+	private ToolGenerationStateStore toolGenerationStateStore;
+
 	private ObjectMapper objectMapper;
 	private ToolGenerationEventService toolGenerationEventService;
 
@@ -55,8 +61,90 @@ class ToolGenerationEventServiceTest {
 		toolGenerationEventService = new ToolGenerationEventService(
 			toolRepository,
 			chatMessageService,
-			objectMapper
+			objectMapper,
+			toolGenerationStateStore
 		);
+	}
+
+	@Test
+	@DisplayName("progress 이벤트를 받으면 Redis에 최신 진행 상태를 저장한다.")
+	void handleProgressSavesRedisState() {
+		// Given
+		ToolGenerationEvent event = ToolGenerationEvent.builder()
+			.eventType("progress")
+			.runId("run-progress")
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.toolId(TOOL_ID)
+			.message("PLAN 구조를 분석하고 있습니다.")
+			.progressRate(45)
+			.build();
+
+		// When
+		toolGenerationEventService.handleProgress(event);
+
+		// Then
+		ArgumentCaptor<ToolGenerationState> stateCaptor = ArgumentCaptor.forClass(ToolGenerationState.class);
+		verify(toolGenerationStateStore).saveProgress(stateCaptor.capture());
+		ToolGenerationState state = stateCaptor.getValue();
+		assertThat(state.getProjectId()).isEqualTo(PROJECT_ID);
+		assertThat(state.getChatSessionId()).isEqualTo(CHAT_SESSION_ID);
+		assertThat(state.getToolId()).isEqualTo(TOOL_ID);
+		assertThat(state.getEventType()).isEqualTo("progress");
+		assertThat(state.getStatus()).isEqualTo("GENERATING");
+		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN.name());
+		assertThat(state.getMessage()).isEqualTo("PLAN 구조를 분석하고 있습니다.");
+		assertThat(state.getProgressRate()).isEqualTo(45);
+		verifyNoInteractions(toolRepository, chatMessageService);
+	}
+
+	@Test
+	@DisplayName("chunk 이벤트를 받으면 Redis에 최신 chunk 상태를 저장한다.")
+	void handleChunkSavesRedisState() {
+		// Given
+		ToolGenerationEvent event = ToolGenerationEvent.builder()
+			.eventType("chunk")
+			.runId("run-chunk")
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.toolId(TOOL_ID)
+			.content("## PLAN draft")
+			.build();
+
+		// When
+		toolGenerationEventService.handleChunk(event);
+
+		// Then
+		ArgumentCaptor<ToolGenerationState> stateCaptor = ArgumentCaptor.forClass(ToolGenerationState.class);
+		verify(toolGenerationStateStore).saveChunk(stateCaptor.capture());
+		ToolGenerationState state = stateCaptor.getValue();
+		assertThat(state.getProjectId()).isEqualTo(PROJECT_ID);
+		assertThat(state.getChatSessionId()).isEqualTo(CHAT_SESSION_ID);
+		assertThat(state.getToolId()).isEqualTo(TOOL_ID);
+		assertThat(state.getEventType()).isEqualTo("chunk");
+		assertThat(state.getStatus()).isEqualTo("GENERATING");
+		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN.name());
+		assertThat(state.getContent()).isEqualTo("## PLAN draft");
+		verifyNoInteractions(toolRepository, chatMessageService);
+	}
+
+	@Test
+	@DisplayName("progress 이벤트 식별자가 부족하면 Redis에 저장하지 않는다.")
+	void skipProgressWhenRequiredIdsMissing() {
+		// Given
+		ToolGenerationEvent event = ToolGenerationEvent.builder()
+			.eventType("progress")
+			.runId("run-progress")
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.message("missing tool")
+			.build();
+
+		// When
+		toolGenerationEventService.handleProgress(event);
+
+		// Then
+		verifyNoInteractions(toolRepository, chatMessageService, toolGenerationStateStore);
 	}
 
 	@Test
@@ -84,6 +172,16 @@ class ToolGenerationEventServiceTest {
 			ChatMessageContentType.MARKDOWN,
 			"## PLAN v1"
 		);
+		ArgumentCaptor<ToolGenerationState> stateCaptor = ArgumentCaptor.forClass(ToolGenerationState.class);
+		verify(toolGenerationStateStore).saveCompleted(stateCaptor.capture());
+		ToolGenerationState state = stateCaptor.getValue();
+		assertThat(state.getProjectId()).isEqualTo(PROJECT_ID);
+		assertThat(state.getChatSessionId()).isEqualTo(CHAT_SESSION_ID);
+		assertThat(state.getToolId()).isEqualTo(TOOL_ID);
+		assertThat(state.getEventType()).isEqualTo("completed");
+		assertThat(state.getStatus()).isEqualTo("COMPLETED");
+		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW.name());
+		assertThat(state.getDraftVersion()).isEqualTo(1);
 	}
 
 	@Test
@@ -129,6 +227,16 @@ class ToolGenerationEventServiceTest {
 			same(tool),
 			contains("AI_GENERATION_FAILED")
 		);
+		ArgumentCaptor<ToolGenerationState> stateCaptor = ArgumentCaptor.forClass(ToolGenerationState.class);
+		verify(toolGenerationStateStore).saveFailed(stateCaptor.capture());
+		ToolGenerationState state = stateCaptor.getValue();
+		assertThat(state.getProjectId()).isEqualTo(PROJECT_ID);
+		assertThat(state.getChatSessionId()).isEqualTo(CHAT_SESSION_ID);
+		assertThat(state.getToolId()).isEqualTo(TOOL_ID);
+		assertThat(state.getEventType()).isEqualTo("failed");
+		assertThat(state.getStatus()).isEqualTo("FAILED");
+		assertThat(state.getErrorCode()).isEqualTo("AI_GENERATION_FAILED");
+		assertThat(state.getErrorMessage()).isEqualTo("LLM request failed");
 	}
 
 	@Test
@@ -142,7 +250,7 @@ class ToolGenerationEventServiceTest {
 		// When & Then
 		assertThatCode(() -> toolGenerationEventService.handleCompleted(event))
 			.doesNotThrowAnyException();
-		verifyNoInteractions(chatMessageService);
+		verifyNoInteractions(chatMessageService, toolGenerationStateStore);
 	}
 
 	private ToolGenerationEvent createCompletedEvent(ChatMessageType messageType) throws Exception {

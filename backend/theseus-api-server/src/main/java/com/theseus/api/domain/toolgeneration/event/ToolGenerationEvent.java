@@ -20,6 +20,7 @@ public class ToolGenerationEvent {
 	private Long toolId;
 	private ToolGenerationAssistantMessagePayload assistantMessage;
 	private ToolGenerationDraftPayload toolDraft;
+	private Integer progressRate;
 	private String code;
 	private String message;
 	private String content;

@@ -9,15 +9,20 @@ import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.service.ChatMessageService;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolGenerationState;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationAssistantMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationDraftPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent;
+import com.theseus.api.domain.toolgeneration.redis.ToolGenerationStateStore;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -27,9 +32,51 @@ public class ToolGenerationEventService {
 
 	private static final String DEFAULT_FAILED_MESSAGE = "Tool PLAN 생성에 실패했습니다.";
 
+	private static final String EVENT_TYPE_PROGRESS = "progress";
+	private static final String EVENT_TYPE_CHUNK = "chunk";
+	private static final String EVENT_TYPE_COMPLETED = "completed";
+	private static final String EVENT_TYPE_FAILED = "failed";
+	private static final String STATUS_GENERATING = "GENERATING";
+	private static final String STATUS_COMPLETED = "COMPLETED";
+	private static final String STATUS_FAILED = "FAILED";
+	private static final String COMPLETED_MESSAGE = "Tool PLAN 생성이 완료되었습니다.";
+
 	private final ToolRepository toolRepository;
 	private final ChatMessageService chatMessageService;
 	private final ObjectMapper objectMapper;
+	private final ToolGenerationStateStore toolGenerationStateStore;
+
+	public void handleProgress(ToolGenerationEvent event) {
+		if (!hasRequiredStateIds(event)) {
+			log.warn(
+				">>>> Tool generation progress state skipped. runId={}, projectId={}, chatSessionId={}, toolId={}",
+				event.getRunId(),
+				event.getProjectId(),
+				event.getChatSessionId(),
+				event.getToolId()
+			);
+			return;
+		}
+
+		ToolGenerationState state = createProgressState(event);
+		saveStateSafely(EVENT_TYPE_PROGRESS, state, () -> toolGenerationStateStore.saveProgress(state));
+	}
+
+	public void handleChunk(ToolGenerationEvent event) {
+		if (!hasRequiredStateIds(event)) {
+			log.warn(
+				">>>> Tool generation chunk state skipped. runId={}, projectId={}, chatSessionId={}, toolId={}",
+				event.getRunId(),
+				event.getProjectId(),
+				event.getChatSessionId(),
+				event.getToolId()
+			);
+			return;
+		}
+
+		ToolGenerationState state = createChunkState(event);
+		saveStateSafely(EVENT_TYPE_CHUNK, state, () -> toolGenerationStateStore.saveChunk(state));
+	}
 
 	@Transactional
 	public void handleCompleted(ToolGenerationEvent event) {
@@ -65,6 +112,9 @@ public class ToolGenerationEventService {
 			assistantContent
 		);
 
+		ToolGenerationState state = createCompletedState(event, tool);
+		saveStateAfterCommit(EVENT_TYPE_COMPLETED, state, () -> toolGenerationStateStore.saveCompleted(state));
+
 		log.info(
 			">>>> Tool generation completed event handled. runId={}, chatSessionId={}, toolId={}",
 			event.getRunId(),
@@ -96,6 +146,9 @@ public class ToolGenerationEventService {
 			createFailedNoticeMessage(event)
 		);
 
+		ToolGenerationState state = createFailedState(event);
+		saveStateAfterCommit(EVENT_TYPE_FAILED, state, () -> toolGenerationStateStore.saveFailed(state));
+
 		log.warn(
 			">>>> Tool generation failed event handled. runId={}, chatSessionId={}, toolId={}, code={}, message={}",
 			event.getRunId(),
@@ -104,6 +157,94 @@ public class ToolGenerationEventService {
 			event.getCode(),
 			event.getMessage()
 		);
+	}
+
+	private boolean hasRequiredStateIds(ToolGenerationEvent event) {
+		return event.getToolId() != null
+			&& event.getProjectId() != null
+			&& event.getChatSessionId() != null;
+	}
+
+	private ToolGenerationState createProgressState(ToolGenerationEvent event) {
+		return ToolGenerationState.builder()
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolId(event.getToolId())
+			.eventType(EVENT_TYPE_PROGRESS)
+			.status(STATUS_GENERATING)
+			.draftPhase(ToolDraftPhase.PLAN.name())
+			.message(event.getMessage())
+			.progressRate(event.getProgressRate())
+			.build();
+	}
+
+	private ToolGenerationState createChunkState(ToolGenerationEvent event) {
+		return ToolGenerationState.builder()
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolId(event.getToolId())
+			.eventType(EVENT_TYPE_CHUNK)
+			.status(STATUS_GENERATING)
+			.draftPhase(ToolDraftPhase.PLAN.name())
+			.content(event.getContent())
+			.build();
+	}
+
+	private ToolGenerationState createCompletedState(ToolGenerationEvent event, Tool tool) {
+		return ToolGenerationState.builder()
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolId(event.getToolId())
+			.eventType(EVENT_TYPE_COMPLETED)
+			.status(STATUS_COMPLETED)
+			.draftPhase(ToolDraftPhase.REVIEW.name())
+			.draftVersion(toInteger(tool.getDraftVersion()))
+			.message(COMPLETED_MESSAGE)
+			.build();
+	}
+
+	private ToolGenerationState createFailedState(ToolGenerationEvent event) {
+		return ToolGenerationState.builder()
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolId(event.getToolId())
+			.eventType(EVENT_TYPE_FAILED)
+			.status(STATUS_FAILED)
+			.errorCode(event.getCode())
+			.errorMessage(event.getMessage())
+			.build();
+	}
+
+	private Integer toInteger(Long value) {
+		return value == null ? null : value.intValue();
+	}
+
+	private void saveStateAfterCommit(String eventType, ToolGenerationState state, Runnable saveAction) {
+		Runnable safeSaveAction = () -> saveStateSafely(eventType, state, saveAction);
+		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+			safeSaveAction.run();
+			return;
+		}
+
+		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+			@Override
+			public void afterCommit() {
+				safeSaveAction.run();
+			}
+		});
+	}
+
+	private void saveStateSafely(String eventType, ToolGenerationState state, Runnable saveAction) {
+		try {
+			saveAction.run();
+		} catch (RuntimeException exception) {
+			log.warn(
+				">>>> Failed to save Tool generation Redis state. eventType={}, toolId={}",
+				eventType,
+				state.getToolId(),
+				exception
+			);
+		}
 	}
 
 	private Optional<Tool> findEventTool(ToolGenerationEvent event) {
