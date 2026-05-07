@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import re
 import asyncio
 from pathlib import Path
 
@@ -11,436 +10,347 @@ try:
 except ImportError:
     pass
 
-# HuggingFace 비인증 경고 및 symlinks 경고 억제
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-# 프로젝트 루트 및 OpenHarness 경로 추가
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))
 
 from openharness.engine.stream_events import (
-    AssistantTextDelta, AssistantTurnComplete, ToolExecutionStarted, ToolExecutionCompleted, ErrorEvent
+    AssistantTextDelta, AssistantTurnComplete,
+    ToolExecutionStarted, ToolExecutionCompleted, ErrorEvent,
 )
 from theseus_engine.core.engine_builder import setup_engine
-from theseus_engine.core.tool_usage_logger import record_tool_call
+from theseus_engine.core.tool_usage_logger import record_tool_call_async as record_tool_call
 from theseus_engine.core.context_compressor import maybe_compress
-from theseus_engine.models.state import TheseusStateMachine, AgentMode, CoordinatorPhase, PlanPhase
+from theseus_engine.models.state import TheseusStateMachine, AgentMode, PlanPhase
 from theseus_engine.engine.cost_tracker import CostTracker
-from theseus_engine.observability.stats import SessionStats
-from theseus_engine.models.sessions import load_session_history, save_session_history
+from theseus_engine.models.sessions import (
+    save_session_history_async as save_session_history,
+    load_session_history,
+    save_plan_state,
+    load_plan_state,
+    clear_plan_state,
+)
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
-from theseus_engine.tools.core.tool_factory import ToolValidator, CUSTOM_TOOLS_DIR
-from theseus_engine.rag.service import get_rag_service
 
-# --- Gemini thought_signature Monkey-Patch ---
-from theseus_engine.wrappers.llm_clients.gemini_patch import apply_gemini_patch
-apply_gemini_patch()
-
-def _print_help() -> None:
-    print("\n" + "-" * 50)
-    print(" Theseus CLI - 사용 가능한 명령어")
-    print("-" * 50)
-    print("  [모드 전환]")
-    print("    /agent            자율 실행 모드 (기본)")
-    print("    /ask              질문/답변 전용 (도구 사용 안 함)")
-    print("    /plan             계획 -> 리뷰 -> 실행 파이프라인")
-    print("    /coordinator      병렬 서브 에이전트 오케스트레이션")
-    print()
-    print("  [도구 및 권한]")
-    print("    /tools            현재 사용 가능한 도구 목록")
-    print("    /rbac <level>     RBAC 권한 레벨 변경 (1~5)")
-    print("    /validate <name>  커스텀 도구 보안/규격 검증")
-    print()
-    print("  [지식 베이스]")
-    print("    /kb <query>       지식 베이스(RAG) 직접 검색")
-    print()
-    print("  [세션 관리]")
-    print("    /cost             세션 토큰 사용량 및 USD 비용 보고서")
-    print("    /stats            툴 실행 시간 및 성능 통계")
-    print("    /clear            세션 대화 기록 초기화")
-    print()
-    print("  [계획 모드 전용]")
-    print("    approve           계획 승인 및 실행 시작 (PLAN 모드에서)")
-    print("    /approve          계획 승인 및 실행 시작 (슬래시 버전)")
-    print("    /reject           계획 거부 및 Agent 모드 복귀")
-    print()
-    print("  [기타]")
-    print("    /help             이 도움말 다시 보기")
-    print("    exit / quit       프로그램 종료")
-    print("-" * 50 + "\n")
-
-
-def _extract_plan_json(response_text: str) -> dict | None:
-    """LLM 응답에서 JSON 계획 블록을 추출합니다."""
-    match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
-    return None
-
-
-def _display_plan(plan_data: dict) -> None:
-    """JSON 계획을 계층적으로 콘솔에 출력합니다."""
-    print("\n" + "=" * 60)
-    print(f"[Plan] {plan_data.get('goal', '(목표 없음)')}")
-    print("=" * 60)
-    tasks = plan_data.get("tasks", [])
-    main_tasks = [t for t in tasks if not t.get("parent_id")]
-    for mt in main_tasks:
-        status_mark = _status_mark(mt.get("status", "pending"))
-        print(f"\n  {status_mark} [{mt['id']}] {mt['title']}")
-        if mt.get("description") and mt["description"] != mt["title"]:
-            print(f"        {mt['description']}")
-        sub_tasks = [t for t in tasks if t.get("parent_id") == mt["id"]]
-        for st in sub_tasks:
-            st_mark = _status_mark(st.get("status", "pending"))
-            print(f"    {st_mark} [{st['id']}] {st['title']}")
-    print("\n" + "-" * 60)
-    print("[*] 'approve' 또는 '/approve'         : 계획 승인 및 실행")
-    print("[*] '<task-id>: <피드백>'              : 특정 태스크 수정 요청")
-    print("[*] 일반 텍스트 입력                   : 전체 계획 수정 요청")
-    print("-" * 60 + "\n")
-
-
-def _status_mark(status: str) -> str:
-    return {"pending": "[ ]", "done": "[v]", "running": "[~]", "failed": "[x]"}.get(status, "[ ]")
-
-
-def _parse_task_feedback(line: str, plan_json_str: str) -> tuple[str, str] | None:
-    """'<task-id>: <피드백>' 패턴을 파싱합니다.
-
-    Returns (task_id, feedback) if matched, else None.
-    """
-    if not plan_json_str:
-        return None
-    try:
-        plan_data = json.loads(plan_json_str)
-    except json.JSONDecodeError:
-        return None
-
-    task_ids = {t["id"] for t in plan_data.get("tasks", [])}
-
-    # "<task-id>: <feedback>" 또는 "<task-id> <feedback>" 형태 모두 지원
-    m = re.match(r'^([a-zA-Z0-9_-]+)\s*:\s*(.+)$', line.strip(), re.DOTALL)
-    if m and m.group(1) in task_ids:
-        return m.group(1), m.group(2).strip()
-
-    return None
-
-
-def _build_task_feedback_prompt(task_id: str, feedback: str, plan_json_str: str) -> str:
-    """태스크 ID 기반 피드백을 LLM에 보낼 프롬프트로 변환합니다."""
-    return (
-        f"아래 계획에서 태스크 ID '{task_id}'에 대한 수정 요청입니다:\n\n"
-        f"피드백: {feedback}\n\n"
-        f"현재 계획:\n```json\n{plan_json_str}\n```\n\n"
-        f"위 피드백을 반영하여 해당 태스크(및 필요한 경우 관련 서브태스크)만 수정한 뒤, "
-        f"전체 계획을 동일한 JSON 형식으로 다시 출력해 주세요."
-    )
-
-
-def _handle_plan_draft(sm: "TheseusStateMachine", response_text: str) -> None:
-    """LLM 응답에서 JSON 계획을 추출하고 상태를 WAIT_FOR_REVIEW로 전환합니다."""
-    plan_data = _extract_plan_json(response_text)
-    if plan_data:
-        sm.plan = json.dumps(plan_data, ensure_ascii=False, indent=2)
-        # temp 디렉토리에 저장
-        try:
-            Path("temp").mkdir(exist_ok=True)
-            with open("temp/plan_refactored.json", "w", encoding="utf-8") as f:
-                json.dump(plan_data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        _display_plan(plan_data)
-    else:
-        # JSON을 찾지 못하면 원문 텍스트를 plan으로 저장
-        sm.plan = response_text
-        print("\n[!] 계획 JSON 파싱 실패. 원문을 계획으로 저장합니다.")
-        print("[*] 'approve' 또는 '/approve'로 실행하거나 피드백을 입력하세요.\n")
-    sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+from theseus_cli.context import CLIContext
+from theseus_cli.ui import print_help, display_plan
+from theseus_cli.parsers import extract_plan_json, parse_plan_feedback, build_feedback_prompt, handle_plan_draft
+from theseus_cli.intent import llm_is_approval
+from theseus_cli.commands import handle_slash_command
 
 
 async def run_cli():
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print(" 🧩 Theseus Core CLI Agent (Gemini 3.1 Ready)")
-    print("="*50)
-    
-    # 설정 초기화
+    print("=" * 50)
+
     sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
     user_level = 5
     project_tool_permissions = {
-        "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2, 
+        "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
         "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
         "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
         "search_knowledge_base": 1, "ingest_document": 2,
     }
-    
-    # 명시적으로 모델 설정
+
     model_name = os.getenv("OPENHARNESS_MODEL", "google/gemini-3.1-pro-preview-customtools")
     os.environ["OPENHARNESS_MODEL"] = model_name
-    
-    # 도구 승인 콜백 (Human-in-the-loop)
-    async def ask_permission(tool_name: str, args_str: str) -> bool:
-        print(f"\n[⚠️  PERMISSION] Allow tool '{tool_name}' with args: {args_str}?")
-        choice = input("Allow this action? (y/N): ").strip().lower()
-        return choice == 'y'
 
-    # 엔진 생성 (TheseusLLMClient 사용)
+    async def ask_permission(tool_name: str, prompt_msg: str) -> str:
+        print(prompt_msg, end="", flush=True)
+        return input().strip()
+
     client = TheseusLLMClient(model_name)
-    engine, _ = setup_engine(
+    engine, _ = await setup_engine(
         sm, user_level, project_tool_permissions, ask_permission,
-        api_client=client
+        api_client=client, reset_stats=True,
     )
-    
-    # 이전 세션 로드
+
     history = load_session_history("default")
     if history:
         engine.load_messages(history)
         print(f"[*] Loaded {len(history)} messages from previous session.")
 
-    _print_help()
+    # 미완료 Plan 재개 제안
+    auto_resume_line = None
+    incomplete_plan = load_plan_state("default")
+    if incomplete_plan and incomplete_plan.get("phase") == "Executing":
+        last_err = incomplete_plan.get("last_error", "알 수 없는 오류")
+        print(f"\n[!] 이전에 중단된 계획이 있습니다. (마지막 에러: {last_err})")
+        print("[?] 이어서 실행하시겠습니까? [y/n]: ", end="", flush=True)
+        if input().strip().lower() in ("y", "yes"):
+            sm.switch_mode(AgentMode.PLAN)
+            sm.set_plan_phase(PlanPhase.EXECUTING)
+            sm.plan = incomplete_plan.get("plan_json", "")
+            engine.set_system_prompt(sm.get_system_prompt())
+            auto_resume_line = (
+                f"[System Alert] Previous execution was interrupted due to: '{last_err}'. "
+                "Resume from the point of interruption and execute remaining steps immediately."
+            )
+            print("[*] Plan 실행을 재개합니다...")
+        else:
+            clear_plan_state("default")
+            print("[*] 이전 계획을 폐기했습니다.")
+
+    print_help(
+        mode=sm.mode.name,
+        user_level=user_level,
+        plan_phase=getattr(sm, "plan_phase", None) and sm.plan_phase.name,
+    )
+
+    ctx = CLIContext(
+        sm=sm, engine=engine, client=client,
+        user_level=user_level,
+        project_tool_permissions=project_tool_permissions,
+        ask_permission=ask_permission,
+    )
 
     while True:
         try:
-            line = input("user> ").strip()
-            if not line: continue
-            
-            if line.lower() in ('exit', 'quit'):
+            # ── 입력 수신 ──────────────────────────────────────────
+            if auto_resume_line:
+                line = auto_resume_line
+                auto_resume_line = None
+            else:
+                line = input("user> ").strip()
+                if not line:
+                    continue
+                ctx.auto_resume_count = 0
+                ctx.waiting_for_user = False
+
+            if line.lower() in ("exit", "quit"):
                 break
-                
-            # 1. Theseus 전용 슬래시 명령어 처리 (Intercept)
+
+            # ── 슬래시 명령어 처리 ─────────────────────────────────
             if line.startswith("/"):
                 parts = line.split()
-                cmd = parts[0].lower()
-                args = parts[1:] if len(parts) > 1 else []
+                cmd, args = parts[0].lower(), parts[1:]
+                should_continue, new_line = await handle_slash_command(cmd, args, ctx)
+                if should_continue:
+                    continue
+                if new_line is not None:
+                    line = new_line
+                # new_line=None → 미인식 명령어, 원문 그대로 LLM에 전달
 
-                if cmd == "/clear":
-                    engine.clear()
-                    print("[*] Session cleared.")
-                    continue
-                elif cmd == "/plan":
-                    sm.switch_mode(AgentMode.PLAN)
-                    engine.set_system_prompt(sm.get_system_prompt())
-                    print("[*] Switched to PLAN mode.")
-                    continue
-                elif cmd == "/agent":
-                    sm.switch_mode(AgentMode.AGENT)
-                    engine.set_system_prompt(sm.get_system_prompt())
-                    print("[*] Switched to AGENT mode.")
-                    continue
-                elif cmd == "/ask":
-                    sm.switch_mode(AgentMode.ASK)
-                    engine.set_system_prompt(sm.get_system_prompt())
-                    print("[*] Switched to ASK mode. (Tools disabled)")
-                    continue
-                elif cmd == "/rbac":
-                    if not args:
-                        print(f"[*] Current user_level: {user_level}")
-                    else:
-                        try:
-                            user_level = int(args[0])
-                            print(f"[*] User level changed to: {user_level}")
-                        except ValueError:
-                            print("[!] User level must be an integer.")
-                    continue
-                elif cmd == "/tools":
-                    print("\n[🛠️  Available Tools]")
-                    _, current_registry = setup_engine(sm, user_level, project_tool_permissions, ask_permission)
-                    for tool in current_registry.list_tools():
-                        perm = project_tool_permissions.get(tool.name, 1)
-                        print(f"- {tool.name:<20} [Lv.{perm}]")
-                    print("")
-                    continue
-                elif cmd == "/validate":
-                    if not args:
-                        print("[!] Usage: /validate <tool_name>")
-                        continue
-                    tool_name = args[0]
-                    file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{tool_name}.py")
-                    if not os.path.exists(file_path):
-                        print(f"[!] Tool file not found: {file_path}")
-                        continue
-                    
-                    print(f"[*] Validating tool: {tool_name}...")
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        code = f.read()
-                    
-                    # 1단계: 정적 분석 및 보안 검증
-                    ok, msg = ToolValidator.validate_code(code)
-                    print(f"--- Analysis Result ---\n{msg}")
-                    
-                    # 2단계: 모듈 로드 및 구조 검증
-                    if ok:
-                        ok2, msg2, _ = ToolValidator.validate_and_load_module(tool_name, file_path)
-                        print(f"--- Runtime Spec Result ---\n{msg2}")
-                    continue
-                elif cmd == "/kb":
-                    if not args:
-                        print("[!] Usage: /kb <query>")
-                        continue
-                    query = " ".join(args)
-                    print(f"[*] Searching Knowledge Base for: '{query}'...")
-                    try:
-                        results = get_rag_service().search(query, top_k=3)
-                        if not results:
-                            print("[*] No matching results found.")
-                        for i, res in enumerate(results):
-                            print(f"\n[{i+1}] Score: {res.get('score', 0):.4f}")
-                            print(f"Content: {res.get('content', '')[:200]}...")
-                    except Exception as e:
-                        print(f"[!] KB Search failed: {e}")
-                    continue
-                elif cmd == "/coordinator":
-                    sm.switch_mode(AgentMode.COORDINATOR)
-                    engine.set_system_prompt(sm.get_system_prompt())
-                    print("[*] Switched to COORDINATOR mode. (Decompose -> Dispatch -> Synthesize -> Verify)")
-                    continue
-                elif cmd == "/cost":
-                    tracker = CostTracker.get_or_create()
-                    report = "\n" + tracker.format_report()
-                    try:
-                        print(report)
-                    except UnicodeEncodeError:
-                        print(report.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding))
-                    continue
-                elif cmd == "/stats":
-                    stats_inst = SessionStats.get()
-                    report = "\n" + stats_inst.format_report()
-                    try:
-                        print(report)
-                    except UnicodeEncodeError:
-                        print(report.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding))
-                    continue
-                elif cmd == "/help":
-                    _print_help()
-                    continue
-                elif cmd == "/approve":
-                    if sm.mode == AgentMode.PLAN and sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
-                        sm.set_plan_phase(PlanPhase.EXECUTING)
-                        engine.set_system_prompt(sm.get_system_prompt())
-                        print("[*] 계획이 승인되었습니다. 실행 단계를 시작합니다.")
-                        # 승인 메시지를 LLM에 전달하여 실행 시작
-                        line = "승인된 계획을 단계별로 실행해 주세요."
-                        # 슬래시 처리 이후의 일반 메시지 흐름으로 넘어감
-                    else:
-                        print("[*] 현재 검토 중인 계획이 없습니다. /plan 모드에서 계획을 먼저 작성하세요.")
-                        continue
-                elif cmd == "/reject":
-                    if sm.mode == AgentMode.PLAN:
-                        sm.switch_mode(AgentMode.AGENT)
-                        engine.set_system_prompt(sm.get_system_prompt())
-                        print("[*] 계획이 거부되었습니다. Agent 모드로 전환합니다.")
-                    continue
-
-            # Plan WAIT_FOR_REVIEW: 입력 가로채기
-            if sm.mode == AgentMode.PLAN and sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
-                if line.strip().lower() in ("approve", "승인"):
-                    # 계획 승인 → EXECUTING 단계로 전환
-                    sm.set_plan_phase(PlanPhase.EXECUTING)
-                    engine.set_system_prompt(sm.get_system_prompt())
-                    print("[*] 계획이 승인되었습니다. 실행 단계를 시작합니다.")
-                    line = "승인된 계획을 단계별로 실행해 주세요."
+            # ── Plan WAIT_FOR_REVIEW: 승인 또는 피드백 처리 ─────────
+            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
+                if await llm_is_approval(line, ctx.client):
+                    ctx.sm.set_plan_phase(PlanPhase.EXECUTING)
+                    ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                    ctx.waiting_for_user = False
+                    print("[*] ✅ 사용자의 긍정적 동의를 확인했습니다. 계획 실행 단계를 시작합니다.")
+                    line = f"{line}\n(계획이 승인되었습니다. 즉시 단계별 실행을 시작하세요.)"
                 else:
-                    # 태스크 ID 기반 피드백 감지: "task-1-1: 수정 내용"
-                    task_feedback = _parse_task_feedback(line, sm.plan)
-                    if task_feedback:
-                        task_id, feedback = task_feedback
-                        print(f"[*] 태스크 [{task_id}] 피드백 반영 중...")
-                        line = _build_task_feedback_prompt(task_id, feedback, sm.plan)
-                    # 일반 텍스트: 전체 계획 수정 요청 (그대로 LLM에 전달)
+                    parsed_fb = parse_plan_feedback(line, ctx.sm.plan)
+                    if parsed_fb:
+                        _label = f"{parsed_fb['target']}.{parsed_fb['field']}" if parsed_fb.get("field") else parsed_fb["target"]
+                        print(f"[*] [{_label}] 피드백 반영 중...")
+                        line = build_feedback_prompt(parsed_fb, ctx.sm.plan)
 
-            # 2. 메시지 전송 및 스트리밍 출력
-            current_messages = list(engine.messages)
+            # ── 자동 재개 초과 후 EXECUTING 진입 차단 ─────────────────
+            if ctx.waiting_for_user and ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.EXECUTING:
+                ctx.waiting_for_user = False  # 사용자가 입력했으므로 플래그 해제 후 정상 처리
 
-            # 메시지 누적 시 자동 압축 (30개 초과 → 최근 10개 보존)
+            # ── 엔진 재구성 + 메시지 압축 ─────────────────────────────
+            current_messages = list(ctx.engine.messages)
             current_messages, did_compress = await maybe_compress(current_messages)
             if did_compress:
                 print(f"[*] 컨텍스트 압축 완료: {len(current_messages)}개 메시지로 축약")
 
-            # [Dynamic Tool Selection] 매 메시지마다 최적화된 도구 셋으로 엔진 재구성
-            engine, _ = setup_engine(
-                sm,
-                user_level,
-                project_tool_permissions,
-                ask_permission,
-                api_client=client,
-                user_query=line,
-                top_k=8,
+            ctx.engine, _ = await setup_engine(
+                ctx.sm, ctx.user_level, ctx.project_tool_permissions, ctx.ask_permission,
+                api_client=ctx.client, user_query=line, top_k=8,
                 history_messages=current_messages,
             )
-            engine.load_messages(current_messages)
+            ctx.engine.load_messages(current_messages)
 
+            # ── 모드 전환 알림 + DRAFTING 형식 강제 주입 ──────────────
+            actual_line = line
+            if ctx.pending_mode_notification:
+                actual_line = ctx.pending_mode_notification + actual_line
+                ctx.pending_mode_notification = ""
+            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.DRAFTING:
+                actual_line = (
+                    f"{actual_line}\n\n"
+                    "IMPORTANT: You are in PLAN DRAFTING mode. "
+                    "Output ONLY the JSON block following the strict schema. "
+                    "No conversational prose allowed."
+                )
+
+            # ── 스트리밍 실행 ──────────────────────────────────────────
             print("assistant> ", end="", flush=True)
             accumulated_text = ""
             tool_called_this_turn = False
+            tool_error_occurred = False
             plan_complete = False
 
-            async for event in engine.submit_message(line):
+            async for event in ctx.engine.submit_message(actual_line):
                 if isinstance(event, AssistantTextDelta):
                     accumulated_text += event.text
                     print(event.text, end="", flush=True)
                 elif isinstance(event, ToolExecutionStarted):
                     tool_called_this_turn = True
                     print(f"\n[*] Executing tool: {event.tool_name}...", flush=True)
-                    record_tool_call(line, event.tool_name)
+                    await record_tool_call(line, event.tool_name)
                 elif isinstance(event, ToolExecutionCompleted):
                     print(f"[*] Tool '{event.tool_name}' result received.", flush=True)
+                    if event.is_error:
+                        tool_error_occurred = True
                 elif isinstance(event, AssistantTurnComplete):
                     print("\n", flush=True)
-                    if sm.mode == AgentMode.PLAN:
-                        if sm.plan_phase == PlanPhase.DRAFTING:
-                            _handle_plan_draft(sm, accumulated_text)
-                            engine.set_system_prompt(sm.get_system_prompt())
-                        elif sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
-                            updated = _extract_plan_json(accumulated_text)
+                    if ctx.sm.mode == AgentMode.PLAN:
+                        if ctx.sm.plan_phase == PlanPhase.DRAFTING:
+                            handle_plan_draft(ctx.sm, accumulated_text)
+                            ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                        elif ctx.sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
+                            updated = extract_plan_json(accumulated_text)
                             if updated:
-                                sm.plan = json.dumps(updated, ensure_ascii=False, indent=2)
+                                ctx.sm.plan = json.dumps(updated, ensure_ascii=False, indent=2)
                                 try:
                                     Path("temp").mkdir(exist_ok=True)
                                     with open("temp/plan_refactored.json", "w", encoding="utf-8") as f:
                                         json.dump(updated, f, ensure_ascii=False, indent=2)
                                 except Exception:
                                     pass
-                                _display_plan(updated)
+                                display_plan(updated)
                                 print("[*] 계획이 업데이트되었습니다.")
-                        elif sm.plan_phase == PlanPhase.EXECUTING:
-                            # 완료 키워드 감지
+                        elif ctx.sm.plan_phase == PlanPhase.EXECUTING:
                             lower = accumulated_text.lower()
-                            if any(kw in lower for kw in ("plan complete", "계획 실행 완료", "모든 계획 완료", "all steps complete")):
+                            if any(kw in lower for kw in ("plan complete", "all steps complete", "execution complete", "all tasks done")):
+                                ctx.sm.set_plan_phase(PlanPhase.VERIFYING)
+                                print("[*] 실행 완료 — 검증(Verifying) 단계로 전환합니다.")
+                                line = "Execution is complete. Please verify the changes."
+                        elif ctx.sm.plan_phase == PlanPhase.VERIFYING:
+                            lower = accumulated_text.lower()
+                            if any(kw in lower for kw in ("verification complete", "all verified", "verified successfully")):
                                 plan_complete = True
+                                clear_plan_state("default")
                 elif isinstance(event, ErrorEvent):
                     print(f"\n[API ERROR] {event.message}", flush=True)
                 else:
                     print(f"\n[EVENT] {type(event).__name__}: {event}", flush=True)
 
-            # PLAN EXECUTING: 도구 호출 없이 턴이 끝나면 자동으로 다음 단계 트리거
-            if (
-                sm.mode == AgentMode.PLAN
-                and sm.plan_phase == PlanPhase.EXECUTING
-                and not tool_called_this_turn
-                and not plan_complete
-            ):
-                print("[auto] 다음 단계를 계속 실행합니다...\n")
-                line = "계속 진행해줘. 다음 단계를 즉시 실행해."
-                # 현재 메시지 저장 후 루프 재진입 (continue로 while 처음으로)
-                save_session_history("default", engine.messages)
-                continue
+            # ── 자동 재개 판단 ─────────────────────────────────────────
+            should_auto_resume = False
+            resume_prompt = "Continue. Execute the next step immediately."
 
-            # 세션 자동 저장
-            save_session_history("default", engine.messages)
-            
+            is_asking_user = any(
+                kw in accumulated_text
+                for kw in ["?", "should I", "would you", "do you want", "please confirm", "let me know"]
+            )
+
+            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase in (PlanPhase.EXECUTING, PlanPhase.VERIFYING):
+                if is_asking_user:
+                    print("\n[*] 에이전트가 사용자 결정을 대기 중입니다. (자동 재개 취소)")
+                elif not tool_called_this_turn and not plan_complete:
+                    should_auto_resume = True
+                elif tool_error_occurred:
+                    should_auto_resume = True
+                    resume_prompt = "A tool execution error occurred. Review the error, find a solution, and retry."
+            elif ctx.sm.mode == AgentMode.AGENT and tool_error_occurred:
+                should_auto_resume = True
+                resume_prompt = "A tool execution error just occurred. Analyze the root cause and retry with a different approach."
+
+            if should_auto_resume and not plan_complete:
+                error_sig = resume_prompt[:80]
+                if error_sig == ctx.last_error_sig:
+                    ctx.repeated_error_count += 1
+                else:
+                    ctx.repeated_error_count = 1
+                    ctx.last_error_sig = error_sig
+
+                if ctx.repeated_error_count > ctx.MAX_REPEATED_ERRORS:
+                    print(f"[!] 동일한 에러가 {ctx.repeated_error_count}회 반복되었습니다. 접근 방식 전환을 요청합니다.")
+                    resume_prompt = (
+                        f"The same error has occurred {ctx.repeated_error_count} times consecutively. "
+                        "You MUST completely change your approach. "
+                        "If you cannot resolve it alone, report the situation to the user and ask for help."
+                    )
+                    ctx.repeated_error_count = 0
+                    ctx.last_error_sig = ""
+
+                ctx.auto_resume_count += 1
+                if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                    print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
+                    ctx.auto_resume_count = 0
+                    ctx.waiting_for_user = True
+                    if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase in (PlanPhase.EXECUTING, PlanPhase.VERIFYING):
+                        ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                        ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                        print("[*] 계획 검토(Review) 단계로 전환됩니다. 대화로 문제를 파악하고 'approve'로 재개하세요.")
+                    await save_session_history("default", ctx.engine.messages)
+                else:
+                    print(f"[auto] {resume_prompt[:30]}... (자동 재개 {ctx.auto_resume_count}/{ctx.MAX_AUTO_RESUME})")
+                    auto_resume_line = resume_prompt
+                    await save_session_history("default", ctx.engine.messages)
+                    continue
+
+            await save_session_history("default", ctx.engine.messages)
+
         except KeyboardInterrupt:
             break
         except Exception as e:
             print(f"\n[ERROR] {e}")
+            await save_session_history("default", ctx.engine.messages)
+
+            error_str = str(e).lower()
+            if any(kw in error_str for kw in ("max turns", "turn limit", "maximum", "limit")):
+                if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.EXECUTING:
+                    save_plan_state("default", plan_json=getattr(ctx.sm, "plan", ""), phase="Executing", last_error=str(e))
+                    print("[*] Plan 상태가 저장되었습니다. 자동으로 재개합니다...")
+                    auto_resume_line = (
+                        f"[System Alert] Previous execution was interrupted due to turn limit: {e}\n"
+                        "Resume from the point of interruption. Do NOT repeat the same approach."
+                    )
+                    ctx.auto_resume_count += 1
+                    if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                        print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
+                        ctx.auto_resume_count = 0
+                        ctx.waiting_for_user = True
+                        ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                        ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                        print("[*] 계획 검토(Review) 단계로 전환됩니다. 'approve'로 재개하세요.")
+                    else:
+                        continue
+
+            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.EXECUTING:
+                err_sig = str(e)[:80]
+                ctx.repeated_error_count = ctx.repeated_error_count + 1 if err_sig == ctx.last_error_sig else 1
+                ctx.last_error_sig = err_sig
+
+                ctx.auto_resume_count += 1
+                if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                    print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
+                    ctx.auto_resume_count = 0
+                    ctx.waiting_for_user = True
+                    ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                    ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                    print("[*] 계획 검토(Review) 단계로 전환됩니다. 'approve'로 재개하세요.")
+                elif ctx.repeated_error_count > ctx.MAX_REPEATED_ERRORS:
+                    print(f"[!] 동일 에러 {ctx.repeated_error_count}회 반복. 접근 방식 전환을 요청합니다.")
+                    auto_resume_line = (
+                        f"The same error '{str(e)[:100]}' has repeated {ctx.repeated_error_count} times. "
+                        "Completely change your approach, or report the situation to the user if you cannot."
+                    )
+                    ctx.repeated_error_count = 0
+                    ctx.last_error_sig = ""
+                    continue
+                else:
+                    print("[*] 에러 발생 후 자동으로 복구 시도 중 (PLAN 모드)...")
+                    auto_resume_line = f"An error occurred: {e}\nAnalyze the root cause and continue with the next step or fix the error."
+                    continue
 
     print("\n[*] Saving session and exiting...")
-    save_session_history("default", engine.messages)
+    await save_session_history("default", ctx.engine.messages)
+    try:
+        await CostTracker.get_or_create().save_async()
+    except Exception:
+        pass
     print("Done. Goodbye!")
+
 
 if __name__ == "__main__":
     asyncio.run(run_cli())

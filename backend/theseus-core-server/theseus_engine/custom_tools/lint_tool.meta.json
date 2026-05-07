@@ -1,0 +1,20 @@
+{
+  "toolName": "lint_tool",
+  "moduleName": "lint_tool",
+  "projectId": "local",
+  "chatSessionId": null,
+  "creatorUserId": "cli_user",
+  "planId": null,
+  "fileName": "lint_tool.py",
+  "createdAt": "2026-05-07T01:20:43.027846+00:00",
+  "updatedAt": "2026-05-07T01:20:43.027846+00:00",
+  "permissionLevel": 1,
+  "status": "active",
+  "isActive": true,
+  "validationResult": {
+    "success": true,
+    "status": "validated",
+    "message": "ToolValidator validation passed.",
+    "checkedAt": "2026-05-07T01:20:43.027846+00:00"
+  }
+}

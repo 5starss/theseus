@@ -255,8 +255,6 @@ class ToolValidator:
                         f"named '{expected}'. (found: '{name}')"
                     )
 
-    # _check_security_violations: AnalysisValidator로 완전 이관됨.
-
     # ------------------------------------------------------------------
     # 2단계: 모듈 로드 및 런타임 규격 검증
     # ------------------------------------------------------------------
@@ -414,7 +412,7 @@ def build_filtered_registry(
         if tool.name in excluded:
             continue
         required = tool_permissions.get(
-            tool.name, DEFAULT_PERMISSION_LEVEL
+            tool.name, getattr(tool, "permission_level", DEFAULT_PERMISSION_LEVEL)
         )
         if user_level >= required:
             filtered.register(tool)
@@ -478,9 +476,10 @@ class ToolCreatorTool(BaseTool):
     )
     input_model = ToolCreatorInput
     permission_level = 2
+    is_destructive = True
 
-    def is_read_only(self, arguments) -> bool:
-        return False
+    # is_read_only is False by default for destructive tools, 
+    # but we can be explicit if needed.
 
     async def execute(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
@@ -507,6 +506,16 @@ class ToolCreatorTool(BaseTool):
                 registry=context.metadata.get("tool_registry"),
                 tool_permissions=context.metadata.get("tool_permissions"),
             )
+            
+            # 레지스트리에 등록된 경우, active_registry에도 반영 (RBAC 체크)
+            if result.status == "created" and context.metadata.get("active_registry") is not None:
+                instance = context.metadata["tool_registry"].get_tool(arguments.tool_name)
+                if instance:
+                    user_rbac = context.metadata.get("user_rbac_level", 1)
+                    tool_lv = getattr(instance, "permission_level", 1)
+                    if user_rbac >= tool_lv:
+                        context.metadata["active_registry"].register(instance)
+
             return ToolResult(
                 output=result.message,
                 is_error=result.status != "created",
@@ -518,92 +527,127 @@ class ToolCreatorTool(BaseTool):
     async def _execute_legacy(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
-        from src.tooling.service import inject_permission_level
+        from src.tooling.service import inject_permission_level, normalize_tool_name, ToolCreationError
+        import json
+        from datetime import datetime, timezone
 
         os.makedirs(CUSTOM_TOOLS_DIR, exist_ok=True)
-        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{arguments.tool_name}.py")
+        
+        # 0. 네이밍 룰 및 정규화
+        try:
+            safe_tool_name = normalize_tool_name(arguments.tool_name)
+        except ToolCreationError as e:
+            log.error("[ToolAudit] Legacy tool creation failed at naming: %s", e.message)
+            return ToolResult(output=f"❌ Naming validation failed:\n{e.message}", is_error=True)
 
-        # 0. permission_level을 코드에 자동 삽입 (클래스 속성이 없는 경우)
-        code = arguments.python_code
-        if "permission_level" not in code:
-            # 정규식: 클래스 내부의 'name = "..."' 패턴을 안전하게 타겟팅
-            pattern = r'(\n\s+)name\s*=\s*(["\'][^"\']+["\'])'
-            replacement = (
-                r'\g<1>permission_level = '
-                + str(arguments.permission_level)
-                + r'\g<1>name = \2'
-            )
-            new_code = re.sub(pattern, replacement, code, count=1)
-            if new_code == code:
-                return ToolResult(
-                    output=(
-                        "❌ Could not find 'name = ...' attribute inside the class. "
-                        "Auto-injection of permission_level failed. "
-                        "Please include permission_level explicitly in your code."
-                    ),
-                    is_error=True,
-                )
-            code = new_code
+        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.py")
+        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.meta.json")
 
-        # 1. 코드 문법 검증
+        # 1. 권한 자동 주입 (service.py 재사용)
+        try:
+            code = inject_permission_level(arguments.python_code, arguments.permission_level)
+        except ToolCreationError as e:
+            log.error("[ToolAudit] Legacy tool creation failed at permission injection: %s", e.message)
+            return ToolResult(output=f"❌ {e.message}", is_error=True)
+
+        # 2. 코드 문법 검증
         is_valid_code, code_msg = ToolValidator.validate_code(code)
         if not is_valid_code:
+            log.error("[ToolAudit] Legacy tool creation failed at validation:\n%s", code_msg)
             return ToolResult(
                 output=f"❌ Code syntax/structure validation failed:\n{code_msg}",
                 is_error=True,
             )
 
-        # 2. 파일 저장
+        # 3. 파일 저장 (임시)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
 
-        # 3. 모듈 로드 및 구조(Schema) 검증
+        # 4. 모듈 로드 및 구조(Schema) 검증
         is_valid_module, mod_msg, tool_class = ToolValidator.validate_and_load_module(
-            arguments.tool_name, file_path
+            safe_tool_name, file_path
         )
         if not is_valid_module:
-            # 검증 실패 시 생성된 파일 롤백(삭제)
             os.remove(file_path)
+            log.error("[ToolAudit] Legacy tool creation failed at module load (rolled back):\n%s", mod_msg)
             return ToolResult(
                 output=f"❌ Tool specification validation failed (file rolled back):\n{mod_msg}",
                 is_error=True,
             )
 
-        # 4. 런타임 ToolRegistry 및 RBAC에 즉시 등록
+        # 5. 로컬 메타데이터 생성 및 저장 (.meta.json)
+        now = datetime.now(timezone.utc).isoformat()
+        metadata = {
+            "toolName": tool_class.name,
+            "moduleName": safe_tool_name,
+            "projectId": "local",
+            "chatSessionId": None,
+            "creatorUserId": "cli_user",
+            "planId": None,
+            "fileName": f"{safe_tool_name}.py",
+            "createdAt": now,
+            "updatedAt": now,
+            "permissionLevel": getattr(tool_class, "permission_level", arguments.permission_level),
+            "status": "active",
+            "isActive": True,
+            "validationResult": {
+                "success": True,
+                "status": "validated",
+                "message": "ToolValidator validation passed.",
+                "checkedAt": now,
+            }
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        # 6. 런타임 ToolRegistry 및 RBAC에 즉시 등록
         registry = context.metadata.get("tool_registry")
         tool_permissions = context.metadata.get("tool_permissions")
-        level = getattr(tool_class, "permission_level", arguments.permission_level)
+        level = metadata["permissionLevel"]
 
         if registry is not None and tool_class is not None:
             try:
                 instance = tool_class()
                 registry.register(instance)
 
-                # RBAC 권한 맵에도 등록
                 if tool_permissions is not None:
                     tool_permissions[tool_class.name] = level
 
+                # 7. active_registry에도 즉시 등록 (RBAC 체크 후)
+                active_registry = context.metadata.get("active_registry")
+                user_rbac = context.metadata.get("user_rbac_level", 1)
+                if active_registry is not None and user_rbac >= level:
+                    active_registry.register(instance)
+                    log.info("[ToolAudit] Tool also registered in active_registry: %s (user_lv=%d, tool_lv=%d)", tool_class.name, user_rbac, level)
+                elif active_registry is not None:
+                    log.warning("[ToolAudit] Tool not added to active_registry: user_lv=%d < tool_lv=%d", user_rbac, level)
+
+                log.info("[ToolAudit] Legacy tool creation activated: %s", tool_class.name)
                 return ToolResult(
                     output=(
                         f"✅ Tool '{tool_class.name}' created, validated, and registered!\n"
                         f"File: {file_path}\n"
+                        f"Metadata: {meta_path}\n"
                         f"Permission level: {level}\n"
                         f"⚡ This tool is immediately available in the current session."
                     )
                 )
             except Exception as e:
+                log.error("[ToolAudit] Legacy tool runtime registration failed: %s", e)
                 return ToolResult(
                     output=(
-                        f"✅ Tool file saved, but runtime registration failed: {e}\n"
+                        f"✅ Tool file & metadata saved, but runtime registration failed: {e}\n"
                         f"File: {file_path}\n"
                         f"The tool will be auto-loaded on the next session start."
                     )
                 )
 
+        log.info("[ToolAudit] Legacy tool creation finished without registry access: %s", tool_class.name)
         return ToolResult(
             output=(
                 f"✅ Tool '{tool_class.name}' created and validated!\n"
                 f"File: {file_path}\n"
+                f"Metadata: {meta_path}\n"
                 f"Permission level: {level}\n"
                 f"⚠️ Could not access runtime registry for auto-registration. "
                 f"The tool will be auto-loaded on the next session start."
