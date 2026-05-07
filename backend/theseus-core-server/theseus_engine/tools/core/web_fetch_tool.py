@@ -64,12 +64,12 @@ class WebFetchTool(BaseTool):
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             return ToolResult(
-                output=f"HTTP {exc.response.status_code} 오류: {url}",
+                output=f"HTTP {exc.response.status_code} error: {url}",
                 is_error=True,
             )
         except httpx.RequestError as exc:
             return ToolResult(
-                output=f"요청 실패: {exc}",
+                output=f"Request failed: {exc}",
                 is_error=True,
             )
 

@@ -29,7 +29,7 @@ class ListMcpResourcesTool(BaseTool):
         manager = get_mcp_manager()
         resources = manager.list_resources()
         if not resources:
-            return ToolResult(output="(연결된 MCP 리소스가 없습니다)")
+            return ToolResult(output="(No connected MCP resources)")
         
         lines = [
             f"{r.server_name} | {r.uri} | {r.description}"
@@ -63,4 +63,4 @@ class ReadMcpResourceTool(BaseTool):
         except McpServerNotConnectedError as exc:
             return ToolResult(output=str(exc), is_error=True)
         except Exception as exc:
-            return ToolResult(output=f"리소스 읽기 실패: {exc}", is_error=True)
+            return ToolResult(output=f"Failed to read resource: {exc}", is_error=True)

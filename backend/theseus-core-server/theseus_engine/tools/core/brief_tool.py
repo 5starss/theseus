@@ -36,7 +36,7 @@ class BriefTool(BaseTool):
     ) -> ToolResult:
         text = arguments.text.strip()
         if not text:
-            return ToolResult(output="(요약할 내용이 없습니다)")
+            return ToolResult(output="(No content to summarize)")
 
         # TODO: Future enhancement - Use LLM to summarize if api_client is available in context
         # For now, implement smart structural compression
@@ -49,14 +49,14 @@ class BriefTool(BaseTool):
         summary = (
             f"[Summary of {len(lines)} lines, structural compression applied]\n"
             + "\n".join(lines[:10])
-            + "\n\n... (중략) ...\n\n"
+            + "\n\n... (omitted) ...\n\n"
             + "\n".join(lines[-10:])
         )
         
         return ToolResult(
             output=(
-                f"📋 요약 결과 (압축됨):\n\n"
+                f"📋 Summary (compressed):\n\n"
                 f"{summary}\n\n"
-                f"전체 내용을 보려면 대화 기록을 참조하세요."
+                f"Refer to the conversation history for full content."
             )
         )

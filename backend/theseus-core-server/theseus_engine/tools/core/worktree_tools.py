@@ -43,7 +43,7 @@ class EnterWorktreeTool(BaseTool):
         top_level = _git_output(context.cwd, "rev-parse", "--show-toplevel")
         if top_level is None:
             return ToolResult(
-                output="Git 저장소가 아니거나 Git 명령을 실행할 수 없습니다.",
+                output="Not a Git repository or Git command failed.",
                 is_error=True
             )
 
@@ -69,14 +69,14 @@ class EnterWorktreeTool(BaseTool):
         
         output = (result.stdout or result.stderr).strip() or f"Created worktree {worktree_path}"
         if result.returncode != 0:
-            return ToolResult(output=f"워크트리 생성 실패: {output}", is_error=True)
+            return ToolResult(output=f"Worktree creation failed: {output}", is_error=True)
             
         return ToolResult(
             output=(
-                f"✅ 워크트리 생성 성공\n"
+                f"✅ Worktree created\n"
                 f"Path: {worktree_path}\n"
                 f"Branch: {arguments.branch}\n\n"
-                f"이제 해당 경로로 이동하여 안전하게 코드를 수정할 수 있습니다."
+                f"You can now safely modify code in this directory."
             )
         )
 
@@ -112,9 +112,9 @@ class ExitWorktreeTool(BaseTool):
         
         output = (result.stdout or result.stderr).strip() or f"Removed worktree {path}"
         if result.returncode != 0:
-            return ToolResult(output=f"워크트리 제거 실패: {output}", is_error=True)
+            return ToolResult(output=f"Worktree removal failed: {output}", is_error=True)
             
-        return ToolResult(output=f"✅ 워크트리 제거 완료: {path}")
+        return ToolResult(output=f"✅ Worktree removed: {path}")
 
 
 def _git_output(cwd: Path, *args: str) -> str | None:

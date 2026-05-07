@@ -78,25 +78,29 @@ class BashTool(BaseTool):
                 )
         except Exception as exc:
             return ToolResult(
-                output=f"명령 실행 실패: {exc}", is_error=True
+                output=f"Command execution failed: {exc}", is_error=True
             )
 
         try:
-            await asyncio.wait_for(
-                process.wait(), timeout=arguments.timeout_seconds
-            )
-        except asyncio.TimeoutError:
-            buf = await _drain(process.stdout)
+            try:
+                await asyncio.wait_for(
+                    process.wait(), timeout=arguments.timeout_seconds
+                )
+            except asyncio.TimeoutError:
+                buf = await _drain(process.stdout)
+                await _terminate(process, force=True)
+                buf.extend(await _read_remaining(process))
+                return ToolResult(
+                    output=_fmt_timeout(
+                        buf,
+                        command=arguments.command,
+                        timeout=arguments.timeout_seconds,
+                    ),
+                    is_error=True,
+                )
+        except asyncio.CancelledError:
             await _terminate(process, force=True)
-            buf.extend(await _read_remaining(process))
-            return ToolResult(
-                output=_fmt_timeout(
-                    buf,
-                    command=arguments.command,
-                    timeout=arguments.timeout_seconds,
-                ),
-                is_error=True,
-            )
+            raise
 
         buf = await _read_remaining(process)
         text = _fmt_output(buf)
@@ -195,8 +199,8 @@ def _preflight_interactive(command: str) -> str | None:
         m in low for m in safe_markers
     ):
         return (
-            "이 명령어는 대화형 입력이 필요합니다. "
-            "bash 도구는 비대화형이므로, --yes / -y / --defaults 등의 "
-            "플래그를 추가하거나 외부 터미널에서 실행하세요."
+            "This command requires interactive input. "
+            "The bash tool is non-interactive — add flags like "
+            "--yes / -y / --defaults, or run in an external terminal."
         )
     return None

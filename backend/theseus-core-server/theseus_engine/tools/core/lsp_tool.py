@@ -66,16 +66,16 @@ class LspInput(BaseModel):
     def check_required_fields(self) -> "LspInput":
         if self.operation == "workspace_symbol":
             if not self.query:
-                raise ValueError("workspace_symbol에는 query가 필요합니다.")
+                raise ValueError("workspace_symbol requires a query parameter.")
             return self
         if not self.file_path:
-            raise ValueError(f"{self.operation}에는 file_path가 필요합니다.")
+            raise ValueError(f"{self.operation} requires a file_path parameter.")
         if self.operation == "document_symbol":
             return self
         # go_to_definition, find_references, hover → need position
         if self.line is None:
             raise ValueError(
-                f"{self.operation}에는 line이 필요합니다."
+                f"{self.operation} requires a line parameter."
             )
         return self
 
@@ -102,8 +102,8 @@ class LspTool(BaseTool):
         if jedi is None:
             return ToolResult(
                 output=(
-                    "jedi 패키지가 설치되어 있지 않습니다. "
-                    "`pip install jedi`를 실행하세요."
+                    "The 'jedi' package is not installed. "
+                    "Run: pip install jedi"
                 ),
                 is_error=True,
             )
@@ -116,9 +116,9 @@ class LspTool(BaseTool):
 
             file_path = _resolve(root, arguments.file_path)
             if not file_path.exists():
-                return ToolResult(output=f"파일을 찾을 수 없습니다: {file_path}", is_error=True)
+                return ToolResult(output=f"File not found: {file_path}", is_error=True)
             if file_path.suffix != ".py":
-                return ToolResult(output="현재 Python(.py) 파일만 지원합니다.", is_error=True)
+                return ToolResult(output="Only Python (.py) files are currently supported.", is_error=True)
 
             source = file_path.read_text(encoding="utf-8", errors="replace")
             script = jedi.Script(source, path=str(file_path), project=jedi.Project(path=str(root)))
@@ -132,10 +132,10 @@ class LspTool(BaseTool):
             elif arguments.operation == "hover":
                 return self._hover(script, arguments, root)
             else:
-                return ToolResult(output=f"알 수 없는 operation: {arguments.operation}", is_error=True)
+                return ToolResult(output=f"Unknown operation: {arguments.operation}", is_error=True)
         except Exception as e:
             log.error("LSP operation failed: %s", e)
-            return ToolResult(output=f"LSP 오류: {e}", is_error=True)
+            return ToolResult(output=f"LSP error: {e}", is_error=True)
 
     # ── Operations ───────────────────────────────────────────────
 
@@ -163,14 +163,14 @@ class LspTool(BaseTool):
                 break
 
         if not results:
-            return ToolResult(output=f"'{query}'에 해당하는 심볼을 찾을 수 없습니다.")
+            return ToolResult(output=f"No symbols found matching '{query}'.")
         return ToolResult(output=f"Found {len(results)} symbols:\n" + "\n".join(results))
 
     def _document_symbol(self, script, file_path: Path, root: Path) -> ToolResult:
         """파일 내의 모든 심볼(클래스, 함수, 변수 등)을 나열합니다."""
         names = script.get_names(all_scopes=True, definitions=True)
         if not names:
-            return ToolResult(output="(심볼 없음)")
+            return ToolResult(output="(no symbols)")
         lines = []
         for n in names:
             indent = "  " * (n.get_line_code_position() if hasattr(n, 'get_line_code_position') else 0)
@@ -183,7 +183,7 @@ class LspTool(BaseTool):
         col = (args.character or 0)
         defs = script.goto(args.line, col)
         if not defs:
-            return ToolResult(output="정의를 찾을 수 없습니다.")
+            return ToolResult(output="Definition not found.")
         lines = []
         for d in defs:
             p = Path(d.module_path) if d.module_path else Path("(builtin)")
@@ -198,7 +198,7 @@ class LspTool(BaseTool):
         col = (args.character or 0)
         refs = script.get_references(args.line, col)
         if not refs:
-            return ToolResult(output="참조를 찾을 수 없습니다.")
+            return ToolResult(output="No references found.")
         lines = []
         for r in refs[:100]:
             p = Path(r.module_path) if r.module_path else Path("(unknown)")
@@ -214,7 +214,7 @@ class LspTool(BaseTool):
         col = (args.character or 0)
         names = script.infer(args.line, col)
         if not names:
-            return ToolResult(output="(hover 결과 없음)")
+            return ToolResult(output="(no hover results)")
         parts = []
         for n in names[:5]:
             parts.append(f"Type: {n.type}  Name: {n.name}")

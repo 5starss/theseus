@@ -51,10 +51,10 @@ class TodoWriteTool(BaseTool):
         if unchecked in existing and arguments.checked:
             updated = existing.replace(unchecked, checked, 1)
         elif target in existing:
-            return ToolResult(output=f"변경 사항 없음: {path}")
+            return ToolResult(output=f"No changes: {path}")
         else:
             updated = existing.rstrip() + f"\n{target}\n"
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(updated, encoding="utf-8")
-        return ToolResult(output=f"TODO 업데이트 완료: {path}")
+        return ToolResult(output=f"TODO updated: {path}")
