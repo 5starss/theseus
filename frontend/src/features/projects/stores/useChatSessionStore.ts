@@ -10,6 +10,7 @@ interface ChatSessionState {
   commentMode: boolean;
   draftComments: Record<string, string>; // blockId -> comment
   currentToolId: string | null;
+  draftVersion: number;
   abortController: AbortController | null;
   title: string;
   isClosed: boolean;
@@ -32,6 +33,8 @@ interface ChatSessionState {
   setCommentMode: (mode: boolean) => void;
   setDraftComment: (blockId: string, comment: string) => void;
   clearDraftComments: () => void;
+  setCurrentToolId: (toolId: string | null) => void;
+  setDraftVersion: (version: number) => void;
   setAbortController: (ctrl: AbortController | null) => void;
   abortGeneration: () => void;
   updateTitle: (title: string) => void;
@@ -47,6 +50,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   commentMode: false,
   draftComments: {},
   currentToolId: null,
+  draftVersion: 0,
   abortController: null,
   title: '',
   isClosed: false,
@@ -56,6 +60,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
     currentPlan: plan,
     draftPhase: phase,
     currentToolId: toolId,
+    draftVersion: 0,
     title,
     isClosed,
     isGenerating: false,
@@ -87,6 +92,8 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
     })),
   clearDraftComments: () => set({ draftComments: {} }),
   
+  setCurrentToolId: (toolId) => set({ currentToolId: toolId }),
+  setDraftVersion: (version) => set({ draftVersion: version }),
   setAbortController: (ctrl) => set({ abortController: ctrl }),
   abortGeneration: () => {
     const ctrl = get().abortController;
