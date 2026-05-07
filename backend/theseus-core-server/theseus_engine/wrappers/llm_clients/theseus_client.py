@@ -8,6 +8,8 @@ preservation) are handled by ``gemini_compat``.
 import os
 import sys
 import json
+import datetime
+from pathlib import Path
 from typing import AsyncIterator, Any
 
 from openharness.api.client import (
@@ -35,21 +37,20 @@ from theseus_engine.wrappers.llm_clients.gemini_compat import (
     rebuild_tool_call_dict,
     patch_assistant_tool_calls,
 )
+from theseus_engine.engine.model_router import get_model_router
 
 # --- DEBUG: Payload Dump Configuration ---
-from pathlib import Path
-import datetime
+# THESEUS_DEBUG_DUMP_DIR 환경변수로 오버라이드 가능, 기본값은 ~/.theseus/debug_dumps
+DEBUG_DUMP_DIR = Path(
+    os.getenv("THESEUS_DEBUG_DUMP_DIR", Path.home() / ".theseus" / "debug_dumps")
+)
 
-# backend/theseus-core-server/debug_dumps
-DEBUG_DUMP_DIR = Path(r"C:\Users\SSAFY\pjt\pjt3\S14P31A308\backend\theseus-core-server\debug_dumps")
-
-def _dump_debug_payload(name: str, data: Any):
+def _dump_debug_payload(name: str, data: Any) -> None:
     try:
         DEBUG_DUMP_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         dump_path = DEBUG_DUMP_DIR / f"{name}_{timestamp}.json"
-        
-        # JSON 직렬화 가능하도록 변환 (ApiMessageRequest 등 포함)
+
         def _serializer(obj):
             if hasattr(obj, "model_dump"): return obj.model_dump()
             if hasattr(obj, "__dict__"): return obj.__dict__
@@ -57,11 +58,11 @@ def _dump_debug_payload(name: str, data: Any):
 
         with open(dump_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=_serializer)
-        # TUI 프로세스의 stderr로 출력 (터미널에서 확인 가능)
         print(f"\n[DEBUG] Dumped {name} to {dump_path}\n", file=sys.stderr)
     except Exception as e:
         print(f"\n[DEBUG] Failed to dump {name}: {e}\n", file=sys.stderr)
 # -----------------------------------------
+
 
 class TheseusGeminiClient(OpenAICompatibleClient):
     """OpenAICompatibleClient that preserves Gemini's ``extra_content``
@@ -175,8 +176,10 @@ class TheseusGeminiClient(OpenAICompatibleClient):
                 continue
             try:
                 args = json.loads(tc["arguments"])
-            except (json.JSONDecodeError, TypeError):
-                args = {}
+            except (json.JSONDecodeError, TypeError) as parse_err:
+                # 빈 dict로 조용히 넘기지 않고 에이전트가 인지할 수 있도록 에러를 노출
+                # ToolUseBlock은 남겨 히스토리 구조를 유지하되, input에 에러 정보를 담음
+                args = {"_parse_error": str(parse_err), "_raw": tc["arguments"][:200]}
             content.append(ToolUseBlock(
                 id=tc["id"], name=tc["name"], input=args,
             ))
@@ -215,6 +218,9 @@ class TheseusLLMClient(SupportsStreamingMessages):
     def __init__(self, model_name: str) -> None:
         self.model_name = model_name
         self._backend = self._initialize_backend(model_name)
+        self._model_router = get_model_router()
+        self._last_tool_calls: list[str] = []
+        self._current_mode: str = "Agent"
 
     def _initialize_backend(
         self, model_name: str
@@ -278,33 +284,82 @@ class TheseusLLMClient(SupportsStreamingMessages):
         # --- DEBUG: Dump incoming request to Router ---
         _dump_debug_payload("router_incoming_request", {
             "target_model": self.model_name,
-            "request": request
+            "request": request,
         })
         # ----------------------------------------------
 
-        # --- DEBUG: Dump incoming request to Router ---
+        # Patch messages to make tool errors extremely explicit for open-source models
+        patched_messages = []
+        for msg in request.messages:
+            if msg.role == "user" and isinstance(msg.content, list):
+                for block in msg.content:
+                    if getattr(block, "type", None) == "tool_result" and getattr(block, "is_error", False):
+                        orig = getattr(block, "content", "")
+                        if isinstance(orig, str) and not orig.startswith("[TOOL EXECUTION ERROR]"):
+                            prefix = "[TOOL EXECUTION ERROR] The tool failed with the following output:\n"
+                            try:
+                                setattr(block, "content", f"{prefix}{orig}")
+                            except (AttributeError, TypeError):
+                                # Frozen Pydantic model — use object.__setattr__
+                                try:
+                                    object.__setattr__(block, "content", f"{prefix}{orig}")
+                                except Exception:
+                                    pass
+            patched_messages.append(msg)
 
-        actual_model = request.model
-        if "/" in actual_model:
-            actual_model = actual_model.split("/", 1)[1]
+        # Smart Model Routing: 최근 도구 호출 기반 모델 선택
+        routed_model = self._model_router.select_model(
+            recent_tool_calls=self._last_tool_calls,
+            mode=self._current_mode,
+        )
+        # 라우팅된 모델이 기본과 다르면 백엔드 재초기화
+        if (
+            self._model_router.enabled
+            and routed_model != self.model_name
+        ):
+            self._backend = self._initialize_backend(routed_model)
+            actual_model = routed_model
+            if "/" in actual_model:
+                actual_model = actual_model.split("/", 1)[1]
+        else:
+            actual_model = request.model
+            if "/" in actual_model:
+                actual_model = actual_model.split("/", 1)[1]
 
         modified_request = ApiMessageRequest(
             model=actual_model,
-            messages=request.messages,
+            messages=patched_messages,
             system_prompt=request.system_prompt,
             max_tokens=request.max_tokens,
             tools=request.tools,
         )
 
+        # 도구 호출 추적 초기화 (이번 턴)
+        turn_tool_calls: list[str] = []
+
         async for event in self._backend.stream_message(modified_request):
-            if isinstance(event, ApiMessageCompleteEvent) and event.usage:
-                try:
-                    from theseus_engine.engine.cost_tracker import CostTracker
-                    CostTracker.get_or_create().record_usage(
-                        model=actual_model,
-                        input_tokens=event.usage.input_tokens,
-                        output_tokens=event.usage.output_tokens,
-                    )
-                except Exception:
-                    pass
+            if isinstance(event, ApiMessageCompleteEvent):
+                if event.usage:
+                    try:
+                        from theseus_engine.engine.cost_tracker import CostTracker
+                        CostTracker.get_or_create().record_usage(
+                            model=actual_model,
+                            input_tokens=event.usage.input_tokens,
+                            output_tokens=event.usage.output_tokens,
+                        )
+                    except Exception:
+                        pass
+                # 응답 메시지에서 tool_use 블록을 추출하여 도구 호출 추적
+                if hasattr(event, "message") and event.message:
+                    for block in getattr(event.message, "content", []):
+                        if getattr(block, "type", None) == "tool_use":
+                            tool_name = getattr(block, "name", "")
+                            if tool_name:
+                                turn_tool_calls.append(tool_name)
             yield event
+
+        # 이번 턴의 도구 호출 기록 갱신 (다음 턴 라우팅에 사용)
+        self._last_tool_calls = turn_tool_calls
+        # 라우팅으로 변경된 백엔드 원복
+        if self._model_router.enabled:
+            self._backend = self._initialize_backend(self.model_name)
