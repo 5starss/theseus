@@ -16,15 +16,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { StatusBadge } from '@/components/StatusBadge';
+import { Pagination } from '@/components/Pagination';
+import { AddUserModal } from './AddUserModal';
+import { EditUserModal } from './EditUserModal';
+
 
 export default function UserManagementSection() {
   const [users, setUsers] = useState<UserResponse[]>([]);
@@ -32,19 +29,11 @@ export default function UserManagementSection() {
   const [isLoading, setIsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
-  const [newUserForm, setNewUserForm] = useState({
-    employeeNumber: '',
-    name: '',
-    email: '',
-    password: '',
-  });
 
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
-  const [editUserForm, setEditUserForm] = useState({
-    name: '',
-    email: '',
-  });
+  const [editInitialName, setEditInitialName] = useState('');
+  const [editInitialEmail, setEditInitialEmail] = useState('');
 
   // Pagination states
   const [page, setPage] = useState(0);
@@ -80,47 +69,11 @@ export default function UserManagementSection() {
     return () => { cancelled = true; };
   }, [page, fetchTrigger]);
 
-  const handleAddUser = async () => {
-    try {
-      await adminApi.createUser({
-        employeeNumber: newUserForm.employeeNumber,
-        name: newUserForm.name,
-        email: newUserForm.email,
-        password: newUserForm.password,
-        systemRole: 'USER',
-      });
-      setIsAddUserOpen(false);
-      setNewUserForm({ employeeNumber: '', name: '', email: '', password: '' });
-      refetch();
-    } catch (error) {
-      console.error('Failed to create user:', error);
-      alert('사용자 생성에 실패했습니다.');
-    }
-  };
-
   const openEditUserDialog = (user: UserResponse) => {
     setEditingUserId(user.id);
-    setEditUserForm({
-      name: user.name || '',
-      email: user.email || '',
-    });
+    setEditInitialName(user.name || '');
+    setEditInitialEmail(user.email || '');
     setIsEditUserOpen(true);
-  };
-
-  const handleEditUser = async () => {
-    if (!editingUserId) return;
-    try {
-      await adminApi.updateUser(editingUserId, {
-        name: editUserForm.name,
-        email: editUserForm.email,
-      });
-      setIsEditUserOpen(false);
-      setEditingUserId(null);
-      refetch();
-    } catch (error) {
-      console.error('Failed to update user:', error);
-      alert('사용자 정보 수정에 실패했습니다.');
-    }
   };
 
   const handleStatusToggle = async (userId: number, currentStatus: 'ACTIVE' | 'INACTIVE') => {
@@ -208,15 +161,7 @@ export default function UserManagementSection() {
                   <TableCell className="text-[#d4e4fa] px-6 py-[10px] text-[15px] font-medium truncate whitespace-nowrap">{user.name}</TableCell>
                   <TableCell className="text-[#c1c7d3] px-6 py-[10px] text-[15px] truncate whitespace-nowrap">{user.email || '-'}</TableCell>
                   <TableCell className="px-6 py-[10px] text-center">
-                    {user.status === 'ACTIVE' ? (
-                      <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.2)] text-[10px] font-bold text-[#4ade80] uppercase">
-                        ACTIVE
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center justify-center px-[9px] py-[3px] rounded-[2px] bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[10px] font-bold text-[#f87171] uppercase">
-                        INACTIVE
-                      </span>
-                    )}
+                    <StatusBadge status={user.status} />
                   </TableCell>
                   <TableCell className="pl-0 pr-6 text-left py-3">
                     {isEditing && (
@@ -259,149 +204,31 @@ export default function UserManagementSection() {
       </div>
 
       {/* Footer / Pagination */}
-      <div className="h-[65px] px-4 border-t border-[rgba(65,71,81,0.1)] flex items-center justify-between shrink-0">
-        <span className="text-xs text-white/40">Total {totalElements} users</span>
-        <div className="flex items-center gap-1">
-          <button
-            disabled={page === 0}
-            onClick={() => setPage(p => p - 1)}
-            className="px-2 py-1 text-xs text-white/60 hover:text-white disabled:opacity-50"
-          >
-            Prev
-          </button>
-          <span className="text-xs text-white/60 px-2">{page + 1} / {totalPages || 1}</span>
-          <button
-            disabled={page >= (totalPages || 1) - 1}
-            onClick={() => setPage(p => p + 1)}
-            className="px-2 py-1 text-xs text-white/60 hover:text-white disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalElements={totalElements}
+        onPageChange={setPage}
+        itemName="users"
+      />
 
-      <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
-        <DialogContent className="bg-[#051424] border-[rgba(65,71,81,0.3)] text-white sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="text-[#d4e4fa] text-lg font-semibold">새 사용자 추가</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="employeeNumber" className="text-right text-[#a4c9ff] text-sm">
-                사번
-              </Label>
-              <Input
-                id="employeeNumber"
-                value={newUserForm.employeeNumber}
-                onChange={(e) => setNewUserForm({ ...newUserForm, employeeNumber: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="ex) 0000000"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="name" className="text-right text-[#a4c9ff] text-sm">
-                이름
-              </Label>
-              <Input
-                id="name"
-                value={newUserForm.name}
-                onChange={(e) => setNewUserForm({ ...newUserForm, name: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="ex) 홍길동"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="email" className="text-right text-[#a4c9ff] text-sm">
-                이메일
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                value={newUserForm.email}
-                onChange={(e) => setNewUserForm({ ...newUserForm, email: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="ex) hong@ssafy.com"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="password" className="text-right text-[#a4c9ff] text-sm">
-                비밀번호
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                value={newUserForm.password}
-                onChange={(e) => setNewUserForm({ ...newUserForm, password: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="비밀번호를 입력하세요"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <button
-              onClick={() => setIsAddUserOpen(false)}
-              className="px-4 py-2 bg-transparent hover:bg-white/5 border border-[rgba(65,71,81,0.3)] text-[#c1c7d3] rounded-md transition-colors text-sm font-medium"
-            >
-              취소
-            </button>
-            <button
-              onClick={handleAddUser}
-              className="px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-md transition-colors text-sm font-medium"
-            >
-              사용자 추가
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AddUserModal
+        isOpen={isAddUserOpen}
+        onClose={() => setIsAddUserOpen(false)}
+        onSuccess={refetch}
+      />
 
-      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
-        <DialogContent className="bg-[#051424] border-[rgba(65,71,81,0.3)] text-white sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle className="text-[#d4e4fa] text-lg font-semibold">사용자 정보 수정</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editName" className="text-right text-[#a4c9ff] text-sm">
-                이름
-              </Label>
-              <Input
-                id="editName"
-                value={editUserForm.name}
-                onChange={(e) => setEditUserForm({ ...editUserForm, name: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="ex) 홍길동"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="editEmail" className="text-right text-[#a4c9ff] text-sm">
-                이메일
-              </Label>
-              <Input
-                id="editEmail"
-                type="email"
-                value={editUserForm.email}
-                onChange={(e) => setEditUserForm({ ...editUserForm, email: e.target.value })}
-                className="col-span-3 bg-[#010f1f] border-[rgba(65,71,81,0.3)] focus-visible:ring-1 focus-visible:ring-white/20 text-[#d4e4fa]"
-                placeholder="ex) hong@ssafy.com"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <button
-              onClick={() => setIsEditUserOpen(false)}
-              className="px-4 py-2 bg-transparent hover:bg-white/5 border border-[rgba(65,71,81,0.3)] text-[#c1c7d3] rounded-md transition-colors text-sm font-medium"
-            >
-              취소
-            </button>
-            <button
-              onClick={handleEditUser}
-              className="px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-md transition-colors text-sm font-medium"
-            >
-              수정 완료
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {isEditUserOpen && editingUserId && (
+        <EditUserModal
+          key={editingUserId}
+          isOpen={isEditUserOpen}
+          onClose={() => setIsEditUserOpen(false)}
+          onSuccess={refetch}
+          userId={editingUserId}
+          initialName={editInitialName}
+          initialEmail={editInitialEmail}
+        />
+      )}
     </div>
   );
 }

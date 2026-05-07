@@ -43,7 +43,7 @@ export default function ProjectIndexPage() {
 
     redirectLogic();
     return () => { cancelled = true; };
-  }, [projectId, navigate]);
+  }, [projectId, navigate, refreshSessions]);
 
   return (
     <div className="flex-1 flex items-center justify-center bg-[#010f1f]">
