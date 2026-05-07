@@ -1,10 +1,10 @@
 import unittest
 from unittest.mock import AsyncMock
 
+from src.tool_generation.plan_generator import ToolPlanGenerator
 from src.tool_generation.processor import ToolGenerationProcessor
 from src.tool_generation.schemas import (
     PlanAiRequest,
-    ToolDraftPayload,
     ToolGenerationRequestEvent,
     ToolPlanResult,
     ToolRegenerationRequestEvent,
@@ -19,16 +19,6 @@ class FakeGenerator:
     async def generate(self, request: PlanAiRequest) -> ToolPlanResult:
         self.requests.append(request)
         return self.result
-
-
-class FakeDraftClient:
-    def __init__(self, draft: ToolDraftPayload):
-        self.draft = draft
-        self.requested_tool_ids: list[int] = []
-
-    async def fetch_tool_draft(self, tool_id: int) -> ToolDraftPayload:
-        self.requested_tool_ids.append(tool_id)
-        return self.draft
 
 
 class ToolGenerationProcessorTests(unittest.IsolatedAsyncioTestCase):
@@ -52,39 +42,33 @@ class ToolGenerationProcessorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(published.assistant_message.message_type, "TOOL_DRAFT_RESPONSE")
         self.assertEqual(published.tool_draft.structured_plan_json["version"], 1)
 
-    async def test_regeneration_fetches_full_base_draft_and_builds_regenerate_plan_request(self):
-        base_draft = ToolDraftPayload.model_validate(
-            {
-                "toolId": 7,
-                "projectId": 1,
-                "chatSessionId": 10,
-                "rawMarkdown": "## PLAN v1",
-                "structuredPlanJson": {
-                    "version": 1,
-                    "blocks": [
-                        {
-                            "blockId": "analysis-summary",
-                            "title": "Analysis",
-                            "content": "Old content",
-                        }
-                    ],
-                },
-                "draftSnapshot": {"version": 1},
-                "draftPhase": "REVIEW",
-            }
+    async def test_generation_publishes_progress_and_chunk_events_before_completion(self):
+        publisher = AsyncMock()
+        processor = ToolGenerationProcessor(
+            publisher=publisher,
+            generator=ToolPlanGenerator(),
         )
+
+        await processor.process_generation(create_generation_event())
+
+        published_event_types = [
+            call.args[1].event_type
+            for call in publisher.publish.await_args_list
+        ]
+        self.assertIn("progress", published_event_types)
+        self.assertIn("chunk", published_event_types)
+        self.assertEqual(published_event_types[-1], "TOOL_GENERATION_COMPLETED")
+
+    async def test_regeneration_fetches_full_base_draft_and_builds_regenerate_plan_request(self):
         publisher = AsyncMock()
         generator = FakeGenerator(create_plan_result(version=2))
-        draft_client = FakeDraftClient(base_draft)
         processor = ToolGenerationProcessor(
             publisher=publisher,
             generator=generator,
-            draft_client=draft_client,
         )
 
         await processor.process_regeneration(create_regeneration_event())
 
-        self.assertEqual(draft_client.requested_tool_ids, [7])
         self.assertEqual(len(generator.requests), 1)
         ai_request = generator.requests[0]
         self.assertEqual(ai_request.request_type, "REGENERATE_PLAN")
@@ -104,25 +88,14 @@ class ToolGenerationProcessorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(published.tool_draft.structured_plan_json["version"], 2)
 
     async def test_regeneration_publishes_failed_event_when_base_version_mismatches(self):
-        base_draft = ToolDraftPayload.model_validate(
-            {
-                "toolId": 7,
-                "projectId": 1,
-                "chatSessionId": 10,
-                "structuredPlanJson": {"version": 2, "blocks": []},
-                "draftSnapshot": {"version": 2},
-                "draftPhase": "REVIEW",
-            }
-        )
         publisher = AsyncMock()
         generator = FakeGenerator(create_plan_result(version=3))
         processor = ToolGenerationProcessor(
             publisher=publisher,
             generator=generator,
-            draft_client=FakeDraftClient(base_draft),
         )
 
-        await processor.process_regeneration(create_regeneration_event())
+        await processor.process_regeneration(create_regeneration_event(base_draft_version=2))
 
         self.assertEqual(generator.requests, [])
         publisher.publish.assert_awaited_once()
@@ -155,7 +128,7 @@ def create_generation_event() -> ToolGenerationRequestEvent:
     )
 
 
-def create_regeneration_event() -> ToolRegenerationRequestEvent:
+def create_regeneration_event(base_draft_version: int = 1) -> ToolRegenerationRequestEvent:
     return ToolRegenerationRequestEvent.model_validate(
         {
             "eventType": "TOOL_REGENERATION_REQUESTED",
@@ -172,6 +145,24 @@ def create_regeneration_event() -> ToolRegenerationRequestEvent:
                     "comment": "make 504 cause more specific",
                 }
             ],
+            "baseDraft": {
+                "toolId": 7,
+                "projectId": 1,
+                "chatSessionId": 10,
+                "rawMarkdown": "## PLAN v1",
+                "structuredPlanJson": {
+                    "version": base_draft_version,
+                    "blocks": [
+                        {
+                            "blockId": "analysis-summary",
+                            "title": "Analysis",
+                            "content": "Old content",
+                        }
+                    ],
+                },
+                "draftSnapshot": {"version": base_draft_version},
+                "draftPhase": "REVIEW",
+            },
             "projectRole": "ADMIN",
             "toolPermission": {
                 "canCreateTool": True,

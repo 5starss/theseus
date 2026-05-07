@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-import json
 import logging
+from inspect import signature
 from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from src.tool_generation.client import ToolDraftClient, tool_draft_client
 from src.tool_generation.plan_generator import ToolPlanGenerator
 from src.tool_generation.publisher import ToolGenerationEventPublisher
 from src.tool_generation.schemas import (
     AssistantMessagePayload,
     PlanAiRequest,
-    ToolDraftPayload,
     ToolDraftResultPayload,
+    ToolGenerationChunkEvent,
     ToolGenerationCompletedEvent,
     ToolGenerationFailedEvent,
+    ToolGenerationProgressEvent,
     ToolGenerationRequestEvent,
     ToolPermissionPayload,
     ToolPlanResult,
@@ -37,11 +37,9 @@ class ToolGenerationProcessor:
         *,
         publisher: ToolGenerationEventPublisher,
         generator: ToolPlanGenerator | None = None,
-        draft_client: ToolDraftClient | None = None,
     ) -> None:
         self.publisher = publisher
         self.generator = generator or ToolPlanGenerator()
-        self.draft_client = draft_client or tool_draft_client
 
     async def process_message(self, payload: dict[str, Any]) -> None:
         event_type = payload.get("eventType")
@@ -58,7 +56,7 @@ class ToolGenerationProcessor:
     async def process_generation(self, event: ToolGenerationRequestEvent) -> None:
         try:
             ai_request = self.build_generation_ai_request(event)
-            result = await self.generator.generate(ai_request)
+            result = await self.generate_with_callbacks(event, ai_request)
             await self.publish_completed(event, result, assistant_message_type="TOOL_DRAFT_RESPONSE")
         except Exception as exc:
             logger.error("Tool PLAN generation failed. runId=%s error=%s", event.run_id, exc, exc_info=True)
@@ -66,10 +64,12 @@ class ToolGenerationProcessor:
 
     async def process_regeneration(self, event: ToolRegenerationRequestEvent) -> None:
         try:
-            base_draft = await self.draft_client.fetch_tool_draft(event.tool_id)
+            base_draft = event.base_draft
+            if base_draft is None:
+                raise ValueError("Base draft payload is missing from regeneration request event")
             self.validate_base_draft_version(event, base_draft)
             ai_request = self.build_regeneration_ai_request(event, base_draft)
-            result = await self.generator.generate(ai_request)
+            result = await self.generate_with_callbacks(event, ai_request)
             await self.publish_completed(event, result, assistant_message_type="TOOL_REGENERATE_RESPONSE")
         except Exception as exc:
             logger.error("Tool PLAN regeneration failed. runId=%s error=%s", event.run_id, exc, exc_info=True)
@@ -90,7 +90,7 @@ class ToolGenerationProcessor:
     def build_regeneration_ai_request(
         self,
         event: ToolRegenerationRequestEvent,
-        base_draft: ToolDraftPayload,
+        base_draft,
     ) -> PlanAiRequest:
         return PlanAiRequest(
             requestType="REGENERATE_PLAN",
@@ -126,10 +126,24 @@ class ToolGenerationProcessor:
             "permissions": self.permissions_to_json(event.tool_permission),
         }
 
+    async def generate_with_callbacks(
+        self,
+        event: ToolGenerationRequestEvent | ToolRegenerationRequestEvent,
+        ai_request: PlanAiRequest,
+    ) -> ToolPlanResult:
+        generator_params = signature(self.generator.generate).parameters
+        if "progress_callback" in generator_params or "chunk_callback" in generator_params:
+            return await self.generator.generate(
+                ai_request,
+                progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
+                chunk_callback=lambda content: self.publish_chunk(event, content),
+            )
+        return await self.generator.generate(ai_request)
+
     def validate_base_draft_version(
         self,
         event: ToolRegenerationRequestEvent,
-        base_draft: ToolDraftPayload,
+        base_draft,
     ) -> None:
         if event.base_draft_version is None:
             return
@@ -137,6 +151,36 @@ class ToolGenerationProcessor:
             raise ValueError(
                 f"Base draft version mismatch. requested={event.base_draft_version}, current={base_draft.version}"
             )
+
+    async def publish_progress(
+        self,
+        event: ToolGenerationRequestEvent | ToolRegenerationRequestEvent,
+        message: str,
+        progress_rate: int,
+    ) -> None:
+        progress = ToolGenerationProgressEvent(
+            runId=event.run_id,
+            projectId=event.project_id,
+            chatSessionId=event.chat_session_id,
+            toolId=event.tool_id,
+            message=message,
+            progressRate=max(0, min(progress_rate, 99)),
+        )
+        await self.publisher.publish(event.run_id, progress)
+
+    async def publish_chunk(
+        self,
+        event: ToolGenerationRequestEvent | ToolRegenerationRequestEvent,
+        content: str,
+    ) -> None:
+        chunk = ToolGenerationChunkEvent(
+            runId=event.run_id,
+            projectId=event.project_id,
+            chatSessionId=event.chat_session_id,
+            toolId=event.tool_id,
+            content=content,
+        )
+        await self.publisher.publish(event.run_id, chunk)
 
     async def publish_completed(
         self,

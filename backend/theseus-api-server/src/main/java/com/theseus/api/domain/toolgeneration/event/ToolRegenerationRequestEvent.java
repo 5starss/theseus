@@ -15,6 +15,7 @@ public record ToolRegenerationRequestEvent(
 	Long requestedByProjectMemberId,
 	Long baseDraftVersion,
 	List<ToolFeedbackItemRequest> feedbackItems,
+	ToolGenerationDraftPayload baseDraft,
 	ProjectRole projectRole,
 	ToolPermissionPayload toolPermission,
 	LocalDateTime requestedAt

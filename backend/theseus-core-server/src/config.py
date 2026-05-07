@@ -16,7 +16,6 @@ class Settings(BaseSettings):
     SPRING_BOOT_BILLING_USAGE_URL: str = "http://localhost:8080/api/internal/billing/usage"
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: str = "http://localhost:8080/api/internal/history/messages"
-    SPRING_BOOT_INTERNAL_TOOL_DRAFT_URL: str = "http://localhost:8080/api/internal/tools/{tool_id}/draft"
     SPRING_BOOT_INTERNAL_API_KEY: str = "theseus-local-internal-api-key"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
