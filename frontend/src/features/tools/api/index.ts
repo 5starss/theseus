@@ -97,13 +97,13 @@ export const toolApi = {
   getTools: async (projectId: string | number): Promise<ToolItem[]> => {
     try {
       const response = await apiClient.get<ApiResponse<ToolItem[]>>(`/api/v1/projects/${projectId}/tools`);
-      
+
       // API 응답이 배열이 아니거나 비어있으면 목업 데이터 반환
       if (!Array.isArray(response.data?.result) || response.data.result.length === 0) {
         console.warn('API returned empty or non-array tools, using mock data.');
         return mockTools;
       }
-      
+
       return response.data.result;
     } catch (error) {
       console.warn('Failed to fetch tools from API, falling back to mock data.', error);
@@ -120,7 +120,7 @@ export const toolApi = {
       return response.data.result;
     } catch (error) {
       console.warn(`Failed to fetch tool ${toolId} from API, falling back to mock data.`, error);
-      
+
       const longMockCode = `import json
 import logging
 from typing import Dict, Any, List
@@ -182,29 +182,29 @@ class ComplexDataAnalyzer:
             report += f"Category {cat}: Average Value = {avg:.2f}\\n"
         return report
 
-def execute(params: Dict[str, Any]) -> str:
-    """
-    Main entry point for the tool execution.
-    """
-    source = params.get("source", "default_db")
-    
-    try:
-        analyzer = ComplexDataAnalyzer(source)
-        if not analyzer.load_data():
-            return "Failed to load data."
-            
-        analyzer.clean_data()
-        analyzer.analyze_patterns()
+    def execute(params: Dict[str, Any]) -> str:
+        """
+        Main entry point for the tool execution.
+        """
+        source = params.get("source", "default_db")
         
-        # Perform some heavy computation simulation
-        for i in range(1000):
-            _ = i * i
+        try:
+            analyzer = ComplexDataAnalyzer(source)
+            if not analyzer.load_data():
+                return "Failed to load data."
+                
+            analyzer.clean_data()
+            analyzer.analyze_patterns()
             
-        return analyzer.generate_report()
-        
-    except Exception as e:
-        logger.error(f"Error during execution: {e}")
-        return f"Execution failed: {str(e)}"
+            # Perform some heavy computation simulation
+            for i in range(1000):
+                _ = i * i
+                
+            return analyzer.generate_report()
+            
+        except Exception as e:
+            logger.error(f"Error during execution: {e}")
+            return f"Execution failed: {str(e)}"
 
 # Testing block
 if __name__ == "__main__":
@@ -213,17 +213,34 @@ if __name__ == "__main__":
     print(result)
 `;
 
+      const idStr = String(toolId);
+      const isReview = /[02468]$/.test(idStr); // 짝수 ID는 승인 대기(REVIEW) 상태로 시뮬레이션
+
       // 목업 데이터 반환 (실제 API에러 시 보여줄 임시 데이터)
       return {
-        toolId: typeof toolId === 'number' ? toolId : parseInt(toolId.replace(/\D/g, '') || '0', 10),
+        toolId: typeof toolId === 'number' ? toolId : parseInt(idStr.replace(/\D/g, '') || '0', 10),
         fileName: 'complex_data_analyzer.py',
         version: 2,
         pythonCode: longMockCode,
-        status: 'APPROVED',
+        status: isReview ? 'REVIEW' : 'APPROVED',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         createdByProjectMemberId: 1
       };
+    }
+  },
+
+  /**
+   * 도구 상태 변경 (승인 / 반려)
+   */
+  updateToolStatus: async (projectId: string | number, toolId: string | number, status: 'APPROVED' | 'REJECTED'): Promise<boolean> => {
+    try {
+      await apiClient.patch(`/api/v1/projects/${projectId}/tools/${toolId}/status`, { status });
+      return true;
+    } catch (error) {
+      console.warn(`Failed to update tool ${toolId} status to ${status}, falling back to mock delay.`, error);
+      // API 실패 시에도 UI 시뮬레이션을 위해 1초 딜레이 후 성공 처리
+      return new Promise((resolve) => setTimeout(() => resolve(true), 1000));
     }
   },
 };

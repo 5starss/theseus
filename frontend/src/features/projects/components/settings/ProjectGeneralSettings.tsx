@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -67,40 +67,40 @@ export function ProjectGeneralSettings({ projectId }: ProjectGeneralSettingsProp
       </CardHeader>
       <CardContent className="space-y-6 overflow-x-auto">
         <div className="min-w-[500px] space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="projectName" className="text-slate-300 font-medium tracking-wide uppercase text-[10px]">프로젝트 이름</Label>
-          <Input
-            id="projectName"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="프로젝트 이름을 입력하세요"
-            className="bg-slate-950/50 border-slate-800 text-slate-200 placeholder:text-slate-600 focus:border-blue-400/50 focus:ring-blue-400/20"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="projectDescription" className="text-slate-300 font-medium tracking-wide uppercase text-[10px]">프로젝트 설명</Label>
-          <Textarea
-            id="projectDescription"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="프로젝트에 대한 설명을 입력하세요"
-            rows={4}
-            className="bg-slate-950/50 border-slate-800 text-slate-200 placeholder:text-slate-600 focus:border-blue-400/50 focus:ring-blue-400/20"
-          />
-        </div>
-
-        <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/30 p-4">
-          <div className="space-y-0.5">
-            <Label className="text-slate-200 font-medium">프로젝트 활성화 상태</Label>
+          <div className="space-y-2">
+            <Label htmlFor="projectName" className="text-slate-300 font-medium tracking-wide uppercase text-[10px]">프로젝트 이름</Label>
+            <Input
+              id="projectName"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="프로젝트 이름을 입력하세요"
+              className="bg-slate-950/50 border-slate-800 text-slate-200 placeholder:text-slate-600 focus:border-blue-400/50 focus:ring-blue-400/20"
+            />
           </div>
-          <Switch
-            checked={isActive}
-            onCheckedChange={setIsActive}
-            className="data-[state=checked]:bg-blue-400"
-          />
+
+          <div className="space-y-2">
+            <Label htmlFor="projectDescription" className="text-slate-300 font-medium tracking-wide uppercase text-[10px]">프로젝트 설명</Label>
+            <Textarea
+              id="projectDescription"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="프로젝트에 대한 설명을 입력하세요"
+              rows={4}
+              className="bg-slate-950/50 border-slate-800 text-slate-200 placeholder:text-slate-600 focus:border-blue-400/50 focus:ring-blue-400/20"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/30 p-4">
+            <div className="space-y-0.5">
+              <Label className="text-slate-200 font-medium">프로젝트 활성화 상태</Label>
+            </div>
+            <Switch
+              checked={isActive}
+              onCheckedChange={setIsActive}
+              className="data-[state=checked]:bg-blue-400"
+            />
+          </div>
         </div>
-      </div>
       </CardContent>
       <CardFooter className="flex justify-end border-t border-slate-800 p-6 min-w-[500px]">
         <Button
