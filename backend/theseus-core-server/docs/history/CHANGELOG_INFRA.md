@@ -2,6 +2,30 @@
 
 인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
 
+## [2026-05-07] Kafka-Centric Tool Generation Worker Alignment
+
+### Tool Generation 통신 모델을 Kafka 중심 비동기 워커 구조로 정렬
+- Tool 생성 및 재생성 흐름을 HTTP/이벤트 혼합 모델에서 Kafka producer-consumer 기반의 완전 비동기 파이프라인으로 정리했습니다.
+- API 서버는 요청 컨텍스트를 Kafka 이벤트로 발행하고 즉시 `runId`를 반환하는 producer 역할로 고정했습니다.
+- Core 서버는 Kafka 요청을 소비해 생성 작업을 수행하고, 진행 상태와 완료/실패 이벤트를 다시 Kafka로 발행하는 worker 역할로 정리했습니다.
+
+### Core 서버 로컬 런타임 및 compose 설정 보강 (`infra/docker/local/docker-compose.core.yml`)
+- `theseus-core-server` 컨테이너 환경 변수에 `AUTH_MODE: spring`을 추가했습니다.
+- `CORE_KAFKA_CONSUMER_ENABLED: true`를 추가해 로컬 Docker 환경에서도 Kafka consumer가 기본 활성화되도록 맞췄습니다.
+- 더 이상 사용하지 않는 `SPRING_BOOT_INTERNAL_TOOL_DRAFT_URL` 환경 변수는 제거해 Kafka 이벤트에 draft 컨텍스트를 포함하는 최신 계약과 설정이 어긋나지 않도록 정리했습니다.
+
+### Kafka 설정 외부화 및 실행 구성 정리 (`backend/theseus-core-server/src/config.py`, `.env.example`)
+- Core 서버 설정에 Kafka bootstrap server 및 topic 이름 구성을 반영해 환경 변수 기반으로 워커 실행 구성을 제어할 수 있게 정리했습니다.
+- 로컬 및 공용 예시 환경 파일에서도 Kafka 기반 Tool Generation 파이프라인 설정값을 확인할 수 있도록 맞췄습니다.
+
+### 운영 검증 기준 갱신
+- 로컬 검증 기준을 HTTP draft 조회 여부가 아니라 Kafka request/event 토픽 흐름 확인으로 전환했습니다.
+- 후속 검증 포인트는 다음 흐름 기준으로 정리했습니다.
+  - Tool regeneration 요청 발행
+  - Core worker consume 및 draft 생성 처리
+  - `theseus.tool-generation.event` 토픽으로 progress/chunk/completed/failed 이벤트 발행
+  - API 서버 SSE 또는 WebSocket 중계 확인
+
 ## [2026-05-06] Sandbox Enforcement + Persistence
 
 ### 샌드박스 강제 관문 추가 (`src/tooling/service.py`, `src/tooling/sandbox_gate.py`, `src/tooling/sandbox_gate_runner.py`)

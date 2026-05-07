@@ -24,6 +24,7 @@ import com.theseus.api.domain.toolgeneration.dto.request.ToolRegenerationRequest
 import com.theseus.api.domain.toolgeneration.dto.response.ToolGenerationRunResponse;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationKafkaPublishEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationRequestEvent;
+import com.theseus.api.domain.toolgeneration.event.ToolGenerationDraftPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolPermissionPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolRegenerationRequestEvent;
 import com.theseus.api.domain.user.entity.User;
@@ -175,6 +176,7 @@ public class ToolGenerationService {
 			projectMember.getId(),
 			request.getBaseDraftVersion(),
 			request.getFeedbackItems(),
+			createBaseDraftPayload(tool),
 			projectMember.getProjectRole(),
 			createPermissionPayload(projectMember),
 			LocalDateTime.now()
@@ -188,6 +190,14 @@ public class ToolGenerationService {
 			projectMember.getCanUpdateTool(),
 			projectMember.getCanDeleteTool()
 		);
+	}
+
+	private ToolGenerationDraftPayload createBaseDraftPayload(Tool tool) {
+		return ToolGenerationDraftPayload.builder()
+			.rawMarkdown(tool.getRawMarkdown())
+			.structuredPlanJson(readJson(tool.getStructuredPlanJson()))
+			.draftSnapshot(readJson(tool.getDraftSnapshot()))
+			.build();
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
@@ -272,6 +282,17 @@ public class ToolGenerationService {
 	private String writeAsJson(ToolRegenerationRequest request) {
 		try {
 			return objectMapper.writeValueAsString(request);
+		} catch (JsonProcessingException exception) {
+			throw BusinessException.of(ErrorCode.INVALID_INPUT_VALUE);
+		}
+	}
+
+	private com.fasterxml.jackson.databind.JsonNode readJson(String value) {
+		if (value == null || value.isBlank()) {
+			return objectMapper.createObjectNode();
+		}
+		try {
+			return objectMapper.readTree(value);
 		} catch (JsonProcessingException exception) {
 			throw BusinessException.of(ErrorCode.INVALID_INPUT_VALUE);
 		}

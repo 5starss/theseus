@@ -51,6 +51,7 @@ class ToolRegenerationRequestEvent(BaseModel):
     requested_by_project_member_id: int = Field(alias="requestedByProjectMemberId")
     base_draft_version: int | None = Field(default=None, alias="baseDraftVersion")
     feedback_items: list[ToolFeedbackItem] = Field(alias="feedbackItems")
+    base_draft: "ToolDraftPayload" | None = Field(default=None, alias="baseDraft")
     project_role: str = Field(alias="projectRole")
     tool_permission: ToolPermissionPayload = Field(alias="toolPermission")
     requested_at: datetime | None = Field(default=None, alias="requestedAt")
@@ -59,13 +60,13 @@ class ToolRegenerationRequestEvent(BaseModel):
 class ToolDraftPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    tool_id: int = Field(alias="toolId")
-    project_id: int = Field(alias="projectId")
-    chat_session_id: int = Field(alias="chatSessionId")
+    tool_id: int | None = Field(default=None, alias="toolId")
+    project_id: int | None = Field(default=None, alias="projectId")
+    chat_session_id: int | None = Field(default=None, alias="chatSessionId")
     raw_markdown: str | None = Field(default=None, alias="rawMarkdown")
     structured_plan_json: dict[str, Any] = Field(alias="structuredPlanJson")
     draft_snapshot: dict[str, Any] | None = Field(default=None, alias="draftSnapshot")
-    draft_phase: str = Field(alias="draftPhase")
+    draft_phase: str = Field(default="REVIEW", alias="draftPhase")
 
     @property
     def version(self) -> int | None:
@@ -123,6 +124,29 @@ class ToolGenerationCompletedEvent(BaseModel):
     assistant_message: AssistantMessagePayload = Field(alias="assistantMessage")
     tool_draft: ToolDraftResultPayload = Field(alias="toolDraft")
     completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), alias="completedAt")
+
+
+class ToolGenerationProgressEvent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_type: Literal["progress"] = Field(default="progress", alias="eventType")
+    run_id: str = Field(alias="runId")
+    project_id: int = Field(alias="projectId")
+    chat_session_id: int = Field(alias="chatSessionId")
+    tool_id: int = Field(alias="toolId")
+    message: str
+    progress_rate: int = Field(alias="progressRate")
+
+
+class ToolGenerationChunkEvent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_type: Literal["chunk"] = Field(default="chunk", alias="eventType")
+    run_id: str = Field(alias="runId")
+    project_id: int = Field(alias="projectId")
+    chat_session_id: int = Field(alias="chatSessionId")
+    tool_id: int = Field(alias="toolId")
+    content: str
 
 
 class ToolGenerationFailedEvent(BaseModel):
