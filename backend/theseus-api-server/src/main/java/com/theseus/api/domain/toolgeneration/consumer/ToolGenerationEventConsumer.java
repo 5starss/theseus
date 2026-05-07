@@ -32,13 +32,12 @@ public class ToolGenerationEventConsumer {
 				toolGenerationEventService.handleFailed(event);
 				return;
 			}
-			if (eventType.isProgressEvent()) {
-				log.info(
-					">>>> Tool generation progress event received. runId={}, eventType={}, toolId={}",
-					event.getRunId(),
-					event.getEventType(),
-					event.getToolId()
-				);
+			if (ToolGenerationEventType.PROGRESS.equals(eventType)) {
+				toolGenerationEventService.handleProgress(event);
+				return;
+			}
+			if (ToolGenerationEventType.CHUNK.equals(eventType)) {
+				toolGenerationEventService.handleChunk(event);
 				return;
 			}
 
