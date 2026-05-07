@@ -7,6 +7,7 @@ import com.theseus.api.domain.auth.dto.request.LoginRequest;
 import com.theseus.api.domain.auth.dto.response.LoginResponse;
 import com.theseus.api.domain.auth.dto.response.LoginResult;
 import com.theseus.api.domain.auth.dto.response.TokenReissueResponse;
+import com.theseus.api.domain.auth.dto.response.TokenReissueResult;
 import com.theseus.api.domain.auth.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -51,12 +52,12 @@ public class AuthController {
 	)
 	public ResponseEntity<ApiResponse<TokenReissueResponse>> reissueAccessToken(HttpServletRequest request) {
 		String refreshToken = refreshTokenCookieProvider.resolveRefreshToken(request);
-		TokenReissueResponse response = authService.reissueAccessToken(refreshToken);
-		ResponseCookie refreshTokenCookie = refreshTokenCookieProvider.createCookie(response.getRefreshToken());
+		TokenReissueResult result = authService.reissueAccessToken(refreshToken);
+		ResponseCookie refreshTokenCookie = refreshTokenCookieProvider.createCookie(result.refreshToken());
 
 		return ResponseEntity.ok()
 			.header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
-			.body(new ApiResponse<>(true, SuccessCode.OK.getCode(), SuccessCode.OK.getMessage(), response));
+			.body(new ApiResponse<>(true, SuccessCode.OK.getCode(), SuccessCode.OK.getMessage(), result.response()));
 	}
 
 	@PostMapping("/logout")

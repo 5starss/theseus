@@ -6,6 +6,7 @@ import com.theseus.api.domain.auth.dto.request.LoginRequest;
 import com.theseus.api.domain.auth.dto.response.LoginResponse;
 import com.theseus.api.domain.auth.dto.response.LoginResult;
 import com.theseus.api.domain.auth.dto.response.TokenReissueResponse;
+import com.theseus.api.domain.auth.dto.response.TokenReissueResult;
 import com.theseus.api.domain.auth.redis.RefreshTokenStore;
 import com.theseus.api.domain.auth.token.JwtTokenProvider;
 import com.theseus.api.domain.user.entity.User;
@@ -48,16 +49,17 @@ public class AuthService {
 	}
 
 	@Transactional
-	public TokenReissueResponse reissueAccessToken(String refreshToken) {
+	public TokenReissueResult reissueAccessToken(String refreshToken) {
 		User user = validateAndFindRefreshTokenUser(refreshToken);
 		String accessToken = jwtTokenProvider.createAccessToken(user);
 		String newRefreshToken = issueRefreshToken(user);
 
-		return TokenReissueResponse.builder()
+		TokenReissueResponse response = TokenReissueResponse.builder()
 			.tokenType(TOKEN_TYPE)
 			.accessToken(accessToken)
-			.refreshToken(newRefreshToken)
 			.build();
+
+		return new TokenReissueResult(response, newRefreshToken);
 	}
 
 	@Transactional

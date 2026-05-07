@@ -6,7 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.theseus.api.common.exception.BusinessException;
-import com.theseus.api.domain.auth.dto.response.TokenReissueResponse;
+import com.theseus.api.domain.auth.dto.response.TokenReissueResult;
 import com.theseus.api.domain.auth.redis.RefreshTokenStore;
 import com.theseus.api.domain.auth.token.JwtTokenProvider;
 import com.theseus.api.domain.user.entity.SystemRole;
@@ -65,11 +65,11 @@ class AuthServiceTest {
 		when(jwtTokenProvider.createRefreshToken(user)).thenReturn("new-refresh-token");
 		when(jwtTokenProvider.getRefreshTokenExpirationMillis()).thenReturn(REFRESH_TOKEN_EXPIRATION_MILLIS);
 
-		TokenReissueResponse response = authService.reissueAccessToken("old-refresh-token");
+		TokenReissueResult result = authService.reissueAccessToken("old-refresh-token");
 
-		assertThat(response.getTokenType()).isEqualTo("Bearer");
-		assertThat(response.getAccessToken()).isEqualTo("new-access-token");
-		assertThat(response.getRefreshToken()).isEqualTo("new-refresh-token");
+		assertThat(result.response().getTokenType()).isEqualTo("Bearer");
+		assertThat(result.response().getAccessToken()).isEqualTo("new-access-token");
+		assertThat(result.refreshToken()).isEqualTo("new-refresh-token");
 		verify(refreshTokenStore).save(
 			USER_ID,
 			"new-refresh-token",
