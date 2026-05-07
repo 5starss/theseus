@@ -14,17 +14,20 @@ import org.springframework.stereotype.Component;
 public class RefreshTokenCookieProvider {
 
 	private final String cookieName;
+	private final String path;
 	private final boolean secure;
 	private final String sameSite;
 	private final long expirationMillis;
 
 	public RefreshTokenCookieProvider(
-		@Value("${jwt.refresh-token-cookie-name:refreshToken}") String cookieName,
+		@Value("${jwt.refresh-token-cookie-name:refresh_token}") String cookieName,
+		@Value("${jwt.refresh-token-cookie-path:/api/v1/auth}") String path,
 		@Value("${jwt.refresh-token-cookie-secure:false}") boolean secure,
 		@Value("${jwt.refresh-token-cookie-same-site:Lax}") String sameSite,
 		@Value("${jwt.refresh-token-expiration-millis}") long expirationMillis
 	) {
 		this.cookieName = cookieName;
+		this.path = path;
 		this.secure = secure;
 		this.sameSite = sameSite;
 		this.expirationMillis = expirationMillis;
@@ -35,7 +38,7 @@ public class RefreshTokenCookieProvider {
 			.httpOnly(true)
 			.secure(secure)
 			.sameSite(sameSite)
-			.path("/")
+			.path(path)
 			.maxAge(Duration.ofMillis(expirationMillis))
 			.build();
 	}
@@ -45,7 +48,7 @@ public class RefreshTokenCookieProvider {
 			.httpOnly(true)
 			.secure(secure)
 			.sameSite(sameSite)
-			.path("/")
+			.path(path)
 			.maxAge(Duration.ZERO)
 			.build();
 	}

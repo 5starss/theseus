@@ -52,8 +52,11 @@ public class AuthController {
 	public ResponseEntity<ApiResponse<TokenReissueResponse>> reissueAccessToken(HttpServletRequest request) {
 		String refreshToken = refreshTokenCookieProvider.resolveRefreshToken(request);
 		TokenReissueResponse response = authService.reissueAccessToken(refreshToken);
+		ResponseCookie refreshTokenCookie = refreshTokenCookieProvider.createCookie(response.getRefreshToken());
 
-		return ApiResponse.onSuccess(SuccessCode.OK, response);
+		return ResponseEntity.ok()
+			.header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+			.body(new ApiResponse<>(true, SuccessCode.OK.getCode(), SuccessCode.OK.getMessage(), response));
 	}
 
 	@PostMapping("/logout")
