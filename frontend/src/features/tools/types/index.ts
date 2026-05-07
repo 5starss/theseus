@@ -9,3 +9,14 @@ export interface ToolItem {
 export interface ToolListResponse {
   tools: ToolItem[];
 }
+
+export interface ToolDetailResponse {
+  toolId: number;
+  fileName: string;
+  version: number;
+  pythonCode: string;
+  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'REJECTED';
+  createdAt: string;
+  updatedAt: string;
+  createdByProjectMemberId: number;
+}

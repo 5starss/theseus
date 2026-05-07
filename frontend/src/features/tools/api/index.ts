@@ -1,6 +1,6 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
-import type { ToolItem } from '../types';
+import type { ToolItem, ToolDetailResponse } from '../types';
 
 // 목업 데이터
 export const mockTools: ToolItem[] = [
@@ -110,4 +110,121 @@ export const toolApi = {
       return mockTools;
     }
   },
+
+  /**
+   * 도구 상세 조회
+   */
+  getTool: async (projectId: string | number, toolId: string | number): Promise<ToolDetailResponse | null> => {
+    try {
+      const response = await apiClient.get<ApiResponse<ToolDetailResponse>>(`/api/v1/projects/${projectId}/tools/${toolId}`);
+      return response.data.result;
+    } catch (error) {
+      console.warn(`Failed to fetch tool ${toolId} from API, falling back to mock data.`, error);
+      
+      const longMockCode = `import json
+import logging
+from typing import Dict, Any, List
+
+logger = logging.getLogger(__name__)
+
+class ComplexDataAnalyzer:
+    """
+    A complex data analyzer tool that processes large datasets,
+    identifies patterns, and generates comprehensive reports.
+    """
+    
+    def __init__(self, data_source: str):
+        self.data_source = data_source
+        self.raw_data = []
+        self.processed_data = {}
+        
+    def load_data(self) -> bool:
+        logger.info(f"Loading data from {self.data_source}")
+        # Simulate data loading
+        self.raw_data = [
+            {"id": 1, "value": 10.5, "category": "A"},
+            {"id": 2, "value": 20.1, "category": "B"},
+            {"id": 3, "value": 15.3, "category": "A"},
+            {"id": 4, "value": 8.9, "category": "C"},
+            {"id": 5, "value": 33.2, "category": "B"},
+        ] * 100  # Duplicate to simulate larger dataset
+        return True
+        
+    def clean_data(self) -> None:
+        logger.info("Cleaning raw data")
+        cleaned = []
+        for item in self.raw_data:
+            if item.get("value") is not None and item.get("value") > 0:
+                cleaned.append(item)
+        self.raw_data = cleaned
+        
+    def analyze_patterns(self) -> Dict[str, float]:
+        logger.info("Analyzing data patterns")
+        categories = {}
+        for item in self.raw_data:
+            cat = item["category"]
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(item["value"])
+            
+        results = {}
+        for cat, values in categories.items():
+            results[cat] = sum(values) / len(values)
+            
+        self.processed_data["averages"] = results
+        return results
+
+    def generate_report(self) -> str:
+        logger.info("Generating final report")
+        report = "Data Analysis Report\\n"
+        report += "=" * 20 + "\\n"
+        for cat, avg in self.processed_data.get("averages", {}).items():
+            report += f"Category {cat}: Average Value = {avg:.2f}\\n"
+        return report
+
+def execute(params: Dict[str, Any]) -> str:
+    """
+    Main entry point for the tool execution.
+    """
+    source = params.get("source", "default_db")
+    
+    try:
+        analyzer = ComplexDataAnalyzer(source)
+        if not analyzer.load_data():
+            return "Failed to load data."
+            
+        analyzer.clean_data()
+        analyzer.analyze_patterns()
+        
+        # Perform some heavy computation simulation
+        for i in range(1000):
+            _ = i * i
+            
+        return analyzer.generate_report()
+        
+    except Exception as e:
+        logger.error(f"Error during execution: {e}")
+        return f"Execution failed: {str(e)}"
+
+# Testing block
+if __name__ == "__main__":
+    print("Running tool locally...")
+    result = execute({"source": "local_test_file.csv"})
+    print(result)
+`;
+
+      // 목업 데이터 반환 (실제 API에러 시 보여줄 임시 데이터)
+      return {
+        toolId: typeof toolId === 'number' ? toolId : parseInt(toolId.replace(/\D/g, '') || '0', 10),
+        fileName: 'complex_data_analyzer.py',
+        version: 2,
+        pythonCode: longMockCode,
+        status: 'APPROVED',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdByProjectMemberId: 1
+      };
+    }
+  },
 };
+
