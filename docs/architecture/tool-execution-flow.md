@@ -6,8 +6,9 @@
 - FE는 AI 서버, Kafka, Redis에 직접 연결하지 않는다.
 - BE는 인증, 프로젝트 접근 권한, Tool 생성 권한을 검증한다.
 - AI 생성 1회는 `runId`로 식별한다.
-- `runId`는 `chatSessionId`가 아니라 실행 ID다.
-- Redis는 진행 중 run 상태, progress/chunk 누적, SSE fanout, 재연결 복구를 담당한다.
+- `runId`는 `chatSessionId`가 아니라 Kafka/Core 이벤트 추적용 실행 ID다.
+- FE SSE 구독과 재연결 복구 기준은 `projectId/sessionId/toolId`다.
+- Redis는 `tool:generation:{toolId}:state`에 Tool 생성 최신 상태를 TTL 기반으로 저장한다.
 - Kafka는 최종 메시지 저장과 Tool 상태 변경을 비동기로 처리한다.
 - `chat_messages`에는 최종 사용자 메시지, 최종 Assistant 메시지, 시스템 안내만 저장한다.
 - AI가 보내는 progress/chunk는 Redis/SSE 이벤트로만 다룬다.
@@ -20,9 +21,9 @@
 | `projectId` | DB | DB | 프로젝트 ID |
 | `chatSessionId` | DB | DB | 대화 세션 ID |
 | `toolId` | BE | DB | 생성 또는 수정 대상 Tool ID |
-| `runId` | BE | Redis | AI 생성 실행 1회 ID |
+| `runId` | BE | Kafka/Core 이벤트 | AI 생성 실행 1회 ID |
 | `messageOrder` | Kafka Consumer | DB | 세션 안의 최종 메시지 순서 |
-| `eventSeq` | BE | Redis/SSE | 진행 이벤트 순서 |
+| `sseStreamKey` | BE | Memory | `projectId:chatSessionId:toolId` |
 
 한 채팅 세션 안에서 여러 Tool 생성 요청이 발생하면 여러 `runId`가 생긴다.
 
@@ -50,43 +51,43 @@ DB는 최종 상태의 기준 저장소다.
 
 ### Redis
 
-Redis는 실행 중 상태와 실시간 전달을 담당한다.
+Redis는 Tool 생성 최신 상태와 SSE 재연결 복구를 담당한다.
 
 예시 key:
 
 ```text
-tool-run:{runId}
-tool-run:{runId}:events
+tool:generation:{toolId}:state
 ```
 
 예시 value:
 
 ```json
 {
-  "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
   "projectId": 1,
   "chatSessionId": 10,
   "toolId": 7,
-  "requestedByUserId": 3,
-  "requestedByProjectMemberId": 5,
-  "status": "RUNNING",
-  "lastEventSeq": 18,
-  "progressText": "입력 파일 구조를 분석하고 있습니다.",
-  "bufferedContent": "...",
-  "createdAt": "2026-04-29T14:30:00",
-  "expiresAt": "2026-04-29T15:00:00"
+  "eventType": "progress",
+  "status": "GENERATING",
+  "draftPhase": "PLAN",
+  "progressRate": 35,
+  "message": "입력 파일 구조를 분석하고 있습니다.",
+  "updatedAt": "2026-04-29T14:30:00"
 }
 ```
 
 TTL은 예시로 30분을 둔다. 정확한 값은 운영 정책으로 정한다. 이 TTL은 로그인 세션 유지용이 아니라 새로고침, SSE 재연결, 브라우저 일시 이탈 복구용이다.
 
-Redis 이벤트 예시:
+SSE 이벤트 예시:
 
 ```json
 {
-  "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
-  "eventSeq": 19,
   "eventType": "progress",
+  "projectId": 1,
+  "chatSessionId": 10,
+  "toolId": 7,
+  "status": "GENERATING",
+  "draftPhase": "PLAN",
+  "progressRate": 35,
   "message": "출력 JSON 스키마를 정리하고 있습니다."
 }
 ```
@@ -99,7 +100,7 @@ Kafka는 비동기 저장과 상태 변경을 담당한다.
 | --- | --- | --- | --- |
 | `CHAT_USER_MESSAGE_REQUESTED` | BE | Chat Consumer | 사용자 메시지를 `chat_messages`에 저장한다. |
 | `TOOL_GENERATION_COMPLETED` | BE | Tool Consumer | 최종 Assistant 메시지 저장, Tool Draft 데이터 갱신, `draft_phase = REVIEW` 변경, `draft_version` 증가를 처리한다. |
-| `TOOL_GENERATION_FAILED` | BE | Tool Consumer | 실패 상태 기록, 필요 시 시스템 메시지 저장, Redis 실패 이벤트 발행을 처리한다. |
+| `TOOL_GENERATION_FAILED` | BE | Tool Consumer | 실패 상태 기록, 필요 시 시스템 메시지 저장, Redis failed 최신 상태 저장과 SSE 전달을 처리한다. |
 
 Kafka Consumer가 `message_order`를 배정한다. 같은 `chat_session_id`에서 다음 순서를 계산하고 저장하는 과정은 트랜잭션으로 처리한다. `(chat_session_id, message_order)` unique constraint는 마지막 방어선이다.
 
@@ -120,26 +121,20 @@ sequenceDiagram
     BE->>BE: 프로젝트 멤버, canCreateTool 검증
     BE->>DB: Tool DRAFT / PLAN 생성(draft_version = 0)
     BE->>BE: runId 생성
-    BE->>Redis: run 상태 등록, TTL 설정
     BE->>Kafka: CHAT_USER_MESSAGE_REQUESTED 발행
     BE->>AI: 생성 요청(runId, projectId, sessionId, toolId, prompt)
 
-    AI-->>BE: progress/chunk stream
-    BE->>Redis: progress/chunk 누적
-    BE->>Redis: progress/chunk 이벤트 publish
-    Redis-->>BE: SSE 담당 BE가 이벤트 subscribe
-    BE-->>FE: SSE progress/chunk 전달
+    AI-->>Kafka: progress/chunk 이벤트 발행
+    Consumer->>Redis: progress/chunk 최신 상태 저장
+    Consumer-->>FE: SSE progress/chunk 전달
 
-    AI-->>BE: done
-    BE->>BE: 최종 응답 취합
-    BE->>Kafka: TOOL_GENERATION_COMPLETED 발행
+    AI-->>Kafka: TOOL_GENERATION_COMPLETED 발행
     Consumer->>DB: ASSISTANT chat_messages 저장
     Consumer->>DB: Tool draft 데이터 갱신
     Consumer->>DB: Tool draft_phase = REVIEW
     Consumer->>DB: Tool draft_version 증가
-    Consumer->>Redis: completed 이벤트 publish
-    Redis-->>BE: SSE 담당 BE가 completed subscribe
-    BE-->>FE: SSE completed 전달
+    Consumer->>Redis: completed 최신 상태 저장
+    Consumer-->>FE: SSE completed 전달
 ```
 
 ## 단계별 책임
@@ -166,9 +161,8 @@ Content-Type: application/json
 3. Tool 생성 권한 검증
 4. `tools.status = DRAFT`, `tools.draft_phase = PLAN`, `tools.draft_version = 0` 생성
 5. `runId` 생성
-6. Redis에 run 상태 등록
-7. Kafka에 USER 메시지 저장 이벤트 발행
-8. AI 서버에 생성 요청
+6. Kafka에 USER 메시지 저장 이벤트 발행
+7. AI 서버에 생성 요청
 
 USER 메시지는 Kafka Consumer가 `chat_messages`에 저장한다.
 
@@ -215,22 +209,21 @@ AI 서버는 생성 중 진행 코멘트와 chunk를 BE에 순차적으로 보�
 }
 ```
 
-BE는 수신한 이벤트를 Redis에 누적하고 Redis Pub/Sub 또는 Stream으로 발행한다.
+Kafka Consumer는 수신한 progress/chunk 이벤트를 Redis `tool:generation:{toolId}:state`에 최신 상태로 저장하고, 같은 API Server의 SSE emitter registry로 전달한다.
 
 ### 5. SSE 중계
 
-FE는 BE와 SSE 연결을 맺는다. 사용자가 연결된 BE 인스턴스와 AI 이벤트를 받은 BE 인스턴스가 달라도 Redis를 통해 같은 이벤트를 받을 수 있다.
+FE는 BE와 `GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events` SSE 연결을 맺는다. 현재 MVP는 단일 API Server 기준으로 메모리 `SseEmitter` registry를 사용한다.
+연결 직후 `connected` 이벤트를 전송하고, Redis 최신 상태가 있으면 최초 상태 이벤트를 1회 전송한다. 주기적 `heartbeat` 이벤트는 후속 이슈에서 구현한다.
 
 ```text
 event: progress
-id: 19
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","message":"출력 JSON 스키마를 정리하고 있습니다."}
+data: {"eventType":"progress","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","progressRate":35,"message":"출력 JSON 스키마를 정리하고 있습니다."}
 ```
 
 ```text
 event: chunk
-id: 20
-data: {"runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","content":"## Tool Plan\n\n1. CSV 업로드..."}
+data: {"eventType":"chunk","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","content":"## Tool Plan\n\n1. CSV 업로드..."}
 ```
 
 ### 6. AI 완료
@@ -270,7 +263,7 @@ Kafka Consumer는 아래 작업을 하나의 트랜잭션으로 처리한다.
 5. `tools.draft_snapshot` 갱신
 6. `tools.draft_phase = REVIEW` 변경
 7. `tools.draft_version` 1 증가
-8. Redis에 `completed` 이벤트 발행
+8. Redis에 `completed` 최신 상태 저장
 
 FE가 `completed`를 받으면 최종 메시지는 DB 조회 가능한 상태여야 한다.
 
@@ -287,7 +280,6 @@ USER TOOL_FEEDBACK
 -> baseDraftVersion과 tools.draft_version 비교
 -> Tool draft_phase = PLAN
 -> runId 생성
--> Redis run 상태 등록
 -> Kafka USER 메시지 저장 이벤트 발행
 -> AI 재생성 요청
 -> progress/chunk SSE
@@ -314,11 +306,11 @@ USER TOOL_FEEDBACK
 
 ## 실패 흐름
 
-AI 생성 중 실패하면 BE 또는 Consumer는 Redis에 `failed` 이벤트를 발행한다.
+AI 생성 중 실패하면 Kafka Consumer는 실패 처리 후 Redis에 `failed` 최신 상태를 저장하고 SSE로 전달한다.
 
 ```text
 event: failed
-data: {"runId":"...","code":"AI_GENERATION_FAILED","message":"Tool 초안 생성에 실패했습니다."}
+data: {"eventType":"failed","projectId":1,"chatSessionId":10,"toolId":7,"status":"FAILED","errorCode":"AI_GENERATION_FAILED","errorMessage":"Tool 초안 생성에 실패했습니다."}
 ```
 
 실패한 chunk는 `chat_messages`에 저장하지 않는다. 사용자에게 남겨야 하는 오류 안내가 필요하면 `SYSTEM_NOTICE` 메시지로 별도 저장한다.
@@ -358,22 +350,22 @@ DRAFT / PLAN
 
 ## 재연결 복구
 
-브라우저 새로고침이나 네트워크 단절이 발생하면 FE는 보유한 `runId`로 진행 상태를 복구한다.
+브라우저 새로고침이나 네트워크 단절이 발생하면 FE는 `projectId/sessionId/toolId`로 SSE를 다시 연결해 진행 상태를 복구한다.
 
 1. FE가 SSE를 다시 연결한다.
-2. FE는 마지막으로 받은 `eventSeq` 또는 `Last-Event-ID`를 전달한다.
-3. BE는 Redis의 `tool-run:{runId}` 상태를 확인한다.
-4. Redis TTL이 남아 있으면 누락된 이벤트 또는 현재 상태를 FE에 전달한다.
-5. Redis TTL이 만료되었으면 DB의 최종 상태를 조회한다.
+2. BE는 Redis의 `tool:generation:{toolId}:state` 최신 상태를 확인한다.
+3. Redis TTL이 남아 있으면 현재 상태를 최초 이벤트로 FE에 전달한다.
+4. Redis TTL이 만료되었으면 FE는 Tool 상세 조회와 ChatMessage 목록 조회로 최종 DB 상태를 복구한다.
 
 Redis TTL이 만료되었고 DB에도 최종 ASSISTANT 메시지가 없으면 해당 생성은 복구 불가 상태로 처리한다.
 
 ## 정합성 규칙
 
-- `runId`는 모든 AI stream, Redis 이벤트, Kafka 이벤트에 포함한다.
+- `runId`는 Kafka/Core 이벤트에 포함하고, FE SSE 구독/복구 기준으로 사용하지 않는다.
 - `toolId`는 Tool 생성 요청을 수락한 시점에 확정한다.
+- Redis 상태 key는 `tool:generation:{toolId}:state`다.
 - `message_order`는 Kafka Consumer가 DB 트랜잭션 안에서 배정한다.
-- `completed` 이벤트는 DB 저장 성공 이후에만 발행한다.
+- `completed` SSE 이벤트는 DB 저장 성공 이후에만 전달한다.
 - `draft_phase = REVIEW`는 최종 ASSISTANT 메시지와 Tool draft 데이터가 저장된 뒤에만 설정한다.
 - `chat_messages`에는 progress/chunk를 저장하지 않는다.
 - 같은 `runId`의 완료 이벤트가 중복 처리되어도 동일한 ASSISTANT 메시지가 중복 저장되지 않아야 한다.

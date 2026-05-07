@@ -28,7 +28,12 @@ public class ToolGenerationRunResponse {
 			.status(tool.getStatus())
 			.draftPhase(tool.getDraftPhase())
 			.draftVersion(tool.getDraftVersion())
-			.sseUrl("/api/v1/tool-runs/" + runId + "/events")
+			.sseUrl(
+				"/api/v1/projects/" + tool.getProject().getId()
+					+ "/sessions/" + tool.getChatSession().getId()
+					+ "/tools/" + tool.getId()
+					+ "/events"
+			)
 			.build();
 	}
 }

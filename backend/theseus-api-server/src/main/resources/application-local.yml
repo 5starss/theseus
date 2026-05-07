@@ -49,6 +49,7 @@ theseus:
       tool-generation-event: ${KAFKA_TOPIC_TOOL_GENERATION_EVENT:theseus.tool-generation.event}
   tool-generation:
     state-ttl-minutes: ${THESEUS_TOOL_GENERATION_STATE_TTL_MINUTES:30}
+    sse-timeout-millis: ${THESEUS_TOOL_GENERATION_SSE_TIMEOUT_MILLIS:1800000}
 
 springdoc:
   api-docs:

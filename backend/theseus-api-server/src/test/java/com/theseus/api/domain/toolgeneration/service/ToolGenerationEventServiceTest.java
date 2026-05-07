@@ -2,6 +2,7 @@ package com.theseus.api.domain.toolgeneration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.verify;
@@ -25,6 +26,7 @@ import com.theseus.api.domain.toolgeneration.event.ToolGenerationAssistantMessag
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationDraftPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent;
 import com.theseus.api.domain.toolgeneration.redis.ToolGenerationStateStore;
+import com.theseus.api.domain.toolgeneration.sse.ToolGenerationSseEmitterRegistry;
 import com.theseus.api.domain.user.entity.User;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,6 +54,9 @@ class ToolGenerationEventServiceTest {
 	@Mock
 	private ToolGenerationStateStore toolGenerationStateStore;
 
+	@Mock
+	private ToolGenerationSseEmitterRegistry toolGenerationSseEmitterRegistry;
+
 	private ObjectMapper objectMapper;
 	private ToolGenerationEventService toolGenerationEventService;
 
@@ -62,7 +67,8 @@ class ToolGenerationEventServiceTest {
 			toolRepository,
 			chatMessageService,
 			objectMapper,
-			toolGenerationStateStore
+			toolGenerationStateStore,
+			toolGenerationSseEmitterRegistry
 		);
 	}
 
@@ -95,6 +101,12 @@ class ToolGenerationEventServiceTest {
 		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN.name());
 		assertThat(state.getMessage()).isEqualTo("PLAN 구조를 분석하고 있습니다.");
 		assertThat(state.getProgressRate()).isEqualTo(45);
+		verify(toolGenerationSseEmitterRegistry).sendToTool(
+			same(PROJECT_ID),
+			same(CHAT_SESSION_ID),
+			same(TOOL_ID),
+			any()
+		);
 		verifyNoInteractions(toolRepository, chatMessageService);
 	}
 
@@ -125,6 +137,12 @@ class ToolGenerationEventServiceTest {
 		assertThat(state.getStatus()).isEqualTo("GENERATING");
 		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN.name());
 		assertThat(state.getContent()).isEqualTo("## PLAN draft");
+		verify(toolGenerationSseEmitterRegistry).sendToTool(
+			same(PROJECT_ID),
+			same(CHAT_SESSION_ID),
+			same(TOOL_ID),
+			any()
+		);
 		verifyNoInteractions(toolRepository, chatMessageService);
 	}
 
@@ -144,7 +162,12 @@ class ToolGenerationEventServiceTest {
 		toolGenerationEventService.handleProgress(event);
 
 		// Then
-		verifyNoInteractions(toolRepository, chatMessageService, toolGenerationStateStore);
+		verifyNoInteractions(
+			toolRepository,
+			chatMessageService,
+			toolGenerationStateStore,
+			toolGenerationSseEmitterRegistry
+		);
 	}
 
 	@Test
@@ -182,6 +205,13 @@ class ToolGenerationEventServiceTest {
 		assertThat(state.getStatus()).isEqualTo("COMPLETED");
 		assertThat(state.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW.name());
 		assertThat(state.getDraftVersion()).isEqualTo(1);
+		verify(toolGenerationSseEmitterRegistry).sendToTool(
+			same(PROJECT_ID),
+			same(CHAT_SESSION_ID),
+			same(TOOL_ID),
+			any()
+		);
+		verify(toolGenerationSseEmitterRegistry).complete(PROJECT_ID, CHAT_SESSION_ID, TOOL_ID);
 	}
 
 	@Test
@@ -237,6 +267,13 @@ class ToolGenerationEventServiceTest {
 		assertThat(state.getStatus()).isEqualTo("FAILED");
 		assertThat(state.getErrorCode()).isEqualTo("AI_GENERATION_FAILED");
 		assertThat(state.getErrorMessage()).isEqualTo("LLM request failed");
+		verify(toolGenerationSseEmitterRegistry).sendToTool(
+			same(PROJECT_ID),
+			same(CHAT_SESSION_ID),
+			same(TOOL_ID),
+			any()
+		);
+		verify(toolGenerationSseEmitterRegistry).complete(PROJECT_ID, CHAT_SESSION_ID, TOOL_ID);
 	}
 
 	@Test
@@ -250,7 +287,7 @@ class ToolGenerationEventServiceTest {
 		// When & Then
 		assertThatCode(() -> toolGenerationEventService.handleCompleted(event))
 			.doesNotThrowAnyException();
-		verifyNoInteractions(chatMessageService, toolGenerationStateStore);
+		verifyNoInteractions(chatMessageService, toolGenerationStateStore, toolGenerationSseEmitterRegistry);
 	}
 
 	private ToolGenerationEvent createCompletedEvent(ChatMessageType messageType) throws Exception {
