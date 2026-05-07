@@ -34,6 +34,23 @@ services:
       timeout: 5s
       retries: 10
 
+  theseus-local-redis:
+    image: redis:7.2-alpine
+    container_name: theseus-local-redis
+    restart: unless-stopped
+    ports:
+      - "16379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - theseus-local-redis-data:/data
+    networks:
+      - theseus-local-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   theseus-local-kafka:
     image: confluentinc/cp-kafka:7.6.1
     container_name: theseus-local-kafka
@@ -108,5 +125,7 @@ volumes:
     name: theseus-local-mysql-data
   theseus-local-postgres-data:
     name: theseus-local-postgres-data
+  theseus-local-redis-data:
+    name: theseus-local-redis-data
   theseus-local-kafka-data:
     name: theseus-local-kafka-data
