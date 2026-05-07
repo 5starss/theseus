@@ -44,16 +44,16 @@ export function ChatArea() {
 
     // 사용자 메시지 추가
     addMessage({
-      id: crypto.randomUUID(),
-      sender: 'USER',
+      messageId: crypto.randomUUID(),
+      senderType: 'USER',
       content: userMessage,
       createdAt: new Date().toISOString()
     });
 
     // 어시스턴트 임시 메시지 추가
     addMessage({
-      id: crypto.randomUUID(),
-      sender: 'ASSISTANT',
+      messageId: crypto.randomUUID(),
+      senderType: 'ASSISTANT',
       content: '',
       createdAt: new Date().toISOString()
     });
@@ -131,14 +131,14 @@ export function ChatArea() {
         {messages.length > 0 ? (
           <div className="space-y-6">
             {messages.map(msg => (
-              <div key={msg.id} className={`flex ${msg.sender === 'USER' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[70%] p-4 rounded-lg whitespace-pre-wrap ${msg.sender === 'USER'
+              <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[70%] p-4 rounded-lg whitespace-pre-wrap ${msg.senderType === 'USER'
                   ? 'bg-[#3e495d] text-[#aeb9d0]'
-                  : msg.sender === 'SYSTEM_NOTICE'
+                  : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM'
                     ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
                     : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa]'
                   }`}>
-                  {msg.content || (isGenerating && msg.sender === 'ASSISTANT' ? '생성 중...' : '')}
+                  {msg.content || (isGenerating && msg.senderType === 'ASSISTANT' ? '생성 중...' : '')}
                 </div>
               </div>
             ))}
@@ -181,4 +181,5 @@ export function ChatArea() {
     </div>
   );
 }
+
 
