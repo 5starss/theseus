@@ -410,7 +410,7 @@ async def run_cli():
                         elif sm.plan_phase == PlanPhase.EXECUTING:
                             # 완료 키워드 감지
                             lower = accumulated_text.lower()
-                            if any(kw in lower for kw in ("plan complete", "완료", "모든 단계", "all steps")):
+                            if any(kw in lower for kw in ("plan complete", "계획 실행 완료", "모든 계획 완료", "all steps complete")):
                                 plan_complete = True
                 elif isinstance(event, ErrorEvent):
                     print(f"\n[API ERROR] {event.message}", flush=True)
