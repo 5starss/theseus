@@ -115,14 +115,11 @@ def _make_summary_message(summary_text: str, original_messages: list):
 
     # ConversationMessage 형식 감지
     if first is not None and hasattr(first, "role"):
-        try:
-            from openharness.engine.messages import ConversationMessage, TextBlock
-            return ConversationMessage(
-                role=DEFAULT_SUMMARY_ROLE,
-                content=[TextBlock(text=summary_text)],
-            )
-        except ImportError:
-            pass
+        from theseus_engine.models.messages import ConversationMessage, TextBlock
+        return ConversationMessage(
+            role=DEFAULT_SUMMARY_ROLE,
+            content=[TextBlock(text=summary_text)],
+        )
 
     # dict fallback
     return {"role": DEFAULT_SUMMARY_ROLE, "content": summary_text}

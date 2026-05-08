@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import platform
 from pathlib import Path
 from typing import Iterable
 
 from pydantic import BaseModel, Field
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
 log = logging.getLogger(__name__)
-
-# Windows 환경에서는 cmd.exe, 그 외에는 bash를 사용
-IS_WINDOWS = platform.system() == "Windows"
 
 
 class BashInput(BaseModel):
@@ -60,22 +56,13 @@ class BashTool(BaseTool):
             return ToolResult(output=preflight, is_error=True)
 
         try:
-            if IS_WINDOWS:
-                process = await asyncio.create_subprocess_exec(
-                    "cmd.exe", "/c", arguments.command,
-                    cwd=str(cwd),
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
-            else:
-                process = await asyncio.create_subprocess_shell(
-                    arguments.command,
-                    cwd=str(cwd),
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.STDOUT,
-                )
+            process = await asyncio.create_subprocess_shell(
+                arguments.command,
+                cwd=str(cwd),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
         except Exception as exc:
             return ToolResult(
                 output=f"Command execution failed: {exc}", is_error=True

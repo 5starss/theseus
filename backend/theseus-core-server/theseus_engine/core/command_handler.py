@@ -1,4 +1,4 @@
-from openharness.engine.query_engine import QueryEngine
+from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.models.state import TheseusStateMachine, AgentMode
 from theseus_engine.tools.core import build_filtered_registry
 from theseus_engine.models.sessions import list_sessions, get_session_path, save_session_history, load_session_history
