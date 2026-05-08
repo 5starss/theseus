@@ -3,6 +3,7 @@ package com.theseus.api.domain.tool.repository;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import jakarta.persistence.LockModeType;
 import java.util.List;
@@ -71,6 +72,8 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 
 	Optional<Tool> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
 
+	Optional<Tool> findBySourceToolPlan(ToolPlan sourceToolPlan);
+
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("""
 		select tool
@@ -103,4 +106,6 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 	boolean existsByProjectAndFileName(Project project, String fileName);
 
 	boolean existsByProjectAndFileNameAndIdNot(Project project, String fileName, Long id);
+
+	boolean existsBySourceToolPlan(ToolPlan sourceToolPlan);
 }
