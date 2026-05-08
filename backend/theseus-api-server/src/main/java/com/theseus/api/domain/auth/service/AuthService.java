@@ -30,6 +30,9 @@ public class AuthService {
 	private final PasswordEncoder passwordEncoder;
 	private final JwtTokenProvider jwtTokenProvider;
 
+	/**
+	 * 로그인 ID와 비밀번호를 검증하고 Access Token과 Refresh Token을 발급합니다.
+	 */
 	@Transactional
 	public LoginResult login(LoginRequest request) {
 		User user = findLoginUser(request.getLoginId());
@@ -48,6 +51,9 @@ public class AuthService {
 		return new LoginResult(response, refreshToken);
 	}
 
+	/**
+	 * 유효한 Refresh Token으로 새 Access Token과 Refresh Token을 재발급합니다.
+	 */
 	@Transactional
 	public TokenReissueResult reissueAccessToken(String refreshToken) {
 		User user = validateAndFindRefreshTokenUser(refreshToken);
@@ -62,6 +68,9 @@ public class AuthService {
 		return new TokenReissueResult(response, newRefreshToken);
 	}
 
+	/**
+	 * 저장된 Refresh Token을 제거하여 로그아웃을 처리합니다.
+	 */
 	@Transactional
 	public void logout(String refreshToken) {
 		if (refreshToken == null || refreshToken.isBlank()) {

@@ -34,6 +34,9 @@ public class ToolService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 프로젝트 멤버가 사용할 수 있는 승인 완료 Tool 목록을 조회합니다.
+	 */
 	public Page<ToolSummaryResponse> getTools(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -60,6 +63,9 @@ public class ToolService {
 			.map(ToolSummaryResponse::createFrom);
 	}
 
+	/**
+	 * 접근 권한과 등급 조건을 검증하고 Tool 상세 정보를 조회합니다.
+	 */
 	public ToolDetailResponse getTool(
 		AuthenticatedUser currentUser,
 		Long projectId,

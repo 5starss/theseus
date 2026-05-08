@@ -50,6 +50,9 @@ public class ToolGenerationEventService {
 	private final ToolGenerationStateStore toolGenerationStateStore;
 	private final ToolGenerationSseEmitterRegistry toolGenerationSseEmitterRegistry;
 
+	/**
+	 * Core Server의 progress 이벤트를 Redis 최신 상태로 저장하고 SSE로 전달합니다.
+	 */
 	public void handleProgress(ToolGenerationEvent event) {
 		if (!hasRequiredStateIds(event)) {
 			log.warn(
@@ -66,6 +69,9 @@ public class ToolGenerationEventService {
 		saveStateAndSend(EVENT_TYPE_PROGRESS, state, () -> toolGenerationStateStore.saveProgress(state));
 	}
 
+	/**
+	 * Core Server의 chunk 이벤트를 Redis 최신 상태로 저장하고 SSE로 전달합니다.
+	 */
 	public void handleChunk(ToolGenerationEvent event) {
 		if (!hasRequiredStateIds(event)) {
 			log.warn(
@@ -82,6 +88,9 @@ public class ToolGenerationEventService {
 		saveStateAndSend(EVENT_TYPE_CHUNK, state, () -> toolGenerationStateStore.saveChunk(state));
 	}
 
+	/**
+	 * Tool 생성 완료 이벤트를 DB에 반영한 뒤 Redis와 SSE에 완료 상태를 전달합니다.
+	 */
 	@Transactional
 	public void handleCompleted(ToolGenerationEvent event) {
 		Optional<Tool> optionalTool = findEventTool(event);
@@ -132,6 +141,9 @@ public class ToolGenerationEventService {
 		);
 	}
 
+	/**
+	 * Tool 생성 실패 이벤트를 DB에 기록한 뒤 Redis와 SSE에 실패 상태를 전달합니다.
+	 */
 	@Transactional
 	public void handleFailed(ToolGenerationEvent event) {
 		Optional<Tool> optionalTool = findEventTool(event);
@@ -173,12 +185,18 @@ public class ToolGenerationEventService {
 		);
 	}
 
+	/**
+	 * Redis 상태 저장에 필요한 식별자가 모두 포함되어 있는지 확인합니다.
+	 */
 	private boolean hasRequiredStateIds(ToolGenerationEvent event) {
 		return event.getToolId() != null
 			&& event.getProjectId() != null
 			&& event.getChatSessionId() != null;
 	}
 
+	/**
+	 * progress 이벤트를 Redis와 SSE에서 사용할 상태 객체로 변환합니다.
+	 */
 	private ToolGenerationState createProgressState(ToolGenerationEvent event) {
 		return ToolGenerationState.builder()
 			.projectId(event.getProjectId())
@@ -193,6 +211,9 @@ public class ToolGenerationEventService {
 			.build();
 	}
 
+	/**
+	 * chunk 이벤트를 Redis와 SSE에서 사용할 상태 객체로 변환합니다.
+	 */
 	private ToolGenerationState createChunkState(ToolGenerationEvent event) {
 		return ToolGenerationState.builder()
 			.projectId(event.getProjectId())
@@ -206,6 +227,9 @@ public class ToolGenerationEventService {
 			.build();
 	}
 
+	/**
+	 * DB 반영이 끝난 completed 이벤트를 최종 상태 객체로 변환합니다.
+	 */
 	private ToolGenerationState createCompletedState(ToolGenerationEvent event, Tool tool) {
 		return ToolGenerationState.builder()
 			.projectId(event.getProjectId())
@@ -220,6 +244,9 @@ public class ToolGenerationEventService {
 			.build();
 	}
 
+	/**
+	 * failed 이벤트를 Redis와 SSE에서 사용할 실패 상태 객체로 변환합니다.
+	 */
 	private ToolGenerationState createFailedState(ToolGenerationEvent event) {
 		return ToolGenerationState.builder()
 			.projectId(event.getProjectId())
@@ -237,12 +264,18 @@ public class ToolGenerationEventService {
 		return value == null ? null : value.intValue();
 	}
 
+	/**
+	 * Redis 저장 성공 시에만 SSE 이벤트를 전송합니다.
+	 */
 	private void saveStateAndSend(String eventType, ToolGenerationState state, Runnable saveAction) {
 		if (saveStateSafely(eventType, state, saveAction)) {
 			sendStateToSse(state);
 		}
 	}
 
+	/**
+	 * completed/failed 최종 상태 저장은 DB 트랜잭션 커밋 이후 실행합니다.
+	 */
 	private void saveStateAfterCommit(Runnable saveAction) {
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
 			saveAction.run();
@@ -257,6 +290,9 @@ public class ToolGenerationEventService {
 		});
 	}
 
+	/**
+	 * Redis 저장 실패가 Kafka Consumer 처리를 중단하지 않도록 격리합니다.
+	 */
 	private boolean saveStateSafely(String eventType, ToolGenerationState state, Runnable saveAction) {
 		try {
 			saveAction.run();
@@ -272,6 +308,9 @@ public class ToolGenerationEventService {
 		}
 	}
 
+	/**
+	 * Redis에 저장한 Tool 생성 상태를 연결된 SSE 구독자에게 전달합니다.
+	 */
 	private void sendStateToSse(ToolGenerationState state) {
 		toolGenerationSseEmitterRegistry.sendToTool(
 			state.getProjectId(),
@@ -281,6 +320,9 @@ public class ToolGenerationEventService {
 		);
 	}
 
+	/**
+	 * completed/failed 최종 이벤트 이후 SSE 연결을 정리합니다.
+	 */
 	private void completeSse(ToolGenerationState state) {
 		toolGenerationSseEmitterRegistry.complete(
 			state.getProjectId(),

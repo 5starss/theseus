@@ -29,6 +29,9 @@ public class ProjectMemberService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 프로젝트 멤버 권한을 확인하고 멤버 목록을 상태 조건과 함께 조회합니다.
+	 */
 	public List<ProjectMemberResponse> getProjectMembers(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -47,6 +50,9 @@ public class ProjectMemberService {
 			.toList();
 	}
 
+	/**
+	 * 로그인 사용자의 프로젝트 멤버 정보를 조회합니다.
+	 */
 	public ProjectMemberResponse getMyProjectMember(AuthenticatedUser currentUser, Long projectId) {
 		User user = getCurrentUserEntity(currentUser);
 		Project project = getProjectEntity(projectId);
@@ -55,6 +61,9 @@ public class ProjectMemberService {
 		return ProjectMemberResponse.createOf(projectMember, isProjectAdminUser(projectMember));
 	}
 
+	/**
+	 * 프로젝트 ADMIN이 사번 기준으로 새 프로젝트 멤버를 등록합니다.
+	 */
 	@Transactional
 	public ProjectMemberResponse createProjectMember(
 		AuthenticatedUser currentUser,
@@ -76,6 +85,9 @@ public class ProjectMemberService {
 		return ProjectMemberResponse.createOf(projectMember, isProjectAdminUser(projectMember));
 	}
 
+	/**
+	 * 프로젝트 ADMIN이 멤버 권한과 상태를 수정합니다.
+	 */
 	@Transactional
 	public ProjectMemberResponse updateProjectMember(
 		AuthenticatedUser currentUser,

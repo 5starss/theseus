@@ -34,6 +34,9 @@ public class ToolGenerationStateService {
 	private final ToolRepository toolRepository;
 	private final ToolGenerationStateStore toolGenerationStateStore;
 
+	/**
+	 * Redis 최신 상태를 우선 조회하고, 없으면 DB Tool 상태로 생성 진행 상태를 복구합니다.
+	 */
 	public ToolGenerationStateResponse getToolGenerationState(
 		AuthenticatedUser currentUser,
 		Long projectId,

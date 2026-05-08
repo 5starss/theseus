@@ -35,6 +35,9 @@ public class ProjectService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 로그인 사용자가 참여 중인 활성 프로젝트 목록을 조회합니다.
+	 */
 	public Page<MyProjectResponse> getMyProjects(AuthenticatedUser currentUser, int page, int size) {
 		User user = getCurrentUserEntity(currentUser);
 		Pageable pageable = createPageable(page, size);
@@ -48,6 +51,9 @@ public class ProjectService {
 			.map(MyProjectResponse::createFrom);
 	}
 
+	/**
+	 * Super Admin이 프로젝트 목록을 상태 조건과 함께 조회합니다.
+	 */
 	public Page<ProjectSummaryResponse> getProjects(
 		AuthenticatedUser currentUser,
 		ProjectStatus status,
@@ -67,6 +73,9 @@ public class ProjectService {
 			.map(ProjectSummaryResponse::createFrom);
 	}
 
+	/**
+	 * 프로젝트 접근 권한을 검증하고 프로젝트 상세 정보를 조회합니다.
+	 */
 	public ProjectResponse getProject(AuthenticatedUser currentUser, Long projectId) {
 		User user = getCurrentUserEntity(currentUser);
 		Project project = getProjectEntity(projectId);
@@ -76,6 +85,9 @@ public class ProjectService {
 		return ProjectResponse.createOf(project, findProjectAdminMember(project));
 	}
 
+	/**
+	 * Super Admin이 프로젝트를 생성하고 지정한 담당자를 프로젝트 ADMIN으로 등록합니다.
+	 */
 	@Transactional
 	public ProjectResponse createProject(AuthenticatedUser currentUser, ProjectCreateRequest request) {
 		User createdByUser = getCurrentUserEntity(currentUser);
@@ -90,6 +102,9 @@ public class ProjectService {
 		return ProjectResponse.createOf(project, adminMember);
 	}
 
+	/**
+	 * 프로젝트 기본 정보를 수정하고 필요한 경우 대표 담당자를 변경합니다.
+	 */
 	@Transactional
 	public ProjectResponse updateProject(AuthenticatedUser currentUser, Long projectId, ProjectUpdateRequest request) {
 		User user = getCurrentUserEntity(currentUser);
@@ -116,6 +131,9 @@ public class ProjectService {
 		return ProjectResponse.createOf(project, adminMember);
 	}
 
+	/**
+	 * 프로젝트 ID로 프로젝트 엔티티를 조회합니다.
+	 */
 	public Project getProjectEntity(Long projectId) {
 		return projectRepository.findById(projectId)
 			.orElseThrow(() -> BusinessException.of(ErrorCode.PROJECT_NOT_FOUND));

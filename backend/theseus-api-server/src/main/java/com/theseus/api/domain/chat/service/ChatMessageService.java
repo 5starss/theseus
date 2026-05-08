@@ -39,6 +39,9 @@ public class ChatMessageService {
 	private final ToolRepository toolRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 로그인 사용자의 일반 채팅 메시지를 세션 순서에 맞춰 저장합니다.
+	 */
 	@Transactional
 	public ChatMessageResponse createUserMessage(
 		AuthenticatedUser currentUser,
@@ -61,6 +64,9 @@ public class ChatMessageService {
 		return ChatMessageResponse.createFrom(chatMessage);
 	}
 
+	/**
+	 * 내부 서버 요청으로 사용자, Assistant, System 메시지를 저장합니다.
+	 */
 	@Transactional
 	public ChatMessageResponse createInternalMessage(
 		Long userId,
@@ -88,6 +94,9 @@ public class ChatMessageService {
 		return ChatMessageResponse.createFrom(chatMessage);
 	}
 
+	/**
+	 * 접근 가능한 채팅 세션의 메시지 목록을 순서대로 조회합니다.
+	 */
 	public List<ChatMessageResponse> getMessages(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -100,6 +109,9 @@ public class ChatMessageService {
 			.toList();
 	}
 
+	/**
+	 * Tool 생성 결과로 받은 Assistant 메시지를 저장합니다.
+	 */
 	@Transactional
 	public ChatMessage saveAssistantMessage(
 		ChatSession chatSession,
@@ -118,6 +130,9 @@ public class ChatMessageService {
 		);
 	}
 
+	/**
+	 * Tool 생성 요청 또는 피드백에 해당하는 사용자 메시지를 저장합니다.
+	 */
 	@Transactional
 	public ChatMessage saveUserToolMessage(
 		ChatSession chatSession,
@@ -138,6 +153,9 @@ public class ChatMessageService {
 		);
 	}
 
+	/**
+	 * 실패나 상태 안내에 필요한 System Notice 메시지를 저장합니다.
+	 */
 	@Transactional
 	public ChatMessage saveSystemNoticeMessage(
 		ChatSession chatSession,

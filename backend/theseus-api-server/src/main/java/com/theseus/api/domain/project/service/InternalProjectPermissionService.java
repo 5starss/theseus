@@ -41,6 +41,9 @@ public class InternalProjectPermissionService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 내부 서버가 사용할 프로젝트 멤버의 Tool 권한 정보를 조회합니다.
+	 */
 	public Map<String, Integer> getToolPermissions(InternalProjectPermissionRequest request) {
 		ProjectMember projectMember = getActiveProjectMember(request.getProjectId(), request.getUserId());
 

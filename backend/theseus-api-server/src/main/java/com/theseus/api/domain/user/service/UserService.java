@@ -28,23 +28,35 @@ public class UserService {
 	private final ProjectRepository projectRepository;
 	private final PasswordEncoder passwordEncoder;
 
+	/**
+	 * Super Admin을 제외한 사용자 목록을 페이지 단위로 조회합니다.
+	 */
 	public Page<UserResponse> getUsers(Pageable pageable) {
 		return userRepository.findBySystemRoleNot(SystemRole.SUPER_ADMIN, pageable)
 				.map(UserResponse::createFrom);
 	}
 
+	/**
+	 * 사용자 ID로 사용자 상세 정보를 조회합니다.
+	 */
 	public UserResponse getUser(Long userId) {
 		User user = getUserEntity(userId);
 
 		return UserResponse.createFrom(user);
 	}
 
+	/**
+	 * 사번으로 사용자 정보를 조회합니다.
+	 */
 	public UserResponse getUserByEmployeeNumber(String employeeNumber) {
 		User user = userRepository.findByEmployeeNumber(employeeNumber)
 				.orElseThrow(() -> BusinessException.of(ErrorCode.USER_NOT_FOUND));
 		return UserResponse.createFrom(user);
 	}
 
+	/**
+	 * Super Admin이 새 사용자 계정을 발급합니다.
+	 */
 	@Transactional
 	public UserResponse createUser(UserCreateRequest request) {
 		validateCreateRequest(request);
@@ -55,6 +67,9 @@ public class UserService {
 		return UserResponse.createFrom(savedUser);
 	}
 
+	/**
+	 * 사용자 기본 정보와 시스템 권한을 수정합니다.
+	 */
 	@Transactional
 	public UserResponse updateUser(Long userId, UserUpdateRequest request) {
 		User user = getUserEntity(userId);
@@ -69,6 +84,9 @@ public class UserService {
 		return UserResponse.createFrom(user);
 	}
 
+	/**
+	 * 사용자 활성 상태를 변경하고 비활성화 가능 여부를 검증합니다.
+	 */
 	@Transactional
 	public UserResponse updateUserStatus(Long userId, UserStatusUpdateRequest request) {
 		User user = getUserEntity(userId);

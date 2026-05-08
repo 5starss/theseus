@@ -21,6 +21,9 @@ public class InternalToolDraftService {
 	private final ToolRepository toolRepository;
 	private final ObjectMapper objectMapper;
 
+	/**
+	 * 내부 서버가 재생성에 사용할 최신 Tool Draft 정보를 조회합니다.
+	 */
 	public InternalToolDraftResponse getToolDraft(Long toolId) {
 		Tool tool = toolRepository.findByIdAndStatusNot(toolId, ToolStatus.DELETED)
 			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));

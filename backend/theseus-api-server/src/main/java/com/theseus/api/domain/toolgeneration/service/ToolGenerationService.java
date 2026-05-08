@@ -54,6 +54,9 @@ public class ToolGenerationService {
 	private final ApplicationEventPublisher eventPublisher;
 	private final ObjectMapper objectMapper;
 
+	/**
+	 * Tool 생성 요청을 검증하고 DRAFT Tool, 사용자 메시지, Kafka 발행 이벤트를 생성합니다.
+	 */
 	@Transactional
 	public ToolGenerationRunResponse generateTool(
 		AuthenticatedUser currentUser,
@@ -95,6 +98,9 @@ public class ToolGenerationService {
 		return ToolGenerationRunResponse.createOf(runId, tool);
 	}
 
+	/**
+	 * Tool 재생성 요청을 검증하고 피드백 메시지와 Kafka 재생성 이벤트를 생성합니다.
+	 */
 	@Transactional
 	public ToolGenerationRunResponse regenerateTool(
 		AuthenticatedUser currentUser,
@@ -134,6 +140,9 @@ public class ToolGenerationService {
 		return ToolGenerationRunResponse.createOf(runId, tool);
 	}
 
+	/**
+	 * 최초 PLAN 생성을 위한 Kafka 요청 payload를 구성합니다.
+	 */
 	private ToolGenerationRequestEvent createGenerationEvent(
 		String runId,
 		Project project,
@@ -158,6 +167,9 @@ public class ToolGenerationService {
 		);
 	}
 
+	/**
+	 * 기존 Draft와 블록 피드백을 포함한 Kafka 재생성 요청 payload를 구성합니다.
+	 */
 	private ToolRegenerationRequestEvent createRegenerationEvent(
 		String runId,
 		Project project,
@@ -183,6 +195,9 @@ public class ToolGenerationService {
 		);
 	}
 
+	/**
+	 * 프로젝트 멤버의 Tool 사용 권한을 Kafka payload 형태로 변환합니다.
+	 */
 	private ToolPermissionPayload createPermissionPayload(ProjectMember projectMember) {
 		return new ToolPermissionPayload(
 			projectMember.getCanCreateTool(),
@@ -192,6 +207,9 @@ public class ToolGenerationService {
 		);
 	}
 
+	/**
+	 * 현재 Tool에 저장된 최신 Draft 내용을 재생성 기준 데이터로 구성합니다.
+	 */
 	private ToolGenerationDraftPayload createBaseDraftPayload(Tool tool) {
 		return ToolGenerationDraftPayload.builder()
 			.rawMarkdown(tool.getRawMarkdown())
@@ -264,6 +282,9 @@ public class ToolGenerationService {
 		}
 	}
 
+	/**
+	 * Tool 재생성이 가능한 상태와 Draft 단계를 검증합니다.
+	 */
 	private void validateRegeneratableTool(Tool tool) {
 		if (!ToolStatus.DRAFT.equals(tool.getStatus()) && !ToolStatus.REJECTED.equals(tool.getStatus())) {
 			throw BusinessException.of(ErrorCode.TOOL_REGENERATION_STATUS_REQUIRED);
@@ -273,6 +294,9 @@ public class ToolGenerationService {
 		}
 	}
 
+	/**
+	 * 사용자 피드백의 기준 버전과 현재 Draft 버전이 같은지 검증합니다.
+	 */
 	private void validateDraftVersion(Tool tool, Long baseDraftVersion) {
 		if (!Objects.equals(tool.getDraftVersion(), baseDraftVersion)) {
 			throw BusinessException.of(ErrorCode.TOOL_DRAFT_VERSION_MISMATCH);

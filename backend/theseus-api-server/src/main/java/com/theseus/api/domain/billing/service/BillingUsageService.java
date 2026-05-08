@@ -32,6 +32,9 @@ public class BillingUsageService {
 	private final ProjectRepository projectRepository;
 	private final ObjectMapper objectMapper;
 
+	/**
+	 * Core Server가 보고한 토큰 사용량을 멱등키 기준으로 저장합니다.
+	 */
 	@Transactional
 	public BillingUsageResponse createUsage(BillingUsageCreateRequest request, String idempotencyKey) {
 		validateRequest(request);
