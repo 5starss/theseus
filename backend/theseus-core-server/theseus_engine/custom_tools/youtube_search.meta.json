@@ -7,7 +7,7 @@
   "planId": null,
   "fileName": "youtube_search.py",
   "createdAt": "2026-05-06T08:43:11.609980+00:00",
-  "updatedAt": "2026-05-06T08:43:11.609980+00:00",
+  "updatedAt": "2026-05-08T04:56:41.895534+00:00",
   "permissionLevel": 1,
   "status": "active",
   "isActive": true,
@@ -16,5 +16,6 @@
     "status": "validated",
     "message": "ToolValidator validation passed.",
     "checkedAt": "2026-05-06T08:43:11.609980+00:00"
-  }
+  },
+  "runtimeMode": "standalone"
 }

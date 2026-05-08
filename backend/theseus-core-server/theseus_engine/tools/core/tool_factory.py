@@ -438,6 +438,7 @@ def normalize_tool_meta(
             "message": "Normalized by load_custom_tools.",
             "checkedAt": now,
         },
+        "runtimeMode": normalized.get("runtimeMode", "standalone"),
     }
 
     # 변경이 없으면 쓰지 않음 (updatedAt 제외 비교)
@@ -512,6 +513,106 @@ def load_custom_tools(
                 log.warning("Failed to instantiate tool from %s: %s", filename, e)
         else:
             log.warning("Skipped invalid custom tool %s: %s", filename, msg)
+
+    return loaded
+
+
+def load_custom_tools_for_project(
+    registry: ToolRegistry,
+    project_id: str,
+    tool_permissions: Optional[Dict[str, int]] = None,
+) -> List[str]:
+    """프로젝트 격리 경로에서 커스텀 툴을 로드합니다.
+
+    경로: ``custom_tools/projects/<project_id>/*.py``
+
+    로드 조건 (``meta.json`` 기준):
+      - ``isActive == True``
+      - ``status == "active"``
+
+    이 함수는 standalone(CLI/TUI)에서도 ``project_id``가 주어지면
+    프로젝트 격리 로딩을 지원하기 위해 ``theseus_engine`` 안에 존재한다.
+    서버 전용 로더(``src/tooling/service.py``)는 sandbox 결과 등
+    추가 조건을 검사하는 상위 레이어이다.
+
+    Args:
+        registry: 툴을 등록할 ToolRegistry 인스턴스.
+        project_id: 프로젝트 식별자.
+        tool_permissions: RBAC 권한 맵핑. 로드된 툴의 level이 자동 추가된다.
+
+    Returns:
+        성공적으로 로드된 툴 이름 목록.
+    """
+    project_dir = os.path.join(CUSTOM_TOOLS_DIR, "projects", project_id)
+    loaded: List[str] = []
+
+    if not os.path.isdir(project_dir):
+        log.info(
+            "Project tools dir not found, skipping: %s (project_id=%s)",
+            project_dir,
+            project_id,
+        )
+        return loaded
+
+    for filename in sorted(os.listdir(project_dir)):
+        if not filename.endswith(".py") or filename.startswith("_"):
+            continue
+
+        module_name = filename[:-3]
+        file_path = os.path.join(project_dir, filename)
+        meta_path = os.path.join(project_dir, f"{module_name}.meta.json")
+
+        # ── meta.json active 체크 ────────────────────────────
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+                if not meta.get("isActive", True):
+                    log.info("Skipped inactive project tool: %s", module_name)
+                    continue
+                if meta.get("status", "active") != "active":
+                    log.info(
+                        "Skipped non-active project tool: %s (status=%s)",
+                        module_name,
+                        meta.get("status"),
+                    )
+                    continue
+            except Exception as exc:
+                log.warning(
+                    "Failed to read project tool meta %s: %s", meta_path, exc,
+                )
+
+        # ── 코드 검증 + 로드 ─────────────────────────────────
+        is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
+            module_name, file_path,
+        )
+        if is_valid and tool_class is not None:
+            try:
+                instance = tool_class()
+                registry.register(instance)
+                loaded.append(tool_class.name)
+
+                level = getattr(
+                    tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL,
+                )
+                if tool_permissions is not None:
+                    tool_permissions[tool_class.name] = level
+
+                log.info(
+                    "Project tool loaded: %s (project=%s level=%d file=%s)",
+                    tool_class.name,
+                    project_id,
+                    level,
+                    filename,
+                )
+            except Exception as exc:
+                log.warning(
+                    "Failed to instantiate project tool %s: %s", filename, exc,
+                )
+        else:
+            log.warning(
+                "Skipped invalid project tool %s: %s", filename, msg,
+            )
 
     return loaded
 

@@ -29,19 +29,30 @@ _MODE_LABELS = {
 }
 
 
-def print_status(mode: str, user_level: int, plan_phase: str | None = None) -> None:
-    """현재 모드와 권한 레벨을 헤더로 출력합니다."""
+def print_status(
+    mode: str,
+    user_level: int,
+    plan_phase: str | None = None,
+    actor_role: str = "ADMIN",
+) -> None:
+    """현재 모드와 권한 레벨, 역할을 헤더로 출력합니다."""
     mode_label = _MODE_LABELS.get(mode, f"❓ {mode}")
     phase_str  = f"  /  Phase: {plan_phase}" if plan_phase and mode == "PLAN" else ""
     print(f"\n  현재 모드  : {mode_label}{phase_str}")
+    print(f"  역할       : {actor_role}")
     print(f"  권한 레벨  : Lv.{user_level}  (1=최소 / 5=최대)")
 
 
-def print_help(mode: str = "AGENT", user_level: int = 5, plan_phase: str | None = None) -> None:
+def print_help(
+    mode: str = "AGENT",
+    user_level: int = 5,
+    plan_phase: str | None = None,
+    actor_role: str = "ADMIN",
+) -> None:
     print("\n" + "-" * 50)
     print(" Theseus CLI - 사용 가능한 명령어")
     print("-" * 50)
-    print_status(mode, user_level, plan_phase)
+    print_status(mode, user_level, plan_phase, actor_role=actor_role)
     print("  [모드 전환]")
     print("    /agent            자율 실행 모드 (기본)")
     print("    /ask              질문/답변 전용 (도구 사용 안 함)")

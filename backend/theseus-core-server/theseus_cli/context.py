@@ -16,8 +16,9 @@ class CLIContext:
     engine: Any
     client: "TheseusLLMClient"
     user_level: int
-    project_tool_permissions: dict
-    ask_permission: Any
+    actor_role: str = "ADMIN"  # "ADMIN" | "MEMBER" — standalone은 기본 ADMIN
+    project_tool_permissions: dict = field(default_factory=dict)
+    ask_permission: Any = None
     full_registry: Any = None  # 전체 ToolRegistry (커스텀 툴 조회 등에 사용)
 
     # 루프 제어 플래그

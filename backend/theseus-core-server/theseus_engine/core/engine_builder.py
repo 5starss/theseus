@@ -11,6 +11,7 @@ from theseus_engine.tools.core import (
     ALL_CORE_TOOLS,
     build_filtered_registry,
     load_custom_tools,
+    load_custom_tools_for_project,
     ToolSearchTool,
 )
 from theseus_engine.core.tool_retriever import ESSENTIAL_TOOL_NAMES
@@ -34,6 +35,11 @@ async def setup_engine(
     user_level: int,
     project_tool_permissions: dict,
     permission_prompt_func,
+    # ── 프로젝트/역할 기반 툴 가시성 ─────────────────────
+    project_id: Optional[str] = None,
+    actor_role: str = "MEMBER",
+    project_disabled_tools: Optional[set] = None,
+    # ── 기존 파라미터 ────────────────────────────────────
     user_query: Optional[str] = None,
     top_k: int = 10,
     history_messages: Optional[list] = None,
@@ -61,7 +67,13 @@ async def setup_engine(
     for tool_cls in ALL_CORE_TOOLS:
         full_registry.register(tool_cls())
 
-    loaded_tools = load_custom_tools(full_registry, project_tool_permissions)
+    # ── 커스텀 툴 로딩: project_id 유무에 따라 경로 분기 ──────
+    if project_id:
+        loaded_tools = load_custom_tools_for_project(
+            full_registry, project_id, project_tool_permissions,
+        )
+    else:
+        loaded_tools = load_custom_tools(full_registry, project_tool_permissions)
     if loaded_tools:
         print(f"✅ Loaded {len(loaded_tools)} custom tools.")
 
@@ -115,15 +127,24 @@ async def setup_engine(
     hook_executor = None
 
     # create_tool은 PLAN EXECUTING 단계에서만 활성화
+    # 서버 모드(project_id 있음): ADMIN 역할 필수
+    # standalone 모드(project_id 없음): 로컬 사용자이므로 역할 제한 없음
     is_plan_executing = (
         sm.mode == AgentMode.PLAN
         and getattr(sm, "plan_phase", None) == PlanPhase.EXECUTING
     )
-    if is_plan_executing and current_registry.get("create_tool") is None:
+    is_admin_or_standalone = (project_id is None) or (actor_role.upper() == "ADMIN")
+    can_create_tool = is_plan_executing and is_admin_or_standalone
+    if can_create_tool and current_registry.get("create_tool") is None:
         creator = full_registry.get("create_tool")
         if creator is not None:
             current_registry.register(creator)
-    exclude = set() if is_plan_executing else {"create_tool"}
+    exclude = set() if can_create_tool else {"create_tool"}
+
+    # 프로젝트 단위 비활성 툴을 제외 집합에 합산
+    if project_disabled_tools:
+        exclude = exclude | set(project_disabled_tools)
+
     active_registry = build_filtered_registry(
         current_registry, project_tool_permissions, user_level, exclude_tools=exclude
     )
@@ -165,6 +186,8 @@ async def setup_engine(
             "scoped_memory": scoped_memory,
             "user_rbac_level": user_level,
             "agent_mode": sm.mode.value if hasattr(sm, "mode") else "normal",
+            "project_id": project_id,
+            "actor_role": actor_role,
         }
     )
 

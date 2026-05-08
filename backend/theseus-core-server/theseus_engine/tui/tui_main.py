@@ -163,6 +163,7 @@ class TheseusTUI(App):
             "search_knowledge_base": 1, "ingest_document": 2,
         }
         self.user_level = 5
+        self.actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
 
     # ── 레이아웃 ────────────────────────────────────────────────
 
@@ -217,7 +218,9 @@ class TheseusTUI(App):
         self._refresh_sidebars(force=True)
         self._append_line(
             "system> [bold green]Theseus Engine Initialized.[/bold green] "
-            f"Mode: [bold]{self.theseus_sm.mode.value}[/bold]"
+            f"Mode: [bold]{self.theseus_sm.mode.value}[/bold] | "
+            f"Role: [bold]{self.actor_role}[/bold] | "
+            f"RBAC: Lv.{self.user_level}"
         )
 
     def _register_commands(self) -> None:
@@ -643,10 +646,12 @@ class TheseusTUI(App):
         if self.theseus_sm.mode == AgentMode.PLAN:
             plan_phase_str = f"\n  phase     : {self.theseus_sm.plan_phase.name}"
 
+        role_color = "bold cyan" if self.actor_role.upper() == "ADMIN" else "dim"
         status_lines = (
             "[b]● Status[/b]\n"
             f"  model     : {state.model}\n"
             f"  mode      : [{mode_color}]{self.theseus_sm.mode.value}[/{mode_color}]{plan_phase_str}\n"
+            f"  role      : [{role_color}]{self.actor_role}[/{role_color}]\n"
             f"  RBAC      : Lv.{self.user_level}\n"
             f"  tokens    : {tokens_str}\n"
             f"  messages  : {msgs}\n"
