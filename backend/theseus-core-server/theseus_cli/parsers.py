@@ -26,12 +26,29 @@ _SECTION_SUBFIELDS = {
 
 
 def extract_plan_json(response_text: str) -> dict | None:
-    match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+    # ```json ... ``` 블록 전체를 탐욕적으로 추출 후 JSON 파싱
+    # non-greedy \{.*?\} 는 중첩 JSON을 첫 } 에서 잘라버리므로 블록 전체를 넘김
+    match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
     if match:
+        candidate = match.group(1).strip()
         try:
-            return json.loads(match.group(1))
+            result = json.loads(candidate)
+            if isinstance(result, dict):
+                return result
         except json.JSONDecodeError:
             pass
+
+    # 코드 펜스 없이 bare JSON으로 반환하는 경우 대비
+    # 첫 { 부터 마지막 } 까지 추출
+    bare = re.search(r'(\{[\s\S]*\})', response_text)
+    if bare:
+        try:
+            result = json.loads(bare.group(1))
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+
     return None
 
 
@@ -105,8 +122,13 @@ def build_feedback_prompt(parsed: dict, plan_json_str: str) -> str:
     )
 
 
-def handle_plan_draft(sm: "TheseusStateMachine", response_text: str) -> None:
-    """LLM 응답에서 JSON 계획을 추출하고 상태를 WAIT_FOR_REVIEW로 전환합니다."""
+def handle_plan_draft(sm: "TheseusStateMachine", response_text: str) -> bool:
+    """LLM 응답에서 JSON 계획을 추출하고 상태를 WAIT_FOR_REVIEW로 전환합니다.
+
+    Returns:
+        True  — JSON 계획 파싱 성공, WAIT_FOR_REVIEW로 전환됨.
+        False — JSON 없음 (탐색/중간 턴), 상태 전환 없음.
+    """
     from theseus_engine.models.state import PlanPhase
 
     plan_data = extract_plan_json(response_text)
@@ -123,9 +145,8 @@ def handle_plan_draft(sm: "TheseusStateMachine", response_text: str) -> None:
         print("[*] 계획이 작성되었습니다. 'approve' 또는 '/approve'를 입력하여 실행하거나,")
         print("[*] 수정할 내용(피드백)을 텍스트로 입력해 주세요.")
         print("-" * 60 + "\n")
+        sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+        return True
     else:
-        sm.plan = response_text
-        print("\n[!] 계획 JSON 파싱 실패. 원문을 계획으로 저장합니다.")
-        print("[*] 'approve' 또는 '/approve'로 실행하거나 피드백을 입력하세요.\n")
-
-    sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+        # JSON 없음 = 아직 탐색/분석 중인 중간 턴 → 상태 전환하지 않음
+        return False

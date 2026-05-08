@@ -23,8 +23,8 @@ async def llm_is_approval(text: str, client: "TheseusLLMClient") -> bool:
     나머지는 LLM에 위임하여 언어·뉘앙스에 관계없이 의도를 정확히 분류합니다.
     LLM 장애 시에는 보수적으로 False를 반환합니다.
     """
-    from openharness.api.client import ApiMessageRequest, ApiTextDeltaEvent
-    from openharness.engine.messages import ConversationMessage, TextBlock
+    from theseus_engine.wrappers.llm_clients.api_types import ApiMessageRequest, ApiTextDeltaEvent
+    from theseus_engine.models.messages import ConversationMessage, TextBlock
 
     t = text.strip()
     if len(t) > 100:
@@ -32,7 +32,7 @@ async def llm_is_approval(text: str, client: "TheseusLLMClient") -> bool:
 
     try:
         request = ApiMessageRequest(
-            model=client.model_name.split("/", 1)[-1] if "/" in client.model_name else client.model_name,
+            model=client.model_name,
             messages=[ConversationMessage(
                 role="user",
                 content=[TextBlock(text=f"Message: '{t}'")],

@@ -15,9 +15,8 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))
 
-from openharness.engine.stream_events import (
+from theseus_engine.engine.stream_events import (
     AssistantTextDelta, AssistantTurnComplete,
     ToolExecutionStarted, ToolExecutionCompleted, ErrorEvent,
 )
@@ -64,7 +63,7 @@ async def run_cli():
         return input().strip()
 
     client = TheseusLLMClient(model_name)
-    engine, _ = await setup_engine(
+    engine, full_registry = await setup_engine(
         sm, user_level, project_tool_permissions, ask_permission,
         api_client=client, reset_stats=True,
     )
@@ -106,6 +105,7 @@ async def run_cli():
         user_level=user_level,
         project_tool_permissions=project_tool_permissions,
         ask_permission=ask_permission,
+        full_registry=full_registry,
     )
 
     while True:
@@ -141,6 +141,9 @@ async def run_cli():
                     ctx.sm.set_plan_phase(PlanPhase.EXECUTING)
                     ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
                     ctx.waiting_for_user = False
+                    ctx.auto_resume_count = 0  # 턴 단위 카운터만 리셋 (session_resume_total 유지)
+                    ctx.repeated_error_count = 0
+                    ctx.last_error_sig = ""
                     print("[*] ✅ 사용자의 긍정적 동의를 확인했습니다. 계획 실행 단계를 시작합니다.")
                     line = f"{line}\n(계획이 승인되었습니다. 즉시 단계별 실행을 시작하세요.)"
                 else:
@@ -160,11 +163,12 @@ async def run_cli():
             if did_compress:
                 print(f"[*] 컨텍스트 압축 완료: {len(current_messages)}개 메시지로 축약")
 
-            ctx.engine, _ = await setup_engine(
+            ctx.engine, new_full_registry = await setup_engine(
                 ctx.sm, ctx.user_level, ctx.project_tool_permissions, ctx.ask_permission,
                 api_client=ctx.client, user_query=line, top_k=8,
                 history_messages=current_messages,
             )
+            ctx.full_registry = new_full_registry
             ctx.engine.load_messages(current_messages)
 
             # ── 모드 전환 알림 + DRAFTING 형식 강제 주입 ──────────────
@@ -175,9 +179,9 @@ async def run_cli():
             if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.DRAFTING:
                 actual_line = (
                     f"{actual_line}\n\n"
-                    "IMPORTANT: You are in PLAN DRAFTING mode. "
-                    "Output ONLY the JSON block following the strict schema. "
-                    "No conversational prose allowed."
+                    "REMINDER: You are in PLAN DRAFTING mode. "
+                    "If this is a question or clarification, answer it directly in natural language. "
+                    "If this is an implementation request, research the codebase first, then output a JSON plan."
                 )
 
             # ── 스트리밍 실행 ──────────────────────────────────────────
@@ -186,6 +190,7 @@ async def run_cli():
             tool_called_this_turn = False
             tool_error_occurred = False
             plan_complete = False
+            newly_created_tools: list[str] = []  # 이번 턴에 create_tool로 등록된 툴 이름 목록
 
             async for event in ctx.engine.submit_message(actual_line):
                 if isinstance(event, AssistantTextDelta):
@@ -199,12 +204,27 @@ async def run_cli():
                     print(f"[*] Tool '{event.tool_name}' result received.", flush=True)
                     if event.is_error:
                         tool_error_occurred = True
+                    elif event.tool_name == "create_tool":
+                        # 성공적으로 생성된 툴 이름을 output에서 파싱
+                        import re as _re
+                        m = _re.search(r"Tool '([^']+)' created", event.output)
+                        if m:
+                            newly_created_tools.append(m.group(1))
                 elif isinstance(event, AssistantTurnComplete):
                     print("\n", flush=True)
+                    # ── 커스텀 툴 자동 등록 알림 ──────────────────────────
+                    if newly_created_tools:
+                        _auto_print_created_tools(newly_created_tools, ctx)
+                        # full_registry를 최신 상태로 갱신 (다음 /tools custom 조회 반영)
+                        ctx.full_registry = ctx.engine._tool_metadata.get(
+                            "tool_registry", ctx.full_registry
+                        )
+                        newly_created_tools.clear()
                     if ctx.sm.mode == AgentMode.PLAN:
                         if ctx.sm.plan_phase == PlanPhase.DRAFTING:
-                            handle_plan_draft(ctx.sm, accumulated_text)
-                            ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                            drafted = handle_plan_draft(ctx.sm, accumulated_text)
+                            if drafted:
+                                ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
                         elif ctx.sm.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
                             updated = extract_plan_json(accumulated_text)
                             if updated:
@@ -255,7 +275,12 @@ async def run_cli():
                 resume_prompt = "A tool execution error just occurred. Analyze the root cause and retry with a different approach."
 
             if should_auto_resume and not plan_complete:
-                error_sig = resume_prompt[:80]
+                # 실제 에러 내용을 시그니처로 사용 (고정 resume_prompt 대신)
+                if tool_error_occurred:
+                    error_sig = accumulated_text[-200:].strip()[:80]
+                else:
+                    error_sig = resume_prompt[:80]
+
                 if error_sig == ctx.last_error_sig:
                     ctx.repeated_error_count += 1
                 else:
@@ -273,7 +298,18 @@ async def run_cli():
                     ctx.last_error_sig = ""
 
                 ctx.auto_resume_count += 1
-                if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                ctx.session_resume_total += 1
+
+                # 세션 전체 절대 상한 초과 — 무한루프 최종 차단
+                if ctx.session_resume_total > ctx.MAX_SESSION_RESUMES:
+                    print(f"[!] 세션 전체 자동 재개 {ctx.MAX_SESSION_RESUMES}회 초과. 강제 종료합니다.")
+                    ctx.waiting_for_user = True
+                    if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase in (PlanPhase.EXECUTING, PlanPhase.VERIFYING):
+                        ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                        ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                    print("[*] 반복 실패로 인해 실행이 중단되었습니다. 문제를 직접 파악한 후 'approve'로 재개하세요.")
+                    await save_session_history("default", ctx.engine.messages)
+                elif ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
                     print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
                     ctx.auto_resume_count = 0
                     ctx.waiting_for_user = True
@@ -283,7 +319,7 @@ async def run_cli():
                         print("[*] 계획 검토(Review) 단계로 전환됩니다. 대화로 문제를 파악하고 'approve'로 재개하세요.")
                     await save_session_history("default", ctx.engine.messages)
                 else:
-                    print(f"[auto] {resume_prompt[:30]}... (자동 재개 {ctx.auto_resume_count}/{ctx.MAX_AUTO_RESUME})")
+                    print(f"[auto] {resume_prompt[:30]}... (자동 재개 {ctx.auto_resume_count}/{ctx.MAX_AUTO_RESUME}, 세션 누적 {ctx.session_resume_total}/{ctx.MAX_SESSION_RESUMES})")
                     auto_resume_line = resume_prompt
                     await save_session_history("default", ctx.engine.messages)
                     continue
@@ -306,7 +342,14 @@ async def run_cli():
                         "Resume from the point of interruption. Do NOT repeat the same approach."
                     )
                     ctx.auto_resume_count += 1
-                    if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                    ctx.session_resume_total += 1
+                    if ctx.session_resume_total > ctx.MAX_SESSION_RESUMES:
+                        print(f"[!] 세션 전체 자동 재개 {ctx.MAX_SESSION_RESUMES}회 초과. 강제 중단합니다.")
+                        ctx.waiting_for_user = True
+                        ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                        ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                        print("[*] 반복 실패로 인해 실행이 중단되었습니다. 'approve'로 재개하세요.")
+                    elif ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
                         print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
                         ctx.auto_resume_count = 0
                         ctx.waiting_for_user = True
@@ -322,7 +365,15 @@ async def run_cli():
                 ctx.last_error_sig = err_sig
 
                 ctx.auto_resume_count += 1
-                if ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
+                ctx.session_resume_total += 1
+
+                if ctx.session_resume_total > ctx.MAX_SESSION_RESUMES:
+                    print(f"[!] 세션 전체 자동 재개 {ctx.MAX_SESSION_RESUMES}회 초과. 강제 중단합니다.")
+                    ctx.waiting_for_user = True
+                    ctx.sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                    ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+                    print("[*] 반복 실패로 인해 실행이 중단되었습니다. 'approve'로 재개하세요.")
+                elif ctx.auto_resume_count > ctx.MAX_AUTO_RESUME:
                     print(f"[!] 자동 재개 {ctx.MAX_AUTO_RESUME}회 초과. 사용자 입력을 기다립니다.")
                     ctx.auto_resume_count = 0
                     ctx.waiting_for_user = True
@@ -350,6 +401,60 @@ async def run_cli():
     except Exception:
         pass
     print("Done. Goodbye!")
+
+
+def _auto_print_created_tools(tool_names: list[str], ctx) -> None:
+    """create_tool 성공 직후 자동으로 등록된 툴 정보를 출력합니다."""
+    import json, os
+    from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR
+
+    print("\n" + "─" * 60)
+    print(f"  ✨ 새 커스텀 툴 등록 완료 ({len(tool_names)}개)")
+    print("─" * 60)
+
+    for tool_name in tool_names:
+        # meta.json 읽기 (모듈명 = tool_name 또는 snake_case 변환 시도)
+        module_name = tool_name.replace("-", "_")
+        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_name}.meta.json")
+        meta: dict = {}
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        perm   = meta.get("permissionLevel", ctx.project_tool_permissions.get(tool_name, 1))
+        status = meta.get("status", "active")
+        fname  = meta.get("fileName", f"{module_name}.py")
+
+        # registry에서 인스턴스 조회 → description
+        description = ""
+        registry = ctx.full_registry or (
+            ctx.engine._tool_metadata.get("tool_registry") if ctx.engine else None
+        )
+        if registry:
+            instance = registry.get(tool_name)
+            if instance:
+                description = getattr(instance, "description", "")
+        desc_short = (description[:55] + "…") if len(description) > 56 else description
+
+        print(f"\n  🔧 {tool_name}")
+        print(f"     권한 레벨   : Lv.{perm}")
+        print(f"     상태        : {status}")
+        print(f"     파일        : custom_tools/{fname}")
+        if desc_short:
+            print(f"     설명        : {desc_short}")
+
+        # validation 결과
+        v = meta.get("validationResult") or {}
+        if v.get("status") == "validated":
+            print(f"     검증        : ✅ 통과")
+        elif v.get("status"):
+            print(f"     검증        : ⚠️  {v.get('status')} — {v.get('message', '')}")
+
+    print("\n  💡 '/tools custom' 으로 전체 커스텀 툴 목록을 확인할 수 있습니다.")
+    print("─" * 60 + "\n")
 
 
 if __name__ == "__main__":
