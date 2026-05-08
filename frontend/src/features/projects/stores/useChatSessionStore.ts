@@ -9,6 +9,9 @@ interface ChatSessionState {
   progressInfo: ProgressInfo | null;
   commentMode: boolean;
   draftComments: Record<string, string>; // blockId -> comment
+  toolResult: Record<string, unknown> | null;
+  activeTab: 'plan' | 'result';
+  isBuilding: boolean;
   currentToolId: string | null;
   draftVersion: number;
   abortController: AbortController | null;
@@ -21,9 +24,13 @@ interface ChatSessionState {
     plan: StructuredPlan | null;
     phase: DraftPhase;
     toolId: string | null;
+    toolResult: Record<string, unknown> | null;
     title: string;
     isClosed: boolean;
   }) => void;
+  setToolResult: (result: Record<string, unknown> | null) => void;
+  setActiveTab: (tab: 'plan' | 'result') => void;
+  setIsBuilding: (isBuilding: boolean) => void;
   addMessage: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
   setPlan: (plan: StructuredPlan) => void;
@@ -51,15 +58,21 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   draftComments: {},
   currentToolId: null,
   draftVersion: 0,
+  toolResult: null,
+  activeTab: 'plan',
+  isBuilding: false,
   abortController: null,
   title: '',
   isClosed: false,
 
-  initSession: ({ messages, plan, phase, toolId, title, isClosed }) => set({
+  initSession: ({ messages, plan, phase, toolId, toolResult, title, isClosed }) => set({
     messages,
     currentPlan: plan,
     draftPhase: phase,
     currentToolId: toolId,
+    toolResult: toolResult || null,
+    activeTab: (phase === 'REVIEW' || phase === 'APPROVED') && toolResult ? 'result' : 'plan',
+    isBuilding: false,
     draftVersion: 0,
     title,
     isClosed,
@@ -94,6 +107,9 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   
   setCurrentToolId: (toolId) => set({ currentToolId: toolId }),
   setDraftVersion: (version) => set({ draftVersion: version }),
+  setToolResult: (result) => set({ toolResult: result }),
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  setIsBuilding: (isBuilding) => set({ isBuilding }),
   setAbortController: (ctrl) => set({ abortController: ctrl }),
   abortGeneration: () => {
     const ctrl = get().abortController;

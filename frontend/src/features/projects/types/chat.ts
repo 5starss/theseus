@@ -40,6 +40,23 @@ export interface ChatSession {
   updatedAt: string;
 }
 
+export interface ChatSessionState {
+  messages: ChatMessage[];
+  currentPlan: StructuredPlan | null;
+  toolResult: Record<string, unknown> | null;
+  draftPhase: DraftPhase;
+  currentToolId: string | null;
+  title: string;
+  isClosed: boolean;
+  isLoading: boolean;
+  isGenerating: boolean;
+  isBuilding: boolean;
+  activeTab: 'plan' | 'result';
+  progressInfo: ProgressInfo | null;
+  draftVersion: number;
+  abortController: AbortController | null;
+}
+
 // Tool 생성/재생성 HTTP 응답
 export interface ToolGenerationRunResponse {
   runId: string;

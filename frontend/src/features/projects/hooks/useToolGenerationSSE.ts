@@ -101,6 +101,7 @@ export function useToolGenerationSSE() {
                     currentPlan?: StructuredPlan;
                     draftPhase?: DraftPhase;
                     currentToolId?: string | number;
+                    draftSnapshot?: Record<string, unknown>;
                     title?: string;
                     isClosed?: boolean;
                   };
@@ -109,6 +110,7 @@ export function useToolGenerationSSE() {
                     plan: details.currentPlan || null,
                     phase: details.draftPhase || 'REVIEW',
                     toolId: details.currentToolId ? String(details.currentToolId) : store.currentToolId,
+                    toolResult: details.draftSnapshot || null,
                     title: details.title || store.title,
                     isClosed: details.isClosed || false
                   });
