@@ -327,17 +327,16 @@ AI 서버가 Spring에 요청하는 API:
 ## 9. 구현 우선순위
 
 ```
-P0 (즉시) ─────────────────────────────────────────────────
-  ① runtime_mode.py — RuntimeMode enum + detect_runtime_mode()
-  ② permission_provider.py — 추상 인터페이스 + StandalonePermissionProvider
-  ③ engine_builder.py에 runtime_mode 파라미터 추가 (기본값: STANDALONE)
+P0 (즉시) ─────────────────────────────────────────────────  ✅ Session 40 완료
+  ① runtime_mode.py — RuntimeMode enum + detect_runtime_mode()  ✅
+  ② permission_provider.py — 추상 인터페이스 + StandalonePermissionProvider  ✅
+  ③ engine_builder.py에 project_id/actor_role/disabled_tools 파라미터 추가  ✅
+  ④ ServerPermissionProvider — 콜백 주입 방식 구현  ✅
+  ⑤ normalize_tool_meta()에 runtimeMode 필드 추가  ✅
+  ⑥ load_custom_tools_for_project() — 프로젝트 격리 툴 로더  ✅
 
 P1 (단기) ─────────────────────────────────────────────────
-  ④ ServerPermissionProvider 구현
-       - get_permissions() → src/auth/permissions.py 위임
-       - sync_tool() → Spring PATCH API 호출 (실패 시 로컬 기록)
-  ⑤ normalize_tool_meta()에 runtimeMode 필드 추가
-  ⑥ create_tool 파이프라인에서 permission_provider.sync_tool() 호출
+  ⑦ create_tool 파이프라인에서 permission_provider.sync_tool() 호출
 
 P2 (중기) ─────────────────────────────────────────────────
   ⑦ src/builder/engine.py → ServerPermissionProvider 주입

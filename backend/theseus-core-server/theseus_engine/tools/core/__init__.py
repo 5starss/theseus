@@ -18,6 +18,7 @@ from theseus_engine.tools.core.tool_factory import (
     ToolValidator,
     build_filtered_registry,
     load_custom_tools,
+    load_custom_tools_for_project,
 )
 
 # ── File Operations ──────────────────────────────────────────────

@@ -4,6 +4,116 @@
 
 ## [Unreleased]
 
+### 🏗️ Session 40 — 프로젝트별 역할 기반 툴 가시성 (RuntimeMode + PermissionProvider) (2026-05-08)
+
+#### 목표
+`dual_mode_runtime_spec.md` P0 항목 구현.
+프로젝트별·역할별로 사용자에게 보이는 툴이 달라지도록 에이전트 코어를 준비한다.
+기존 standalone 호출은 하위 호환 유지.
+
+---
+
+#### 신규 파일 1 — `theseus_engine/models/runtime_mode.py`
+
+- `RuntimeMode` enum: `STANDALONE` / `SERVER`
+- `detect_runtime_mode(project_id, actor_user_id)`:
+  - 우선순위: 환경변수 `THESEUS_RUNTIME_MODE` > 컨텍스트 파라미터 > 폴백 `STANDALONE`
+
+---
+
+#### 신규 파일 2 — `theseus_engine/models/permission_provider.py`
+
+- `ToolPermissionProvider` ABC:
+  - `get_permissions() -> dict[str, int]` — 툴 권한 맵
+  - `get_disabled_tools() -> set[str]` — 프로젝트 단위 비활성 툴
+  - `sync_tool(tool_name, permission_level, meta)` — 생성/갱신 후 소스 동기화
+- `StandalonePermissionProvider` — `.meta.json` 파일 스캔 기반
+  - `get_permissions()`: `custom_tools/*.meta.json` 의 `permissionLevel` 읽기
+  - `get_disabled_tools()`: `isActive=False` 인 툴 수집
+  - `sync_tool()`: `.meta.json` 의 `permissionLevel` 갱신
+- `ServerPermissionProvider` — 콜백 함수 주입 방식
+  - `theseus_engine`은 `src/auth`를 직접 import하지 않음
+  - 호출 측(`src/builder/engine.py`)이 `fetch_permissions_func`, `fetch_disabled_func`, `sync_func` 콜백을 주입
+  - Spring Backend API 연결 시 추가 코드 변경 불필요
+
+---
+
+#### 수정 — `theseus_engine/tools/core/tool_factory.py`
+
+- `load_custom_tools_for_project(registry, project_id, tool_permissions)` 함수 추가:
+  - 경로: `custom_tools/projects/<project_id>/*.py`
+  - `meta.json`의 `isActive=True` && `status="active"` 인 것만 로드
+  - `ToolValidator.validate_and_load_module()` 검증 후 등록
+  - `tool_permissions` 딕셔너리에 로드된 툴의 `permission_level` 자동 추가
+- `normalize_tool_meta()` — `runtimeMode` 필드 추가 (기본값 `"standalone"`)
+
+---
+
+#### 수정 — `theseus_engine/tools/core/__init__.py`
+
+- `load_custom_tools_for_project` export 추가
+
+---
+
+#### 수정 — `theseus_engine/core/engine_builder.py`
+
+- `setup_engine()` 신규 파라미터:
+  - `project_id: str | None = None` — 프로젝트 격리 경로
+  - `actor_role: str = "MEMBER"` — `"ADMIN"` / `"MEMBER"`
+  - `project_disabled_tools: set | None = None` — 프로젝트 단위 비활성 툴
+- 커스텀 툴 로딩 분기: `project_id` 유무에 따라 `load_custom_tools` / `load_custom_tools_for_project` 선택
+- `create_tool` 제외 로직 강화:
+  - 기존: PLAN EXECUTING이면 허용
+  - 변경: **ADMIN** 역할 + PLAN EXECUTING 일 때만 `create_tool` 허용
+- `project_disabled_tools` → `exclude_tools`에 합산하여 `build_filtered_registry` 호출
+- `tool_metadata`에 `project_id`, `actor_role` 추가
+
+---
+
+#### 하위 호환
+
+- 모든 신규 파라미터에 기본값 설정 (`None`, `"MEMBER"`, `None`)
+- `theseus_cli.py`, `tui_main.py` 기존 호출 변경 없이 동작 유지
+- standalone 경로 (`project_id=None`): 기존 `load_custom_tools()` 사용, `create_tool`은 PLAN EXECUTING에서 역할 제한 없이 허용 (로컬 사용자는 ADMIN 역할 불요)
+- 서버 경로 (`project_id` 존재): `actor_role="ADMIN"` 일 때만 `create_tool` 허용
+
+---
+
+#### 기능 추가 — CLI / TUI 사용자 역할 표시
+
+**파일**: `theseus_cli.py`, `theseus_cli/context.py`, `theseus_cli/ui.py`, `theseus_engine/tui/tui_main.py`
+
+현재 사용자의 역할(`ADMIN` / `MEMBER`)을 CLI 헤더와 TUI 사이드바에 표시.
+
+- **`theseus_cli.py`**: `actor_role = "ADMIN"` 변수 추가, `CLIContext`·`print_help`에 전달
+- **`theseus_cli/context.py`**: `actor_role: str = "ADMIN"` 필드 추가
+- **`theseus_cli/ui.py`**: `print_status()`·`print_help()`에 `actor_role` 파라미터 추가, 헤더에 `역할 : ADMIN` 줄 출력
+- **`theseus_engine/tui/tui_main.py`**:
+  - `self.actor_role = "ADMIN"` 필드 추가
+  - 사이드바 Status에 `role : ADMIN` 표시 (ADMIN → `bold cyan`, MEMBER → `dim`)
+  - 초기화 완료 메시지에 `Role: ADMIN | RBAC: Lv.5` 표시
+
+**CLI 출력 예시**:
+```
+  현재 모드  : 🤖 AGENT       (자율 실행)
+  역할       : ADMIN
+  권한 레벨  : Lv.5  (1=최소 / 5=최대)
+```
+
+**TUI 사이드바 예시**:
+```
+● Status
+  model     : gpt-4o
+  mode      : AGENT
+  role      : ADMIN
+  RBAC      : Lv.5
+  tokens    : N/A
+  messages  : 0
+  session   : default
+```
+
+---
+
 ### 🖥️ Session 39 — TUI Native App 고도화: 바인딩 정리 · /quit 커맨드 · 자동완성 수정 (2026-05-08)
 
 #### 목표

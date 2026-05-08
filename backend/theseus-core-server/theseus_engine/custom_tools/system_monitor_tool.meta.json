@@ -7,7 +7,7 @@
   "planId": null,
   "fileName": "system_monitor_tool.py",
   "createdAt": "2026-05-08T01:10:54.384408+00:00",
-  "updatedAt": "2026-05-08T01:10:54.384408+00:00",
+  "updatedAt": "2026-05-08T04:56:41.827154+00:00",
   "permissionLevel": 1,
   "status": "active",
   "isActive": true,
@@ -16,5 +16,6 @@
     "status": "validated",
     "message": "Normalized by load_custom_tools.",
     "checkedAt": "2026-05-08T01:10:54.384408+00:00"
-  }
+  },
+  "runtimeMode": "standalone"
 }

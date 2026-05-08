@@ -48,6 +48,7 @@ async def run_cli():
 
     sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
     user_level = 5
+    actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
     project_tool_permissions = {
         "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
         "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
@@ -98,11 +99,13 @@ async def run_cli():
         mode=sm.mode.name,
         user_level=user_level,
         plan_phase=getattr(sm, "plan_phase", None) and sm.plan_phase.name,
+        actor_role=actor_role,
     )
 
     ctx = CLIContext(
         sm=sm, engine=engine, client=client,
         user_level=user_level,
+        actor_role=actor_role,
         project_tool_permissions=project_tool_permissions,
         ask_permission=ask_permission,
         full_registry=full_registry,
