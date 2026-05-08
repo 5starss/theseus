@@ -7,6 +7,18 @@ from typing import Optional
 
 security = HTTPBearer(auto_error=False)
 
+
+def _build_mock_session_context(token: str) -> SessionContext:
+    if not settings.mock_auth_enabled:
+        raise RuntimeError("Mock authentication is disabled in this environment")
+
+    return SessionContext(
+        user_id=9999,
+        project_id=8888,
+        permission_level=3,
+        token=token,
+    )
+
 async def get_bearer_token(
     auth: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
@@ -48,16 +60,10 @@ async def get_session_context(
 ) -> SessionContext:
     """
     추출된 토큰을 검증하고 세션 컨텍스트를 반환합니다.
-    AUTH_MODE=mock인 경우 고정된 데이터를 반환합니다.
+    AUTH_MODE=mock은 dev/test 환경에서만 허용됩니다.
     """
-    if settings.AUTH_MODE == "mock":
-        # Mock 모드: 고정 데이터 반환
-        return SessionContext(
-            user_id=9999,
-            project_id=8888,
-            permission_level=3,  # Admin 권한 부여
-            token=token
-        )
+    if settings.mock_auth_enabled:
+        return _build_mock_session_context(token)
     
     # 실제 Spring Boot 연동 모드
     user_session: UserSession = await auth_client.verify_token(token)
@@ -77,13 +83,8 @@ async def get_sse_session_context(
     """
     SSE 전용 토큰 추출 방식을 사용하는 세션 컨텍스트 의존성입니다.
     """
-    if settings.AUTH_MODE == "mock":
-        return SessionContext(
-            user_id=9999,
-            project_id=8888,
-            permission_level=3,
-            token=token
-        )
+    if settings.mock_auth_enabled:
+        return _build_mock_session_context(token)
 
     user_session: UserSession = await auth_client.verify_token(
         token,
