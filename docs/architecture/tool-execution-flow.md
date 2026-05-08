@@ -13,6 +13,7 @@
 - Redis는 `tool:plan:{runId}:state`에 최신 상태를 TTL 기반으로 저장한다.
 - `chat_messages`에는 최종 사용자 메시지, 최종 Assistant 메시지, 시스템 안내만 저장한다.
 - AI가 보내는 progress/chunk는 Redis/SSE 이벤트로만 다룬다.
+- `planSnapshot`, history 변환, progress/chunk 세부 규칙은 [ToolPlan Snapshot, History, Progress Rules](./tool-plan-runtime-rules.md)를 따른다.
 
 ## 식별자
 
@@ -57,6 +58,30 @@ last emitted progress sequence
 ```
 
 API Server의 `planSnapshot`은 Core StateMachine 복원용 checkpoint가 아니다.
+
+### ToolPlan Snapshot
+
+`planSnapshot`은 사용자가 본 PLAN 화면과 승인 대상을 고정하는 API-facing snapshot이다.
+
+```text
+tool_plans.plan_snapshot
+```
+
+`planSnapshot`은 FE 렌더링, 새로고침 복구, 승인 감사에 사용한다. Core agent loop 재개, tool-use trace, intermediate state 복구에는 사용하지 않는다.
+
+필수 구성:
+
+```text
+schemaVersion
+planVersion
+title
+summary
+blocks[].blockId
+blocks[].title
+blocks[].content
+blocks[].order
+createdAt
+```
 
 ### Redis
 
@@ -104,6 +129,7 @@ sequenceDiagram
     FE->>API: POST /projects/{projectId}/sessions/{sessionId}/tool-plans/generate
     API->>API: 인증, 프로젝트 멤버, canCreateTool 검증
     API->>DB: USER TOOL_PLAN_REQUEST 메시지 저장
+    API->>DB: history snapshot 구성
     API->>DB: ToolPlanRun REQUESTED 생성
     API->>DB: DB commit
     API->>Kafka: TOOL_PLAN_REQUESTED 발행
@@ -133,6 +159,7 @@ PLAN 요청 시점에는 `tools` row와 `tool_plans` row를 생성하지 않는�
 사용자가 PLAN 카드에 블록별 코멘트 작성
 -> FE가 baseToolPlanId, basePlanVersion, feedbackItems 전송
 -> API Server가 base ToolPlan 검증
+-> API Server가 history snapshot 구성
 -> ToolPlanRun 생성
 -> Kafka TOOL_PLAN_REGENERATION_REQUESTED 발행
 -> Core가 basePlan과 feedbackItems로 최신 전체 PLAN 생성
@@ -253,6 +280,15 @@ PLAN_FAILED
 ```
 
 `progressRate`는 정확한 작업량 비율이 아니라 UI 표시용 추정값이다.
+
+규칙:
+
+```text
+eventSequence는 runId 안에서 단조 증가
+progressRate는 같은 run 안에서 감소하지 않음
+chunk는 임시 표시용이며 최종 메시지로 저장하지 않음
+terminal event 이후 progress/chunk는 무시
+```
 
 ## blockId
 

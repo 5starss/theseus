@@ -26,6 +26,8 @@ FE
 
 Kafka request 1개는 LLM 호출 1회가 아니라 Core Server의 장기 실행 run 하나를 시작하는 명령이다. Core 내부 `TheseusStateMachine` 상태와 tool-use trace는 Core PostgreSQL에 `runId` 기준 checkpoint로 저장한다.
 
+`planSnapshot`, history 변환, progress/chunk 세부 규칙은 [ToolPlan Snapshot, History, Progress Rules](../architecture/tool-plan-runtime-rules.md)를 따른다.
+
 ## Kafka Topic
 
 | Topic | Producer | Consumer | 용도 |
@@ -158,6 +160,8 @@ API Server가 `theseus.tool-plan.request` topic으로 발행한다.
     "planSnapshot": {
       "schemaVersion": 1,
       "planVersion": 1,
+      "title": "장애 로그 분석 Tool",
+      "summary": "최근 장애 로그를 수집하고 원인을 분류합니다.",
       "blocks": [
         {
           "blockId": "analysis-summary",
@@ -165,7 +169,8 @@ API Server가 `theseus.tool-plan.request` topic으로 발행한다.
           "content": "최근 장애 로그 분석 결과...",
           "order": 1
         }
-      ]
+      ],
+      "createdAt": "2026-05-08T10:18:00"
     }
   },
   "feedbackItems": [
@@ -191,11 +196,13 @@ Core Server가 `theseus.tool-plan.event` topic으로 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `progress` |
 | `runId` | string | Y | 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
+| `stage` | string | Y | 현재 진행 단계 |
 | `message` | string | Y | 진행 상태 문구 |
-| `progressRate` | number | N | UI 표시용 추정 진행률 |
+| `progressRate` | number | N | UI 표시용 0-100 정수 추정 진행률 |
+| `updatedAt` | datetime string | Y | 이벤트 발생 시각 |
 
 권장 progress 단계:
 
@@ -213,6 +220,8 @@ PLAN_SKIPPED
 PLAN_FAILED
 ```
 
+`progressRate`는 같은 run 안에서 감소하지 않는다. 실패나 skipped는 terminal event와 함께 100으로 종료할 수 있다.
+
 ### chunk
 
 생성 중인 내용 일부를 전달한다. DB에는 저장하지 않고 Redis 최신 상태와 SSE로만 사용한다.
@@ -221,10 +230,13 @@ PLAN_FAILED
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `chunk` |
 | `runId` | string | Y | 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
 | `content` | string | Y | 생성 중인 content |
+| `updatedAt` | datetime string | Y | 이벤트 발생 시각 |
+
+`chunk`는 임시 표시용 스트리밍 조각이다. 최종 Assistant 메시지는 `TOOL_PLAN_COMPLETED.assistantMessage`만 저장한다.
 
 ### TOOL_PLAN_COMPLETED
 
@@ -234,7 +246,7 @@ PLAN 생성/재생성이 성공했을 때 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `TOOL_PLAN_COMPLETED` |
 | `runId` | string | Y | 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
 | `assistantMessage` | object | Y | chat_messages에 저장할 Assistant 메시지 |
@@ -259,6 +271,23 @@ PLAN 생성/재생성이 성공했을 때 발행한다.
 
 `structuredPlanJson.blocks[].blockId/title/content`는 필수다.
 
+`planSnapshot`은 Core checkpoint가 아니다. Core checkpoint는 Core PostgreSQL에 `runId` 기준으로 저장한다.
+
+#### `planSnapshot`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `schemaVersion` | number | Y | snapshot 구조 버전 |
+| `planVersion` | number | Y | `tool_plans.plan_version`과 같은 값 |
+| `title` | string | Y | PLAN 카드 제목 |
+| `summary` | string | Y | PLAN 요약 |
+| `blocks` | array | Y | 화면 렌더링과 피드백 기준 블록 |
+| `blocks[].blockId` | string | Y | 블록 식별자 |
+| `blocks[].title` | string | Y | 블록 제목 |
+| `blocks[].content` | string | Y | 블록 본문 |
+| `blocks[].order` | number | Y | 화면 표시 순서 |
+| `createdAt` | datetime string | Y | Core completed 기준 생성 시각 |
+
 ### TOOL_PLAN_SKIPPED
 
 Core Server가 PLAN 모드 입력을 Tool 명세 생성 대상으로 판단하지 않은 경우 발행한다.
@@ -267,7 +296,7 @@ Core Server가 PLAN 모드 입력을 Tool 명세 생성 대상으로 판단하�
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `TOOL_PLAN_SKIPPED` |
 | `runId` | string | Y | 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
 | `assistantMessage` | object | Y | 사용자에게 표시할 안내 메시지 |
@@ -281,7 +310,7 @@ PLAN 생성/재생성 실패 시 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `TOOL_PLAN_FAILED` |
 | `runId` | string | Y | 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
 | `code` | string | Y | 실패 코드 |
@@ -314,7 +343,7 @@ Core Server가 `theseus.tool-build.event` topic으로 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `TOOL_BUILD_COMPLETED` |
 | `runId` | string | Y | build 실행 ID |
-| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `eventSequence` | number | Y | run 내부 단조 증가 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
 | `toolPlanId` | number | Y | 승인된 PLAN ID |
@@ -348,16 +377,26 @@ Core Server가 `theseus.tool-build.event` topic으로 발행한다.
 
 API Server는 Kafka payload에 최근 대화 history snapshot을 포함한다.
 
-| API messageType | Core context 변환 |
-| --- | --- |
-| `CHAT` | 일반 user/assistant text |
-| `TOOL_PLAN_REQUEST` | 사용자의 PLAN 요청 text |
-| `TOOL_PLAN_RESPONSE` | PLAN 요약 또는 rawMarkdown 중심 text |
-| `TOOL_FEEDBACK` | feedbackItems 요약 text |
-| `TOOL_APPROVAL_REQUEST` | 기본 LLM 생성 context에서는 제외 가능 |
-| `SYSTEM_NOTICE` | 제외 또는 system summary로 압축 |
+저장 위치:
+
+```text
+tool_plan_runs.history_snapshot_json
+```
+
+| ChatMessage | Core history role | Core history content |
+| --- | --- | --- |
+| `senderType = USER`, `messageType = CHAT` | `user` | `content` text |
+| `senderType = ASSISTANT`, `messageType = CHAT` | `assistant` | `content` text |
+| `TOOL_PLAN_REQUEST` | `user` | PLAN 요청 text |
+| `TOOL_PLAN_RESPONSE` | `assistant` | PLAN 요약과 핵심 block text |
+| `TOOL_FEEDBACK` | `user` | feedbackItems 요약 text |
+| `SYSTEM_NOTICE` | `system` 또는 제외 | 사용자 판단에 필요한 안내만 압축 |
 
 Core 내부 ToolUseBlock, ToolResultBlock은 API history에서 복원하지 않는다. Core 내부 tool-use trace는 Core checkpoint에서 관리한다.
+
+`TOOL_PLAN_RESPONSE` 전체 Markdown이 너무 길면 API Server는 요약본과 `toolPlanId`, `planVersion`, 주요 block title/content만 포함할 수 있다. 원본 PLAN은 재생성 payload의 `basePlan`으로 전달한다.
+
+history는 최근 메시지 개수 또는 token budget 기준으로 제한한다. 오래된 메시지는 요약 메시지로 압축할 수 있다.
 
 ## blockId 규칙
 
@@ -367,6 +406,20 @@ Core 내부 ToolUseBlock, ToolResultBlock은 API history에서 복원하지 않�
 - 삭제된 블록은 다음 PLAN에서 제외한다.
 - 분할된 블록은 기존 `blockId`를 대표 블록 하나에만 유지하고 나머지는 새 `blockId`를 생성한다.
 - 병합된 블록은 핵심 의미가 가장 큰 기존 `blockId` 하나를 유지한다.
+
+## Event Ordering
+
+Core Server는 같은 `runId` 안에서 `eventSequence`를 단조 증가시킨다.
+
+```text
+eventSequence = 1, 2, 3, ...
+```
+
+- `progress`, `chunk`, `completed`, `skipped`, `failed`는 같은 sequence 공간을 사용한다.
+- API Server는 이미 처리한 `runId + eventSequence` 이벤트를 다시 처리하지 않는다.
+- 늦게 도착한 낮은 sequence 이벤트는 Redis/SSE 최신 상태를 덮어쓰지 않는다.
+- `completed`, `skipped`, `failed`는 terminal event다.
+- terminal event 이후 같은 run의 progress/chunk는 무시한다.
 
 ## 저장 순서
 
@@ -452,7 +505,47 @@ docker exec -i theseus-local-kafka kafka-console-producer \
 ```
 
 ```json
-{"eventType":"TOOL_PLAN_COMPLETED","runId":"f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7","eventSequence":10,"projectId":2,"chatSessionId":360,"assistantMessage":{"messageType":"TOOL_PLAN_RESPONSE","contentType":"MARKDOWN","content":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석"},"toolPlan":{"rawMarkdown":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석","structuredPlanJson":{"version":1,"blocks":[{"blockId":"analysis-summary","title":"분석 요약","content":"최근 장애 로그를 수집하고 원인을 분류합니다."}]},"planSnapshot":{"schemaVersion":1,"planVersion":1,"blocks":[{"blockId":"analysis-summary","title":"분석 요약","content":"최근 장애 로그를 수집하고 원인을 분류합니다.","order":1}]}},"completedAt":"2026-05-08T10:21:00"}
+{
+  "eventType": "TOOL_PLAN_COMPLETED",
+  "runId": "f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7",
+  "eventSequence": 10,
+  "projectId": 2,
+  "chatSessionId": 360,
+  "assistantMessage": {
+    "messageType": "TOOL_PLAN_RESPONSE",
+    "contentType": "MARKDOWN",
+    "content": "## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석"
+  },
+  "toolPlan": {
+    "rawMarkdown": "## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석",
+    "structuredPlanJson": {
+      "version": 1,
+      "blocks": [
+        {
+          "blockId": "analysis-summary",
+          "title": "분석 요약",
+          "content": "최근 장애 로그를 수집하고 원인을 분류합니다."
+        }
+      ]
+    },
+    "planSnapshot": {
+      "schemaVersion": 1,
+      "planVersion": 1,
+      "title": "장애 로그 분석 Tool",
+      "summary": "최근 장애 로그를 수집하고 원인을 분류합니다.",
+      "blocks": [
+        {
+          "blockId": "analysis-summary",
+          "title": "분석 요약",
+          "content": "최근 장애 로그를 수집하고 원인을 분류합니다.",
+          "order": 1
+        }
+      ],
+      "createdAt": "2026-05-08T10:21:00"
+    }
+  },
+  "completedAt": "2026-05-08T10:21:00"
+}
 ```
 
 ### Redis state 확인

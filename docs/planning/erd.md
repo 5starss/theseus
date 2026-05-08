@@ -66,6 +66,8 @@ PLAN 요청
 
 AI 생성 중 progress/chunk는 `chat_messages`에 저장하지 않는다. Redis/SSE 상태로만 전달한다.
 
+`tool_plans.plan_snapshot`은 FE 렌더링, 새로고침 복구, 승인 감사에 사용하는 API-facing PLAN 고정본이다. Core Server의 `TheseusStateMachine` checkpoint와 tool-use trace는 API MySQL이 아니라 Core PostgreSQL에 저장한다.
+
 ## State
 
 ### ToolPlanGroupStatus
@@ -136,6 +138,8 @@ AI/Core 실행 1회는 `runId`로 식별한다. `runId`는 Kafka/Core 이벤트,
 | SSE | Redis 최신 상태와 Kafka Consumer 수신 이벤트를 FE에 실시간 중계 |
 
 Kafka request 1개는 LLM 호출 1회가 아니라 Core Server의 장기 실행 run 하나를 시작하는 명령이다. Core 내부 `TheseusStateMachine` checkpoint는 Core Server PostgreSQL에 저장한다.
+
+`tool_plan_runs.history_snapshot_json`은 Kafka 요청 시점의 Core 입력용 대화 snapshot이다. Core Server는 API Server 내부 HTTP로 history를 다시 조회하지 않는다.
 
 ## Relationship
 
