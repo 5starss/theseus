@@ -34,6 +34,9 @@ public class InternalAuthService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final ChatSessionRepository chatSessionRepository;
 
+	/**
+	 * 내부 서버 요청의 사용자 토큰과 프로젝트 접근 권한을 검증합니다.
+	 */
 	public InternalAuthVerifyResponse verify(InternalAuthVerifyRequest request) {
 		User user = getUserFromToken(request.getToken());
 		validateActiveUser(user);

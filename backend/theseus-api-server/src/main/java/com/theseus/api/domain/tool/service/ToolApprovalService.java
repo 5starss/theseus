@@ -43,6 +43,9 @@ public class ToolApprovalService {
 	private final UserRepository userRepository;
 	private final ChatMessageService chatMessageService;
 
+	/**
+	 * 승인 권한을 가진 프로젝트 멤버가 Tool 승인 요청 목록을 조회합니다.
+	 */
 	public Page<ToolApprovalResponse> getToolApprovals(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -64,6 +67,9 @@ public class ToolApprovalService {
 			.map(ToolApprovalResponse::createFrom);
 	}
 
+	/**
+	 * 승인 권한을 검증하고 Tool 승인 요청 상세 정보를 조회합니다.
+	 */
 	public ToolApprovalResponse getToolApproval(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -80,6 +86,9 @@ public class ToolApprovalService {
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
 
+	/**
+	 * Tool 생성자가 REVIEW 단계의 Draft Tool에 대해 승인 요청을 등록합니다.
+	 */
 	@Transactional
 	public ToolApprovalResponse requestToolApproval(
 		AuthenticatedUser currentUser,
@@ -111,6 +120,9 @@ public class ToolApprovalService {
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
 
+	/**
+	 * 승인 담당자가 대기 중인 Tool 승인 요청을 승인 처리합니다.
+	 */
 	@Transactional
 	public ToolApprovalResponse approveToolApproval(
 		AuthenticatedUser currentUser,
@@ -134,6 +146,9 @@ public class ToolApprovalService {
 		return ToolApprovalResponse.createFrom(toolApproval);
 	}
 
+	/**
+	 * 승인 담당자가 대기 중인 Tool 승인 요청을 반려 처리합니다.
+	 */
 	@Transactional
 	public ToolApprovalResponse rejectToolApproval(
 		AuthenticatedUser currentUser,

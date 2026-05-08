@@ -38,6 +38,9 @@ public class ChatSessionService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * 로그인 사용자의 프로젝트 멤버 권한으로 새 채팅 세션을 생성합니다.
+	 */
 	@Transactional
 	public ChatSessionResponse createChatSession(
 		AuthenticatedUser currentUser,
@@ -53,6 +56,9 @@ public class ChatSessionService {
 		return ChatSessionResponse.createFrom(chatSession);
 	}
 
+	/**
+	 * 로그인 사용자가 접근 가능한 프로젝트의 채팅 세션 목록을 조회합니다.
+	 */
 	public Page<ChatSessionResponse> getChatSessions(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -68,6 +74,9 @@ public class ChatSessionService {
 			.map(ChatSessionResponse::createFrom);
 	}
 
+	/**
+	 * 채팅 세션 상세 정보와 세션 메시지 목록을 함께 조회합니다.
+	 */
 	public ChatSessionDetailResponse getChatSession(
 		AuthenticatedUser currentUser,
 		Long projectId,
@@ -79,6 +88,9 @@ public class ChatSessionService {
 		return ChatSessionDetailResponse.createOf(chatSession, messages);
 	}
 
+	/**
+	 * 접근 가능한 채팅 세션의 제목을 수정합니다.
+	 */
 	@Transactional
 	public ChatSessionResponse updateChatSessionTitle(
 		AuthenticatedUser currentUser,
@@ -93,6 +105,9 @@ public class ChatSessionService {
 		return ChatSessionResponse.createFrom(chatSession);
 	}
 
+	/**
+	 * 접근 가능한 채팅 세션을 종료 처리합니다.
+	 */
 	@Transactional
 	public ChatSessionResponse closeChatSession(
 		AuthenticatedUser currentUser,

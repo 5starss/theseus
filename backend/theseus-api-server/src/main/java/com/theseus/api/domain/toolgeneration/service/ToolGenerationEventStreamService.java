@@ -36,6 +36,9 @@ public class ToolGenerationEventStreamService {
 	private final ToolGenerationStateProperties properties;
 	private final ToolGenerationSseEmitterRegistry emitterRegistry;
 
+	/**
+	 * Tool 생성 진행 상태 SSE 구독을 등록하고 현재 Redis 상태를 즉시 전송합니다.
+	 */
 	public SseEmitter subscribe(
 		AuthenticatedUser currentUser,
 		Long projectId,
