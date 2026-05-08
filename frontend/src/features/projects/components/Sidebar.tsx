@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Sparkles, Wrench, Settings, UserCircle, LogOut, Shield, User, Key, Check, X } from 'lucide-react';
+import { Sparkles, Wrench, Settings, UserCircle, LogOut, User, Key, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAuthStore } from '@/store/useAuthStore';
