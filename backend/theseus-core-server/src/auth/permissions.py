@@ -36,7 +36,7 @@ async def get_project_tool_permissions(
 ) -> dict[str, int]:
     del session_id  # Reserved for a future session-aware permission contract.
 
-    if settings.AUTH_MODE == "mock":
+    if settings.mock_auth_enabled:
         return dict(MOCK_PROJECT_TOOL_PERMISSIONS)
 
     try:
