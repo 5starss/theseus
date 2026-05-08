@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from typing import Optional
 from typing import Literal
 from urllib.parse import urlparse
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     SANDBOX_CPU_QUOTA: int = 50000
     SANDBOX_CPU_PERIOD: int = 100000
     SANDBOX_KEEP_FAILED_CONTAINERS: bool = False
+    DOCKER_HOST: Optional[str] = None
+    SANDBOX_STARTUP_CHECK: bool = True
+    SANDBOX_STARTUP_STRICT: bool = False
+    SANDBOX_PULL_ON_STARTUP: bool = False
 
     # Kafka Settings
     CORE_KAFKA_CONSUMER_ENABLED: bool = False
@@ -102,6 +107,10 @@ class Settings(BaseSettings):
                 "http://127.0.0.1:5173",
             ]
         return []
+
+    @property
+    def docker_host(self) -> Optional[str]:
+        return self.DOCKER_HOST or os.getenv("DOCKER_HOST")
 
     @model_validator(mode="after")
     def validate_runtime_safety(self) -> "Settings":

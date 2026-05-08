@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
@@ -7,18 +8,33 @@ from src.builder.worker import setup_scheduler
 from src.config import settings
 from src.db.postgres import init_db
 from src.routes import health, plan, sandbox, stream
+from src.sandbox.docker_executor import DockerExecutor, SandboxStartupCheckError
 from src.tool_generation.consumer import start_tool_generation_consumer
 import logging
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+_sandbox_executor = DockerExecutor()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Core database schema initialized.")
+
+    if settings.SANDBOX_STARTUP_CHECK:
+        try:
+            sandbox_info = await asyncio.to_thread(
+                _sandbox_executor.verify_connectivity,
+                pull_if_missing=settings.SANDBOX_PULL_ON_STARTUP,
+            )
+            logger.info("Sandbox connectivity verified. image=%s status=%s host=%s",
+                        sandbox_info["image"], sandbox_info["imageStatus"], sandbox_info["dockerHost"])
+        except SandboxStartupCheckError as exc:
+            if settings.SANDBOX_STARTUP_STRICT:
+                raise
+            logger.warning("Sandbox startup check failed: %s", exc)
 
     scheduler = setup_scheduler()
     app.state.billing_scheduler = scheduler

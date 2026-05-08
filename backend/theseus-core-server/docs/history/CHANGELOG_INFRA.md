@@ -2,6 +2,18 @@
 
 인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
 
+## [2026-05-08] Sandbox Execution Hardening & Operational Readiness
+
+### 샌드박스 실행 경로 안정성 및 진단 능력 보강 (`src/sandbox/`, `src/main.py`)
+- **Startup Verification**: 서버 기동 시(`lifespan`) Docker 데몬 연결성 및 샌드박스 이미지(`SANDBOX_IMAGE`) 존재 여부를 자동으로 점검하도록 개선했습니다.
+- **Auto-Pull Strategy**: 운영 환경에서의 지연을 방지하기 위해 부팅 단계에서 샌드박스 이미지를 미리 Pull 할 수 있는 옵션(`SANDBOX_PULL_ON_STARTUP`)을 추가했습니다.
+- **Detailed Error Mapping**: Docker 에러를 권한, 마운트 실패, 연결 오류, 이미지 부재 등으로 세분화하여 분류하고, ExitCode 137(OOM)을 명시적으로 감지하도록 로직을 보강했습니다.
+- **Diagnostics Metadata**: 샌드박스 실행 결과에 `containerId`, `dockerHost`, 리소스 제한 도달 여부 등 상세 진단 정보를 포함하여 운영 중 디버깅 효율을 높였습니다.
+
+### 검증 도구 및 설정 자동화 (`scratch/`, `.env.example`)
+- **Sandbox Smoke Test**: 전체 실행 경로(마운트 -> 실행 -> 결과 회수)를 독립적으로 검증할 수 있는 `scratch/smoke_sandbox.py`를 추가했습니다.
+- **Docker Host Configuration**: `DOCKER_HOST` 설정을 외부에 노출하여 원격 Docker 데몬이나 특수 컨테이너 환경에서도 유연하게 대응할 수 있도록 정리했습니다.
+
 ## [2026-05-07] Kafka-Centric Tool Generation Worker Alignment
 
 ### Tool Generation 통신 모델을 Kafka 중심 비동기 워커 구조로 정렬
