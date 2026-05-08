@@ -62,6 +62,10 @@ async def handle_slash_command(
     elif cmd == "/coordinator":
         ctx.sm.switch_mode(AgentMode.COORDINATOR)
         ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
+        ctx.pending_mode_notification = (
+            "[System: Mode switched to COORDINATOR. Decompose the task into parallel sub-agents. "
+            "All prior mode restrictions are lifted.]\n\n"
+        )
         print_status(ctx.sm.mode.name, ctx.user_level)
         return True, None
 
@@ -109,14 +113,22 @@ async def handle_slash_command(
 
     # ── 도구 목록 ────────────────────────────────────────────────
     elif cmd == "/tools":
-        print("\n[🛠️  Available Tools]")
-        _, current_registry = await setup_engine(
-            ctx.sm, ctx.user_level, ctx.project_tool_permissions, ctx.ask_permission,
-        )
-        for tool in current_registry.list_tools():
-            perm = ctx.project_tool_permissions.get(tool.name, 1)
-            print(f"- {tool.name:<20} [Lv.{perm}]")
-        print("")
+        sub = args[0].lower() if args else "all"
+
+        if sub == "custom":
+            _print_custom_tools(ctx)
+        elif sub in ("all", "list", ""):
+            _print_all_tools(ctx)
+        elif sub == "help":
+            print(
+                "\n[🛠️  /tools 사용법]\n"
+                "  /tools           — 전체 활성 툴 목록\n"
+                "  /tools all       — 전체 활성 툴 목록 (동일)\n"
+                "  /tools custom    — 커스텀 툴만 필터링\n"
+                "  /tools help      — 이 도움말\n"
+            )
+        else:
+            print(f"[!] 알 수 없는 서브커맨드: '{sub}'. '/tools help'를 입력하면 사용법을 확인할 수 있습니다.")
         return True, None
 
     # ── 도구 검증 ────────────────────────────────────────────────
@@ -190,3 +202,103 @@ async def handle_slash_command(
 
     # ── 미인식 명령어 ────────────────────────────────────────────
     return False, None
+
+
+# ── 내부 헬퍼 ────────────────────────────────────────────────────
+
+def _print_all_tools(ctx: CLIContext) -> None:
+    """전체 활성 툴 목록 출력 (커스텀 툴은 [custom] 태그 표시)."""
+    from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR
+
+    custom_names = _get_custom_tool_names()
+    tools = ctx.full_registry.list_tools() if ctx.full_registry else []
+
+    if not tools:
+        print("\n[!] 등록된 툴이 없습니다.")
+        return
+
+    print(f"\n[🛠️  All Tools] ({len(tools)}개)")
+    print(f"{'이름':<24} {'레벨':<6} {'구분'}")
+    print("─" * 46)
+    for tool in sorted(tools, key=lambda t: t.name):
+        perm = ctx.project_tool_permissions.get(tool.name, 1)
+        tag = "[custom]" if tool.name in custom_names else "[core]  "
+        print(f"  {tool.name:<22} Lv.{perm:<3}  {tag}")
+    print()
+
+
+def _print_custom_tools(ctx: CLIContext) -> None:
+    """커스텀 툴만 필터링하여 상세 정보와 함께 출력."""
+    import json
+    from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR
+
+    custom_names = _get_custom_tool_names()
+
+    if not custom_names:
+        print("\n[ℹ️ ] 등록된 커스텀 툴이 없습니다.")
+        print(f"     커스텀 툴 디렉토리: {CUSTOM_TOOLS_DIR}")
+        return
+
+    # full_registry에서 커스텀 툴 인스턴스 조회
+    registry_map: dict = {}
+    if ctx.full_registry:
+        for tool in ctx.full_registry.list_tools():
+            if tool.name in custom_names:
+                registry_map[tool.name] = tool
+
+    print(f"\n[🔧  Custom Tools] ({len(custom_names)}개)")
+    print(f"{'이름':<24} {'레벨':<6} {'상태':<10} {'설명'}")
+    print("─" * 80)
+
+    for module_name in sorted(custom_names):
+        meta = _load_meta(CUSTOM_TOOLS_DIR, module_name)
+        tool_name   = meta.get("toolName", module_name)
+        perm        = meta.get("permissionLevel", ctx.project_tool_permissions.get(tool_name, 1))
+        status      = meta.get("status", "active")
+        is_active   = meta.get("isActive", True)
+        status_tag  = f"{'✅' if is_active else '⏸️ '} {status}"
+
+        # description은 registry의 인스턴스에서 읽음
+        instance = registry_map.get(tool_name)
+        description = getattr(instance, "description", "") if instance else ""
+        desc_short  = (description[:38] + "…") if len(description) > 39 else description
+
+        print(f"  {tool_name:<22} Lv.{perm:<3}  {status_tag:<10}  {desc_short}")
+
+        # 상세 정보 (validation 결과)
+        validation = meta.get("validationResult") or {}
+        v_status = validation.get("status", "")
+        if v_status and v_status != "validated":
+            print(f"    {'':2}⚠️  validation: {v_status} — {validation.get('message','')}")
+
+    print()
+    from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR as _DIR
+    print(f"  📁 디렉토리: {_DIR}")
+    print()
+
+
+def _get_custom_tool_names() -> set[str]:
+    """custom_tools/ 디렉토리에서 .py 파일 기반으로 모듈명 집합을 반환."""
+    import os
+    from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR
+
+    if not os.path.isdir(CUSTOM_TOOLS_DIR):
+        return set()
+    names: set[str] = set()
+    for fname in os.listdir(CUSTOM_TOOLS_DIR):
+        if fname.endswith(".py") and not fname.startswith("_"):
+            names.add(fname[:-3])  # 모듈명 (확장자 제거)
+    return names
+
+
+def _load_meta(custom_tools_dir: str, module_name: str) -> dict:
+    """module_name.meta.json을 읽어 dict로 반환. 파일 없으면 빈 dict."""
+    import json, os
+    path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}

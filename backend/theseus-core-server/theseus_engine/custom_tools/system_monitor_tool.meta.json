@@ -1,0 +1,20 @@
+{
+  "toolName": "system_monitor_tool",
+  "moduleName": "system_monitor_tool",
+  "projectId": "local",
+  "chatSessionId": null,
+  "creatorUserId": "cli_user",
+  "planId": null,
+  "fileName": "system_monitor_tool.py",
+  "createdAt": "2026-05-08T01:10:54.384408+00:00",
+  "updatedAt": "2026-05-08T01:10:54.384408+00:00",
+  "permissionLevel": 1,
+  "status": "active",
+  "isActive": true,
+  "validationResult": {
+    "success": true,
+    "status": "validated",
+    "message": "Normalized by load_custom_tools.",
+    "checkedAt": "2026-05-08T01:10:54.384408+00:00"
+  }
+}

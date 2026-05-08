@@ -4,6 +4,452 @@
 
 ## [Unreleased]
 
+### 🐛 Session 37 — maybe_compress 시그니처 버그 수정 / /tools custom 커맨드 추가 / create_tool 자동 등록 알림 / LLM 생성 코드 정제 (2026-05-08)
+
+---
+
+#### 버그 수정 1 — `maybe_compress()` 미지원 파라미터 에러
+
+**증상**: `[ERROR] maybe_compress() got an unexpected keyword argument 'system_prompt'`
+
+**원인**: `theseus_engine/engine/query_engine.py`의 `run_query()` 안에서 `maybe_compress()`를 호출할 때
+`system_prompt=`, `force=True` 두 개의 없는 파라미터를 전달하고 있었음.
+`maybe_compress(messages, max_messages, keep_recent, api_client, model)` 시그니처에는 두 파라미터가 없음.
+추가로 반환값이 `(list, bool)` 튜플인데 `messages = await ...` 로 튜플 전체를 받고 있었음.
+
+**수정**: `theseus_engine/engine/query_engine.py`
+- auto-compact 경로: `system_prompt` 제거, 반환값 `messages, _ = await maybe_compress(...)` 언패킹
+- reactive compact 경로: `system_prompt`·`force=True` 제거, `keep_recent=4` 명시(공격적 압축), 반환값 언패킹
+
+---
+
+#### 기능 추가 1 — `/tools custom` 커맨드
+
+**파일**: `theseus_cli/commands.py`, `theseus_cli/context.py`, `theseus_cli.py`, `theseus_cli/ui.py`
+
+`/tools` 커맨드를 서브커맨드 방식으로 확장.
+
+| 커맨드 | 동작 |
+|--------|------|
+| `/tools` 또는 `/tools all` | 전체 활성 툴 목록. 커스텀 툴은 `[custom]` 태그 표시 |
+| `/tools custom` | 커스텀 툴만 필터링. `meta.json`에서 권한·상태·검증 결과 읽어 상세 출력 |
+| `/tools help` | 서브커맨드 도움말 |
+
+- **`theseus_cli/commands.py`**:
+    - `/tools` 핸들러를 서브커맨드 라우터로 재작성
+    - `_print_all_tools(ctx)`: 전체 툴 테이블, 커스텀 툴 `[custom]` 태그
+    - `_print_custom_tools(ctx)`: `meta.json`(`toolName`, `permissionLevel`, `status`, `isActive`, `validationResult`) + registry 인스턴스 `description` 조합 출력
+    - `_get_custom_tool_names()`: `custom_tools/` 디렉토리 `.py` 파일 스캔
+    - `_load_meta(dir, module_name)`: `module_name.meta.json` 파싱 헬퍼
+
+- **`theseus_cli/context.py`**: `full_registry: Any = None` 필드 추가
+
+- **`theseus_cli.py`**:
+    - `engine, _ = await setup_engine(...)` → `engine, full_registry = await setup_engine(...)`
+    - `CLIContext(full_registry=full_registry)` 주입
+    - 매 턴 `setup_engine` 재구성 후 `ctx.full_registry = new_full_registry` 갱신
+
+- **`theseus_cli/ui.py`**: `/help` 출력에 `/tools custom`, `/tools help` 라인 추가
+
+---
+
+#### 기능 추가 2 — `create_tool` 성공 후 자동 등록 알림
+
+**파일**: `theseus_cli.py`
+
+`create_tool` 툴이 성공적으로 실행된 직후, 다음 `AssistantTurnComplete` 이벤트 수신 시 새로 등록된 툴 정보를 자동으로 출력.
+
+**동작 흐름**:
+```
+ToolExecutionCompleted(tool_name="create_tool", is_error=False)
+  └─ output에서 "Tool '<name>' created" 정규식 파싱 → newly_created_tools 누적
+AssistantTurnComplete
+  └─ _auto_print_created_tools() 자동 호출
+  └─ ctx.full_registry를 engine._tool_metadata["tool_registry"]로 갱신
+```
+
+**출력 예시**:
+```
+────────────────────────────────────────────────────────────
+  ✨ 새 커스텀 툴 등록 완료 (1개)
+────────────────────────────────────────────────────────────
+  🔧 internet_speed_tool
+     권한 레벨   : Lv.1
+     상태        : active
+     파일        : custom_tools/internet_speed_tool.py
+     설명        : 인터넷 속도를 측정하여 다운로드/업로드 속도…
+     검증        : ✅ 통과
+
+  💡 '/tools custom' 으로 전체 커스텀 툴 목록을 확인할 수 있습니다.
+────────────────────────────────────────────────────────────
+```
+
+- **추가 함수** `_auto_print_created_tools(tool_names, ctx)`:
+    - 각 툴 이름으로 `module_name.meta.json` 읽기
+    - `full_registry` 또는 `engine._tool_metadata["tool_registry"]`에서 인스턴스 조회 → `description` 출력
+    - validation 이상 시 경고 라인 추가
+- **이벤트 루프 수정**: `newly_created_tools: list[str] = []` 턴 단위 버퍼, `ToolExecutionCompleted` 핸들러에서 파싱·누적, `AssistantTurnComplete` 후 출력 및 `clear()`
+
+---
+
+#### 버그 수정 2 — LLM 생성 코드 파싱 오염 (`SyntaxError: unexpected character after line continuation character`)
+
+**증상**: `[ToolAudit] Legacy tool creation failed at validation: Syntax Error: unexpected character after line continuation character (<unknown>, line 7)`
+
+**원인 분류**:
+
+| 패턴 | 원인 |
+|------|------|
+| `\ ` (백슬래시 + 후행 공백) | LLM이 줄 끝 공백을 보존한 채 멀티라인 코드 생성 — 파이썬은 `\` 뒤 공백에서 SyntaxError 발생 |
+| ` ```python\n...\n``` ` | `python_code` 인자에 마크다운 펜스 블록째로 전달 |
+| `\r\n` 혼입 | Windows 라인엔딩이 섞인 코드 생성 |
+| NULL 바이트 | 바이너리 혼입 시 파서 충돌 |
+
+**수정**: `_sanitize_generated_code(code: str) -> str` 함수를 두 실행 경로 모두에 추가.
+
+- **`theseus_engine/tools/core/tool_factory.py`**:
+    - `_sanitize_generated_code()` 모듈 레벨 함수 추가
+    - `_execute_standalone()` 내 `inject_permission_level()` 직후 `code = _sanitize_generated_code(code)` 호출
+    - 검증 실패 시 코드 앞 20줄을 로그에 덤프 (디버깅 가시성 확보)
+
+- **`src/tooling/service.py`**:
+    - 동일한 `_sanitize_generated_code()` 함수 추가 (서버 경로 동일 처리)
+    - `inject_permission_level()` 직후 `code = _sanitize_generated_code(code)` 호출
+
+**`_sanitize_generated_code` 처리 순서**:
+1. 마크다운 코드펜스 벗기기 (` ```python ... ``` `)
+2. CRLF → LF 정규화
+3. NULL 바이트 제거
+4. `\ ` (백슬래시 + 1개 이상 공백 + `\n`) → `\\\n` 교정
+
+---
+
+### 🔧 Session 36 — QueryEngine & TUI OH 의존 완전 제거 (2026-05-08)
+
+#### 목표
+`openharness.engine.query_engine.QueryEngine`, `openharness.ui.*`, `openharness.commands.*` 의존을
+Theseus-native 구현으로 교체하여 `theseus_engine` 패키지 내 **런타임 OH import 0개** 달성.
+
+#### 달성 결과 요약
+
+| 영역 | 이전 | 이후 |
+|------|------|------|
+| QueryEngine | `openharness.engine.query_engine.QueryEngine` | `theseus_engine.engine.query_engine.QueryEngine` |
+| Stream Events | OH re-export `try/except` 브릿지 | Theseus-native frozen dataclass |
+| TUI 베이스 | `OpenHarnessTerminalApp` 상속 | `textual.app.App` 직접 상속 |
+| TUI 런타임 | `build_runtime`, `start_runtime`, `handle_line` (OH) | `build_theseus_runtime`, `start_theseus_runtime` (Theseus-native) |
+| 커맨드 레지스트리 | `SlashCommand`, `CommandResult` (OH) | `theseus_engine.tui.commands` (Theseus-native) |
+| sys.path 주입 | `OpenHarness/src` 경로 2곳 | 완전 제거 |
+
+---
+
+#### Task 2 — QueryEngine Theseus-native 구현 및 배선
+
+- **`theseus_engine/engine/query_engine.py` (신규)**:
+    - `MaxTurnsExceeded(max_turns)` — OH 호환 예외 클래스
+    - `QueryContext` dataclass — 단일 쿼리 실행 상태 캡슐화
+    - `_execute_tool_call()`:
+        - pre-hook (`TheseusHookExecutor.before_tool`) → permission check (`TheseusPermissionChecker`) → tool 유효성 검사 → tool 실행
+        - 대형 출력 파일 오프로드 (`THESEUS_TOOL_OUTPUT_INLINE_CHARS`, 기본 8000자)
+        - carryover 추적 (읽기/쓰기 파일 메타 기록) → post-hook (`after_tool`)
+    - `run_query()` 비동기 제너레이터:
+        - auto-compact: `context_compressor.maybe_compress()` 위임
+        - token limit 에러 감지 → reactive compact 후 재시도
+        - 복수 tool call 병렬 실행: `asyncio.gather(return_exceptions=True)`
+        - `AssistantTextDelta`, `AssistantTurnComplete`, `ToolExecutionStarted`, `ToolExecutionCompleted`, `ErrorEvent`, `StatusEvent`, `CompactProgressEvent` yield
+    - `QueryEngine` 클래스 — OH-compatible public interface:
+        - `submit_message(text)` → `AsyncIterator[StreamEvent]`
+        - `set_system_prompt(prompt)`, `set_api_client(client)`, `clear()`
+        - `load_messages(msgs)`, `messages` property, `total_usage` property
+    - Tool metadata 추적 헬퍼:
+        - `remember_user_goal`, `_remember_active_artifact`, `_remember_verified_work`
+        - `_remember_read_file`, `_record_tool_carryover`, `_offload_tool_output_if_needed`
+
+- **`theseus_engine/core/engine_builder.py`**:
+    - `from openharness.engine.query_engine import QueryEngine` → `from theseus_engine.engine.query_engine import QueryEngine`
+
+- **`theseus_engine/core/command_handler.py`**:
+    - `from openharness.engine.query_engine import QueryEngine` → `from theseus_engine.engine.query_engine import QueryEngine`
+
+---
+
+#### Task 6 — stream_events.py 브릿지 → native 전환
+
+- **`theseus_engine/engine/stream_events.py` (재작성)**:
+    - OH re-export `try/except ImportError` 브릿지 블록 완전 제거
+    - `AssistantTextDelta`, `AssistantTurnComplete`, `ToolExecutionStarted`, `ToolExecutionCompleted`, `ErrorEvent`, `StatusEvent`, `CompactProgressEvent`, `StreamEvent` — 모두 `@dataclass(frozen=True)` Theseus-native 정의로 확정
+    - docstring: OH 브릿지 설명 → "Theseus-native stream event types" 로 교체
+    - **배경**: Session 34에서 OH `QueryEngine`이 yield하는 타입과 `isinstance()` 호환을 위해 OH re-export 방식을 임시 채택했었음. 본 세션에서 `QueryEngine`을 Theseus-native로 교체하면서 브릿지 불필요 → 순수 Theseus 정의로 전환
+
+---
+
+#### Task 5 — TUI OH 프레임워크 완전 분리
+
+- **`theseus_engine/tui/commands.py` (신규)**:
+    - `CommandResult(message, exit_app)` — 커맨드 핸들러 반환값
+    - `SlashCommand(name, description, handler)` — 커맨드 정의
+    - `CommandRegistry` — 등록(`register`), 조회(`get`), 디스패치(`dispatch`) 기능 포함
+    - OH `openharness.commands.registry` 완전 대체
+
+- **`theseus_engine/tui/runtime.py` (신규)**:
+    - `AppState(model, permission_mode, session)` — TUI 앱 상태, `.get()`/`.set()` 인터페이스 (OH bundle.app_state 호환)
+    - `TheseusBundle(engine, tool_registry, api_client, commands, app_state, external_api_client)` — OH bundle 인터페이스 호환 dataclass
+    - `build_theseus_runtime(...)` — `setup_engine` 결과로 `QueryEngine` 생성 및 `TheseusBundle` 반환
+    - `start_theseus_runtime(bundle)` — 백그라운드 태스크 시작 (확장 포인트)
+    - `handle_theseus_line(bundle, line, ...)` — 슬래시 커맨드 디스패치 (`/exit`, `/quit`, `/clear` 포함)
+    - OH `openharness.ui.runtime` 완전 대체
+
+- **`theseus_engine/tui/tui_main.py` (전면 재작성)**:
+    - **제거**: `from openharness.ui.textual_app import OpenHarnessTerminalApp`
+    - **제거**: `from openharness.ui.runtime import build_runtime, start_runtime, handle_line`
+    - **제거**: `from openharness.engine.query import MaxTurnsExceeded`
+    - **제거**: `from openharness.commands.registry import SlashCommand, CommandResult`
+    - **제거**: `sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))`
+    - `TheseusTUI(App)` — `textual.app.App` 직접 상속, Theseus-native CSS/BINDINGS 자체 정의
+    - `TheseusInput(Input)` — 슬래시 커맨드 위젯 레벨 인터셉트 유지 (OH 의존 없음)
+    - `on_mount()`: OH `build_runtime` 제거 → `setup_engine()` 직접 호출, `TheseusBundle` 생성
+    - `_register_commands()`: OH `bundle.commands._commands` 직접 조작 대신 `CommandRegistry.register()` 사용
+    - `_render_event()`: `isinstance()` 분기 — `AssistantTextDelta`, `AssistantTurnComplete`, `ToolExecutionStarted`, `ToolExecutionCompleted`, `ErrorEvent`, `StatusEvent`, `CompactProgressEvent` 모두 처리
+    - `_process_line()`: `MaxTurnsExceeded` → `theseus_engine.engine.query_engine`에서 import
+    - `_cmd_*` 핸들러: `CommandResult` → `theseus_engine.tui.commands`에서 import
+    - `action_quit_session()`: 종료 시 세션 히스토리 자동 저장
+    - `_refresh_sidebars()`: OH `bundle.app_state.get()` → `TheseusBundle.app_state.get()` 호환 유지
+
+---
+
+#### Task 7 — sys.path OpenHarness 경로 제거
+
+- **`theseus_cli.py`** (line 18):
+    - `sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))` 삭제
+    - `sys.path.insert(0, str(PROJECT_ROOT))` 1줄만 유지
+
+- **`theseus_engine/core/cli_main.py`** (line 8):
+    - 동일 라인 삭제
+
+---
+
+#### 최종 OH 의존 현황 (theseus_engine + theseus_cli)
+
+| 구분 | OH import 수 | 비고 |
+|------|-------------|------|
+| `theseus_engine/**/*.py` (런타임) | **0** | `state.py` docstring 텍스트만 존재 (코드 아님) |
+| `theseus_cli/**/*.py` | **0** | 완전 클린 |
+| `src/builder/engine.py` | 6 | 서버 빌더 — 별도 계획 |
+| `docs/legacy/*.py` | 13 | 비활성 레거시 — 삭제 예정 |
+
+---
+
+### 🔧 Session 35 — Message 타입 & LLM Client OH 의존 제거 (2026-05-08)
+
+#### 목표
+`openharness.engine.messages`, `openharness.api.client`, `openharness.api.openai_client`,
+`openharness.api.usage` 4개 모듈 의존을 Theseus-native 구현으로 완전 교체.
+
+#### Task 3 — Message 타입 자체 정의
+
+- **`theseus_engine/models/messages.py` (신규)**:
+    - `TextBlock`, `ImageBlock`, `ToolUseBlock`, `ToolResultBlock`, `ContentBlock`, `ConversationMessage` — Pydantic BaseModel 기반, OH 의존 없음
+    - `serialize_content_block()`, `assistant_message_from_api()`, `sanitize_conversation_messages()` 헬퍼 포함
+    - `ConversationMessage.to_api_param()`, `.text`, `.tool_uses`, `from_user_text()` 등 OH와 동일 인터페이스 유지
+
+- **`theseus_engine/models/sessions.py`**: `from openharness.engine.messages import ConversationMessage` → `theseus_engine.models.messages`
+- **`theseus_engine/core/context_compressor.py`**: lazy OH import → Theseus 직접 import (try/except 제거)
+- **`theseus_cli/intent.py`**: `openharness.engine.messages` → `theseus_engine.models.messages`
+- **`src/history/mapper.py`**: lazy OH import → Theseus import (fallback 메시지 문구 업데이트)
+- **`tests/test_markdown_to_pdf.py`**: `openharness.tools.base.ToolExecutionContext` → `theseus_engine.tools.core.base_tools`
+
+#### Task 1 — LLM Client OH 의존 제거
+
+- **`theseus_engine/wrappers/llm_clients/api_types.py` (신규)**:
+    - `UsageSnapshot`, `ApiMessageRequest`, `ApiTextDeltaEvent`, `ApiMessageCompleteEvent`, `ApiRetryEvent`, `ApiStreamEvent`, `SupportsStreamingMessages` Protocol
+    - `TheseusApiError`, `AuthenticationFailure`, `RateLimitFailure`, `RequestFailure` 에러 타입
+
+- **`theseus_engine/wrappers/llm_clients/anthropic_client.py` (신규)**:
+    - `TheseusAnthropicClient` — `AnthropicApiClient` OH 의존 없이 재구현
+    - 표준 API 키 인증, retry/backoff, `_stream_once()` 완전 구현
+    - Claude OAuth 전용 코드 제거 (OH 전용 기능)
+
+- **`theseus_engine/wrappers/llm_clients/openai_compat_client.py` (신규)**:
+    - `TheseusOpenAICompatClient` — `OpenAICompatibleClient` OH 의존 없이 재구현
+    - 변환 함수 4개 이식: `_convert_messages_to_openai`, `_convert_tools_to_openai`, `_token_limit_param_for_model`, `_strip_think_blocks`
+    - DashScope, DeepSeek, Ollama, vLLM, OpenAI 등 모든 OpenAI 호환 제공자 지원
+
+- **`theseus_engine/wrappers/llm_clients/theseus_client.py`**:
+    - `from openharness.api.*`, `from openharness.engine.messages` → `theseus_engine.wrappers.llm_clients.api_types`, `theseus_engine.models.messages`
+    - `AnthropicApiClient` → `TheseusAnthropicClient`, `OpenAICompatibleClient` → `TheseusOpenAICompatClient`
+
+#### 잔여 OH import (theseus_engine/ 기준)
+
+| 파일 | 항목 | Phase |
+|------|------|-------|
+| `core/engine_builder.py`, `core/command_handler.py` | `QueryEngine` | Task 2 (P1) |
+| `engine/stream_events.py` | OH re-export 브릿지 | Task 6 (QueryEngine 이후) |
+| `tui/tui_main.py` | TUI 프레임워크 4개 | Task 5 (P2) |
+
+---
+
+### 🔧 Session 34 — Tool Primitives & Stream Events 자체 정의 (2026-05-07)
+
+#### 목표
+OpenHarness 완전 분리를 위해 남은 핵심 import 2개(`openharness.tools.base`, `openharness.engine.stream_events`)를 Theseus-native 구현으로 교체.
+
+#### Task 1 — `base_tools.py` 자체 정의
+
+- **`theseus_engine/tools/core/base_tools.py`**:
+    - `from openharness.tools.base import (BaseTool, ToolExecutionContext, ToolResult, ToolRegistry)` 제거.
+    - `ToolExecutionContext` (dataclass), `ToolResult` (frozen dataclass), `BaseTool` (ABC), `ToolRegistry` (dict-backed)를 Theseus-native로 완전 재정의.
+    - `to_api_schema()` 메서드 포함 — LLM API 스키마 변환 자체 처리.
+    - `DummyTool`, `SystemRebootTool` 테스트 도구 유지.
+    - 모든 `theseus_engine/` 코드가 이 단일 모듈에서 import — 향후 OH 완전 제거 시 변경점 1곳.
+
+#### Task 2 — `stream_events.py` OH 브릿지 + Theseus 폴백
+
+- **`theseus_engine/engine/stream_events.py` (신규)**:
+    - OH `QueryEngine`이 yield하는 이벤트와 `isinstance()` 호환을 위해 OH re-export 방식 채택.
+    - `try: from openharness.engine.stream_events import ...` → `except ImportError:` Theseus-native frozen dataclass 폴백.
+    - 향후 QueryEngine 자체 분리 시 이 파일만 Theseus-native 정의로 교체하면 완료.
+    - `AssistantTextDelta`, `AssistantTurnComplete`, `ToolExecutionStarted`, `ToolExecutionCompleted`, `ErrorEvent`, `StatusEvent`, `CompactProgressEvent`, `StreamEvent` 8개 심볼 제공.
+
+- **`theseus_engine/core/cli_main.py`**: import를 `theseus_engine.engine.stream_events`로 변경.
+- **`theseus_cli.py`**: import를 `theseus_engine.engine.stream_events`로 변경.
+
+#### Hotfix — `isinstance()` 불일치 수정
+
+- **원인**: `QueryEngine`(OH)은 `openharness.engine.stream_events.AssistantTextDelta`를 yield하지만, 변경 후 `theseus_cli.py`가 `theseus_engine.engine.stream_events.AssistantTextDelta`로 isinstance 체크 → 서로 다른 클래스이므로 항상 `False` → 모든 이벤트가 `else` 분기의 `[EVENT]` 디버그 출력으로 빠짐.
+- **수정**: `stream_events.py`를 OH re-export 방식으로 변경하여 동일 클래스 참조 보장. OH 미설치 환경에서는 Theseus-native 폴백 자동 적용.
+
+---
+
+### 🏗️ Session 33 — OpenHarness 의존성 체계적 제거 (2026-05-07)
+
+#### 목표
+OpenHarness 컴포넌트가 유기적으로 참조되어 Theseus 엔진이 bypass되는 문제를 근본 해결. 3단계(단기/중기/장기)로 의존성을 제거하여 Theseus가 모든 Hook/RBAC/Tool 파이프라인을 독자적으로 제어하도록 개선.
+
+---
+
+#### 🔴 Phase 1 (단기) — Hook/RBAC 상속 제거, 핵심 bypass 차단
+
+- **`theseus_hook_executor.py` — `HookExecutor` 상속 완전 제거**:
+    - `class TheseusHookExecutor(HookExecutor)` → `class TheseusHookExecutor`로 변경.
+    - `super().__init__(registry, context)`, `super().execute(event, payload)` 호출 삭제 — OH Hook 파이프라인이 Theseus보다 선행하는 문제 원천 제거.
+    - `HookEvent`, `HookResult`, `AggregatedHookResult`를 Theseus-native로 재정의 (동일 필드/프로퍼티 유지, QueryEngine duck-typing 호환).
+    - `__init__` 시그니처에서 `registry: HookRegistry`, `context: HookExecutionContext` 제거 → keyword-only 파라미터로 단순화.
+    - OH `AgentHook` Markdown backtick 복구 로직 삭제 (OH 파이프라인 자체가 없으므로 불필요).
+    - OpenHarness import 6개 → 0개로 감소.
+
+- **`engine_builder.py` — `create_default_tool_registry()` 제거**:
+    - `from openharness.tools import create_default_tool_registry` 삭제.
+    - `full_registry = create_default_tool_registry()` → `full_registry = ToolRegistry()` 로 교체.
+    - OH 기본 도구(BashTool, FileReadTool 등 38개)가 Theseus `ALL_CORE_TOOLS`와 이중 등록되던 문제 해결.
+    - `HookRegistry`, `HookExecutionContext` import 및 사용 삭제 — `TheseusHookExecutor` 생성자가 더 이상 필요하지 않음.
+
+- **`rbac.py` — `PermissionChecker`/`PermissionSettings` 상속 제거**:
+    - `class TheseusPermissionChecker(PermissionChecker)` → 독립 클래스.
+    - `PermissionDecision`, `TheseusPermissionSettings`, `PermissionMode` Theseus-native 정의.
+    - OH `SENSITIVE_PATH_PATTERNS` 이관 (민감 자격증명 경로 보호 유지).
+    - `super().evaluate()` 호출 삭제 — Theseus가 RBAC + 경로/명령어 정책을 직접 평가.
+
+---
+
+#### 🟠 Phase 2 (중기) — 래핑 레이어 교체
+
+- **`tui_main.py` — `PermissionMode` import 교체**:
+    - `from openharness.permissions.modes import PermissionMode` → `from theseus_engine.models.rbac import PermissionMode`.
+    - TUI 베이스(`OpenHarnessTerminalApp`)는 장기 교체 대상으로 주석 표시.
+
+- **PLAN DRAFTING 프롬프트 — `create_tool` 경로 명시**:
+    - `state.py` DRAFTING RULES에 "새 도구 생성 시 `target_files`는 `theseus_engine/custom_tools/` 경로만 사용, `OpenHarness/src/` 금지" 지시 추가.
+    - `tool_factory.py` `execute()` — `src.tooling` import를 `try/except ImportError`로 감싸 CLI 전용 배포에서 standalone 폴백.
+
+---
+
+#### 🟡 Phase 3 (장기) — `BaseTool`/`ToolResult` re-export 단일 게이트웨이
+
+- **`base_tools.py` — OpenHarness tool primitives 단일 진입점 확립**:
+    - `BaseTool`, `ToolExecutionContext`, `ToolResult`, `ToolRegistry`를 `base_tools.py`에서 re-export.
+    - `theseus_engine/tools/core/` 26개 파일, `theseus_engine/custom_tools/` 7개 파일, `core/tool_retriever.py`, `core/engine_builder.py` — 전부 `from openharness.tools.base import ...` → `from theseus_engine.tools.core.base_tools import ...`로 일괄 교체.
+    - **향후 OpenHarness 완전 분리 시 `base_tools.py` 1개 파일만 교체하면 됨**.
+
+---
+
+#### 현재 잔존 OpenHarness 의존 (장기 유지/순차 교체 대상)
+
+| 모듈 | 의존 | 비고 |
+|------|------|------|
+| `base_tools.py` | `openharness.tools.base` | 단일 게이트웨이 (설계상 유지) |
+| `engine_builder.py`, `command_handler.py` | `QueryEngine` | 코어 LLM 엔진 — 교체 비용 최대 |
+| `theseus_client.py` | `openharness.api.*` | API client/message types — 대규모 이관 필요 |
+| `tui_main.py` | `OpenHarnessTerminalApp`, `build_runtime` 등 | TUI 프레임워크 — Theseus 자체 TUI 완성 후 교체 |
+| `cli_main.py` | `stream_events` | 이벤트 데이터 클래스 — 장기 유지 허용 |
+| `sessions.py`, `context_compressor.py` | `ConversationMessage` | 메시지 타입 — `QueryEngine` 교체와 동시 진행 |
+
+---
+
+### 🔒 Session 32 — THESEUS_ENABLE_AGENT_HOOK OpenHarness 의존성 제거 (2026-05-07)
+
+#### 목표
+`THESEUS_ENABLE_AGENT_HOOK=true` 활성화 시 `src/tooling` 서버 레이어(Spring/FastAPI)와 OpenHarness `AgentHookDefinition`에 대한 의존 없이 독립적으로 감사 LLM을 실행하도록 개선.
+
+#### 변경 사항
+
+- **`theseus_engine/tools/core/tool_validator.py` — 신규 생성**:
+    - `src/tooling/service.py`에만 있던 `ToolCreationError`, `normalize_tool_name`, `inject_permission_level`를 `theseus_engine/` 내부에 독립 모듈로 추출.
+    - `theseus_engine/` 내에서 `src/` 레이어 없이 도구 생성 파이프라인 전체를 자급자족.
+
+- **`theseus_engine/tools/core/tool_factory.py` — `_execute_standalone()` 독립화**:
+    - `_execute_legacy()`가 `src.tooling.service`를 import하던 의존성 제거.
+    - `_execute_standalone()`이 `theseus_engine.tools.core.tool_validator`만 사용하도록 리팩토링.
+    - `_execute_legacy()`는 `_execute_standalone()`으로 위임(delegate)하는 thin wrapper로 유지.
+
+- **`theseus_engine/wrappers/hooks/theseus_hook_executor.py` — 감사 LLM 독립화**:
+    - `_AUDIT_PROMPT` 클래스 상수 추가 (OpenHarness `AgentHookDefinition.prompt`에서 이관).
+    - `__init__`에 `llm_client: TheseusLLMClient` 및 `audit_tools: set[str]` 파라미터 추가.
+    - `_run_audit_llm(tool_name, tool_input)` 메서드 구현: `TheseusLLMClient.generate()`를 직접 호출하여 파일 수정 안전성 감사. OpenHarness `AgentHookDefinition` 불필요.
+    - PRE_TOOL_USE 블록에서 `self._audit_tools`에 속한 도구(기본: `write_file`, `edit_file`)에 대해 `_run_audit_llm()` 자동 실행.
+    - 감사 실패(`ok: false`) 시 HITL 건너뛰고 즉시 차단. 감사 LLM 오류(예외) 시 통과 처리(fail-open).
+
+- **`theseus_engine/core/engine_builder.py` — HookExecutor 생성자 갱신**:
+    - `HookEvent`, `AgentHookDefinition` import 제거.
+    - `TheseusHookExecutor` 생성 시 `llm_client=api_client`, `audit_tools={"write_file", "edit_file"}` 전달.
+
+---
+
+### 🐛 Session 31 — CHANGELOG 감사 및 불일치 전면 수정 (2026-05-07)
+
+#### 신규 버그 수정
+
+- **`bash_tool.py` — Windows 따옴표 손상 버그 수정 (🚨 Critical)**:
+    - Windows에서 `asyncio.create_subprocess_exec("cmd.exe", "/c", command)`를 사용할 때 Python의 `list2cmdline`이 command 문자열을 추가 인용하면서 cmd.exe가 따옴표를 잘못 처리, Python `-c` 인자 앞에 `"`가 붙어 `SyntaxError: unterminated string literal`이 발생하던 버그 수정.
+    - Windows/Linux 구분 없이 `asyncio.create_subprocess_shell`로 통일. `IS_WINDOWS` 상수 및 `platform` import 제거.
+    - 이 버그로 인해 `python -c "..."` 형태의 모든 bash 명령이 Windows에서 실패하고, 에이전트가 동일 명령을 무한 반복하는 루프의 근본 원인이었음.
+
+- **`engine_builder.py` — EXECUTING 단계에서 `create_tool` RAG 제외 문제 수정 (🔴 High)**:
+    - RAG Top-K가 `create_tool`을 쿼리와 무관하다고 판단해 `current_registry`에서 제외하면, `build_filtered_registry`에서 `exclude_tools=set()`(EXECUTING이므로 제외 없음)을 전달해도 이미 없는 도구는 포함되지 않는 구조적 누락 수정.
+    - `is_plan_executing=True`일 때 `current_registry`에 `create_tool`이 없으면 `full_registry`에서 꺼내 강제 삽입하는 로직 추가.
+
+- **`theseus_cli.py` — PLAN DRAFTING REINFORCEMENT 과잉 강제 수정 (🟠 Medium)**:
+    - Session 28에서 도입된 `"Output ONLY the JSON block... No conversational prose allowed."` 주입이 질문·대화 입력에도 적용되어, 에이전트가 단순 질문을 JSON 플랜으로 만들어버리는 문제 수정.
+    - `"REMINDER: If this is a question, answer it directly. If this is an implementation request, output a JSON plan."` 으로 완화하여 입력 의도에 따라 응답 방식을 선택하도록 개선.
+
+#### CHANGELOG 감사 결과 반영 — 기존 미수정 불일치 항목
+
+- **`theseus_cli.py` — `error_sig` 실제 에러 내용 기반으로 수정 (🟠 Medium)**:
+    - 기존: `error_sig = resume_prompt[:80]` — tool error 시 항상 고정 문자열(`"A tool execution error occurred..."`)을 시그니처로 사용하여 에러가 달라져도 동일하게 처리됨.
+    - 수정: `tool_error_occurred=True`일 때 `error_sig = accumulated_text[-200:][:80]` — LLM이 출력한 실제 에러 텍스트로 시그니처 생성. 에러 내용이 다르면 다른 시그니처로 판별하여 반복 에러 감지 정확도 향상.
+
+- **`context.py`, `theseus_cli.py` — 세션 전체 자동 재개 절대 상한 추가 (🔴 High)**:
+    - 문제: `auto_resume_count`가 5 초과 시 `WAIT_FOR_REVIEW`로 강등되지만, 사용자 재승인(`approve`) 후 `auto_resume_count`가 리셋되어 다시 5턴 반복 가능. 세션 전체에서 bash 무한루프가 30턴을 꽉 채우는 원인.
+    - `CLIContext`에 `session_resume_total: int = 0`, `MAX_SESSION_RESUMES: int = 20` 추가.
+    - `auto_resume_count`는 재개 승인 시 리셋하되 `session_resume_total`은 세션 전체에서 유지. 20회 초과 시 재승인 없이 최종 차단.
+    - 자동 재개 3개 블록(정상 resume, 턴 리밋 예외, 일반 예외) 모두 `session_resume_total` 카운팅 적용.
+    - WAIT_FOR_REVIEW → EXECUTING 재진입 시 `auto_resume_count`, `repeated_error_count`, `last_error_sig` 리셋 명시.
+
+- **`commands.py` — `/coordinator` 모드 전환 시 `pending_mode_notification` 누락 수정 (🟡 Low)**:
+    - `/agent`, `/ask`, `/plan` 전환에는 모드 전환 알림이 주입되었으나 `/coordinator`에는 누락되어 히스토리 컨텍스트 오염 방지 기능이 미적용된 문제 수정.
+    - `"[System: Mode switched to COORDINATOR. Decompose the task into parallel sub-agents. All prior mode restrictions are lifted.]"` 알림 추가.
+
+---
+
 ### 🚀 Session 30 (2026-05-07)
 - **`state.py` 프롬프트 감사 및 불일치 전면 수정**:
     - **검증(Verifying) 완료 키워드 명시**: `_PLAN_VERIFYING_PROMPT`에 "Verification complete." 출력 지시를 추가하여, 검증 완료 후 에이전트가 "사용자 결정 대기" 상태로 무한 정지하던 버그의 근본 원인을 해결했습니다.
