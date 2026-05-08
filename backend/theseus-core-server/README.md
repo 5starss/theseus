@@ -4,7 +4,7 @@
 
 * **목표:** 엔터프라이즈 환경에서 보안 통제력을 갖추고 토큰 비용을 최적화할 수 있는 사내 맞춤형 AI 에이전트 시스템(Theseus)의 Python 코어 서버 구축.
 * **주요 역할:**
-  * OpenHarness 코어 엔진 래핑 및 에이전트 오케스트레이션
+  * **Theseus-Native 엔진**: OpenHarness 의존성을 완전히 제거하고 자체 QueryEngine, Tool Primitives, Stream Events를 갖춘 독립적인 에이전트 오케스트레이션 엔진
   * **RBAC 기반 툴 필터링**: 사용자 권한(Level)에 따른 동적 도구 주입으로 보안 강화 및 컨텍스트 압축
   * **메타-툴링 (Meta-Tooling)**: 자연어를 통한 툴 생성 파이프라인 (Planning -> Code Gen -> Validation)
   * **Direct SSE 스트리밍**: 클라이언트와의 실시간 통신 및 Zero-Trust 과금 처리
@@ -23,7 +23,7 @@
 
 * **Web Framework:** `fastapi`, `uvicorn`, `pydantic` (엄격한 파라미터 검증)
 * **Streaming & I/O:** `sse-starlette`, `httpx` (비동기 HTTP 통신)
-* **Agent Engine:** `openharness` (사내 라이브러리 임포트)
+* **Agent Engine:** `theseus_engine` (OpenHarness 의존성을 배제한 자체 코어 엔진)
 * **Vector DB / RAG:** `psycopg2`, `pgvector`, `sentence-transformers`, `langchain-core`
 * **Tracing:** `langsmith`
 
@@ -36,7 +36,7 @@
 ### 4.2. 메타-툴링 & HITL 파이프라인 (Tool Maker)
 * **역할:** 반복적인 복잡한 작업을 단일 캡슐화된 툴로 생성합니다.
 * **Interactive Planning**: 코드를 즉시 생성하지 않고, 에이전트가 "구현 계획서"를 먼저 작성하여 사용자의 리뷰와 승인을 받습니다.
-* **생명주기**: `Draft` -> `Pending` -> `Approved` (Spring Boot Web UI를 통한 최고 관리자의 최종 승인 필수)
+* **생명주기 (4단계 파이프라인)**: `Drafting` -> `Review` -> `Executing` -> `Verifying` (자동 검증 단계 추가를 통한 테스트 및 회귀 확인 필수)
 
 ### 4.3. 세분화된 자동 검증기 (Domain-Specific Validators)
 * **역할:** 툴이 생성된 직후, 위험도와 용도에 따라 4가지 특화된 검증기가 코드를 1차 자동 스캔합니다.
@@ -62,7 +62,7 @@
    * 토큰 검증 후 `user_level`, `project_id` 획득.
    * `custom_tools/{project_id}` 폴더에서 권한에 맞는 툴만 메모리에 동적 로드.
 3. **Streaming (에이전트 실행):**
-   * OpenHarness 엔진(`run_query`)이 실행되며, LangSmith를 통해 모든 궤적이 추적됩니다.
+   * Theseus 자체 엔진(`run_query`)이 실행되며, LangSmith를 통해 모든 궤적이 추적됩니다.
    * RAG가 필요하면 `search_knowledge_base` 툴을 호출하여 중앙 PostgreSQL DB에서 임베딩 벡터 기반의 맥락을 가져옵니다.
    * LLM 응답 청크가 생성되는 즉시 클라이언트로 SSE 브로드캐스트됩니다.
 4. **Post-Process (과금 및 유지보수):**
@@ -161,27 +161,27 @@ python scratch/create_db.py
 
 ```plaintext
 theseus-core/
-├── src/
-│   ├── main.py             # FastAPI 엔드포인트 및 다이렉트 SSE 스트리밍
+├── theseus_engine/         # Theseus-Native 코어 엔진 및 에이전트 로직
+│   ├── core/               # Engine Builder, Context Compressor 등 핵심 구성 요소
+│   ├── engine/             # QueryEngine, Stream Events 등 자체 실행 엔진
+│   ├── models/             # 상태, 세션, 메시지, RBAC 등 데이터 모델
+│   ├── tools/              # 자체 Tool Primitives 및 기본 제공 도구 모음
+│   ├── wrappers/           # LLM Clients, Hooks 등 외부 API/통제 로직 연동
+│   └── custom_tools/       # 메타-툴링으로 생성된 동적 도구 격리 공간
+├── theseus_cli/            # CLI 파서, UI, 의도 분류기(Intent) 등 독립 패키지
+│   ├── commands.py         # 슬래시 명령어 라우터
+│   ├── intent.py           # 다국어 지원 LLM 기반 승인 의도 분류기
+│   ├── parsers.py          # 피드백 파싱 및 프롬프트 조립
+│   └── ui.py               # UI 컴포넌트 렌더링
+├── src/                    # FastAPI 엔드포인트 및 서버 뼈대
+│   ├── main.py             # 다이렉트 SSE 스트리밍 엔드포인트
 │   ├── auth/               # Spring Boot 연동 세션 토큰 검증 미들웨어
-│   ├── builder/            # 메타-툴링 (Tool Maker) Planning & Code Gen 로직
 │   └── validators/         # 기능별 세분화된 도구 검증기 4종
-│       ├── execution_validator.py
-│       ├── query_validator.py
-│       ├── analysis_validator.py
-│       └── suggestion_validator.py
-├── basic_tools/            # 시스템 기본 제공 코어 도구 
-│   └── search_knowledge.py # KB 기반 RAG 검색 도구 (PostgreSQL pgvector 연동)
-├── custom_tools/           # 프로젝트별 생성된 도구 격리 공간
-│   ├── project_A/
-│   │   ├── custom_db_query.py  
-│   │   └── daily_report.md     
-│   └── project_B/
-├── .openharness/           # 시스템 상태 및 임시 저장 폴더
-│   └── tools/
-│       └── pending/        # 1차 검증 통과 후 Admin 승인 대기 중인 코드
+├── scratch/                # 디버그 덤프 및 스크립트 공간
+├── docs/                   # 프로젝트 관련 문서, CHANGELOG 등
+├── theseus_cli.py          # CLI 엔트리포인트
 ├── Dockerfile              # FastAPI 및 프로덕션 환경 빌드 파일
-├── requirements.txt        # 파이썬 의존성 (openharness 포함)
+├── requirements.txt        # 파이썬 의존성
 └── README.md               # 현재 문서
 ```
 ---
@@ -210,14 +210,14 @@ FastAPI 서버 구축, Spring Boot와의 통신, Vector DB 연동 등 시스템�
 OpenHarness 엔진 래핑, 프롬프트 엔지니어링, 권한 필터링, 그리고 코드 검증을 책임집니다.
 
 * **엔진 연동 및 관측성 (Engine & Observability)**
-  * OpenHarness 실행 제너레이터(`run_query`)를 스트리밍 엔드포인트 내부에 연동.
+  * 자체 QueryEngine 실행 제너레이터(`run_query`)를 스트리밍 엔드포인트 내부에 연동.
   * 시스템 전반에 LangSmith `@traceable` 데코레이터를 주입하여 에이전트 궤적 완벽 추적.
 * **동적 권한 필터링 로직 (RBAC Loader)**
-  * `custom_tools/{project_id}/` 폴더의 `.py` 파일들을 런타임에 읽어오는 `importlib` 스캐너 구현.
+  * `theseus_engine/custom_tools/` 폴더의 `.py` 파일들을 런타임에 동적으로 주입.
   * 유저의 `user_level`과 툴의 `permission_level`을 비교하여 권한 밖의 툴을 Drop하는 로직 구현.
 * **메타-툴링 파이프라인 (Interactive Planning)**
-  * `Planning` -> `WAIT_FOR_REVIEW` -> `Coding` 상태 제어를 위한 State Machine 작성.
-  * 코드를 바로 짜지 않고 구현 계획서를 먼저 출력하도록 시스템 프롬프트 엔지니어링.
+  * `Drafting` -> `Review` -> `Executing` -> `Verifying` 4단계 상태 제어를 위한 State Machine 및 다국어 지원 파서 구축.
+  * 코드를 바로 짜지 않고 구현 계획서를 먼저 출력하도록 시스템 프롬프트 및 JSON 스키마 엔지니어링.
 * **세분화된 자동 검증기 4종 (`src/validators/`)**
   * Execution & Query 검증기: DB/API 호출 안전성 및 권한 판별 로직 구현.
   * Analysis 검증기 (보안): `ast` 파싱을 통한 금지된 라이브러리(`os`, `subprocess`) 호출 및 취약점 방어 로직.
