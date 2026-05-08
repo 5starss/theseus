@@ -1,8 +1,12 @@
-"""Theseus Hook Executor: OpenHarness HookExecutor 래핑.
+"""Theseus Hook Executor — OpenHarness 독립 구현.
 
-OpenHarness의 공식 HookExecutor를 상속하여,
-PRE_TOOL_USE 이벤트 시 Theseus 전용 검증기(Execution/Query)를
-자동으로 실행하는 래핑 클래스입니다.
+OpenHarness HookExecutor를 상속하지 않고, 동일한 ``execute(event, payload)``
+인터페이스를 독자적으로 구현합니다.  QueryEngine은 duck-typing으로 이
+인터페이스를 호출하므로 상속이 필요하지 않습니다.
+
+Theseus 검증기(Execution/Query), 감사 LLM, HITL, 동적 도구 검색을
+모두 자체적으로 관리하며, OpenHarness Hook 파이프라인이 선행하는
+문제를 원천 제거합니다.
 """
 
 from __future__ import annotations
@@ -10,20 +14,10 @@ from __future__ import annotations
 import difflib
 import logging
 import time
+from enum import Enum
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from openharness.hooks.events import HookEvent
-from openharness.hooks.executor import (
-    HookExecutionContext,
-    HookExecutor,
-)
-from openharness.hooks.loader import HookRegistry
-from openharness.hooks.types import (
-    AggregatedHookResult,
-    HookResult,
-)
-from openharness.tools.base import ToolRegistry
 
 from theseus_engine.validators.execution_validator import (
     ExecutionValidator,
@@ -40,36 +34,93 @@ from theseus_engine.observability.stats import SessionStats
 log = logging.getLogger(__name__)
 
 
-class TheseusHookExecutor(HookExecutor):
-    """OpenHarness HookExecutor를 래핑하여 Theseus 검증기를 주입.
+# ---------------------------------------------------------------------------
+# Theseus-native hook types (OpenHarness 의존 제거)
+# ---------------------------------------------------------------------------
+# QueryEngine 호환을 위해 동일한 필드/프로퍼티 시그니처를 유지합니다.
 
-    PRE_TOOL_USE 이벤트가 발생하면 부모 클래스의 공식 Hook
-    파이프라인을 먼저 실행한 뒤, Theseus 전용 검증기
-    (ExecutionValidator, QueryValidator)를 추가로 실행합니다.
+
+class HookEvent(str, Enum):
+    """Theseus-native hook event types."""
+    SESSION_START = "session_start"
+    SESSION_END = "session_end"
+    PRE_COMPACT = "pre_compact"
+    POST_COMPACT = "post_compact"
+    PRE_TOOL_USE = "pre_tool_use"
+    POST_TOOL_USE = "post_tool_use"
+    USER_PROMPT_SUBMIT = "user_prompt_submit"
+    NOTIFICATION = "notification"
+    STOP = "stop"
+    SUBAGENT_STOP = "subagent_stop"
+
+
+@dataclass(frozen=True)
+class HookResult:
+    """Result from a single hook execution."""
+    hook_type: str
+    success: bool
+    output: str = ""
+    blocked: bool = False
+    reason: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class AggregatedHookResult:
+    """Aggregated result for a hook event."""
+    results: list[HookResult] = field(default_factory=list)
+
+    @property
+    def blocked(self) -> bool:
+        return any(r.blocked for r in self.results)
+
+    @property
+    def reason(self) -> str:
+        for r in self.results:
+            if r.blocked:
+                return r.reason or r.output
+        return ""
+
+
+class TheseusHookExecutor:
+    """Theseus 독립 Hook Executor.
+
+    OpenHarness HookExecutor를 상속하지 않으며, QueryEngine이
+    duck-typing으로 호출하는 ``execute(event, payload)`` 인터페이스만
+    구현합니다.  모든 검증(Execution/Query/Audit LLM/HITL)을
+    Theseus가 직접 제어합니다.
     """
+
+    _AUDIT_PROMPT = (
+        "You are a security auditor. Does this file modification look safe, "
+        "non-destructive, and not malicious? "
+        "Return strict JSON: {\"ok\": true} or {\"ok\": false, \"reason\": \"...\"}. "
+        "IMPORTANT: DO NOT use markdown backticks or any other formatting. "
+        "Output raw JSON only. Arguments: {arguments}"
+    )
 
     def __init__(
         self,
-        registry: HookRegistry,
-        context: HookExecutionContext,
-        active_registry: ToolRegistry | None = None,
-        full_registry: ToolRegistry | None = None,
+        *,
+        active_registry: Any | None = None,
+        full_registry: Any | None = None,
         enable_dynamic_tools: bool = True,
         permission_prompt: Any | None = None,
+        llm_client: Any | None = None,
+        audit_tools: set[str] | None = None,
     ) -> None:
-        super().__init__(registry, context)
         self._active_registry = active_registry
         self._full_registry = full_registry
         self._enable_dynamic_tools = enable_dynamic_tools
         self._permission_prompt = permission_prompt
+        self._llm_client = llm_client
+        self._audit_tools: set[str] = audit_tools or {"write_file", "edit_file"}
         self._retriever = (
             ToolRetriever(full_registry)
             if full_registry and enable_dynamic_tools
             else None
         )
-        # 세션 내 "항상 허용" 캐시 — 한 번 승인된 파괴적 툴은 재확인 불필요
         self._always_allow: set[str] = set()
-        # [추가] 무한 루프 방지를 위한 상태 저장
         self._last_failed_call: tuple[str, str] | None = None
 
     @theseus_traceable(
@@ -82,23 +133,25 @@ class TheseusHookExecutor(HookExecutor):
         event: HookEvent,
         payload: dict[str, Any],
     ) -> AggregatedHookResult:
-        """OpenHarness Hook 실행 후 Theseus 검증기를 연쇄 실행.
+        """Theseus 독립 Hook 파이프라인을 실행합니다.
+
+        OpenHarness HookExecutor를 호출하지 않으며, Theseus 자체
+        검증기(Execution/Query/Audit LLM/HITL)만 사용합니다.
 
         Args:
-            event: Hook 이벤트 종류.
+            event: Hook 이벤트 종류 (Theseus-native HookEvent).
             payload: 이벤트 페이로드 (tool_name, tool_input 등).
 
         Returns:
-            공식 Hook + Theseus 검증기 결과를 합산한
-            AggregatedHookResult.
+            Theseus 검증기 결과를 합산한 AggregatedHookResult.
         """
         stats = SessionStats.get()
 
-        # [추가 1] PRE_TOOL_USE 단계에서 중복 실패 호출 원천 차단
+        # PRE_TOOL_USE 단계에서 중복 실패 호출 원천 차단
         if event == HookEvent.PRE_TOOL_USE:
             tool_name = payload.get("tool_name", "")
             tool_input_str = str(payload.get("tool_input", {}))
-            
+
             if self._last_failed_call == (tool_name, tool_input_str):
                 log.warning("[LoopBreaker] 동일한 실패 호출 반복 감지 차단: %s", tool_name)
                 return AggregatedHookResult(
@@ -117,50 +170,17 @@ class TheseusHookExecutor(HookExecutor):
                     ]
                 )
 
-        # 1단계: OpenHarness 공식 Hook 파이프라인 실행
-        base_result = await super().execute(event, payload)
+        # 기본 결과 — 이벤트가 PRE/POST에 해당하지 않으면 빈 결과 반환
+        result = AggregatedHookResult()
 
-        # [Bugfix] AgentHook이 Markdown backtick으로 감싸진 JSON을 반환할 경우
-        # OpenHarness 파서가 실패하여 blocked=True가 되는 문제를 휴리스틱하게 복구합니다.
-        if base_result.blocked:
-            repaired_results = []
-            any_repaired = False
-            for res in base_result.results:
-                if res.blocked and ("ok\": true" in res.reason.lower() or "ok\": true" in res.output.lower()):
-                    # Markdown backtick 제거 후 재검증 시도
-                    raw_text = res.output or res.reason
-                    import re as _re
-                    clean_text = _re.sub(r'```(?:json)?\n?|\n?```', '', raw_text).strip().lower()
-                    if clean_text == '{"ok": true}':
-                        log.info("[TheseusHook] AgentHook의 Markdown 응답을 감지하여 차단을 해제합니다.")
-                        repaired_results.append(
-                            HookResult(
-                                hook_type=res.hook_type,
-                                success=True,
-                                output=res.output,
-                                blocked=False,
-                                metadata={**res.metadata, "repaired": True}
-                            )
-                        )
-                        any_repaired = True
-                        continue
-                repaired_results.append(res)
-            
-            if any_repaired:
-                base_result = AggregatedHookResult(results=repaired_results)
-
-        # 공식 Hook이 여전히 차단 상태이면 바로 반환
-        if base_result.blocked:
-            return base_result
-
-        # 2단계: PRE_TOOL_USE일 때만 Theseus 검증기 실행
+        # PRE_TOOL_USE — Theseus 검증기 실행
         if event == HookEvent.PRE_TOOL_USE:
             tool_name = payload.get("tool_name", "")
             tool_input = payload.get("tool_input", {})
             # 툴 타이머 시작
             stats.tool_start(tool_name)
 
-            extra_results = list(base_result.results)
+            extra_results: list[HookResult] = []
 
             # Execution 검증기
             exec_ok, exec_msg = ExecutionValidator.validate(
@@ -198,14 +218,23 @@ class TheseusHookExecutor(HookExecutor):
                     )
                 )
 
+            # 자체 감사 LLM — OpenHarness AgentHook 없이 TheseusLLMClient로 직접 실행
+            if tool_name in self._audit_tools:
+                audit_result = await self._run_audit_llm(tool_name, tool_input)
+                if audit_result is not None:
+                    extra_results.append(audit_result)
+                    # 감사 차단 시 HITL 건너뜀
+                    if audit_result.blocked:
+                        return AggregatedHookResult(results=extra_results)
+
             # HITL 검증기: is_destructive=True 툴에 대해 사용자 승인 요청
             hitl_result = await self._check_hitl(tool_name, tool_input, payload)
             if hitl_result is not None:
                 extra_results.append(hitl_result)
 
-            base_result = AggregatedHookResult(results=extra_results)
+            result = AggregatedHookResult(results=extra_results)
 
-        # 3단계: POST_TOOL_USE — 타이머 종료 + 동적 도구 검색 및 주입
+        # POST_TOOL_USE — 타이머 종료 + 동적 도구 검색 및 주입 — 타이머 종료 + 동적 도구 검색 및 주입
         if event == HookEvent.POST_TOOL_USE:
             post_tool_name = payload.get("tool_name", "")
             is_error = bool(payload.get("is_error", False))
@@ -250,7 +279,60 @@ class TheseusHookExecutor(HookExecutor):
                         file_path, payload
                     )
 
-        return base_result
+        return result
+
+    async def _run_audit_llm(
+        self,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> HookResult | None:
+        """TheseusLLMClient를 직접 호출하여 파일 수정 안전성을 감사합니다.
+
+        OpenHarness AgentHookDefinition 없이 독립적으로 동작합니다.
+        Returns:
+            HookResult(blocked=True) if unsafe, None if safe or llm_client absent.
+        """
+        if self._llm_client is None:
+            return None
+
+        import json as _json
+
+        try:
+            args_str = _json.dumps(tool_input, ensure_ascii=False)[:2000]
+            prompt = self._AUDIT_PROMPT.format(arguments=args_str)
+
+            response = await self._llm_client.generate(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=64,
+            )
+
+            # response가 문자열이거나 객체일 수 있음 — 텍스트 추출
+            if isinstance(response, str):
+                raw = response
+            else:
+                raw = getattr(response, "content", None) or str(response)
+
+            # Markdown 펜스 제거
+            import re as _re
+            raw = _re.sub(r'```(?:json)?\n?|\n?```', '', raw).strip()
+
+            parsed = _json.loads(raw)
+            if parsed.get("ok") is True:
+                log.info("[AuditLLM] %s → 안전 확인", tool_name)
+                return None
+
+            reason = parsed.get("reason", "LLM 감사: 안전하지 않은 파일 수정 감지")
+            log.warning("[AuditLLM] %s → 차단: %s", tool_name, reason)
+            return HookResult(
+                hook_type="theseus_audit_llm",
+                success=False,
+                blocked=True,
+                reason=reason,
+            )
+
+        except Exception as e:
+            log.debug("[AuditLLM] 감사 LLM 호출 실패 (통과 처리): %s", e)
+            return None
 
     def _show_diff_preview(
         self,

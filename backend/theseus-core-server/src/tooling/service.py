@@ -12,6 +12,28 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 DEFAULT_PERMISSION_LEVEL = 1
+
+
+def _sanitize_generated_code(code: str) -> str:
+    """LLM 생성 코드의 파싱 오염 패턴을 제거합니다.
+
+    처리 항목:
+    - 마크다운 코드펜스(```python ... ```) 벗기기
+    - CRLF → LF 정규화
+    - NULL 바이트 제거
+    - 백슬래시 뒤 후행 공백 제거 (SyntaxError: unexpected character after line continuation)
+    """
+    # 마크다운 코드펜스 벗기기
+    fence_match = re.match(
+        r"^\s*```(?:python)?\s*\n(.*?)\n\s*```\s*$", code, re.DOTALL
+    )
+    if fence_match:
+        code = fence_match.group(1)
+
+    code = code.replace("\r\n", "\n").replace("\r", "\n")
+    code = code.replace("\x00", "")
+    code = re.sub(r"\\ +\n", "\\\n", code)
+    return code
 CUSTOM_TOOLS_DIR = (
     Path(__file__).resolve().parents[2] / "theseus_engine" / "custom_tools"
 )
@@ -317,6 +339,7 @@ def persist_draft_tool(
 ) -> tuple[ServerToolArtifactPaths, dict[str, Any]]:
     normalized_name = normalize_tool_name(request.tool_name)
     code = inject_permission_level(request.python_code, request.permission_level)
+    code = _sanitize_generated_code(code)
     paths = build_tool_paths(request.project_id, normalized_name, storage_root=storage_root)
     paths.project_dir.mkdir(parents=True, exist_ok=True)
     paths.module_path.write_text(code, encoding="utf-8")
