@@ -5,6 +5,7 @@
 - `planSnapshot`은 API Server와 FE가 동일한 PLAN 화면을 복구하기 위한 고정본이다.
 - `planSnapshot`은 Core Server의 `TheseusStateMachine` checkpoint가 아니다.
 - Core Server의 agent loop, tool-use trace, intermediate state는 Core PostgreSQL에 `runId` 기준으로 저장한다.
+- Core checkpoint 저장 정책은 [TheseusStateMachine Run Checkpoint Policy](../../backend/theseus-core-server/docs/architecture/theseus_state_machine_run_checkpoint_policy.md)를 따른다.
 - API Server는 Kafka payload에 최근 대화 history snapshot을 포함한다.
 - Core Server는 API Server 내부 HTTP로 PLAN이나 history를 조회하지 않는다.
 - `progress`와 `chunk`는 Redis/SSE 전용 진행 이벤트이며 `chat_messages`에 저장하지 않는다.

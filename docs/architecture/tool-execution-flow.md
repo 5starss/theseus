@@ -45,6 +45,8 @@
 
 Core 내부 다회전 에이전트 루프의 checkpoint를 저장한다.
 
+세부 저장 정책은 [TheseusStateMachine Run Checkpoint Policy](../../backend/theseus-core-server/docs/architecture/theseus_state_machine_run_checkpoint_policy.md)를 따른다.
+
 ```text
 runId
 current agent mode
