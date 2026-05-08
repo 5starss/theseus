@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from markdownify import markdownify
 from pydantic import BaseModel, Field
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 from theseus_engine.tools.core.web_search_tool import _parse_search_results
 
 log = logging.getLogger(__name__)

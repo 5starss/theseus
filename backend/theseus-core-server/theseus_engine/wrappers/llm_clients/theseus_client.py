@@ -1,8 +1,10 @@
 """Theseus LLM Client — Router / Facade for multi-provider support.
 
-Selects the correct OpenHarness API client based on the model name
+Selects the correct Theseus-native API client based on the model name
 and delegates streaming to it.  Gemini-specific quirks (thought_signature
 preservation) are handled by ``gemini_compat``.
+
+OpenHarness 의존 없음 — 모든 타입을 Theseus-native 모듈에서 import합니다.
 """
 
 import os
@@ -12,25 +14,25 @@ import datetime
 from pathlib import Path
 from typing import AsyncIterator, Any
 
-from openharness.api.client import (
+from theseus_engine.wrappers.llm_clients.api_types import (
     ApiMessageRequest,
     ApiStreamEvent,
     SupportsStreamingMessages,
-    AnthropicApiClient,
     ApiTextDeltaEvent,
     ApiMessageCompleteEvent,
+    UsageSnapshot,
 )
-from openharness.api.openai_client import (
-    OpenAICompatibleClient,
+from theseus_engine.wrappers.llm_clients.anthropic_client import TheseusAnthropicClient
+from theseus_engine.wrappers.llm_clients.openai_compat_client import (
+    TheseusOpenAICompatClient,
     _convert_messages_to_openai,
     _convert_tools_to_openai,
     _token_limit_param_for_model,
     _strip_think_blocks,
 )
-from openharness.engine.messages import (
+from theseus_engine.models.messages import (
     ConversationMessage, ContentBlock, TextBlock, ToolUseBlock,
 )
-from openharness.api.usage import UsageSnapshot
 
 from theseus_engine.wrappers.llm_clients.gemini_compat import (
     extract_extra_content,
@@ -64,7 +66,7 @@ def _dump_debug_payload(name: str, data: Any) -> None:
 # -----------------------------------------
 
 
-class TheseusGeminiClient(OpenAICompatibleClient):
+class TheseusGeminiClient(TheseusOpenAICompatClient):
     """OpenAICompatibleClient that preserves Gemini's ``extra_content``
     (thought_signature) across multi-turn tool-calling conversations.
     """
@@ -230,14 +232,12 @@ class TheseusLLMClient(SupportsStreamingMessages):
         # 1. Anthropic (Claude)
         if model_lower.startswith("anthropic/") or "claude" in model_lower:
             api_key = os.getenv("ANTHROPIC_API_KEY", "")
-            return AnthropicApiClient(api_key=api_key)
+            return TheseusAnthropicClient(api_key=api_key)
 
         # 2. Google (Gemini)
         elif model_lower.startswith("google/") or "gemini" in model_lower:
             api_key = os.getenv("GEMINI_API_KEY", "")
-            base_url = (
-                "https://generativelanguage.googleapis.com/v1beta/openai/"
-            )
+            base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
             return TheseusGeminiClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
             )
@@ -246,26 +246,22 @@ class TheseusLLMClient(SupportsStreamingMessages):
         elif model_lower.startswith("deepseek/") or "deepseek" in model_lower:
             api_key = os.getenv("DEEPSEEK_API_KEY", "")
             base_url = "https://api.deepseek.com/v1"
-            return OpenAICompatibleClient(
+            return TheseusOpenAICompatClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
             )
 
         # 4. Ollama
         elif model_lower.startswith("ollama/"):
-            base_url = os.getenv(
-                "OLLAMA_BASE_URL", "http://localhost:11434/v1",
-            )
-            return OpenAICompatibleClient(
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            return TheseusOpenAICompatClient(
                 api_key="ollama", base_url=base_url, timeout=120.0,
             )
 
         # 5. vLLM / Custom OpenAI Compatible
         elif model_lower.startswith("vllm/"):
-            base_url = os.getenv(
-                "OPENAI_BASE_URL", "http://localhost:8000/v1",
-            )
+            base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
             api_key = os.getenv("OPENAI_API_KEY", "vllm")
-            return OpenAICompatibleClient(
+            return TheseusOpenAICompatClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
             )
 
@@ -273,7 +269,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
         else:
             api_key = os.getenv("OPENAI_API_KEY", "")
             base_url = os.getenv("OPENAI_BASE_URL", None)
-            return OpenAICompatibleClient(
+            return TheseusOpenAICompatClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
             )
 

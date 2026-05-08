@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pydantic import BaseModel, Field
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
 from theseus_engine.mcp.client import get_mcp_manager, McpServerNotConnectedError
 

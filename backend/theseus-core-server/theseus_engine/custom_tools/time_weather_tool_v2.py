@@ -1,5 +1,5 @@
 
-from openharness.tools.base import BaseTool, ToolResult, ToolExecutionContext
+from theseus_engine.tools.core.base_tools import BaseTool, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import os

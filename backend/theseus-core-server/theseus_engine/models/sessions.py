@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import List
-from openharness.engine.messages import ConversationMessage
+from theseus_engine.models.messages import ConversationMessage
 
 # Session History Management
 SESSION_DIR = Path(".theseus_sessions")

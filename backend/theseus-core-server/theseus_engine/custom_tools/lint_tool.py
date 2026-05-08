@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Union
 from pydantic import BaseModel, Field
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
 class LintToolInput(BaseModel):
     file_path: str = Field(..., description="분석할 파이썬 파일의 경로")

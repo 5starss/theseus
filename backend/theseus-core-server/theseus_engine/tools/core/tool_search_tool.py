@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
 log = logging.getLogger(__name__)
 

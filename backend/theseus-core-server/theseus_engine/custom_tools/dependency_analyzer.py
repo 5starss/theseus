@@ -2,7 +2,7 @@ import ast
 import os
 from pathlib import Path
 from typing import List, Set, Dict, Any
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 from pydantic import BaseModel, Field
 
 class DependencyAnalyzerToolInput(BaseModel):
