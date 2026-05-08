@@ -9,13 +9,15 @@ This module provides three core capabilities:
 import os
 import re
 import ast
+import json
 import logging
 import inspect
 import importlib.util
+from datetime import datetime, timezone
 from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
 from pydantic import BaseModel, Field
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +30,49 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
+
+
+def _sanitize_generated_code(code: str) -> str:
+    """LLM이 생성한 코드에서 파이썬 파싱을 망가뜨리는 오염 패턴을 제거합니다.
+
+    주요 처리 항목
+    ──────────────
+    1. 백슬래시 + 후행 공백(trailing whitespace after line continuation)
+       원인: LLM이 멀티라인 문자열을 JSON으로 직렬화할 때 ``\\n`` → ``\n`` 변환 후
+             실제 개행 앞뒤에 공백이 붙어 ``\\ <space>`` 패턴이 생기는 경우.
+             파이썬은 ``\`` 뒤에 공백이 있으면 SyntaxError를 발생시킴.
+       처리: ``\\ `` (백슬래시 + 스페이스) → 백슬래시만 남김.
+
+    2. Windows CRLF → LF 정규화
+       원인: 일부 모델이 \\r\\n 라인 엔딩을 포함한 코드를 생성.
+
+    3. NULL 바이트 제거
+       원인: 바이너리 혼입 시 파서 충돌.
+
+    4. 마크다운 코드펜스 제거
+       원인: LLM이 ``python_code`` 인자에 ```python ... ``` 블록째로 넣는 경우.
+    """
+    # 4. 마크다운 코드펜스 벗기기 (```python ... ``` 또는 ``` ... ```)
+    fence_match = re.match(
+        r"^\s*```(?:python)?\s*\n(.*?)\n\s*```\s*$", code, re.DOTALL
+    )
+    if fence_match:
+        code = fence_match.group(1)
+
+    # 2. CRLF → LF
+    code = code.replace("\r\n", "\n").replace("\r", "\n")
+
+    # 3. NULL 바이트 제거
+    code = code.replace("\x00", "")
+
+    # 1. 백슬래시 뒤에 공백만 있는 줄 끝 정리
+    #    ``\ `` or ``\  `` (여러 공백) → ``\``
+    code = re.sub(r"\\ +\n", "\\\n", code)
+    #    줄 끝이 아닌 위치의 ``\ `` 패턴 (인라인 line continuation 오염)
+    #    예: return value1 \  +  value2  → return value1 \+  value2 (불완전)
+    #    → 여기서는 보수적으로 줄 끝 패턴만 처리하고 인라인은 건드리지 않음
+
+    return code
 
 
 class ToolValidator:
@@ -329,6 +374,86 @@ class ToolValidator:
 # ---------------------------------------------------------------------------
 
 
+def normalize_tool_meta(
+    meta_path: str,
+    tool_class: Any,
+    module_name: str,
+) -> None:
+    """meta.json을 정규(canonical) 스키마로 정규화하고 재저장합니다.
+
+    LLM이 edit_file/write_file로 meta.json을 직접 수정하면 키 이름·구조가
+    어긋날 수 있습니다. 이 함수는 기존 파일을 읽어 누락 필드를 채우고
+    잘못된 키를 canonical 키로 교정한 뒤 덮어씁니다.
+
+    Canonical schema:
+        toolName, moduleName, projectId, chatSessionId, creatorUserId,
+        planId, fileName, createdAt, updatedAt, permissionLevel,
+        status, isActive, validationResult
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    tool_name = getattr(tool_class, "name", module_name)
+    permission_level = getattr(tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL)
+
+    # 기존 파일 로드 (없으면 빈 dict)
+    existing: Dict[str, Any] = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                existing = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 잘못된 키 → canonical 키 매핑
+    _key_aliases = {
+        "name":             "toolName",
+        "tool_name":        "toolName",
+        "module_name":      "moduleName",
+        "input_model":      None,           # meta에 불필요 — 제거
+        "description":      None,           # .py에서 읽어야 함 — meta에서 제거
+        "permission_level": "permissionLevel",
+    }
+    normalized: Dict[str, Any] = {}
+    for k, v in existing.items():
+        canonical = _key_aliases.get(k, k)  # 없으면 그대로
+        if canonical is not None:
+            normalized[canonical] = v
+
+    # 필수 필드 채우기 (py 클래스가 source of truth)
+    canonical_meta: Dict[str, Any] = {
+        "toolName":      tool_name,
+        "moduleName":    module_name,
+        "projectId":     normalized.get("projectId", "local"),
+        "chatSessionId": normalized.get("chatSessionId"),
+        "creatorUserId": normalized.get("creatorUserId", "cli_user"),
+        "planId":        normalized.get("planId"),
+        "fileName":      f"{module_name}.py",
+        "createdAt":     normalized.get("createdAt", now),
+        "updatedAt":     now,
+        "permissionLevel": permission_level,
+        "status":        normalized.get("status", "active"),
+        "isActive":      normalized.get("isActive", True),
+        "validationResult": normalized.get("validationResult") or {
+            "success": True,
+            "status": "validated",
+            "message": "Normalized by load_custom_tools.",
+            "checkedAt": now,
+        },
+    }
+
+    # 변경이 없으면 쓰지 않음 (updatedAt 제외 비교)
+    compare_existing = {k: v for k, v in existing.items() if k != "updatedAt"}
+    compare_new = {k: v for k, v in canonical_meta.items() if k != "updatedAt"}
+    if compare_existing == compare_new:
+        return
+
+    try:
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(canonical_meta, f, ensure_ascii=False, indent=2)
+        log.info("[MetaNorm] Normalized meta: %s", meta_path)
+    except OSError as e:
+        log.warning("[MetaNorm] Failed to write normalized meta %s: %s", meta_path, e)
+
+
 def load_custom_tools(
     registry: ToolRegistry,
     tool_permissions: Optional[Dict[str, int]] = None,
@@ -378,6 +503,11 @@ def load_custom_tools(
                         "Custom tool loaded: %s (level=%d, file=%s)",
                         tool_class.name, level, filename,
                     )
+
+                # meta.json 정규화 (누락·이름 오류 교정)
+                meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_name}.meta.json")
+                normalize_tool_meta(meta_path, tool_class, module_name)
+
             except Exception as e:
                 log.warning("Failed to instantiate tool from %s: %s", filename, e)
         else:
@@ -484,14 +614,18 @@ class ToolCreatorTool(BaseTool):
     async def execute(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
-        """툴 생성을 서버 래퍼 또는 레거시 경로로 위임합니다."""
+        """서버 컨텍스트가 있으면 서버 파이프라인, 없으면 standalone 경로로 실행합니다."""
         project_id = context.metadata.get("project_id")
         user_id = context.metadata.get("user_id")
         chat_session_id = context.metadata.get("chat_session_id")
         plan_id = context.metadata.get("plan_id")
 
         if project_id and user_id and chat_session_id is not None and plan_id:
-            from src.tooling import ServerToolCreationRequest, create_tool_for_server
+            try:
+                from src.tooling import ServerToolCreationRequest, create_tool_for_server
+            except ImportError:
+                # src.tooling 없는 환경(CLI 전용 배포)에서는 standalone으로 폴백
+                return await self._execute_standalone(arguments, context)
 
             result = await create_tool_for_server(
                 ServerToolCreationRequest(
@@ -506,8 +640,7 @@ class ToolCreatorTool(BaseTool):
                 registry=context.metadata.get("tool_registry"),
                 tool_permissions=context.metadata.get("tool_permissions"),
             )
-            
-            # 레지스트리에 등록된 경우, active_registry에도 반영 (RBAC 체크)
+
             if result.status == "created" and context.metadata.get("active_registry") is not None:
                 instance = context.metadata["tool_registry"].get_tool(arguments.tool_name)
                 if instance:
@@ -522,12 +655,16 @@ class ToolCreatorTool(BaseTool):
                 metadata=result.to_metadata(),
             )
 
-        return await self._execute_legacy(arguments, context)
+        return await self._execute_standalone(arguments, context)
 
-    async def _execute_legacy(
+    async def _execute_standalone(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
-        from src.tooling.service import inject_permission_level, normalize_tool_name, ToolCreationError
+        from theseus_engine.tools.core.tool_validator import (
+            inject_permission_level,
+            normalize_tool_name,
+            ToolCreationError,
+        )
         import json
         from datetime import datetime, timezone
 
@@ -550,10 +687,22 @@ class ToolCreatorTool(BaseTool):
             log.error("[ToolAudit] Legacy tool creation failed at permission injection: %s", e.message)
             return ToolResult(output=f"❌ {e.message}", is_error=True)
 
-        # 2. 코드 문법 검증
+        # 2. 코드 정제 (LLM 출력에서 발생하는 이스케이프 오염 제거)
+        code = _sanitize_generated_code(code)
+
+        # 2b. 코드 문법 검증
         is_valid_code, code_msg = ToolValidator.validate_code(code)
         if not is_valid_code:
-            log.error("[ToolAudit] Legacy tool creation failed at validation:\n%s", code_msg)
+            # 문제 코드 7번 줄 전후를 로그에 덤프해 디버깅을 돕는다
+            lines = code.splitlines()
+            snippet = "\n".join(
+                f"  {i+1:>4}: {l}" for i, l in enumerate(lines[:20])
+            )
+            log.error(
+                "[ToolAudit] Legacy tool creation failed at validation:\n%s\n"
+                "[Code snippet (first 20 lines)]\n%s",
+                code_msg, snippet,
+            )
             return ToolResult(
                 output=f"❌ Code syntax/structure validation failed:\n{code_msg}",
                 is_error=True,
@@ -599,6 +748,9 @@ class ToolCreatorTool(BaseTool):
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        # 5b. 생성 직후 정규화 (스키마 일관성 보장)
+        normalize_tool_meta(meta_path, tool_class, safe_tool_name)
 
         # 6. 런타임 ToolRegistry 및 RBAC에 즉시 등록
         registry = context.metadata.get("tool_registry")

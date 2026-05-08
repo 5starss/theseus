@@ -2,14 +2,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# OpenHarness / Theseus imports
-from openharness.engine.query_engine import QueryEngine
-from openharness.tools import create_default_tool_registry
-from openharness.config.settings import PermissionSettings
-from openharness.hooks.events import HookEvent
-from openharness.hooks.loader import HookRegistry
-from openharness.hooks.schemas import AgentHookDefinition
-from openharness.hooks.executor import HookExecutionContext
+from theseus_engine.engine.query_engine import QueryEngine
+from theseus_engine.tools.core.base_tools import ToolRegistry
 
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 from theseus_engine.models.state import TheseusStateMachine, AgentMode, PlanPhase
@@ -47,13 +41,11 @@ async def setup_engine(
     enable_dynamic_tools: bool = THESEUS_DYNAMIC_TOOL_RETRIEVAL,
     reset_stats: bool = False,
 ):
-    # 통계 및 비용 추적기는 세션 시작 시 1회만 리셋 (매 턴 리셋 방지)
     if reset_stats:
         SessionStats.reset()
         CostTracker.reset()
     tracker = CostTracker.get_or_create()
 
-    # 3단계 메모리 컨텍스트 로드
     scoped_memory = ScopedMemory(cwd=Path.cwd())
     scoped_memory.ensure_gitignore()
     memory_context = scoped_memory.read_context()
@@ -62,7 +54,8 @@ async def setup_engine(
     if api_client is None:
         api_client = TheseusLLMClient(model_name)
 
-    full_registry = create_default_tool_registry()
+    # Theseus 자체 ToolRegistry로 시작 — create_default_tool_registry() 사용하지 않음
+    full_registry = ToolRegistry()
 
     # ALL_CORE_TOOLS에서 모든 핵심 도구를 자동 등록
     for tool_cls in ALL_CORE_TOOLS:
@@ -76,7 +69,7 @@ async def setup_engine(
     # 동적 도구 선택 (Top-K Tool Retrieval)
     # --------------------------------------------------------------
     current_registry = full_registry
-    rag_failed = False  # RAG 실패 여부 추적
+    rag_failed = False
 
     if enable_dynamic_tools and user_query:
         try:
@@ -89,7 +82,6 @@ async def setup_engine(
                 history_messages=history_messages,
             )
 
-            # ESSENTIAL_TOOL_NAMES만 반환된 경우 = 유사도 기반 선택이 0개 → RAG 실패
             selected_names = {t.name for t in selected_tools}
             similarity_added = len(selected_names - ESSENTIAL_TOOL_NAMES)
             rag_failed = similarity_added == 0
@@ -108,68 +100,46 @@ async def setup_engine(
                 "[ToolRetriever] 도구 검색 실패, 전체 레지스트리 사용: %s", _e,
             )
             print("⚠️ 도구 검색 중 오류 발생. 전체 레지스트리를 사용합니다.")
-            rag_failed = True  # 예외 발생도 폴백 트리거
+            rag_failed = True
     # --------------------------------------------------------------
 
-    settings = PermissionSettings()
-    # require_human_confirm=False: HITL 훅이 이미 is_destructive 툴에 대해 사람 확인을 담당.
-    # 권한 체커가 추가로 묻지 않도록 False로 고정. (RBAC 레벨 체크만 수행)
+    # Theseus 자체 PermissionSettings — OpenHarness PermissionSettings 제거
+    from theseus_engine.models.rbac import TheseusPermissionSettings
+    settings = TheseusPermissionSettings()
     permission_checker = TheseusPermissionChecker(
         settings, user_level, project_tool_permissions,
         require_human_confirm=False,
     )
-    
-    # 6단계: Hook Executor 및 Security Validator 주입
+
     enable_hooks = os.getenv("THESEUS_ENABLE_AGENT_HOOK", "false").lower() == "true"
     hook_executor = None
 
-    # 필터링된 레지스트리 생성
-    # create_tool은 PLAN EXECUTING 단계에서만 활성화 — 나머지 모드에서는 제외
+    # create_tool은 PLAN EXECUTING 단계에서만 활성화
     is_plan_executing = (
         sm.mode == AgentMode.PLAN
         and getattr(sm, "plan_phase", None) == PlanPhase.EXECUTING
     )
+    if is_plan_executing and current_registry.get("create_tool") is None:
+        creator = full_registry.get("create_tool")
+        if creator is not None:
+            current_registry.register(creator)
     exclude = set() if is_plan_executing else {"create_tool"}
     active_registry = build_filtered_registry(
         current_registry, project_tool_permissions, user_level, exclude_tools=exclude
     )
 
-    # RAG 폴백: 유사도 선택 실패 시 ToolSearchTool을 active_registry에 주입
     if rag_failed and active_registry.get("tool_search") is None:
         active_registry.register(ToolSearchTool())
         print("🔧 ToolSearchTool이 폴백으로 활성화되었습니다.")
 
     if enable_hooks:
-        hook_registry = HookRegistry()
-        # AgentHook 추가 (파일 수정 감시 - read_file 제외)
-        # write_file, edit_file 개별 등록 (read_file 제외)
-        _audit_prompt = (
-            "You are a security auditor. Does this file modification look safe, non-destructive, and not malicious? "
-            "Return strict JSON: {\"ok\": true} or {\"ok\": false, \"reason\": \"...\"}. "
-            "IMPORTANT: DO NOT use markdown backticks or any other formatting. Output raw JSON only. "
-            "Arguments: $ARGUMENTS"
-        )
-        for tool_to_audit in ["write_file", "edit_file"]:
-            h = AgentHookDefinition(
-                prompt=_audit_prompt,
-                matcher=tool_to_audit,
-                block_on_failure=True
-            )
-            hook_registry.register(HookEvent.PRE_TOOL_USE, h)
-        
-        hook_context = HookExecutionContext(
-            cwd=Path.cwd(),
-            api_client=api_client,
-            default_model=model_name,
-        )
-        
         hook_executor = TheseusHookExecutor(
-            hook_registry,
-            hook_context,
             active_registry=active_registry,
             full_registry=full_registry,
             enable_dynamic_tools=enable_dynamic_tools,
             permission_prompt=permission_prompt_func,
+            llm_client=api_client,
+            audit_tools={"write_file", "edit_file"},
         )
 
     # ==============================================================
@@ -198,9 +168,6 @@ async def setup_engine(
         }
     )
 
-    # ==============================================================
-    # [Task 1.4] Observability: 트레이싱 메타데이터 로깅
-    # ==============================================================
     if is_tracing_enabled():
         import logging
         _log = logging.getLogger(__name__)
