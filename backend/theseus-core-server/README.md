@@ -13,7 +13,7 @@
 
 ## 2. 개발 환경 및 공통 설정
 
-* **언어:** Python 3.11 권장 (OpenHarness 권장 사양)
+* **언어:** Python 3.11 권장
 * **서버 프레임워크:** FastAPI
 * **환경 관리:** `uv` 패키지 매니저 기반 가상환경 및 의존성 관리 (속도 최적화)
 * **컨테이너:** Docker (멀티스테이지 빌드, Python 3.11-slim) / DinD (Docker-in-Docker) 격리 실행
@@ -23,7 +23,8 @@
 
 * **Web Framework:** `fastapi`, `uvicorn`, `pydantic` (엄격한 파라미터 검증)
 * **Streaming & I/O:** `sse-starlette`, `httpx` (비동기 HTTP 통신)
-* **Agent Engine:** `theseus_engine` (OpenHarness 의존성을 배제한 자체 코어 엔진)
+* **Agent Engine:** `theseus_engine` (자체 구현 코어 엔진 — OpenHarness 의존성 없음)
+* **LLM Clients:** `anthropic>=0.40.0`, `openai>=1.0.0` (직접 SDK 호출)
 * **Vector DB / RAG:** `psycopg2`, `pgvector`, `sentence-transformers`, `langchain-core`
 * **Tracing:** `langsmith`
 
@@ -89,7 +90,7 @@ cd theseus-core
 uv venv --python 3.11
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 2. 의존성 설치 (openharness 라이브러리 포함)
+# 2. 의존성 설치
 uv pip install -r requirements.txt
 ```
 
@@ -210,7 +211,7 @@ FastAPI 서버 구축, Spring Boot와의 통신, Vector DB 연동 등 시스템�
 OpenHarness 엔진 래핑, 프롬프트 엔지니어링, 권한 필터링, 그리고 코드 검증을 책임집니다.
 
 * **엔진 연동 및 관측성 (Engine & Observability)**
-  * 자체 QueryEngine 실행 제너레이터(`run_query`)를 스트리밍 엔드포인트 내부에 연동.
+  * Theseus-native `QueryEngine`(`theseus_engine/engine/query_engine.py`) 실행 제너레이터(`run_query`)를 스트리밍 엔드포인트 내부에 연동.
   * 시스템 전반에 LangSmith `@traceable` 데코레이터를 주입하여 에이전트 궤적 완벽 추적.
 * **동적 권한 필터링 로직 (RBAC Loader)**
   * `theseus_engine/custom_tools/` 폴더의 `.py` 파일들을 런타임에 동적으로 주입.
@@ -218,6 +219,7 @@ OpenHarness 엔진 래핑, 프롬프트 엔지니어링, 권한 필터링, 그�
 * **메타-툴링 파이프라인 (Interactive Planning)**
   * `Drafting` -> `Review` -> `Executing` -> `Verifying` 4단계 상태 제어를 위한 State Machine 및 다국어 지원 파서 구축.
   * 코드를 바로 짜지 않고 구현 계획서를 먼저 출력하도록 시스템 프롬프트 및 JSON 스키마 엔지니어링.
+  * `create_tool` 성공 시 자동 등록 알림 및 `/tools custom` 커맨드로 커스텀 툴 목록 조회 가능.
 * **세분화된 자동 검증기 4종 (`src/validators/`)**
   * Execution & Query 검증기: DB/API 호출 안전성 및 권한 판별 로직 구현.
   * Analysis 검증기 (보안): `ast` 파싱을 통한 금지된 라이브러리(`os`, `subprocess`) 호출 및 취약점 방어 로직.
