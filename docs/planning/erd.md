@@ -5,22 +5,28 @@
 | 테이블 | 역할 |
 | --- | --- |
 | `users` | 사용자 계정, 시스템 권한, 계정 상태를 저장한다. |
-| `refresh_tokens` | 사용자별 Refresh Token hash와 만료 시각을 저장한다. |
 | `projects` | Tool 생성과 사용이 이루어지는 프로젝트 단위를 저장한다. |
 | `project_members` | 프로젝트 내부 역할, 접근 레벨, Tool 작업 권한을 저장한다. |
 | `chat_sessions` | 프로젝트 멤버가 진행하는 대화 세션을 저장한다. |
 | `tools` | Draft부터 승인, 삭제까지 Tool 본체와 상태를 저장한다. |
 | `chat_messages` | 세션 안에서 오간 최종 메시지를 순서대로 저장한다. |
 | `tool_approvals` | Tool 승인 요청 이력과 검토 결과를 저장한다. |
+| `billing_usages` | Core Server가 보고한 토큰 사용량과 원본 usage payload를 저장한다. |
 
 ## User / Auth
 
 - `users.employee_number`는 로그인 ID로 사용한다.
 - `users.password`는 해시된 비밀번호만 저장한다.
 - `users.email`은 선택값이지만 값이 있으면 유일해야 한다.
-- `refresh_tokens.user_id`는 사용자당 하나의 Refresh Token만 허용한다.
-- `refresh_tokens.token_hash`는 Refresh Token 원문이 아니라 SHA-256 hash를 저장한다.
-- `refresh_tokens.expires_at`은 Access Token 재발급 가능 여부를 판단한다.
+- Refresh Token은 DB 테이블에 저장하지 않고 Redis `RT:{userId}` 키에 TTL 기반으로 저장한다.
+- Access Token은 응답 body로 전달하고, Refresh Token은 HttpOnly Cookie로 전달한다.
+
+## Billing Usage
+
+- Core Server는 Internal API를 통해 Tool 생성 과정의 토큰 사용량을 보고한다.
+- `billing_usages.user_id`와 `billing_usages.project_id`는 사용량 집계 기준이다.
+- `billing_usages.idempotency_key`가 있으면 동일 key 중복 저장을 방지한다.
+- `billing_usages.usage_payload_json`에는 절감량 계산 계약이 확정되기 전까지 Core 원본 usage payload를 보관한다.
 
 ## Project / ProjectMember
 
@@ -77,10 +83,10 @@ AI 생성 1회는 `runId`로 식별한다. `runId`는 DB 영구 테이블의 기
 | 구성 요소 | 역할 |
 | --- | --- |
 | Redis | `tool:generation:{toolId}:state` 최신 상태, progress/chunk 최신값, SSE 재연결 복구 |
-| Kafka | USER/ASSISTANT 메시지 저장 이벤트, Tool draft 상태 변경 이벤트 |
+| Kafka | Tool 생성/재생성 요청 이벤트와 Core Server 결과 이벤트 전달 |
 | SSE | Redis 최신 상태와 Kafka Consumer 수신 이벤트를 FE에 실시간 중계 |
 
-`completed` 이벤트는 AI 생성 완료 시점이 아니라 Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool을 `REVIEW`로 변경한 뒤 발행한다.
+Core Server의 `completed` 이벤트를 수신하면 Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool을 `REVIEW`로 변경한 뒤 Redis completed 상태와 SSE completed 이벤트를 전달한다.
 
 ## DDL
 
@@ -100,20 +106,6 @@ CREATE TABLE users (
     CONSTRAINT uk_users_email UNIQUE (email)
 );
 
-CREATE TABLE refresh_tokens (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    user_id BIGINT NOT NULL,
-    token_hash VARCHAR(64) NOT NULL,
-    expires_at DATETIME NOT NULL,
-    created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL,
-    CONSTRAINT pk_refresh_tokens PRIMARY KEY (id),
-    CONSTRAINT uk_refresh_tokens_user UNIQUE (user_id),
-    CONSTRAINT uk_refresh_tokens_token_hash UNIQUE (token_hash),
-    CONSTRAINT fk_refresh_tokens_user
-        FOREIGN KEY (user_id) REFERENCES users (id)
-);
-
 CREATE TABLE projects (
     id BIGINT NOT NULL AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
@@ -130,12 +122,32 @@ CREATE TABLE projects (
         FOREIGN KEY (project_admin_user_id) REFERENCES users (id)
 );
 
+CREATE TABLE billing_usages (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    project_id BIGINT NOT NULL,
+    prompt_tokens BIGINT NOT NULL,
+    completion_tokens BIGINT NOT NULL,
+    total_tokens BIGINT NOT NULL,
+    model_name VARCHAR(120) NOT NULL,
+    reported_at DATETIME NOT NULL,
+    idempotency_key VARCHAR(255) NULL,
+    usage_payload_json LONGTEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT pk_billing_usages PRIMARY KEY (id),
+    CONSTRAINT uk_billing_usages_idempotency_key UNIQUE (idempotency_key),
+    CONSTRAINT fk_billing_usages_user
+        FOREIGN KEY (user_id) REFERENCES users (id),
+    CONSTRAINT fk_billing_usages_project
+        FOREIGN KEY (project_id) REFERENCES projects (id)
+);
+
 CREATE TABLE project_members (
     id BIGINT NOT NULL AUTO_INCREMENT,
     project_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     project_role VARCHAR(30) NOT NULL DEFAULT 'MEMBER',
-    access_level INT UNSIGNED NOT NULL DEFAULT 1,
+    access_level INT NOT NULL DEFAULT 1,
     can_create_tool BOOLEAN NOT NULL DEFAULT FALSE,
     can_use_tool BOOLEAN NOT NULL DEFAULT TRUE,
     can_update_tool BOOLEAN NOT NULL DEFAULT FALSE,
@@ -254,18 +266,25 @@ CREATE INDEX idx_tools_project_status
 
 CREATE INDEX idx_tool_approvals_tool_status
     ON tool_approvals (tool_id, approval_status);
+
+CREATE INDEX idx_billing_usages_user_reported_at
+    ON billing_usages (user_id, reported_at);
+
+CREATE INDEX idx_billing_usages_project_reported_at
+    ON billing_usages (project_id, reported_at);
 ```
 
 ## Relationship Summary
 
 ```text
-users 1:1 refresh_tokens
 users 1:N projects(created_by_user_id)
 users 1:N projects(project_admin_user_id)
 users 1:N project_members
+users 1:N billing_usages
 projects 1:N project_members
 projects 1:N chat_sessions
 projects 1:N tools
+projects 1:N billing_usages
 project_members 1:N chat_sessions
 project_members 1:N tools(created_by_project_member_id)
 chat_sessions 1:N tools
