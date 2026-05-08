@@ -257,6 +257,20 @@ skipped
 failed
 ```
 
+### progress 예시
+
+```text
+event: progress
+data: {"eventType":"progress","runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","eventSequence":3,"projectId":1,"chatSessionId":10,"stage":"PLAN_DRAFTING","message":"PLAN 구조를 작성하고 있습니다.","progressRate":35,"updatedAt":"2026-05-08T10:08:00"}
+```
+
+### chunk 예시
+
+```text
+event: chunk
+data: {"eventType":"chunk","runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","eventSequence":4,"projectId":1,"chatSessionId":10,"content":"## 입력 정의...","updatedAt":"2026-05-08T10:08:03"}
+```
+
 ### completed 예시
 
 ```text
@@ -301,6 +315,7 @@ Authorization: Bearer {accessToken}
     "planVersion": 1,
     "eventType": "completed",
     "status": "REVIEW",
+    "stage": "PLAN_COMPLETED",
     "progressRate": 100,
     "message": "Tool PLAN 생성이 완료되었습니다.",
     "updatedAt": "2026-05-08T10:10:00"
@@ -407,8 +422,8 @@ Authorization: Bearer {accessToken}
     "status": "REVIEW",
     "mode": "PLAN",
     "rawMarkdown": "## Tool Plan...",
-    "structuredPlanJson": "{\"version\":1,\"blocks\":[]}",
-    "planSnapshot": "{\"schemaVersion\":1,\"blocks\":[]}",
+    "structuredPlanJson": "{\"version\":1,\"blocks\":[{\"blockId\":\"analysis-summary\",\"title\":\"분석 요약\",\"content\":\"최근 장애 로그를 수집하고 원인을 분류합니다.\"}]}",
+    "planSnapshot": "{\"schemaVersion\":1,\"planVersion\":1,\"title\":\"장애 로그 분석 Tool\",\"summary\":\"최근 장애 로그를 수집하고 원인을 분류합니다.\",\"blocks\":[{\"blockId\":\"analysis-summary\",\"title\":\"분석 요약\",\"content\":\"최근 장애 로그를 수집하고 원인을 분류합니다.\",\"order\":1}],\"createdAt\":\"2026-05-08T10:10:00\"}",
     "createdAt": "2026-05-08T10:00:00",
     "updatedAt": "2026-05-08T10:10:00"
   }
