@@ -30,10 +30,12 @@ import lombok.NoArgsConstructor;
 @Table(
 	name = "tool_approvals",
 	uniqueConstraints = {
-		@UniqueConstraint(name = "uk_tool_approvals_tool_request", columnNames = {"tool_id", "request_number"})
+		@UniqueConstraint(name = "uk_tool_approvals_tool_request", columnNames = {"tool_id", "request_number"}),
+		@UniqueConstraint(name = "uk_tool_approvals_plan_request", columnNames = {"tool_plan_id", "request_number"})
 	},
 	indexes = {
-		@Index(name = "idx_tool_approvals_tool_status", columnList = "tool_id, approval_status")
+		@Index(name = "idx_tool_approvals_tool_status", columnList = "tool_id, approval_status"),
+		@Index(name = "idx_tool_approvals_plan_status", columnList = "tool_plan_id, approval_status")
 	}
 )
 @Entity
@@ -46,6 +48,10 @@ public class ToolApproval {
 	@ManyToOne(fetch = FetchType.LAZY)
 	@JoinColumn(name = "tool_id", nullable = false, foreignKey = @ForeignKey(name = "fk_tool_approvals_tool"))
 	private Tool tool;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "tool_plan_id", foreignKey = @ForeignKey(name = "fk_tool_approvals_tool_plan"))
+	private ToolPlan toolPlan;
 
 	@Column(name = "request_number", nullable = false)
 	private Integer requestNumber;
@@ -81,10 +87,12 @@ public class ToolApproval {
 	@Builder
 	private ToolApproval(
 		Tool tool,
+		ToolPlan toolPlan,
 		Integer requestNumber,
 		ProjectMember requestedByProjectMember
 	) {
 		this.tool = Objects.requireNonNull(tool, "tool must not be null");
+		this.toolPlan = toolPlan;
 		this.requestNumber = validateRequestNumber(requestNumber);
 		this.requestedByProjectMember = Objects.requireNonNull(
 			requestedByProjectMember,
@@ -124,6 +132,10 @@ public class ToolApproval {
 
 	public boolean isReviewed() {
 		return reviewedAt != null;
+	}
+
+	public void connectToolPlan(ToolPlan toolPlan) {
+		this.toolPlan = Objects.requireNonNull(toolPlan, "toolPlan must not be null");
 	}
 
 	@PrePersist

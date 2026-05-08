@@ -53,6 +53,19 @@ PLAN 요청
 
 `tools`는 실제 코드, 파일, 모듈, 실행 메타데이터가 준비된 산출물만 저장한다. 승인 전 PLAN 후보와 진행 중 상태는 `tools`에 저장하지 않는다.
 
+### 전환 단계 기준
+
+`S14P31A308-237` 단계에서는 신규 ToolPlan 구조를 추가하되 기존 Tool 생성/승인 API 호환을 유지한다.
+
+```text
+tools.source_tool_plan_id nullable
+tool_approvals.tool_plan_id nullable
+기존 tools draft 컬럼 유지
+기존 tools.status enum 유지
+```
+
+최종 ToolPlan 전환이 끝난 뒤 별도 이슈에서 legacy Tool draft 컬럼을 제거하고, Tool 상태를 build 산출물 기준 상태로 정리한다.
+
 ## ChatMessage 연결
 
 | 메시지 | 저장 규칙 |
@@ -118,6 +131,10 @@ SKIPPED
 `SKIPPED`는 PLAN 모드 입력이 Tool 명세 생성 대상이 아니라고 Core Server가 판단한 경우다.
 
 ### ToolStatus
+
+전환 단계에서는 기존 API 호환을 위해 `DRAFT`, `PENDING`, `REJECTED`, `APPROVED`, `DELETED`를 유지한다.
+
+최종 build 산출물 중심 전환 후 상태:
 
 ```text
 ACTIVE
@@ -287,7 +304,7 @@ ALTER TABLE tool_plan_groups
 
 CREATE TABLE tool_plan_runs (
     id BIGINT NOT NULL AUTO_INCREMENT,
-    run_id VARCHAR(80) NOT NULL,
+    run_id VARCHAR(64) NOT NULL,
     project_id BIGINT NOT NULL,
     chat_session_id BIGINT NOT NULL,
     request_type VARCHAR(30) NOT NULL,
@@ -329,7 +346,7 @@ CREATE TABLE tools (
     project_id BIGINT NOT NULL,
     chat_session_id BIGINT NOT NULL,
     created_by_project_member_id BIGINT NOT NULL,
-    source_tool_plan_id BIGINT NOT NULL,
+    source_tool_plan_id BIGINT NULL,
     file_name VARCHAR(120) NOT NULL,
     display_name VARCHAR(30) NULL,
     display_description TEXT NULL,
@@ -337,7 +354,12 @@ CREATE TABLE tools (
     artifact_path VARCHAR(500) NULL,
     code_snapshot LONGTEXT NULL,
     metadata_json LONGTEXT NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+    status VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+    draft_phase VARCHAR(30) NOT NULL DEFAULT 'PLAN',
+    draft_version BIGINT NOT NULL DEFAULT 0,
+    raw_markdown LONGTEXT NULL,
+    structured_plan_json LONGTEXT NULL,
+    draft_snapshot LONGTEXT NULL,
     tool_grade INT UNSIGNED NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
@@ -369,7 +391,7 @@ CREATE TABLE chat_messages (
     sender_type VARCHAR(30) NOT NULL,
     message_type VARCHAR(50) NOT NULL,
     content_type VARCHAR(30) NOT NULL,
-    content LONGTEXT NOT NULL,
+    content MEDIUMTEXT NOT NULL,
     message_order BIGINT NOT NULL,
     idempotency_key VARCHAR(255) NULL,
     created_at DATETIME NOT NULL,
@@ -392,8 +414,8 @@ CREATE TABLE chat_messages (
 
 CREATE TABLE tool_approvals (
     id BIGINT NOT NULL AUTO_INCREMENT,
-    tool_plan_id BIGINT NOT NULL,
-    tool_id BIGINT NULL,
+    tool_plan_id BIGINT NULL,
+    tool_id BIGINT NOT NULL,
     request_number BIGINT NOT NULL,
     approval_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     requested_by_project_member_id BIGINT NOT NULL,
@@ -402,6 +424,7 @@ CREATE TABLE tool_approvals (
     requested_at DATETIME NOT NULL,
     reviewed_at DATETIME NULL,
     CONSTRAINT pk_tool_approvals PRIMARY KEY (id),
+    CONSTRAINT uk_tool_approvals_tool_request UNIQUE (tool_id, request_number),
     CONSTRAINT uk_tool_approvals_plan_request UNIQUE (tool_plan_id, request_number),
     CONSTRAINT fk_tool_approvals_tool_plan
         FOREIGN KEY (tool_plan_id) REFERENCES tool_plans (id),

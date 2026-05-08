@@ -4,6 +4,7 @@ import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
 import com.theseus.api.domain.tool.entity.ToolApprovalStatus;
+import com.theseus.api.domain.tool.entity.ToolPlan;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
@@ -18,9 +19,15 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 
 	List<ToolApproval> findByToolOrderByRequestNumberDesc(Tool tool);
 
+	List<ToolApproval> findByToolPlanOrderByRequestNumberDesc(ToolPlan toolPlan);
+
 	Optional<ToolApproval> findByToolAndRequestNumber(Tool tool, Integer requestNumber);
 
+	Optional<ToolApproval> findByToolPlanAndRequestNumber(ToolPlan toolPlan, Integer requestNumber);
+
 	Optional<ToolApproval> findTopByToolOrderByRequestNumberDesc(Tool tool);
+
+	Optional<ToolApproval> findTopByToolPlanOrderByRequestNumberDesc(ToolPlan toolPlan);
 
 	List<ToolApproval> findByToolAndApprovalStatusOrderByRequestNumberDesc(
 		Tool tool,
@@ -120,4 +127,6 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 	List<ToolApproval> findByToolOrderByRequestNumberDescForUpdate(@Param("tool") Tool tool);
 
 	boolean existsByToolAndApprovalStatus(Tool tool, ToolApprovalStatus approvalStatus);
+
+	boolean existsByToolPlanAndApprovalStatus(ToolPlan toolPlan, ToolApprovalStatus approvalStatus);
 }

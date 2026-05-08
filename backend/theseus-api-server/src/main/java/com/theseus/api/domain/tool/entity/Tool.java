@@ -33,7 +33,8 @@ import lombok.NoArgsConstructor;
 @Table(
 	name = "tools",
 	uniqueConstraints = {
-		@UniqueConstraint(name = "uk_tools_project_file_name", columnNames = {"project_id", "file_name"})
+		@UniqueConstraint(name = "uk_tools_project_file_name", columnNames = {"project_id", "file_name"}),
+		@UniqueConstraint(name = "uk_tools_source_tool_plan", columnNames = "source_tool_plan_id")
 	},
 	indexes = {
 		@Index(name = "idx_tools_chat_session_status", columnList = "chat_session_id, status"),
@@ -62,6 +63,10 @@ public class Tool {
 		foreignKey = @ForeignKey(name = "fk_tools_created_by_project_member")
 	)
 	private ProjectMember createdByProjectMember;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "source_tool_plan_id", foreignKey = @ForeignKey(name = "fk_tools_source_tool_plan"))
+	private ToolPlan sourceToolPlan;
 
 	@Column(name = "file_name", nullable = false, length = 120)
 	private String fileName;
@@ -95,6 +100,18 @@ public class Tool {
 	@Column(name = "draft_snapshot", columnDefinition = "LONGTEXT")
 	private String draftSnapshot;
 
+	@Column(name = "module_name", length = 160)
+	private String moduleName;
+
+	@Column(name = "artifact_path", length = 500)
+	private String artifactPath;
+
+	@Column(name = "code_snapshot", columnDefinition = "LONGTEXT")
+	private String codeSnapshot;
+
+	@Column(name = "metadata_json", columnDefinition = "LONGTEXT")
+	private String metadataJson;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private LocalDateTime createdAt;
 
@@ -106,6 +123,7 @@ public class Tool {
 		Project project,
 		ChatSession chatSession,
 		ProjectMember createdByProjectMember,
+		ToolPlan sourceToolPlan,
 		String fileName,
 		String displayName,
 		String displayDescription,
@@ -115,7 +133,11 @@ public class Tool {
 		Integer toolGrade,
 		String rawMarkdown,
 		String structuredPlanJson,
-		String draftSnapshot
+		String draftSnapshot,
+		String moduleName,
+		String artifactPath,
+		String codeSnapshot,
+		String metadataJson
 	) {
 		this.project = Objects.requireNonNull(project, "project must not be null");
 		this.chatSession = Objects.requireNonNull(chatSession, "chatSession must not be null");
@@ -133,6 +155,11 @@ public class Tool {
 		this.rawMarkdown = rawMarkdown;
 		this.structuredPlanJson = structuredPlanJson;
 		this.draftSnapshot = draftSnapshot;
+		this.sourceToolPlan = sourceToolPlan;
+		this.moduleName = moduleName;
+		this.artifactPath = artifactPath;
+		this.codeSnapshot = codeSnapshot;
+		this.metadataJson = metadataJson;
 	}
 
 	public void updateDraft(
@@ -201,6 +228,22 @@ public class Tool {
 		if (toolGrade != null) {
 			this.toolGrade = toolGrade;
 		}
+	}
+
+	public void connectSourceToolPlan(ToolPlan sourceToolPlan) {
+		this.sourceToolPlan = Objects.requireNonNull(sourceToolPlan, "sourceToolPlan must not be null");
+	}
+
+	public void updateArtifact(
+		String moduleName,
+		String artifactPath,
+		String codeSnapshot,
+		String metadataJson
+	) {
+		this.moduleName = moduleName;
+		this.artifactPath = artifactPath;
+		this.codeSnapshot = codeSnapshot;
+		this.metadataJson = metadataJson;
 	}
 
 	public void delete() {

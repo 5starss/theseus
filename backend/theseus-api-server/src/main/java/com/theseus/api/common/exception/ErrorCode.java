@@ -77,6 +77,12 @@ public enum ErrorCode {
     // ToolGeneration
     TOOL_GENERATION_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TGEN-001", "유효하지 않은 Tool 생성 이벤트입니다."),
 
+    // ToolPlan
+    TOOL_PLAN_VERSION_INVALID(HttpStatus.BAD_REQUEST, "TPLN-001", "ToolPlan 버전은 1 이상이어야 합니다."),
+    TOOL_PLAN_RUN_ID_REQUIRED(HttpStatus.BAD_REQUEST, "TPLN-002", "ToolPlanRun runId는 비어 있을 수 없습니다."),
+    TOOL_PLAN_STATUS_TRANSITION_INVALID(HttpStatus.CONFLICT, "TPLN-003", "ToolPlan 상태를 전환할 수 없습니다."),
+    TOOL_PLAN_RUN_ALREADY_FINISHED(HttpStatus.CONFLICT, "TPLN-004", "이미 종료된 ToolPlanRun입니다."),
+
     // Billing
     BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),
     BILLING_USAGE_PAYLOAD_INVALID(HttpStatus.BAD_REQUEST, "BILL-002", "유효하지 않은 Billing 사용량 요청입니다.");
