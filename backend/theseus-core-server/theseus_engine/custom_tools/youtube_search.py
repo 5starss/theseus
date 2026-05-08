@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 
 from playwright.async_api import async_playwright
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 from pydantic import BaseModel, Field
 
 class YoutubeSearchToolInput(BaseModel):

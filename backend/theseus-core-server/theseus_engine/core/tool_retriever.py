@@ -22,7 +22,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from openharness.tools.base import BaseTool, ToolRegistry
+from theseus_engine.tools.core.base_tools import BaseTool, ToolRegistry
 
 log = logging.getLogger(__name__)
 

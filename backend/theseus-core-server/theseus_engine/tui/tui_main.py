@@ -3,115 +3,151 @@ import sys
 import asyncio
 from pathlib import Path
 
-# Add project root and OpenHarness/src to sys.path
+# Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))
 
+from textual.app import App, ComposeResult
 from textual.widgets import Static, RichLog, OptionList, Input, Header, Footer
 from textual.containers import Horizontal, Vertical, Container
+from textual.binding import Binding
 from textual import on, events
 
-from openharness.ui.textual_app import OpenHarnessTerminalApp
-from openharness.ui.runtime import build_runtime, start_runtime, handle_line
-from openharness.engine.query import MaxTurnsExceeded
-from openharness.commands.registry import SlashCommand, CommandResult
-
 from theseus_engine.models.state import TheseusStateMachine, AgentMode, CoordinatorPhase
-from theseus_engine.models.sessions import load_session_history, save_session_history, list_sessions, get_session_path
-from theseus_engine.core.engine_builder import setup_engine
+from theseus_engine.models.sessions import (
+    load_session_history, save_session_history,
+    list_sessions, get_session_path,
+)
+from theseus_engine.core.engine_builder import setup_engine, get_tracing_tags, get_tracing_metadata
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
-print(f"\n[DEBUG] TheseusLLMClient loaded from: {TheseusLLMClient.__init__.__code__.co_filename}\n", file=sys.stderr)
-from openharness.permissions.modes import PermissionMode
+from theseus_engine.models.rbac import PermissionMode
 from theseus_engine.tools.core.tool_factory import build_filtered_registry
-
+from theseus_engine.engine.query_engine import MaxTurnsExceeded
+from theseus_engine.engine.stream_events import (
+    AssistantTextDelta, AssistantTurnComplete,
+    ToolExecutionStarted, ToolExecutionCompleted,
+    ErrorEvent, StatusEvent, CompactProgressEvent,
+)
 from theseus_engine.tui.autocomplete import AutocompleteHelper
 from theseus_engine.tui.ui_components import THESEUS_TUI_CSS, THESEUS_BINDINGS
+from theseus_engine.tui.commands import SlashCommand, CommandResult, CommandRegistry
+from theseus_engine.tui.runtime import TheseusBundle, build_theseus_runtime, start_theseus_runtime
 from theseus_engine.observability.tracer import tracing_context
-from theseus_engine.core.engine_builder import (
-    setup_engine, get_tracing_tags, get_tracing_metadata,
+
+print(
+    f"\n[DEBUG] TheseusLLMClient loaded from: {TheseusLLMClient.__init__.__code__.co_filename}\n",
+    file=sys.stderr,
 )
 
+# ──────────────────────────────────────────────────────────
+# CSS & 기본 설정
+# ──────────────────────────────────────────────────────────
 
+THESEUS_BASE_CSS = """
+Screen { padding: 0; }
+#app-container { width: 100%; height: 100%; }
+#main-row { height: 100%; }
+#transcript-column { width: 1fr; height: 100%; }
+#side-column {
+    width: 35; height: 100%;
+    border-left: vkey $accent;
+    padding: 0 1;
+}
+#transcript { height: 1fr; }
+#current-response { height: 3; border: solid $accent; padding: 0 1; }
+#autocomplete {
+    display: none; max-height: 8;
+    border: solid $accent; background: $panel; margin: 0 1;
+}
+#autocomplete > .option-list--option-highlighted {
+    background: $accent !important;
+    color: $surface !important;
+    text-style: bold reverse !important;
+}
+#autocomplete > .option-list--option-hover { background: $accent 50%; }
+"""
+
+
+# ──────────────────────────────────────────────────────────
+# 커스텀 Input (슬래시 커맨드 인터셉트)
+# ──────────────────────────────────────────────────────────
 
 class TheseusInput(Input):
-    """오픈하네스(App)로 이벤트가 올라가기 전에, 가장 밑단 위젯에서
-    Theseus 슬래시 커맨드 이벤트를 선제 차단(Intercept)하는 커스텀 입력창.
-
-    Architecture:
-        Textual의 이벤트 버블링 구조에서 Input.Submitted 이벤트는
-        Widget → Container → ... → App 순으로 올라갑니다.
-        TheseusTUI와 OpenHarnessTerminalApp 모두 App 레벨이므로
-        App에서 event.stop()을 해도 Race Condition이 발생합니다.
-        이 위젯은 이벤트가 App에 도달하기 전 Widget 레벨에서
-        완벽히 차단하여 OpenHarness가 이벤트의 존재조차 모르게 합니다.
-    """
+    """Theseus 슬래시 커맨드를 위젯 레벨에서 선제 차단하는 커스텀 Input."""
 
     @on(Input.Submitted)
-    async def intercept_at_source(
-        self, event: Input.Submitted,
-    ) -> None:
-        """Theseus 전용 커맨드를 위젯 레벨에서 가로채 처리합니다."""
+    async def intercept_at_source(self, event: Input.Submitted) -> None:
         value = event.value.strip()
         if not value.startswith("/"):
-            # 일반 텍스트 대화는 건드리지 않고 위로(오픈하네스로) 흘려보냄
-            return
+            return  # 일반 텍스트는 그대로 앱으로 흘려보냄
 
         parts = value.split()
         cmd_name = parts[0][1:].lower()
         args = " ".join(parts[1:])
 
         theseus_cmds = {"plan", "agent", "ask", "coordinator", "session", "clear"}
+        if cmd_name not in theseus_cmds:
+            return
 
-        if cmd_name in theseus_cmds:
-            # [핵심] 이벤트가 App(OpenHarness)으로 버블링되는 것을 완벽히 차단
-            event.stop()
-            event.prevent_default()
+        event.stop()
+        event.prevent_default()
 
-            # TheseusTUI(App) 인스턴스에 접근하여 핸들러를 다이렉트 실행
-            app = self.app
-            if cmd_name == "plan":
-                await app._cmd_plan(args, None)
-            elif cmd_name == "agent":
-                await app._cmd_agent(args, None)
-            elif cmd_name == "ask":
-                await app._cmd_ask(args, None)
-            elif cmd_name == "coordinator":
-                await app._cmd_coordinator(args, None)
-            elif cmd_name == "session":
-                await app._cmd_session(args, None)
-            elif cmd_name == "clear":
-                await app._cmd_clear(args, None)
+        app: TheseusTUI = self.app  # type: ignore[assignment]
+        handlers = {
+            "plan": app._cmd_plan,
+            "agent": app._cmd_agent,
+            "ask": app._cmd_ask,
+            "coordinator": app._cmd_coordinator,
+            "session": app._cmd_session,
+            "clear": app._cmd_clear,
+        }
+        await handlers[cmd_name](args, None)
 
-            # 입력창 비우기 및 자동완성 닫기
-            self.value = ""
-            try:
-                autocomplete = app.query_one("#autocomplete")
-                if autocomplete:
-                    autocomplete.display = False
-            except Exception:
-                pass
+        self.value = ""
+        try:
+            autocomplete = app.query_one("#autocomplete")
+            if autocomplete:
+                autocomplete.display = False
+        except Exception:
+            pass
 
 
-class TheseusTUI(OpenHarnessTerminalApp):
-    CSS = OpenHarnessTerminalApp.CSS + THESEUS_TUI_CSS
-    BINDINGS = [*OpenHarnessTerminalApp.BINDINGS, *THESEUS_BINDINGS]
+# ──────────────────────────────────────────────────────────
+# 메인 TUI App
+# ──────────────────────────────────────────────────────────
 
-    def __init__(self, **kwargs):
+class TheseusTUI(App):
+    """Theseus-native Textual TUI — OpenHarness 의존 없음."""
+
+    CSS = THESEUS_BASE_CSS + THESEUS_TUI_CSS
+    BINDINGS = [
+        Binding("ctrl+p", "switch_plan", "Plan Mode"),
+        Binding("ctrl+a", "switch_agent", "Agent Mode"),
+        Binding("ctrl+s", "switch_ask", "Ask Mode"),
+        Binding("ctrl+c", "quit_session", "Quit"),
+        *THESEUS_BINDINGS,
+    ]
+
+    def __init__(self, model: str = "gpt-4o", **kwargs):
         super().__init__(**kwargs)
+        self._model = model
         self.theseus_sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
         self.current_session = "default"
-        
-        self.project_tool_permissions = {
-            "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2, 
+        self._busy = False
+        self._bundle: TheseusBundle | None = None
+        self.auto_helper: AutocompleteHelper | None = None
+
+        self.project_tool_permissions: dict = {
+            "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
             "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
             "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
             "search_knowledge_base": 1, "ingest_document": 2,
         }
         self.user_level = 5
-        self.auto_helper = None
 
-    def compose(self):
+    # ── 레이아웃 ────────────────────────────────────────────
+
+    def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Container(id="app-container"):
             with Horizontal(id="main-row"):
@@ -119,199 +155,208 @@ class TheseusTUI(OpenHarnessTerminalApp):
                     yield RichLog(id="transcript", wrap=True, highlight=True, markup=True)
                     yield Static("Ready.", id="current-response")
                     yield OptionList(id="autocomplete")
-                    yield TheseusInput(placeholder="Ask Theseus or enter a /command", id="composer")
+                    yield TheseusInput(
+                        placeholder="Ask Theseus or enter a /command",
+                        id="composer",
+                    )
                 with Vertical(id="side-column"):
                     yield Static("Starting...", id="status-bar")
                     yield Static("No tasks yet.", id="tasks-panel")
                     yield Static("No MCP servers configured.", id="mcp-panel")
         yield Footer()
 
+    # ── 초기화 ──────────────────────────────────────────────
+
     async def on_mount(self) -> None:
-        client = TheseusLLMClient(self._config.model)
-        
-        self._bundle = await build_runtime(
-            prompt=self._config.prompt,
-            cwd=str(self.app.cwd) if hasattr(self.app, 'cwd') else str(Path.cwd()),
-            model=client.model_name,
-            max_turns=30,
-            base_url=self._config.base_url,
-            system_prompt=self.theseus_sm.get_system_prompt(),
-            api_key=self._config.api_key,
-            api_client=client,
-            permission_prompt=self._ask_permission,
-            ask_user_prompt=self._ask_question,
+        api_client = TheseusLLMClient(self._model)
+
+        engine, full_registry = await setup_engine(
+            sm=self.theseus_sm,
+            user_level=self.user_level,
+            project_tool_permissions=self.project_tool_permissions,
+            permission_prompt_func=self._ask_permission,
+            reset_stats=True,
         )
-        
+
+        self._bundle = TheseusBundle(
+            engine=engine,
+            tool_registry=full_registry,
+            api_client=api_client,
+        )
+        self._bundle.app_state.model = self._model
+
         self.auto_helper = AutocompleteHelper(self._bundle)
-        
+
+        # 세션 복원
         history = load_session_history(self.current_session)
         if history:
-            self._bundle.engine.load_messages(history)
-            self._append_line(f"system> Loaded {len(history)} messages from session [bold]'{self.current_session}'[/bold].")
-        
-        await self._customize_runtime()
-        await start_runtime(self._bundle)
-        
+            engine._messages = history
+            self._append_line(
+                f"system> Loaded {len(history)} messages from session "
+                f"[bold]'{self.current_session}'[/bold]."
+            )
+
+        # 커맨드 등록
+        self._register_commands()
+
+        await start_theseus_runtime(self._bundle)
+
         self.query_one("#composer").focus()
         self._refresh_sidebars(force=True)
-        self._append_line(f"system> [bold green]Theseus Engine Initialized.[/bold green] Mode: [bold]{self.theseus_sm.mode.value}[/bold]")
+        self._append_line(
+            f"system> [bold green]Theseus Engine Initialized.[/bold green] "
+            f"Mode: [bold]{self.theseus_sm.mode.value}[/bold]"
+        )
 
-        if self._config.prompt:
-            self.call_later(lambda: asyncio.create_task(self._process_line(self._config.prompt or "")))
-
-    async def _customize_runtime(self):
-        if not self._bundle: return
-
-        # We reuse part of the engine_builder logic here conceptually, but inject directly into Textual bundle
-        from theseus_engine.core.engine_builder import setup_engine
-        engine, full_registry = await setup_engine(self.theseus_sm, self.user_level, self.project_tool_permissions, self._ask_permission)
-        
-        # Replace bundle components with Theseus configured ones
-        self._bundle.engine._permission_checker = engine._permission_checker
-        self._bundle.tool_registry = full_registry
-        self._bundle.engine._tool_registry = engine._tool_registry
-        self._bundle.engine._tool_metadata = engine._tool_metadata
-        self._bundle.engine._hook_executor = engine._hook_executor
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        # Force inject TheseusLLMClient to prevent bypass
-        actual_model = self._bundle.app_state.get().model
-        theseus_client = TheseusLLMClient(actual_model)
-        
-        # 1. Update the engine's client
-        self._bundle.engine.set_api_client(theseus_client)
-        # 2. Update the bundle's client
-        self._bundle.api_client = theseus_client
-        # 3. Mark as external to prevent OpenHarness from overwriting it on refresh
-        self._bundle.external_api_client = True
-        
-        self._append_line(f"system> [bold green]Force injected TheseusLLMClient[/bold green] (Model: {actual_model}, Type: {type(self._bundle.engine.api_client)})")
-        print(f"\n[DEBUG] Final Engine Client Type: {type(self._bundle.engine._api_client)}\n", file=sys.stderr)
-        
-        # Synchronize initial PermissionMode
-        self._sync_permission_mode()
-        
-        theseus_cmds = [
-            SlashCommand(name="plan", description="Switch to Theseus PLAN mode", handler=self._cmd_plan),
-            SlashCommand(name="agent", description="Switch to Theseus AGENT mode", handler=self._cmd_agent),
-            SlashCommand(name="ask", description="Switch to Theseus ASK mode", handler=self._cmd_ask),
-            SlashCommand(name="coordinator", description="Switch to Theseus COORDINATOR mode (parallel sub-agent orchestration)", handler=self._cmd_coordinator),
-            SlashCommand(name="session", description="Manage sessions (/session [list|new|switch] [name])", handler=self._cmd_session),
-            SlashCommand(name="clear", description="Clear session history", handler=self._cmd_clear),
+    def _register_commands(self) -> None:
+        registry = self._bundle.commands  # type: ignore[union-attr]
+        cmds = [
+            SlashCommand("plan", "Switch to PLAN mode", self._cmd_plan),
+            SlashCommand("agent", "Switch to AGENT mode", self._cmd_agent),
+            SlashCommand("ask", "Switch to ASK mode", self._cmd_ask),
+            SlashCommand("coordinator", "Switch to COORDINATOR mode", self._cmd_coordinator),
+            SlashCommand("session", "Manage sessions", self._cmd_session),
+            SlashCommand("clear", "Clear session history", self._cmd_clear),
         ]
-        
-        for cmd in theseus_cmds:
-            self._bundle.commands._commands[cmd.name] = cmd
-            if cmd.name in self._bundle.commands._canonical_names:
-                self._bundle.commands._canonical_names.remove(cmd.name)
-            self._bundle.commands._canonical_names.insert(0, cmd.name)
-            
-        self._append_line(f"system> [bold cyan]Registered {len(theseus_cmds)} Theseus slash commands.[/bold cyan]")
+        for cmd in cmds:
+            registry.register(cmd)
+        self._append_line(
+            f"system> [bold cyan]Registered {len(cmds)} Theseus slash commands.[/bold cyan]"
+        )
 
-    async def _cmd_plan(self, args: str, context: object) -> object:
+    # ── 슬래시 커맨드 핸들러 ────────────────────────────────
+
+    async def _cmd_plan(self, args: str, context: object) -> CommandResult:
         self.action_switch_plan()
         return CommandResult(message="Switched to PLAN mode.")
 
-    async def _cmd_agent(self, args: str, context: object) -> object:
+    async def _cmd_agent(self, args: str, context: object) -> CommandResult:
         self.action_switch_agent()
         return CommandResult(message="Switched to AGENT mode.")
 
-    async def _cmd_ask(self, args: str, context: object) -> object:
+    async def _cmd_ask(self, args: str, context: object) -> CommandResult:
         self.action_switch_ask()
         return CommandResult(message="Switched to ASK mode.")
 
-    async def _cmd_coordinator(self, args: str, context: object) -> object:
+    async def _cmd_coordinator(self, args: str, context: object) -> CommandResult:
         self.action_switch_coordinator()
         return CommandResult(message="Switched to COORDINATOR mode.")
 
-    async def _cmd_clear(self, args: str, context: object) -> object:
-        self._bundle.engine.clear()
+    async def _cmd_clear(self, args: str, context: object) -> CommandResult:
+        if self._bundle:
+            self._bundle.engine._messages = []
         session_path = get_session_path(self.current_session)
         if session_path.exists():
             session_path.unlink()
-        self._append_line(f"system> 🧹 Session [bold]'{self.current_session}'[/bold] history cleared.")
+        self._append_line(
+            f"system> 🧹 Session [bold]'{self.current_session}'[/bold] history cleared."
+        )
         self._refresh_sidebars(force=True)
         return CommandResult(message="Session cleared.")
 
-    async def _cmd_session(self, args: str, context: object) -> object:
+    async def _cmd_session(self, args: str, context: object) -> CommandResult:
         parts = args.split()
         if not parts:
             return CommandResult(message="Usage: /session [list|new|switch] [name]")
-            
-        sub_cmd = parts[0].lower()
-        if sub_cmd == "list":
+
+        sub = parts[0].lower()
+        if sub == "list":
             sessions = list_sessions()
-            msg = "Available sessions:\n" + "\n".join([f"- {name}" for name in sessions])
+            msg = "Available sessions:\n" + "\n".join(f"- {n}" for n in sessions)
             return CommandResult(message=msg)
-        elif sub_cmd in ("new", "switch"):
+
+        if sub in ("new", "switch"):
             if len(parts) < 2:
-                return CommandResult(message=f"Usage: /session {sub_cmd} <session_name>")
-            
+                return CommandResult(message=f"Usage: /session {sub} <session_name>")
             new_name = parts[1]
-            save_session_history(self.current_session, self._bundle.engine.messages)
-            
-            self.current_session = new_name
-            self._bundle.engine.load_messages(load_session_history(new_name))
+            if self._bundle:
+                save_session_history(self.current_session, self._bundle.engine._messages)
+                self.current_session = new_name
+                self._bundle.engine._messages = load_session_history(new_name)
             self._append_line(f"system> Switched to session [bold]'{new_name}'[/bold].")
             self._refresh_sidebars(force=True)
             return CommandResult(message=f"Switched to {new_name}")
+
         return CommandResult(message="Unknown session command.")
 
+    # ── 모드 전환 액션 ──────────────────────────────────────
+
     def action_switch_plan(self) -> None:
+        if not self._bundle:
+            return
         self.theseus_sm.switch_mode(AgentMode.PLAN)
         self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
         self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, 
-            self.user_level, exclude_tools=set()
+            self._bundle.tool_registry, self.project_tool_permissions,
+            self.user_level, exclude_tools=set(),
         )
         self._sync_permission_mode()
         self._append_line("system> Switched to [bold yellow]PLAN[/bold yellow] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_agent(self) -> None:
+        if not self._bundle:
+            return
         self.theseus_sm.switch_mode(AgentMode.AGENT)
         self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
         self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, 
-            self.user_level, exclude_tools={"create_tool"}
+            self._bundle.tool_registry, self.project_tool_permissions,
+            self.user_level, exclude_tools={"create_tool"},
         )
         self._sync_permission_mode()
         self._append_line("system> Switched to [bold green]AGENT[/bold green] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_ask(self) -> None:
+        if not self._bundle:
+            return
         self.theseus_sm.switch_mode(AgentMode.ASK)
         self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        all_tool_names = {t.name for t in self._bundle.tool_registry.list_tools()}
+        all_names = {t.name for t in self._bundle.tool_registry.list_tools()}
         self._bundle.engine._tool_registry = build_filtered_registry(
             self._bundle.tool_registry, self.project_tool_permissions,
-            self.user_level, exclude_tools=all_tool_names
+            self.user_level, exclude_tools=all_names,
         )
         self._sync_permission_mode()
         self._append_line("system> Switched to [bold blue]ASK[/bold blue] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_coordinator(self) -> None:
+        if not self._bundle:
+            return
         self.theseus_sm.switch_mode(AgentMode.COORDINATOR)
         self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
         self._bundle.engine._tool_registry = build_filtered_registry(
             self._bundle.tool_registry, self.project_tool_permissions,
-            self.user_level, exclude_tools={"create_tool"}
+            self.user_level, exclude_tools={"create_tool"},
         )
         self._sync_permission_mode()
         self._append_line("system> Switched to [bold magenta]COORDINATOR[/bold magenta] mode.")
         self._refresh_sidebars(force=True)
 
+    def action_quit_session(self) -> None:
+        if self._bundle:
+            save_session_history(self.current_session, self._bundle.engine._messages)
+        self.exit()
+
+    # ── 권한 동기화 ─────────────────────────────────────────
+
     def _sync_permission_mode(self) -> None:
-        if not self._bundle: return
-        mode_mapping = {
+        if not self._bundle:
+            return
+        mode_map = {
             AgentMode.AGENT: PermissionMode.FULL_AUTO,
             AgentMode.PLAN: PermissionMode.PLAN,
             AgentMode.ASK: PermissionMode.DEFAULT,
             AgentMode.COORDINATOR: PermissionMode.FULL_AUTO,
         }
-        target_mode = mode_mapping.get(self.theseus_sm.mode, PermissionMode.FULL_AUTO)
-        self._bundle.engine._permission_checker._settings.mode = target_mode
-        self._bundle.app_state.set(permission_mode=target_mode.value)
+        target = mode_map.get(self.theseus_sm.mode, PermissionMode.FULL_AUTO)
+        checker = self._bundle.engine._permission_checker
+        if hasattr(checker, "_settings"):
+            checker._settings.mode = target
+        self._bundle.app_state.permission_mode = target.value
+
+    # ── 메시지 처리 루프 ────────────────────────────────────
 
     async def _process_line(self, line: str) -> None:
         if not line.strip() or self._bundle is None or self._busy:
@@ -325,57 +370,35 @@ class TheseusTUI(OpenHarnessTerminalApp):
 
         try:
             if line.strip().startswith("/"):
-                parts = line.strip().split()
+                parts = line.strip().split(None, 1)
                 cmd_name = parts[0][1:].lower()
-                args = " ".join(parts[1:])
+                args = parts[1] if len(parts) > 1 else ""
 
-                theseus_cmd_handlers = {
-                    "plan": self._cmd_plan,
-                    "agent": self._cmd_agent,
-                    "ask": self._cmd_ask,
-                    "coordinator": self._cmd_coordinator,
-                    "session": self._cmd_session,
-                    "clear": self._cmd_clear,
-                }
-
-                if cmd_name in theseus_cmd_handlers:
-                    result = await theseus_cmd_handlers[cmd_name](args, None)
-                    if result and result.message:
-                        await self._print_system(result.message)
-                    self._refresh_sidebars()
-                    return
-
-                should_continue = await handle_line(
-                    self._bundle, line, print_system=self._print_system,
-                    render_event=self._render_event, clear_output=self._clear_transcript,
-                )
+                result = await self._bundle.commands.dispatch(cmd_name, args)
+                if result is None:
+                    await self._print_system(f"Unknown command: /{cmd_name}")
+                elif result.message:
+                    await self._print_system(result.message)
+                    if result.exit_app:
+                        self.exit()
                 self._refresh_sidebars()
-                if not should_continue:
-                    self.exit()
                 return
 
+            # 일반 메시지
             self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
 
-            model_name = getattr(self._bundle.engine, '_model', 'unknown')
-            tags = get_tracing_tags(
-                self.user_level, model_name,
-                self.current_session,
-            )
-            metadata = get_tracing_metadata(
-                self.user_level, model_name,
-                self.current_session,
-            )
+            model_name = getattr(self._bundle.engine, "_model", "unknown")
+            tags = get_tracing_tags(self.user_level, model_name, self.current_session)
+            metadata = get_tracing_metadata(self.user_level, model_name, self.current_session)
 
             try:
-                with tracing_context(
-                    tags=tags, metadata=metadata,
-                ):
+                with tracing_context(tags=tags, metadata=metadata):
                     async for event in self._bundle.engine.submit_message(line):
                         await self._render_event(event)
             except MaxTurnsExceeded as exc:
                 await self._print_system(f"Stopped after {exc.max_turns} turns (max_turns).")
 
-            save_session_history(self.current_session, self._bundle.engine.messages)
+            save_session_history(self.current_session, self._bundle.engine._messages)
             self._refresh_sidebars()
 
         finally:
@@ -383,12 +406,107 @@ class TheseusTUI(OpenHarnessTerminalApp):
             composer.disabled = False
             composer.focus()
 
+    # ── 권한 프롬프트 (HITL) ────────────────────────────────
+
+    async def _ask_permission(self, tool_name: str, tool_input: dict) -> bool:
+        """Permission prompt — 기본값 자동 승인. 필요 시 Textual 다이얼로그로 교체."""
+        return True
+
+    # ── UI 헬퍼 ─────────────────────────────────────────────
+
+    def _append_line(self, text: str) -> None:
+        try:
+            self.query_one("#transcript", RichLog).write(text)
+        except Exception:
+            pass
+
+    def _set_current_response(self, text: str) -> None:
+        try:
+            self.query_one("#current-response", Static).update(text)
+        except Exception:
+            pass
+
+    async def _print_system(self, message: str) -> None:
+        self._append_line(f"system> {message}")
+
+    def _clear_transcript(self) -> None:
+        try:
+            self.query_one("#transcript", RichLog).clear()
+        except Exception:
+            pass
+
+    async def _render_event(self, event: object) -> None:
+        if isinstance(event, AssistantTextDelta):
+            self._set_current_response(event.text)
+        elif isinstance(event, AssistantTurnComplete):
+            if event.message:
+                # message는 ConversationMessage; .text 프로퍼티로 full text 추출
+                full_text = getattr(event.message, "text", str(event.message))
+                self._append_line(f"assistant> {full_text}")
+            self._set_current_response("")
+        elif isinstance(event, ToolExecutionStarted):
+            self._append_line(
+                f"[dim]🔧 {event.tool_name}({event.tool_input})[/dim]"
+            )
+        elif isinstance(event, ToolExecutionCompleted):
+            status = "❌" if event.is_error else "✅"
+            self._append_line(
+                f"[dim]{status} {event.tool_name}: {event.output[:120]}[/dim]"
+            )
+        elif isinstance(event, ErrorEvent):
+            self._append_line(f"[bold red]ERROR:[/bold red] {event.message}")
+        elif isinstance(event, StatusEvent):
+            self._append_line(f"[dim italic]{event.message}[/dim italic]")
+        elif isinstance(event, CompactProgressEvent):
+            self._append_line(
+                f"[dim]♻️  compact [{event.phase}] {event.message or ''}[/dim]"
+            )
+
+    def _refresh_sidebars(self, *, force: bool = False) -> None:
+        if self._bundle is None:
+            return
+        state = self._bundle.app_state.get()
+
+        usage = getattr(self._bundle.engine, "total_usage", None)
+        tokens_str = (
+            str(usage.total_tokens)
+            if usage and getattr(usage, "total_tokens", 0) > 0
+            else "N/A"
+        )
+        messages_count = len(getattr(self._bundle.engine, "_messages", []))
+
+        status_lines = [
+            "[b]Status[/b]",
+            f"model: {state.model}",
+            f"permissions: RBAC (Lv.{self.user_level})",
+            f"tokens: {tokens_str}",
+            f"messages: {messages_count}",
+            "",
+            "[b]Theseus Context[/b]",
+            f"mode: [bold]{self.theseus_sm.mode.value}[/bold]",
+            f"user_level: {self.user_level}",
+            f"session: {self.current_session}",
+        ]
+        try:
+            self.query_one("#status-bar", Static).update("\n".join(status_lines))
+        except Exception:
+            pass
+
+    # ── Input 이벤트 ─────────────────────────────────────────
+
+    @on(Input.Submitted, "#composer")
+    async def handle_submitted(self, event: Input.Submitted) -> None:
+        line = event.value.strip()
+        if not line:
+            return
+        event.input.value = ""
+        asyncio.create_task(self._process_line(line))
+
     def on_key(self, event: events.Key) -> None:
         if not self.focused or self.focused.id != "composer":
             return
 
         autocomplete = self.query_one("#autocomplete", OptionList)
-        
         if event.key == "tab" and autocomplete.display:
             event.prevent_default()
             idx = autocomplete.highlighted if autocomplete.highlighted is not None else 0
@@ -396,24 +514,32 @@ class TheseusTUI(OpenHarnessTerminalApp):
                 self._apply_suggestion(idx)
         elif event.key == "down" and autocomplete.display:
             event.prevent_default()
-            autocomplete.highlighted = ((autocomplete.highlighted + 1) % autocomplete.option_count 
-                if autocomplete.highlighted is not None else 0)
+            autocomplete.highlighted = (
+                ((autocomplete.highlighted + 1) % autocomplete.option_count)
+                if autocomplete.highlighted is not None
+                else 0
+            )
         elif event.key == "up" and autocomplete.display:
             event.prevent_default()
-            autocomplete.highlighted = ((autocomplete.highlighted - 1) % autocomplete.option_count 
-                if autocomplete.highlighted is not None else autocomplete.option_count - 1)
+            autocomplete.highlighted = (
+                ((autocomplete.highlighted - 1) % autocomplete.option_count)
+                if autocomplete.highlighted is not None
+                else autocomplete.option_count - 1
+            )
 
     @on(Input.Changed, "#composer")
     def handle_input_changed(self, event: Input.Changed) -> None:
+        if self.auto_helper is None:
+            return
         value = event.value
         autocomplete = self.query_one("#autocomplete", OptionList)
 
         if value.startswith("/"):
-            opts, mode = self.auto_helper.get_command_suggestions(value[1:])
+            opts, _ = self.auto_helper.get_command_suggestions(value[1:])
         elif "@" in value:
-            opts, mode = self.auto_helper.get_file_suggestions(value.split("@")[-1])
+            opts, _ = self.auto_helper.get_file_suggestions(value.split("@")[-1])
         else:
-            opts, mode = [], None
+            opts = []
 
         if opts:
             autocomplete.clear_options()
@@ -429,42 +555,19 @@ class TheseusTUI(OpenHarnessTerminalApp):
 
     def _apply_suggestion(self, index: int) -> None:
         autocomplete = self.query_one("#autocomplete", OptionList)
-        if index < 0 or index >= autocomplete.option_count: return
-
+        if index < 0 or index >= autocomplete.option_count:
+            return
         composer = self.query_one("#composer", Input)
         option_text = str(autocomplete.get_option_at_index(index).prompt)
-        
-        composer.value = self.auto_helper.process_selection(option_text, composer.value)
+        composer.value = self.auto_helper.process_selection(option_text, composer.value)  # type: ignore[union-attr]
         composer.cursor_position = len(composer.value)
         composer.focus()
         autocomplete.display = False
 
-    def action_quit_session(self) -> None:
-        if self._bundle and hasattr(self._bundle.engine, "_messages"):
-            save_session_history(self.current_session, self._bundle.engine._messages)
-        self.exit()
 
-    def _refresh_sidebars(self, *, force: bool = False) -> None:
-        if self._bundle is None: return
-        super()._refresh_sidebars(force=force)
-        state = self._bundle.app_state.get()
-        usage = self._bundle.engine.total_usage
-        
-        tokens_str = str(usage.total_tokens) if usage.total_tokens > 0 else "N/A"
-        
-        status_lines = [
-            "[b]Status[/b]",
-            f"model: {state.model}",
-            f"permissions: RBAC (Lv.{self.user_level})",
-            f"tokens: {tokens_str}",
-            f"messages: {len(self._bundle.engine.messages)}",
-            "",
-            "[b]Theseus Context[/b]",
-            f"mode: [bold]{self.theseus_sm.mode.value}[/bold]",
-            f"user_level: {self.user_level}",
-            f"session: {getattr(self, 'current_session', 'default')}"
-        ]
-        self.query_one("#status-bar", Static).update("\n".join(status_lines))
+# ──────────────────────────────────────────────────────────
+# 엔트리포인트
+# ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:
@@ -474,6 +577,5 @@ if __name__ == "__main__":
         pass
 
     model_name = os.getenv("OPENHARNESS_MODEL", "gpt-4o")
-    
     app = TheseusTUI(model=model_name)
     app.run()

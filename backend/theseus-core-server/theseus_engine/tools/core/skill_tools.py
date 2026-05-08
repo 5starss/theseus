@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from openharness.tools.base import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
 from theseus_engine.skills.registry import load_skill_registry, get_skills_dir
 

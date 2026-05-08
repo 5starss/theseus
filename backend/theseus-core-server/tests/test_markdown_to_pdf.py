@@ -1,6 +1,6 @@
 import pytest
 from markdown_to_pdf_tool import MarkdownToPdfTool, MarkdownToPdfToolInput
-from openharness.tools.base import ToolExecutionContext
+from theseus_engine.tools.core.base_tools import ToolExecutionContext
 
 @pytest.mark.asyncio
 async def test_markdown_to_pdf_conversion():

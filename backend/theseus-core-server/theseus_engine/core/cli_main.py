@@ -5,7 +5,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "OpenHarness" / "src"))
 
 if sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
@@ -16,7 +15,7 @@ try:
 except ImportError:
     pass
 
-from openharness.engine.stream_events import (
+from theseus_engine.engine.stream_events import (
     AssistantTextDelta, ToolExecutionStarted, ToolExecutionCompleted, ErrorEvent
 )
 from theseus_engine.models.state import TheseusStateMachine, AgentMode
