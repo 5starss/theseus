@@ -336,7 +336,11 @@ Classify each main task into one of three tiers:
  - Main tasks MUST include `problem`, `solution`, and `expected_effect` fields.
  - The `description` field MUST NOT be a vague summary. Specify concrete class/function names, library methods with key arguments, and error handling — detailed enough to code from directly.
  - The JSON must be complete and valid — no truncation, no placeholder values.
- - This plan will be parsed programmatically. The JSON block must be valid.\
+ - This plan will be parsed programmatically. The JSON block must be valid.
+ - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
+the correct path is `create_tool` (meta-tool), NOT direct modification of OpenHarness \
+source files. In this case `target_files` must list `theseus_engine/custom_tools/<tool_name>.py` \
+only. Do NOT include `OpenHarness/src/` or `openharness/tools/__init__.py` paths.\
 """
 
 _PLAN_REVIEW_PROMPT = """\

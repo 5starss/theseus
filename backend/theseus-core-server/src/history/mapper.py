@@ -54,10 +54,10 @@ def to_engine_messages(records: list[HistoryMessageRecord]) -> list[Any]:
         return []
 
     try:
-        from openharness.engine.messages import ConversationMessage, TextBlock
+        from theseus_engine.models.messages import ConversationMessage, TextBlock
     except ImportError:
         logger.warning(
-            "OpenHarness message types unavailable while mapping history; "
+            "Theseus message types unavailable while mapping history; "
             "falling back to dict messages."
         )
         return [
