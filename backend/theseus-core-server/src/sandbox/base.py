@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 
 
@@ -28,10 +28,12 @@ class SandboxOutput(BaseModel):
     stdout: str = ""
     stderr: str = ""
     error_message: Optional[str] = None
+    error_type: Optional[str] = None
     exit_code: Optional[int] = None
     timed_out: bool = False
     resource_limited: bool = False
     execution_time_ms: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class ToolRunner(ABC):
     @abstractmethod

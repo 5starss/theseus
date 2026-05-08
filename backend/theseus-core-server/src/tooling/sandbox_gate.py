@@ -48,8 +48,11 @@ async def run_tool_sandbox_gate(
         "status": "passed" if output.success else "failed",
         "logs": logs,
         "error": output.error_message,
+        "errorType": output.error_type,
         "checkedAt": datetime.now(timezone.utc).isoformat(),
         "executionTimeMs": output.execution_time_ms,
         "exitCode": output.exit_code,
         "timedOut": output.timed_out,
+        "resourceLimited": output.resource_limited,
+        "metadata": output.metadata,
     }
