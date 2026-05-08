@@ -4,6 +4,103 @@
 
 ## [Unreleased]
 
+### 🖥️ Session 39 — TUI Native App 고도화: 바인딩 정리 · /quit 커맨드 · 자동완성 수정 (2026-05-08)
+
+#### 목표
+`tui_native_app_refactoring_plan.md` 로드맵의 구현 완료 후 발견된 잠재 버그를 수정하고,
+TUI 종료 커맨드(`/quit`, `/exit`, `/bye`)를 추가하여 사용성을 완성.
+
+---
+
+#### 버그 수정 1 — Textual 키바인딩 중복 등록
+
+**증상**: `TheseusTUI.BINDINGS`에 `ctrl+p/a/s`를 직접 선언하면서 `*THESEUS_BINDINGS` spread도 포함 —
+동일 키가 두 번 등록되어 Textual 내부 경고(BindingConflict) 발생 가능.
+
+**수정**: `theseus_engine/tui/tui_main.py`
+- `BINDINGS` 리스트에서 `*THESEUS_BINDINGS` spread 제거
+- `from theseus_engine.tui.ui_components import THESEUS_BINDINGS, ...` → `THESEUS_TUI_CSS`만 import
+
+**수정**: `theseus_engine/tui/ui_components.py`
+- `THESEUS_BINDINGS` 목록에서 `ctrl+p/a/s/c` 4개 제거 (tui_main.py에서 직접 관리)
+- `ctrl+c → quit_session` 바인딩 제거 — 터미널 인터럽트(SIGINT)와 충돌 방지
+- `THESEUS_BINDINGS`는 향후 확장 포인트로 빈 목록만 유지
+
+---
+
+#### 버그 수정 2 — `CommandRegistry.list_commands()` 누락
+
+**증상**: `AutocompleteHelper.get_command_suggestions()`에서 `bundle.commands.list_commands()` 호출 →
+`AttributeError: 'CommandRegistry' object has no attribute 'list_commands'`
+
+**수정**: `theseus_engine/tui/commands.py`
+- `list_commands() -> list[SlashCommand]` 메서드 추가
+  - `_canonical_names` 순서대로 등록된 모든 `SlashCommand` 객체를 반환
+
+---
+
+#### 기능 추가 — `/quit` `/exit` `/bye` 종료 커맨드
+
+**파일**: `theseus_engine/tui/tui_main.py`
+
+TUI 내에서 슬래시 커맨드로 앱을 안전하게 종료할 수 있는 커맨드 3종 추가.
+
+| 커맨드 | 동작 |
+|--------|------|
+| `/quit` | 현재 세션 히스토리를 저장하고 TUI 종료 |
+| `/exit` | `/quit`와 동일 |
+| `/bye`  | `/quit`와 동일 |
+
+**구현 상세**:
+- `TheseusInput._THESEUS_CMDS`에 `"quit"`, `"exit"`, `"bye"` 추가 → Input 위젯 레벨에서 선제 인터셉트
+- `_register_commands()`에 세 커맨드 모두 동일한 `_cmd_quit` 핸들러로 등록
+- `_cmd_quit()` 핸들러:
+  - `save_session_history()` 호출로 메시지 히스토리 보존
+  - RichLog에 `"👋 Goodbye! Session saved."` 출력
+  - `self.call_after_refresh(self.exit)` — 마지막 메시지가 화면에 렌더된 한 프레임 후 종료
+    (즉시 `self.exit()` 호출 시 RichLog write가 화면에 나타나기 전에 앱이 닫히는 현상 방지)
+
+---
+
+### 🔧 Session 38 — requirements.txt OH 의존 제거 & README 현행화 (2026-05-08)
+
+#### 목표
+`-e ./OpenHarness` 항목을 `requirements.txt`에서 완전히 제거하고,
+OH가 간접 제공하던 패키지를 Theseus가 직접 명시하도록 재구성.
+README.md의 OH 관련 문구를 현행 아키텍처에 맞게 갱신.
+
+---
+
+#### `requirements.txt` 재편
+
+| 구분 | 변경 내용 |
+|------|----------|
+| 제거 | `-e ./OpenHarness` — OH 로컬 패키지 완전 삭제 |
+| 추가 | `anthropic>=0.40.0` — Theseus-native LLM client (OH가 간접 제공하던 것) |
+| 추가 | `openai>=1.0.0` — OpenAI 호환 클라이언트 직접 명시 |
+| 추가 | `textual>=0.80.0` — TUI 프레임워크 직접 명시 (OH가 간접 제공) |
+| 추가 | `rich>=13.0.0` — 터미널 렌더링 (OH 간접 의존) |
+| 추가 | `prompt-toolkit>=3.0.0` — CLI 입력 처리 (OH 간접 의존) |
+| 추가 | `sse-starlette>=1.6.0` — FastAPI SSE 스트리밍 |
+| 추가 | `websockets>=12.0` — MCP/WebSocket 통신 |
+| 추가 | `pyyaml>=6.0` — YAML 파싱 유틸 |
+| 추가 | `psutil` — 시스템 리소스 모니터링 (커스텀 툴 실사용) |
+| 추가 | `speedtest-cli` — 인터넷 속도 측정 툴 의존 |
+| 정리 | 섹션별 주석(`Web Framework`, `LLM Clients`, `TUI` 등) 추가로 가독성 개선 |
+
+**제거 근거**: OH `pyproject.toml` 의존성(`anthropic`, `openai`, `textual`, `rich`, `prompt-toolkit`, `websockets`, `pyyaml` 등)이 `-e ./OpenHarness`를 통해 간접 설치되고 있었음. OH 제거 후 이 패키지들이 누락되지 않도록 직접 명시.
+
+---
+
+#### `README.md` 현행화
+
+- **개발 환경**: `"Python 3.11 권장 (OpenHarness 권장 사양)"` → `"Python 3.11 권장"`
+- **Tech Stack**: `theseus_engine (OpenHarness 의존성을 배제한...)` → `(자체 구현 코어 엔진 — OpenHarness 의존성 없음)`, LLM Clients 항목 신규 추가
+- **Quick Start**: `"의존성 설치 (openharness 라이브러리 포함)"` → `"의존성 설치"`
+- **업무 분장 B**: QueryEngine 설명에 `theseus_engine/engine/query_engine.py` 경로 명시, `create_tool` 자동 등록 알림·`/tools custom` 언급 추가
+
+---
+
 ### 🐛 Session 37 — maybe_compress 시그니처 버그 수정 / /tools custom 커맨드 추가 / create_tool 자동 등록 알림 / LLM 생성 코드 정제 (2026-05-08)
 
 ---

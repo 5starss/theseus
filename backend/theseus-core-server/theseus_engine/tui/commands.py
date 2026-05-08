@@ -39,6 +39,10 @@ class CommandRegistry:
     def names(self) -> list[str]:
         return list(self._canonical_names)
 
+    def list_commands(self) -> list[SlashCommand]:
+        """등록된 모든 SlashCommand 객체 목록을 반환합니다."""
+        return [self._commands[n] for n in self._canonical_names]
+
     async def dispatch(self, name: str, args: str, context: Any = None) -> Optional[CommandResult]:
         cmd = self._commands.get(name)
         if cmd is None:

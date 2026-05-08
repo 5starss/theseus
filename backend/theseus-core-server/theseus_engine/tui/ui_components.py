@@ -48,8 +48,6 @@ Screen {
 """
 
 THESEUS_BINDINGS = [
-    Binding("ctrl+p", "switch_plan", "Plan Mode"),
-    Binding("ctrl+a", "switch_agent", "Agent Mode"),
-    Binding("ctrl+s", "switch_ask", "Ask Mode"),
-    Binding("ctrl+c", "quit_session", "Quit"),
+    # tui_main.py의 BINDINGS에 직접 정의된 키와 중복되지 않게
+    # 확장용 바인딩만 관리 (현재는 빈 목록)
 ]
