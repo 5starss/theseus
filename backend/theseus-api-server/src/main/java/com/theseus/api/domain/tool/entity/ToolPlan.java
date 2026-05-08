@@ -160,14 +160,14 @@ public class ToolPlan {
 	}
 
 	public void supersede() {
-		if (ToolPlanStatus.APPROVED.equals(status)) {
+		if (!ToolPlanStatus.REVIEW.equals(status) && !ToolPlanStatus.REJECTED.equals(status)) {
 			throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
 		}
 		status = ToolPlanStatus.SUPERSEDED;
 	}
 
 	public void fail() {
-		if (ToolPlanStatus.APPROVED.equals(status)) {
+		if (!ToolPlanStatus.REVIEW.equals(status) && !ToolPlanStatus.PENDING.equals(status)) {
 			throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
 		}
 		status = ToolPlanStatus.FAILED;

@@ -113,19 +113,23 @@ public class ToolPlanGroup {
 	}
 
 	public void markReview(ToolPlan latestToolPlan) {
-		validateMutable();
+		validateStatus(
+			ToolPlanGroupStatus.PLANNING,
+			ToolPlanGroupStatus.REVIEW,
+			ToolPlanGroupStatus.REJECTED
+		);
 		this.latestToolPlan = Objects.requireNonNull(latestToolPlan, "latestToolPlan must not be null");
 		status = ToolPlanGroupStatus.REVIEW;
 	}
 
 	public void markPending(ToolPlan latestToolPlan) {
-		validateMutable();
+		validateStatus(ToolPlanGroupStatus.REVIEW);
 		this.latestToolPlan = Objects.requireNonNull(latestToolPlan, "latestToolPlan must not be null");
 		status = ToolPlanGroupStatus.PENDING;
 	}
 
 	public void approve(ToolPlan approvedToolPlan) {
-		validateMutable();
+		validateStatus(ToolPlanGroupStatus.PENDING);
 		this.approvedToolPlan = Objects.requireNonNull(approvedToolPlan, "approvedToolPlan must not be null");
 		this.latestToolPlan = approvedToolPlan;
 		status = ToolPlanGroupStatus.APPROVED;
@@ -147,19 +151,22 @@ public class ToolPlanGroup {
 	}
 
 	public void reject() {
-		validateMutable();
+		validateStatus(ToolPlanGroupStatus.PENDING);
 		status = ToolPlanGroupStatus.REJECTED;
 	}
 
 	public void cancel() {
-		validateMutable();
+		validateStatus(
+			ToolPlanGroupStatus.PLANNING,
+			ToolPlanGroupStatus.REVIEW,
+			ToolPlanGroupStatus.PENDING,
+			ToolPlanGroupStatus.REJECTED
+		);
 		status = ToolPlanGroupStatus.CANCELLED;
 	}
 
 	public void fail() {
-		if (ToolPlanGroupStatus.BUILT.equals(status) || ToolPlanGroupStatus.CANCELLED.equals(status)) {
-			throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
-		}
+		validateMutableBuildFailure();
 		status = ToolPlanGroupStatus.FAILED;
 	}
 
@@ -181,8 +188,20 @@ public class ToolPlanGroup {
 		updatedAt = LocalDateTime.now();
 	}
 
-	private void validateMutable() {
-		if (isFinished()) {
+	private void validateStatus(ToolPlanGroupStatus... allowedStatuses) {
+		for (ToolPlanGroupStatus allowedStatus : allowedStatuses) {
+			if (allowedStatus.equals(status)) {
+				return;
+			}
+		}
+
+		throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
+	}
+
+	private void validateMutableBuildFailure() {
+		if (ToolPlanGroupStatus.BUILT.equals(status)
+			|| ToolPlanGroupStatus.CANCELLED.equals(status)
+			|| ToolPlanGroupStatus.FAILED.equals(status)) {
 			throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
 		}
 	}
