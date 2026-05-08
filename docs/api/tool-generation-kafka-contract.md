@@ -1,8 +1,8 @@
-# Tool Generation Kafka Payload Contract
+# ToolPlan Kafka Payload Contract
 
 ## 전체 흐름
 
-Tool 생성과 재생성은 FE, API Server, Core Server가 아래 흐름으로 처리한다.
+Tool PLAN 생성, 재생성, 실제 Tool build는 FE, API Server, Core Server가 아래 흐름으로 처리한다.
 
 ```text
 FE
@@ -16,89 +16,113 @@ FE
 ```
 
 - FE는 API Server와만 HTTP/SSE로 통신한다.
-- API Server는 인증, 프로젝트 접근 권한, Tool 생성/수정 권한을 검증한다.
-- API Server는 Tool row 생성, 사용자 메시지 저장, Kafka 요청 이벤트 발행을 담당한다.
-- Core Server는 Kafka 요청 이벤트를 consume하고 Tool PLAN 생성/재생성을 수행한다.
-- Core Server는 진행 이벤트와 완료/실패 이벤트를 Kafka로 발행한다.
-- API Server는 Core 이벤트를 consume하고 Redis 상태 저장, DB 최종 반영, SSE 전달을 담당한다.
-- Core Server는 재생성 시 API Server 내부 HTTP로 Draft를 조회하지 않고 Kafka payload의 `baseDraft`를 사용한다.
+- API Server는 인증, 프로젝트 접근 권한, PLAN 요청 권한, 승인 권한을 검증한다.
+- API Server는 ToolPlanRun 생성, 사용자 메시지 저장, history snapshot 구성, Kafka 요청 이벤트 발행을 담당한다.
+- API Server는 PLAN 요청 시점에 `tools` row를 생성하지 않는다.
+- Core Server는 Kafka 요청 이벤트를 consume하고 Tool PLAN 생성/재생성 또는 Tool build를 수행한다.
+- Core Server는 API Server 내부 HTTP로 PLAN이나 history를 조회하지 않는다.
+- Core Server는 진행 이벤트와 완료/실패/skipped 이벤트를 Kafka로 발행한다.
+- API Server는 Core 이벤트를 consume하고 DB 최종 반영, Redis 상태 저장, SSE 전달을 담당한다.
+
+Kafka request 1개는 LLM 호출 1회가 아니라 Core Server의 장기 실행 run 하나를 시작하는 명령이다. Core 내부 `TheseusStateMachine` 상태와 tool-use trace는 Core PostgreSQL에 `runId` 기준 checkpoint로 저장한다.
 
 ## Kafka Topic
 
 | Topic | Producer | Consumer | 용도 |
 | --- | --- | --- | --- |
-| `theseus.tool-generation.request` | API Server | Core Server | 최초 Tool PLAN 생성 요청 |
-| `theseus.tool-regeneration.request` | API Server | Core Server | 기존 Tool PLAN 재생성 요청 |
-| `theseus.tool-generation.event` | Core Server | API Server | progress, chunk, completed, failed 이벤트 |
+| `theseus.tool-plan.request` | API Server | Core Server | PLAN 생성/재생성 요청 |
+| `theseus.tool-plan.event` | Core Server | API Server | PLAN progress, chunk, completed, skipped, failed 이벤트 |
+| `theseus.tool-build.request` | API Server | Core Server | 승인된 PLAN 기반 실제 Tool 산출물 생성 요청 |
+| `theseus.tool-build.event` | Core Server | API Server | Tool build completed, failed 이벤트 |
 
-Kafka key는 현재 `runId`를 사용한다.
+Kafka key는 `runId`를 사용한다.
 
-## Generate Request Payload
+## 공통 필드
 
-API Server가 `theseus.tool-generation.request` topic으로 발행한다.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `eventType` | string | Y | 이벤트 타입 |
+| `runId` | string | Y | Core 실행 1회 식별자 |
+| `projectId` | number | Y | 프로젝트 ID |
+| `chatSessionId` | number | Y | 채팅 세션 ID |
+| `mode` | string | N | `PLAN`, `ASK`, `AGENT` 중 해당 모드 |
+| `requestedAt` | datetime string | N | API Server 요청 생성 시각 |
+
+datetime 값은 ISO-8601 문자열로 직렬화한다.
+
+## PLAN Generate Request
+
+API Server가 `theseus.tool-plan.request` topic으로 발행한다.
 
 ### 필드
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `eventType` | string | Y | `TOOL_GENERATION_REQUESTED` |
-| `runId` | string | Y | Tool 생성 실행 1회 식별자 |
+| `eventType` | string | Y | `TOOL_PLAN_REQUESTED` |
+| `mode` | string | Y | `PLAN` |
+| `runId` | string | Y | PLAN 생성 실행 1회 식별자 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | 생성된 Tool ID |
 | `requestedByUserId` | number | Y | 요청 사용자 ID |
 | `requestedByProjectMemberId` | number | Y | 요청 프로젝트 멤버 ID |
-| `prompt` | string | Y | 사용자가 입력한 Tool 생성 요청 |
-| `fileName` | string | Y | Tool 파일명 |
-| `projectRole` | string | Y | 요청자의 프로젝트 역할 |
-| `toolPermission` | object | Y | 요청자의 Tool 권한 |
-| `requestedAt` | datetime | Y | API Server 요청 생성 시각 |
+| `prompt` | string | Y | 사용자가 입력한 PLAN 요청 |
+| `history` | array | Y | 최근 대화 snapshot |
+| `requestedAt` | datetime string | Y | 요청 시각 |
+
+`toolId`는 포함하지 않는다. 아직 실제 Tool이 없기 때문이다.
 
 ### 예시
 
 ```json
 {
-  "eventType": "TOOL_GENERATION_REQUESTED",
+  "eventType": "TOOL_PLAN_REQUESTED",
+  "mode": "PLAN",
   "runId": "f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7",
   "projectId": 2,
   "chatSessionId": 360,
-  "toolId": 736,
   "requestedByUserId": 8,
   "requestedByProjectMemberId": 2,
-  "prompt": "장애 로그를 분석하고 자동 복구 가이드를 만드는 Tool을 만들어줘.",
-  "fileName": "incident-recovery-guide",
-  "projectRole": "ADMIN",
-  "toolPermission": {
-    "canCreateTool": true,
-    "canUseTool": true,
-    "canUpdateTool": true,
-    "canDeleteTool": true
-  },
+  "prompt": "장애 로그를 분석하고 자동 복구 가이드를 만드는 Tool 명세를 작성해줘.",
+  "history": [
+    {
+      "role": "user",
+      "messageType": "CHAT",
+      "contentType": "TEXT",
+      "content": "최근 장애 로그가 자주 발생해."
+    }
+  ],
   "requestedAt": "2026-05-08T10:15:08"
 }
 ```
 
-## Regenerate Request Payload
+## PLAN Regenerate Request
 
-API Server가 `theseus.tool-regeneration.request` topic으로 발행한다.
+API Server가 `theseus.tool-plan.request` topic으로 발행한다.
 
 ### 필드
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `eventType` | string | Y | `TOOL_REGENERATION_REQUESTED` |
-| `runId` | string | Y | Tool 재생성 실행 1회 식별자 |
+| `eventType` | string | Y | `TOOL_PLAN_REGENERATION_REQUESTED` |
+| `mode` | string | Y | `PLAN` |
+| `runId` | string | Y | PLAN 재생성 실행 1회 식별자 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | 재생성 대상 Tool ID |
-| `requestedByUserId` | number | Y | 요청 사용자 ID |
-| `requestedByProjectMemberId` | number | Y | 요청 프로젝트 멤버 ID |
-| `baseDraftVersion` | number | Y | 사용자가 피드백한 Draft 버전 |
+| `baseToolPlanId` | number | Y | 피드백 기준 PLAN ID |
+| `planGroupId` | number | Y | 같은 Tool 후보 흐름 ID |
+| `basePlanVersion` | number | Y | 사용자가 피드백한 PLAN 버전 |
+| `basePlan` | object | Y | 재생성 기준 PLAN |
 | `feedbackItems` | array | Y | 블록별 피드백 목록 |
-| `baseDraft` | object | Y | 재생성 기준 Draft |
-| `projectRole` | string | Y | 요청자의 프로젝트 역할 |
-| `toolPermission` | object | Y | 요청자의 Tool 권한 |
-| `requestedAt` | datetime | Y | API Server 요청 생성 시각 |
+| `history` | array | Y | 최근 대화 snapshot |
+| `requestedAt` | datetime string | Y | 요청 시각 |
+
+### `basePlan`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `rawMarkdown` | string | Y | 기준 PLAN 원문 Markdown |
+| `structuredPlanJson` | object | Y | 기준 PLAN 구조화 JSON |
+| `planSnapshot` | object | Y | API-facing PLAN 고정본 |
 
 ### `feedbackItems`
 
@@ -107,37 +131,19 @@ API Server가 `theseus.tool-regeneration.request` topic으로 발행한다.
 | `blockId` | string | Y | 피드백 대상 PLAN block ID |
 | `comment` | string | Y | 사용자 피드백 내용 |
 
-### `baseDraft`
-
-현재 API Server는 재생성 요청에 아래 Draft 데이터를 포함한다.
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `rawMarkdown` | string \| null | N | 현재 Draft 원문 Markdown |
-| `structuredPlanJson` | object | Y | 현재 Draft 구조화 PLAN JSON |
-| `draftSnapshot` | object \| null | N | 현재 Draft snapshot |
-
-Core Server는 재생성 시 `baseDraft.structuredPlanJson`과 `feedbackItems`를 사용해 최신 전체 PLAN을 다시 생성한다.
-
 ### 예시
 
 ```json
 {
-  "eventType": "TOOL_REGENERATION_REQUESTED",
+  "eventType": "TOOL_PLAN_REGENERATION_REQUESTED",
+  "mode": "PLAN",
   "runId": "74bd1c34-b9ab-45cc-9c1f-3baf1efef1c7",
   "projectId": 2,
   "chatSessionId": 360,
-  "toolId": 736,
-  "requestedByUserId": 8,
-  "requestedByProjectMemberId": 2,
-  "baseDraftVersion": 1,
-  "feedbackItems": [
-    {
-      "blockId": "analysis-summary",
-      "comment": "504 에러 원인을 더 구체적으로 나눠줘."
-    }
-  ],
-  "baseDraft": {
+  "baseToolPlanId": 736,
+  "planGroupId": 51,
+  "basePlanVersion": 1,
+  "basePlan": {
     "rawMarkdown": "## Tool Plan\n\n...",
     "structuredPlanJson": {
       "version": 1,
@@ -149,24 +155,33 @@ Core Server는 재생성 시 `baseDraft.structuredPlanJson`과 `feedbackItems`�
         }
       ]
     },
-    "draftSnapshot": {
-      "version": 1
+    "planSnapshot": {
+      "schemaVersion": 1,
+      "planVersion": 1,
+      "blocks": [
+        {
+          "blockId": "analysis-summary",
+          "title": "분석 요약",
+          "content": "최근 장애 로그 분석 결과...",
+          "order": 1
+        }
+      ]
     }
   },
-  "projectRole": "ADMIN",
-  "toolPermission": {
-    "canCreateTool": true,
-    "canUseTool": true,
-    "canUpdateTool": true,
-    "canDeleteTool": true
-  },
+  "feedbackItems": [
+    {
+      "blockId": "analysis-summary",
+      "comment": "504 에러 원인을 더 구체적으로 나눠줘."
+    }
+  ],
+  "history": [],
   "requestedAt": "2026-05-08T10:20:00"
 }
 ```
 
-## Core Event Payload
+## Core PLAN Event Payload
 
-Core Server가 `theseus.tool-generation.event` topic으로 발행한다.
+Core Server가 `theseus.tool-plan.event` topic으로 발행한다.
 
 ### progress
 
@@ -176,11 +191,27 @@ Core Server가 `theseus.tool-generation.event` topic으로 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `progress` |
 | `runId` | string | Y | 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | Tool ID |
 | `message` | string | Y | 진행 상태 문구 |
-| `progressRate` | number | Y | 진행률. API Server는 그대로 Redis/SSE에 반영한다. |
+| `progressRate` | number | N | UI 표시용 추정 진행률 |
+
+권장 progress 단계:
+
+```text
+REQUEST_RECEIVED
+INTENT_CHECKING
+HISTORY_LOADING
+PLAN_DRAFTING
+TOOL_CALLING
+TOOL_RESULT_READING
+PLAN_STRUCTURING
+PLAN_VALIDATING
+PLAN_COMPLETED
+PLAN_SKIPPED
+PLAN_FAILED
+```
 
 ### chunk
 
@@ -190,263 +221,261 @@ Core Server가 `theseus.tool-generation.event` topic으로 발행한다.
 | --- | --- | --- | --- |
 | `eventType` | string | Y | `chunk` |
 | `runId` | string | Y | 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | Tool ID |
 | `content` | string | Y | 생성 중인 content |
 
-### TOOL_GENERATION_COMPLETED
+### TOOL_PLAN_COMPLETED
 
 PLAN 생성/재생성이 성공했을 때 발행한다.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `eventType` | string | Y | `TOOL_GENERATION_COMPLETED` |
+| `eventType` | string | Y | `TOOL_PLAN_COMPLETED` |
 | `runId` | string | Y | 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | Tool ID |
 | `assistantMessage` | object | Y | chat_messages에 저장할 Assistant 메시지 |
-| `toolDraft` | object | Y | tools 테이블에 반영할 Draft 데이터 |
-| `completedAt` | datetime | N | Core Server 완료 시각 |
+| `toolPlan` | object | Y | tool_plans에 저장할 PLAN 데이터 |
+| `completedAt` | datetime string | N | Core Server 완료 시각 |
 
 #### `assistantMessage`
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `messageType` | string | Y | 최초 생성 완료: `TOOL_DRAFT_RESPONSE`, 재생성 완료: `TOOL_REGENERATE_RESPONSE` |
-| `contentType` | string | Y | 현재 계약: `MARKDOWN` |
+| `messageType` | string | Y | `TOOL_PLAN_RESPONSE` |
+| `contentType` | string | Y | `MARKDOWN` 또는 `TEXT` |
 | `content` | string | Y | 사용자에게 보여줄 Assistant 메시지 |
 
-#### `toolDraft`
+#### `toolPlan`
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `rawMarkdown` | string | Y | Draft Markdown 원문 |
+| `rawMarkdown` | string | Y | PLAN 원문 Markdown |
 | `structuredPlanJson` | object | Y | 구조화 PLAN JSON |
-| `draftSnapshot` | object | Y | Draft snapshot |
+| `planSnapshot` | object | Y | UI 렌더링과 승인 감사용 PLAN 고정본 |
 
-`structuredPlanJson.blocks[]`는 Core Server가 아래 필드를 보장한다.
+`structuredPlanJson.blocks[].blockId/title/content`는 필수다.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `blockId` | string | Y | 블록별 피드백 대상 ID |
-| `title` | string | Y | PLAN block 제목 |
-| `content` | string | Y | PLAN block 본문 |
+### TOOL_PLAN_SKIPPED
 
-### completed 예시
-
-```json
-{
-  "eventType": "TOOL_GENERATION_COMPLETED",
-  "runId": "f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7",
-  "projectId": 2,
-  "chatSessionId": 360,
-  "toolId": 736,
-  "assistantMessage": {
-    "messageType": "TOOL_DRAFT_RESPONSE",
-    "contentType": "MARKDOWN",
-    "content": "## Tool Plan\n\n..."
-  },
-  "toolDraft": {
-    "rawMarkdown": "## Tool Plan\n\n...",
-    "structuredPlanJson": {
-      "version": 1,
-      "blocks": [
-        {
-          "blockId": "analysis-summary",
-          "title": "분석 요약",
-          "content": "최근 장애 로그 분석 결과..."
-        }
-      ]
-    },
-    "draftSnapshot": {
-      "version": 1
-    }
-  },
-  "completedAt": "2026-05-08T10:21:00Z"
-}
-```
-
-API Server는 completed 이벤트 처리 성공 후 아래 작업을 수행한다.
-
-```text
-Tool draft 데이터 갱신
--> Tool draftPhase = REVIEW
--> Tool draftVersion 증가
--> ASSISTANT chat_messages 저장
--> Redis completed state 저장
--> SSE completed 전달
-```
-
-### TOOL_GENERATION_FAILED
-
-PLAN 생성/재생성이 실패했을 때 발행한다.
+Core Server가 PLAN 모드 입력을 Tool 명세 생성 대상으로 판단하지 않은 경우 발행한다.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `eventType` | string | Y | `TOOL_GENERATION_FAILED` |
+| `eventType` | string | Y | `TOOL_PLAN_SKIPPED` |
 | `runId` | string | Y | 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
 | `projectId` | number | Y | 프로젝트 ID |
 | `chatSessionId` | number | Y | 채팅 세션 ID |
-| `toolId` | number | Y | Tool ID |
+| `assistantMessage` | object | Y | 사용자에게 표시할 안내 메시지 |
+| `completedAt` | datetime string | N | 종료 시각 |
+
+### TOOL_PLAN_FAILED
+
+PLAN 생성/재생성 실패 시 발행한다.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `eventType` | string | Y | `TOOL_PLAN_FAILED` |
+| `runId` | string | Y | 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `projectId` | number | Y | 프로젝트 ID |
+| `chatSessionId` | number | Y | 채팅 세션 ID |
 | `code` | string | Y | 실패 코드 |
 | `message` | string | Y | 실패 메시지 |
-| `failedAt` | datetime | N | Core Server 실패 시각 |
+| `failedAt` | datetime string | N | 실패 시각 |
 
-### failed 예시
+## Tool Build Request
 
-```json
-{
-  "eventType": "TOOL_GENERATION_FAILED",
-  "runId": "f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7",
-  "projectId": 2,
-  "chatSessionId": 360,
-  "toolId": 736,
-  "code": "AI_GENERATION_FAILED",
-  "message": "Tool PLAN 생성에 실패했습니다.",
-  "failedAt": "2026-05-08T10:22:00Z"
-}
-```
+API Server가 `theseus.tool-build.request` topic으로 발행한다.
 
-API Server는 failed 이벤트 처리 후 아래 작업을 수행한다.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `eventType` | string | Y | `TOOL_BUILD_REQUESTED` |
+| `runId` | string | Y | build 실행 ID |
+| `projectId` | number | Y | 프로젝트 ID |
+| `chatSessionId` | number | Y | 채팅 세션 ID |
+| `toolPlanId` | number | Y | 승인된 PLAN ID |
+| `planGroupId` | number | Y | PLAN 그룹 ID |
+| `approvedByProjectMemberId` | number | Y | 승인자 프로젝트 멤버 ID |
+| `approvedPlan` | object | Y | 승인된 PLAN |
+| `requestedAt` | datetime string | Y | 요청 시각 |
+
+## Tool Build Event Payload
+
+Core Server가 `theseus.tool-build.event` topic으로 발행한다.
+
+### TOOL_BUILD_COMPLETED
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `eventType` | string | Y | `TOOL_BUILD_COMPLETED` |
+| `runId` | string | Y | build 실행 ID |
+| `eventSequence` | number | N | run 내부 이벤트 순서 |
+| `projectId` | number | Y | 프로젝트 ID |
+| `chatSessionId` | number | Y | 채팅 세션 ID |
+| `toolPlanId` | number | Y | 승인된 PLAN ID |
+| `artifact` | object | Y | 실제 Tool 산출물 정보 |
+| `completedAt` | datetime string | N | 완료 시각 |
+
+#### `artifact`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `fileName` | string | Y | Tool 파일명 |
+| `moduleName` | string | N | 모듈명 |
+| `artifactPath` | string | N | 산출물 저장 경로 |
+| `codeSnapshot` | string | N | 코드 snapshot |
+| `metadataJson` | object | N | 부가 메타데이터 |
+
+### TOOL_BUILD_FAILED
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `eventType` | string | Y | `TOOL_BUILD_FAILED` |
+| `runId` | string | Y | build 실행 ID |
+| `projectId` | number | Y | 프로젝트 ID |
+| `chatSessionId` | number | Y | 채팅 세션 ID |
+| `toolPlanId` | number | Y | 승인된 PLAN ID |
+| `code` | string | Y | 실패 코드 |
+| `message` | string | Y | 실패 메시지 |
+| `failedAt` | datetime string | N | 실패 시각 |
+
+## History 변환 규칙
+
+API Server는 Kafka payload에 최근 대화 history snapshot을 포함한다.
+
+| API messageType | Core context 변환 |
+| --- | --- |
+| `CHAT` | 일반 user/assistant text |
+| `TOOL_PLAN_REQUEST` | 사용자의 PLAN 요청 text |
+| `TOOL_PLAN_RESPONSE` | PLAN 요약 또는 rawMarkdown 중심 text |
+| `TOOL_FEEDBACK` | feedbackItems 요약 text |
+| `TOOL_APPROVAL_REQUEST` | 기본 LLM 생성 context에서는 제외 가능 |
+| `SYSTEM_NOTICE` | 제외 또는 system summary로 압축 |
+
+Core 내부 ToolUseBlock, ToolResultBlock은 API history에서 복원하지 않는다. Core 내부 tool-use trace는 Core checkpoint에서 관리한다.
+
+## blockId 규칙
+
+- 동일한 의미의 블록은 재생성 후에도 같은 `blockId`를 유지한다.
+- 내용이 수정되어도 역할이 같으면 같은 `blockId`를 유지한다.
+- 새 의미의 블록은 새 `blockId`를 생성한다.
+- 삭제된 블록은 다음 PLAN에서 제외한다.
+- 분할된 블록은 기존 `blockId`를 대표 블록 하나에만 유지하고 나머지는 새 `blockId`를 생성한다.
+- 병합된 블록은 핵심 의미가 가장 큰 기존 `blockId` 하나를 유지한다.
+
+## 저장 순서
+
+요청은 DB에 먼저 기록한 뒤 Kafka로 발행한다.
 
 ```text
-Tool 상태를 재시도 가능한 PLAN 단계로 유지
--> SYSTEM_NOTICE chat_messages 저장
--> Redis failed state 저장
--> SSE failed 전달
+ToolPlanRun 저장
+ChatMessage 저장
+Outbox 저장 또는 after-commit 발행 예약
+DB commit
+Kafka 발행
 ```
 
-## Local Kafka Test
+completed/skipped/failed 이벤트는 DB commit 후 Redis/SSE를 처리한다.
 
-아래 명령은 `infra/docker/local` 기준 local Docker Compose 환경에서 실행한다.
+```text
+Kafka event 수신
+idempotency 확인
+DB 상태 변경
+ChatMessage 저장
+DB commit
+Redis 상태 저장
+SSE 전송
+```
 
-### 1. Topic 확인
+DB commit 전에 Redis/SSE를 먼저 처리하지 않는다.
+
+## Idempotency
+
+Kafka는 at-least-once 전달이 가능하므로 중복 이벤트를 전제로 처리한다.
+
+권장 기준:
+
+```text
+tool_plan_runs.run_id unique
+runId + eventType
+runId + eventSequence
+chat_messages.idempotency_key unique
+tool_plans(plan_group_id, plan_version) unique
+tools.source_tool_plan_id unique
+```
+
+중복 completed 처리 규칙:
+
+- `ToolPlanRun.status`가 이미 `COMPLETED`, `SKIPPED`, `FAILED`이면 skip한다.
+- 동일 `idempotency_key`의 ChatMessage가 있으면 insert하지 않는다.
+- `tools.source_tool_plan_id`가 이미 존재하면 build completed로 Tool을 중복 생성하지 않는다.
+
+## Local Kafka 테스트 절차
+
+### Topic 확인
 
 ```bash
 docker exec theseus-local-kafka kafka-topics \
-  --bootstrap-server theseus-local-kafka:29092 \
+  --bootstrap-server localhost:19092 \
   --list
 ```
 
-```bash
-docker exec theseus-local-kafka kafka-topics \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --describe \
-  --topic theseus.tool-generation.request
+필수 topic:
+
+```text
+theseus.tool-plan.request
+theseus.tool-plan.event
+theseus.tool-build.request
+theseus.tool-build.event
 ```
 
-```bash
-docker exec theseus-local-kafka kafka-topics \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --describe \
-  --topic theseus.tool-regeneration.request
-```
+### PLAN request 확인
 
 ```bash
-docker exec theseus-local-kafka kafka-topics \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --describe \
-  --topic theseus.tool-generation.event
+docker exec -it theseus-local-kafka kafka-console-consumer \
+  --bootstrap-server localhost:19092 \
+  --topic theseus.tool-plan.request \
+  --from-beginning
 ```
 
-### 2. Generate request 발행 확인
-
-FE 또는 Swagger에서 아래 API를 호출한다.
-
-```http
-POST /api/v1/projects/{projectId}/sessions/{sessionId}/tools/generate
-```
-
-request topic을 확인한다.
+### mock PLAN completed produce
 
 ```bash
-docker exec theseus-local-kafka kafka-console-consumer \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --topic theseus.tool-generation.request \
-  --from-beginning \
-  --timeout-ms 10000
+docker exec -i theseus-local-kafka kafka-console-producer \
+  --bootstrap-server localhost:19092 \
+  --topic theseus.tool-plan.event
 ```
 
-### 3. Regenerate request 발행 확인
-
-FE 또는 Swagger에서 아래 API를 호출한다.
-
-```http
-PATCH /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/regenerate
+```json
+{"eventType":"TOOL_PLAN_COMPLETED","runId":"f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7","eventSequence":10,"projectId":2,"chatSessionId":360,"assistantMessage":{"messageType":"TOOL_PLAN_RESPONSE","contentType":"MARKDOWN","content":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석"},"toolPlan":{"rawMarkdown":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석","structuredPlanJson":{"version":1,"blocks":[{"blockId":"analysis-summary","title":"분석 요약","content":"최근 장애 로그를 수집하고 원인을 분류합니다."}]},"planSnapshot":{"schemaVersion":1,"planVersion":1,"blocks":[{"blockId":"analysis-summary","title":"분석 요약","content":"최근 장애 로그를 수집하고 원인을 분류합니다.","order":1}]}},"completedAt":"2026-05-08T10:21:00"}
 ```
 
-regeneration request topic을 확인한다.
+### Redis state 확인
 
 ```bash
-docker exec theseus-local-kafka kafka-console-consumer \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --topic theseus.tool-regeneration.request \
-  --from-beginning \
-  --timeout-ms 10000
+docker exec theseus-local-redis redis-cli GET tool:plan:{runId}:state
 ```
 
-### 4. Mock completed event produce
-
-아래 값은 실제 DB에 존재하는 `projectId`, `chatSessionId`, `toolId`, `runId`로 바꿔서 사용한다.
+### SSE 수신 확인
 
 ```bash
-cat <<'JSON' | docker exec -i theseus-local-kafka kafka-console-producer \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --topic theseus.tool-generation.event
-{"eventType":"TOOL_GENERATION_COMPLETED","runId":"f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7","projectId":2,"chatSessionId":360,"toolId":736,"assistantMessage":{"messageType":"TOOL_DRAFT_RESPONSE","contentType":"MARKDOWN","content":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석\n3. 복구 가이드 생성"},"toolDraft":{"rawMarkdown":"## Tool Plan\n\n1. 로그 수집\n2. 장애 원인 분석\n3. 복구 가이드 생성","structuredPlanJson":{"version":1,"blocks":[{"blockId":"analysis-summary","title":"분석 요약","content":"최근 장애 로그를 수집하고 원인을 분류합니다."}]},"draftSnapshot":{"version":1}},"completedAt":"2026-05-08T10:21:00Z"}
-JSON
+curl -N \
+  -H "Authorization: Bearer {accessToken}" \
+  http://localhost:8080/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plan-runs/{runId}/events
 ```
 
-### 5. Mock failed event produce
+## AI 담당자 체크리스트
 
-아래 값은 실제 DB에 존재하는 `projectId`, `chatSessionId`, `toolId`, `runId`로 바꿔서 사용한다.
-
-```bash
-cat <<'JSON' | docker exec -i theseus-local-kafka kafka-console-producer \
-  --bootstrap-server theseus-local-kafka:29092 \
-  --topic theseus.tool-generation.event
-{"eventType":"TOOL_GENERATION_FAILED","runId":"f2adc89f-0ca4-425b-b312-a2ca1ca9b0a7","projectId":2,"chatSessionId":360,"toolId":736,"code":"AI_GENERATION_FAILED","message":"Tool PLAN 생성에 실패했습니다.","failedAt":"2026-05-08T10:22:00Z"}
-JSON
-```
-
-### 6. Redis state 확인
-
-```bash
-docker exec theseus-local-redis redis-cli GET tool:generation:{toolId}:state
-```
-
-예시:
-
-```bash
-docker exec theseus-local-redis redis-cli GET tool:generation:736:state
-```
-
-### 7. SSE 수신 확인
-
-FE는 Tool 생성/재생성 API 응답의 `sseUrl`로 SSE를 구독한다.
-
-```http
-GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events
-Authorization: Bearer {accessToken}
-Accept: text/event-stream
-```
-
-SSE 연결 직후 API Server는 `connected` 이벤트를 전송한다. Redis에 최신 상태가 있으면 해당 상태를 최초 1회 추가 전송한다.
-
-## AI 담당자 구현 체크리스트
-
-- Core Server는 API Server 내부 HTTP로 Draft를 조회하지 않는다.
-- Core Server는 재생성 시 Kafka payload의 `baseDraft`를 사용한다.
-- Core Server는 재생성 결과로 변경 블록만이 아니라 최신 전체 PLAN을 반환한다.
-- Core Server는 생성 완료 시 `assistantMessage.messageType = TOOL_DRAFT_RESPONSE`를 사용한다.
-- Core Server는 재생성 완료 시 `assistantMessage.messageType = TOOL_REGENERATE_RESPONSE`를 사용한다.
-- Core Server는 실패 이벤트에 `code`와 `message`를 포함한다.
-- Core Server는 `structuredPlanJson.blocks[].blockId/title/content`를 포함한 PLAN 구조를 반환한다.
-
-## TODO
-
-- `baseDraft`에 DB 기준 `draftVersion`을 직접 포함할지 검토한다.
-- failed 이벤트의 `code/message`를 `errorCode/errorMessage`로 통일할지 검토한다.
-- Kafka key를 `runId`로 유지할지 `toolId`로 변경할지 검토한다.
+- Core는 API 내부 HTTP로 PLAN이나 history를 조회하지 않는다.
+- Core는 Kafka payload의 `history`, `basePlan`, `feedbackItems`를 사용한다.
+- PLAN 모드 입력이 Tool 명세 대상이 아니면 `TOOL_PLAN_SKIPPED`를 발행한다.
+- PLAN 재생성 결과는 최신 전체 PLAN을 반환한다.
+- `structuredPlanJson.blocks[].blockId/title/content`를 보장한다.
+- 같은 의미의 블록은 재생성 후에도 같은 `blockId`를 유지한다.
+- Core 내부 StateMachine checkpoint는 Core PostgreSQL에 저장한다.
+- failed 이벤트는 `code`, `message`를 사용한다.

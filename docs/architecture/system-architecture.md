@@ -55,13 +55,12 @@ flowchart LR
     API --> REDIS[(SuperApp ElastiCache Redis)]
     API --> S3[(SuperApp S3 Storage)]
 
-    API --> KAFKA[Kafka<br/>Event Pipeline]
-    API --> CORE[Theseus Core Server<br/>Python FastAPI]
+    API <--> KAFKA[Kafka<br/>Event Pipeline]
+    KAFKA <--> CORE[Theseus Core Server<br/>Python FastAPI]
 
     CORE --> PG[(SuperApp RDS PostgreSQL<br/>pgvector / RAG DB)]
     CORE --> REDIS
     CORE --> S3
-    CORE --> KAFKA
     CORE --> LLM[LLM Provider / Local LLM]
     CORE --> SANDBOX[Tool Sandbox<br/>Docker Executor]
 
@@ -80,7 +79,7 @@ Frontend는 React + Vite 기반 사용자 화면이다.
 
 - 로그인 화면
 - 프로젝트 선택 화면
-- 채팅형 Tool 생성 화면
+- 채팅형 ToolPlan 생성 화면
 - Tool 목록 / 상세 화면
 - Tool 승인 / 반려 화면
 - 관리자 화면
@@ -104,9 +103,9 @@ API Server는 Spring Boot 기반 메인 백엔드이다.
 - 사용자 관리
 - 프로젝트 관리
 - 프로젝트 멤버 및 권한 관리
-- Tool 메타데이터 관리
-- Tool 생성 요청 접수
-- Tool 승인 / 반려 플로우
+- ToolPlan, Tool 메타데이터 관리
+- ToolPlan 생성 요청 접수
+- ToolPlan 승인 / 반려 플로우
 - 채팅 세션 및 메시지 저장
 - SSE 연결 관리
 - Core Server 실행 전 권한 검증
@@ -118,7 +117,6 @@ API Server는 Spring Boot 기반 메인 백엔드이다.
 - SuperApp ElastiCache Redis
 - SuperApp S3
 - Kafka
-- Theseus Core Server
 
 API Server는 제품 데이터와 권한 판단의 기준 서버이다.
 
@@ -129,10 +127,10 @@ Core Server는 Python FastAPI 기반 AI 실행 서버이다.
 주요 역할:
 
 - AI Agent 실행
-- Tool 생성 및 재생성
+- ToolPlan 생성 및 재생성
 - RAG 검색
 - 프롬프트 구성
-- 코드 생성
+- 승인된 ToolPlan 기반 코드/파일 생성
 - 생성 결과 검증
 - 샌드박스 실행
 - 실행 로그 생성
@@ -147,7 +145,7 @@ Core Server는 Python FastAPI 기반 AI 실행 서버이다.
 - LLM Provider 또는 Local LLM
 - Docker Sandbox
 
-Core Server는 권한 판단의 기준 서버가 아니다. Core Server는 API Server가 이미 검증한 요청을 기준으로 AI 작업을 수행한다.
+Core Server는 권한 판단의 기준 서버가 아니다. Core Server는 API Server가 이미 검증한 Kafka payload를 기준으로 AI 작업을 수행한다.
 
 ## 5. 데이터 저장 책임
 
@@ -164,10 +162,11 @@ project_members
 project_roles
 chat_sessions
 chat_messages
-tools
-tool_versions
+tool_plan_groups
+tool_plans
+tool_plan_runs
 tool_approvals
-tool_runs
+tools
 billing_usage
 audit_logs
 ```
@@ -213,8 +212,8 @@ Redis는 임시 상태와 빠른 조회가 필요한 데이터에 사용한다.
 ```text
 Refresh Token 저장
 Access Token 블랙리스트
-SSE 연결 상태
-Tool 생성 진행 상태
+SSE 재연결 복구 상태
+ToolPlan 생성 진행 상태
 runId 기준 최신 progress 상태
 재접속 시 마지막 이벤트 복구 상태
 짧은 TTL 캐시
@@ -224,11 +223,9 @@ runId 기준 최신 progress 상태
 Redis key 예시:
 
 ```text
-tool-run:{runId}:status
-tool-run:{runId}:progress
-tool-run:{runId}:last-event-id
+tool:plan:{runId}:state
 auth:refresh:{userId}
-lock:tool-generation:{toolId}
+lock:tool-plan:{runId}
 ```
 
 원칙:
@@ -272,8 +269,9 @@ Kafka는 API Server와 Core Server 사이의 비동기 이벤트 파이프라인
 
 Kafka 사용 대상:
 
-- Tool 생성 요청
-- Tool 재생성 요청
+- ToolPlan 생성 요청
+- ToolPlan 재생성 요청
+- Tool build 요청
 - Tool 실행 요청
 - 진행 상태 이벤트
 - 완료 이벤트
@@ -283,10 +281,10 @@ Kafka 사용 대상:
 추천 Topic 구조:
 
 ```text
-tool-generation.request
-tool-generation.progress
-tool-generation.completed
-tool-generation.failed
+theseus.tool-plan.request
+theseus.tool-plan.event
+theseus.tool-build.request
+theseus.tool-build.event
 
 tool-execution.request
 tool-execution.progress
@@ -304,7 +302,7 @@ API Server -> SSE -> Frontend
 
 Frontend는 Kafka에 직접 접근하지 않는다.
 
-## 7. Tool 생성 흐름
+## 7. ToolPlan / Tool 생성 흐름
 
 ```mermaid
 sequenceDiagram
@@ -317,30 +315,53 @@ sequenceDiagram
     participant R as Redis
     participant S3 as S3
 
-    FE->>API: Tool 생성 요청
+    FE->>API: PLAN 생성 요청
     API->>API: JWT 검증
     API->>API: 프로젝트 권한 검증
-    API->>DB: tool_run 생성
-    API->>DB: tools / tool_versions 초안 생성
-    API->>K: tool-generation.request 발행
-    API-->>FE: runId, toolId 반환
+    API->>DB: tool_plan_run 생성
+    API->>DB: USER 메시지 저장
+    API->>K: TOOL_PLAN_REQUESTED 발행
+    API-->>FE: runId 반환
 
     CORE->>K: request consume
     CORE->>PG: RAG context 검색
-    CORE->>CORE: LLM 호출, 계획 수립, 코드 생성
-    CORE->>CORE: Sandbox 검증
-    CORE->>S3: artifact 저장
+    CORE->>CORE: LLM 호출, PLAN 생성
     CORE->>K: progress 이벤트 발행
 
     API->>K: progress consume
     API->>R: 최신 progress 저장
     API-->>FE: SSE progress 전송
 
-    CORE->>K: completed 이벤트 발행
-    API->>DB: 최종 Tool version 저장
-    API->>DB: run 상태 completed 반영
-    API->>R: completed 상태 저장
-    API-->>FE: SSE completed 전송
+    CORE->>K: TOOL_PLAN_COMPLETED 또는 TOOL_PLAN_SKIPPED 발행
+    API->>DB: ToolPlan 생성 또는 skipped 처리
+    API->>R: completed/skipped 상태 저장
+    API-->>FE: SSE completed/skipped 전송
+```
+
+승인 전에는 `tools` row를 생성하지 않는다. 실제 Tool은 승인된 ToolPlan을 기반으로 Core Server가 code/file artifact 생성을 완료한 뒤 `TOOL_BUILD_COMPLETED` 이벤트를 통해 생성된다.
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant API as Spring API Server
+    participant DB as RDS MySQL
+    participant K as Kafka
+    participant CORE as FastAPI Core Server
+    participant S3 as S3
+
+    FE->>API: ToolPlan 승인 요청
+    API->>DB: approval, ToolPlan, group 상태 갱신
+    API->>K: TOOL_BUILD_REQUESTED 발행
+
+    CORE->>K: build request consume
+    CORE->>CORE: 코드/파일 생성 및 검증
+    CORE->>S3: artifact 저장
+    CORE->>K: TOOL_BUILD_COMPLETED 발행
+
+    API->>K: build completed consume
+    API->>DB: tools row 생성
+    API->>DB: group.created_tool_id 설정
+    API-->>FE: 상태 조회/SSE로 생성 완료 확인
 ```
 
 ## 8. Bastion 및 Private Access

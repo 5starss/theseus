@@ -1,60 +1,45 @@
-# Tool API
+# Tool / ToolPlan API
 
 ## 공통 규칙
 
 - 인증이 필요한 요청은 `Authorization: Bearer {accessToken}`을 사용한다.
-- Tool 생성, 사용, 수정, 삭제 권한은 `project_members`의 Boolean 권한으로 판단한다.
-- Tool 승인과 반려는 프로젝트 `ADMIN` 또는 `MANAGER`가 수행한다.
-- 승인된 Tool 접근 가능 여부는 `project_members.access_level >= tools.tool_grade`로 판단한다.
-- 한 채팅 세션에서 여러 Tool을 생성할 수 있다.
-- Tool 생성 또는 수정과 관련된 메시지는 `chat_messages.tool_id`로 해당 Tool에 연결한다.
+- FE는 API Server와만 HTTP/SSE로 통신한다.
+- API Server와 Core Server 사이의 PLAN 생성, 재생성, Tool build는 Kafka로 통신한다.
+- PLAN 모드 요청은 Tool 생성 요청이 아니라 Tool PLAN 후보 생성 요청이다.
+- 승인 전에는 `tools` row를 생성하지 않는다.
+- 승인 대상은 `toolId`가 아니라 `toolPlanId`다.
+- 실제 Tool은 승인된 ToolPlan을 기반으로 Core Server가 코드/파일 산출물 생성을 완료한 뒤 생성된다.
 - AI 생성 중 progress/chunk는 Redis와 SSE로만 전달하고 `chat_messages`에는 저장하지 않는다.
-- 최종 USER, ASSISTANT, SYSTEM 메시지만 `chat_messages`에 저장한다.
+- completed/skipped/failed는 DB commit 이후 Redis/SSE로 전달한다.
 
 ## 상태 값
 
 | 구분 | 값 |
 | --- | --- |
-| `toolStatus` | `DRAFT`, `PENDING`, `REJECTED`, `APPROVED`, `DELETED` |
-| `draftPhase` | `PLAN`, `REVIEW` |
+| `toolPlanGroupStatus` | `PLANNING`, `REVIEW`, `PENDING`, `APPROVED`, `BUILDING`, `BUILT`, `REJECTED`, `CANCELLED`, `FAILED` |
+| `toolPlanStatus` | `REVIEW`, `PENDING`, `APPROVED`, `REJECTED`, `SUPERSEDED`, `FAILED` |
+| `toolPlanRunStatus` | `REQUESTED`, `GENERATING`, `COMPLETED`, `FAILED`, `SKIPPED` |
+| `toolPlanRunRequestType` | `GENERATE_PLAN`, `REGENERATE_PLAN`, `BUILD_TOOL` |
+| `toolStatus` | `ACTIVE`, `INACTIVE`, `DELETED`, `BUILD_FAILED` |
 | `approvalStatus` | `PENDING`, `REJECTED`, `APPROVED` |
 | `senderType` | `USER`, `ASSISTANT`, `SYSTEM` |
-| `messageType` | `CHAT`, `TOOL_DRAFT_REQUEST`, `TOOL_DRAFT_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_REGENERATE_RESPONSE`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE` |
+| `messageType` | `CHAT`, `TOOL_PLAN_REQUEST`, `TOOL_PLAN_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_APPROVAL_REQUEST`, `TOOL_BUILD_NOTICE`, `SYSTEM_NOTICE` |
 | `contentType` | `TEXT`, `MARKDOWN`, `JSON` |
-
-`messageType`은 메시지가 속한 업무 흐름을 나타낸다. `contentType`은 메시지 본문을 렌더링하거나 파싱할 형식을 나타낸다. 숫자, 배열, 객체 같은 구조화된 값은 `contentType = JSON`으로 저장한다.
-
-Draft Tool의 PLAN은 `tools.structured_plan_json`에 구조화된 JSON으로 저장한다. PLAN JSON은 `version`과 `blocks[].blockId`를 포함할 수 있다. 오래된 PLAN 피드백 여부는 `structured_plan_json.version`이 아니라 `tools.draft_version`을 기준으로 검증한다. `blockId`는 블록별 피드백을 기존 PLAN 블록과 매칭하기 위한 식별자다.
 
 ## Tool 목록 조회
 
+실제 build가 완료된 Tool만 조회한다.
+
 ```http
-GET /api/v1/projects/{projectId}/tools?scope=accessible&status=APPROVED&page=0&size=20
+GET /api/v1/projects/{projectId}/tools?scope=accessible&status=ACTIVE&page=0&size=20
 Accept: application/json
 Authorization: Bearer {accessToken}
 ```
-
 ### 권한
 
 - 프로젝트 멤버
 - `project_members.status = 진행중`
 - `project_members.can_use_tool = true`
-
-### Query Parameters
-
-| 이름 | 필수 | 기본값 | 설명 |
-| --- | --- | --- | --- |
-| `scope` | N | `accessible` | 접근 가능한 Tool만 조회한다. |
-| `status` | N | `APPROVED` | 승인된 Tool만 조회한다. |
-| `page` | N | `0` | 0부터 시작하는 페이지 번호다. |
-| `size` | N | `20` | 페이지 크기다. |
-
-### 동작
-
-- `scope`는 `accessible`만 지원한다.
-- `status`는 `APPROVED`만 지원한다.
-- `tools.tool_grade IS NULL`이거나 `project_members.access_level >= tools.tool_grade`인 Tool만 조회한다.
-- `tools.updated_at DESC` 순서로 조회한다.
 
 ### Response Body
 
@@ -69,18 +54,19 @@ Authorization: Bearer {accessToken}
         "toolId": 7,
         "projectId": 1,
         "chatSessionId": 10,
+        "sourceToolPlanId": 21,
         "createdByProjectMemberId": 3,
         "createdByUserId": 5,
         "createdByUserName": "홍길동",
-        "fileName": "sales-summary-tool",
-        "displayName": "매출 요약 Tool",
-        "displayDescription": "CSV 매출 데이터를 요약합니다.",
-        "status": "APPROVED",
-        "draftPhase": "REVIEW",
-        "draftVersion": 1,
+        "fileName": "incident-recovery-guide.py",
+        "displayName": "장애 복구 가이드",
+        "displayDescription": "최근 장애 로그를 분석하고 복구 가이드를 생성합니다.",
+        "moduleName": "incident_recovery_guide",
+        "artifactPath": "projects/1/incident_recovery_guide.py",
+        "status": "ACTIVE",
         "toolGrade": 2,
-        "createdAt": "2026-04-30T10:00:00",
-        "updatedAt": "2026-04-30T10:10:00"
+        "createdAt": "2026-05-08T10:00:00",
+        "updatedAt": "2026-05-08T10:10:00"
       }
     ],
     "page": 0,
@@ -104,7 +90,7 @@ Authorization: Bearer {accessToken}
 - 프로젝트 멤버
 - `project_members.status = 진행중`
 - `project_members.can_use_tool = true`
-- `tools.status = APPROVED`
+- `tools.status = ACTIVE`
 - `tools.tool_grade IS NULL` 또는 `project_members.access_level >= tools.tool_grade`
 
 ### Response Body
@@ -118,29 +104,26 @@ Authorization: Bearer {accessToken}
     "toolId": 7,
     "projectId": 1,
     "chatSessionId": 10,
-    "createdByProjectMemberId": 3,
-    "createdByUserId": 5,
-    "createdByUserName": "홍길동",
-    "fileName": "sales-summary-tool",
-    "displayName": "매출 요약 Tool",
-    "displayDescription": "CSV 매출 데이터를 요약합니다.",
-    "status": "APPROVED",
-    "draftPhase": "REVIEW",
-    "draftVersion": 1,
+    "sourceToolPlanId": 21,
+    "fileName": "incident-recovery-guide.py",
+    "displayName": "장애 복구 가이드",
+    "displayDescription": "최근 장애 로그를 분석하고 복구 가이드를 생성합니다.",
+    "moduleName": "incident_recovery_guide",
+    "artifactPath": "projects/1/incident_recovery_guide.py",
+    "codeSnapshot": "...",
+    "metadataJson": "{\"runtime\":\"python\"}",
+    "status": "ACTIVE",
     "toolGrade": 2,
-    "rawMarkdown": "## Tool Plan...",
-    "structuredPlanJson": "{\"steps\":[]}",
-    "draftSnapshot": "{\"version\":1}",
-    "createdAt": "2026-04-30T10:00:00",
-    "updatedAt": "2026-04-30T10:10:00"
+    "createdAt": "2026-05-08T10:00:00",
+    "updatedAt": "2026-05-08T10:10:00"
   }
 }
 ```
 
-## Draft Tool 생성
+## PLAN 생성 요청
 
 ```http
-POST /api/v1/projects/{projectId}/sessions/{sessionId}/tools/generate
+POST /api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/generate
 Accept: application/json
 Content-Type: application/json
 Authorization: Bearer {accessToken}
@@ -151,13 +134,14 @@ Authorization: Bearer {accessToken}
 - 프로젝트 멤버
 - `project_members.status = 진행중`
 - `project_members.can_create_tool = true`
+- ChatSession이 해당 프로젝트에 속해야 한다.
 
 ### Request Body
 
 ```json
 {
-  "userMessage": "CSV 파일을 업로드하면 매출 합계를 계산하는 Tool을 만들어줘.",
-  "fileName": "sales-summary-tool"
+  "mode": "PLAN",
+  "prompt": "장애 로그를 분석하고 자동 복구 가이드를 만드는 Tool 명세를 작성해줘."
 }
 ```
 
@@ -166,360 +150,220 @@ Authorization: Bearer {accessToken}
 ```json
 {
   "isSuccess": true,
-  "code": 202,
-  "message": "Draft Tool 생성을 시작하였습니다.",
+  "code": "COMMON-202",
+  "message": "Tool PLAN 생성을 시작하였습니다.",
   "result": {
     "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
-    "toolId": 7,
     "projectId": 1,
     "sessionId": 10,
-    "status": "DRAFT",
-    "draftPhase": "PLAN",
-    "draftVersion": 0,
-    "sseUrl": "/api/v1/projects/1/sessions/10/tools/7/events"
+    "status": "GENERATING",
+    "sseUrl": "/api/v1/projects/1/sessions/10/tool-plan-runs/3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11/events"
   }
 }
 ```
 
 ### 동작
 
-- BE가 Access Token, 프로젝트 멤버, Tool 생성 권한을 검증한다.
-- BE가 `tools.status = DRAFT`, `tools.draft_phase = PLAN`인 Tool을 생성한다.
-- BE가 AI 생성 실행 ID인 `runId`를 생성한다.
-- Redis 진행 상태와 SSE 복구 기준은 `toolId`다.
-- BE가 Kafka에 USER 메시지 저장 이벤트를 발행한다.
-- BE가 AI 서버에 `runId`, `projectId`, `chatSessionId`, `toolId`, `prompt`를 포함해 생성 요청한다.
-- AI progress/chunk는 `tool:generation:{toolId}:state`에 최신 상태로 저장하고 SSE로 FE에 전달한다.
-- AI 완료 후 BE가 전체 응답을 취합하고 Kafka에 완료 이벤트를 발행한다.
-- Kafka Consumer가 최종 ASSISTANT 메시지를 저장하고 Tool draft 데이터를 갱신한다.
-- Kafka Consumer가 `tools.draft_phase = REVIEW`로 변경한다.
-- 저장과 상태 변경이 끝난 뒤 `completed` 이벤트를 FE에 전달한다.
+- API Server는 ToolPlanRun을 생성한다.
+- API Server는 USER `TOOL_PLAN_REQUEST` 메시지를 저장한다.
+- API Server는 최근 history snapshot을 구성한다.
+- API Server는 `TOOL_PLAN_REQUESTED` Kafka 이벤트를 발행한다.
+- 이 시점에는 `tools`와 `tool_plans`를 생성하지 않는다.
+- Core Server가 유효한 Tool 명세 요청이라고 판단하면 `TOOL_PLAN_COMPLETED` 이벤트를 발행한다.
+- Core Server가 Tool 명세 요청이 아니라고 판단하면 `TOOL_PLAN_SKIPPED` 이벤트를 발행한다.
 
-## Draft Tool 재생성
+## PLAN 재생성 요청
 
 ```http
-PATCH /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/regenerate
+PATCH /api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/{toolPlanId}/regenerate
 Accept: application/json
 Content-Type: application/json
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- Tool 생성자 또는 `can_update_tool = true`인 프로젝트 멤버
-- `tools.status = DRAFT` 또는 `REJECTED`
-- `tools.draft_phase = REVIEW`
-
-### Request Body
-
-```json
-{
-  "baseDraftVersion": 1,
-  "feedbackItems": [
-    {
-      "blockId": "input-format",
-      "comment": "입력 파일 형식을 xlsx도 허용하도록 수정해줘."
-    },
-    {
-      "blockId": "error-handling",
-      "comment": "파일 파싱 실패 시 사용자에게 원인을 보여줘."
-    }
-  ]
-}
-```
-
-### Response Body
-
-```json
-{
-  "isSuccess": true,
-  "code": 202,
-  "message": "Draft Tool 재생성을 시작하였습니다.",
-  "result": {
-    "runId": "74bd2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d22",
-    "toolId": 7,
-    "projectId": 1,
-    "sessionId": 10,
-    "status": "DRAFT",
-    "draftPhase": "PLAN",
-    "draftVersion": 1,
-    "sseUrl": "/api/v1/projects/1/sessions/10/tools/7/events"
-  }
-}
-```
-
-### 동작
-
-- 사용자 첨삭 메시지는 `TOOL_FEEDBACK`, `JSON`으로 저장한다.
-- `baseDraftVersion`은 사용자가 피드백한 시점의 `tools.draft_version` 값이다.
-- `feedbackItems[].blockId`는 `structured_plan_json.blocks[].blockId`와 매칭한다.
-- 완성된 PLAN을 확인한 뒤 피드백하는 흐름이므로 `draft_phase = REVIEW`인 Tool만 재생성할 수 있다.
-- 현재 Tool의 `tools.draft_version`과 `baseDraftVersion`이 다르면 재생성을 시작하지 않는다.
-- 대상 Tool은 AI 재생성 시작 시 `draft_phase = PLAN`으로 변경한다.
-- 재생성마다 새 `runId`를 발급한다.
-- 최종 Assistant 응답은 `TOOL_REGENERATE_RESPONSE`로 저장한다.
-- 수정된 계획 또는 명세가 저장되면 `draft_phase = REVIEW`로 변경한다.
-
-## AI 생성 이벤트 구독
-
-```http
-GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events
-Accept: text/event-stream
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- 해당 프로젝트의 활성 프로젝트 멤버
-- `sessionId`가 해당 `projectId`에 속해야 한다.
-- `toolId`가 해당 `projectId`와 `sessionId`에 속해야 한다.
-
-연결 직후 `connected` 이벤트를 전송한다. Redis에 `tool:generation:{toolId}:state` 최신 상태가 있으면 현재 상태 이벤트를 최초 1회 전송한다. 주기적 `heartbeat` 이벤트는 후속 이슈에서 구현한다.
-
-### Event: connected
-
-```text
-event: connected
-data: {"eventType":"connected","projectId":1,"chatSessionId":10,"toolId":7,"message":"connected"}
-```
-
-### Event: progress
-
-```text
-event: progress
-data: {"eventType":"progress","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","progressRate":35,"message":"입력 파일 구조를 분석하고 있습니다."}
-```
-
-### Event: chunk
-
-```text
-event: chunk
-data: {"eventType":"chunk","projectId":1,"chatSessionId":10,"toolId":7,"status":"GENERATING","draftPhase":"PLAN","content":"## Tool Plan\n\n1. CSV 업로드..."}
-```
-
-### Event: completed
-
-```text
-event: completed
-data: {"eventType":"completed","projectId":1,"chatSessionId":10,"toolId":7,"status":"COMPLETED","draftPhase":"REVIEW","draftVersion":1}
-```
-
-### Event: failed
-
-```text
-event: failed
-data: {"eventType":"failed","projectId":1,"chatSessionId":10,"toolId":7,"status":"FAILED","errorCode":"AI_GENERATION_FAILED","errorMessage":"Tool 초안 생성에 실패했습니다."}
-```
-
-## AI 생성 상태 복구
-
-- 별도 `runId` 상태 조회 API는 제공하지 않는다.
-- FE는 `GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/events`로 다시 연결한다.
-- BE는 Redis의 `tool:generation:{toolId}:state` 최신 상태가 있으면 연결 직후 최초 상태 이벤트로 전송한다.
-- SSE 연결 실패, 새로고침, 채팅방 재진입 시 FE는 Tool 생성 상태 조회 API로 현재 상태를 복구한다.
-- Redis TTL이 만료되면 BE는 DB Tool 상태 기반 fallback 응답을 반환한다.
-- `runId`는 Kafka/Core 이벤트 추적용 실행 ID이며 FE SSE 구독/복구 기준이 아니다.
-
-## AI 생성 상태 조회
-
-```http
-GET /api/v1/projects/{projectId}/sessions/{sessionId}/tools/{toolId}/generation-state
-Accept: application/json
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- 해당 프로젝트의 활성 프로젝트 멤버
-- `sessionId`가 해당 `projectId`에 속해야 한다.
-- `toolId`가 해당 `projectId`와 `sessionId`에 속해야 한다.
-
-### 응답
-
-```json
-{
-  "isSuccess": true,
-  "code": "COMMON-200",
-  "message": "성공입니다.",
-  "result": {
-    "projectId": 1,
-    "chatSessionId": 10,
-    "toolId": 7,
-    "eventType": "progress",
-    "status": "GENERATING",
-    "draftPhase": "PLAN",
-    "progressRate": 65,
-    "message": "PLAN 명세를 작성하고 있습니다.",
-    "content": null,
-    "draftVersion": 1,
-    "errorCode": null,
-    "errorMessage": null,
-    "updatedAt": "2026-05-07T10:30:00"
-  }
-}
-```
-
-### 동작
-
-- Redis `tool:generation:{toolId}:state` 최신 상태가 있으면 Redis 값을 우선 반환한다.
-- Redis 상태가 없거나 조회에 실패하면 DB의 `tools.status`, `tools.draft_phase`, `tools.draft_version`, `tools.updated_at` 기준으로 fallback 응답을 반환한다.
-- DB fallback의 `eventType`은 `state`다.
-- DB fallback 상태 매핑은 `PLAN -> GENERATING`, `DRAFT / REVIEW -> REVIEW`, `PENDING -> PENDING`, `APPROVED -> APPROVED`, `REJECTED -> REJECTED`, `DELETED -> DELETED`다.
-- `FAILED`는 Redis 상태가 남아 있을 때만 반환한다.
-
-## Tool 승인 요청
-
-```http
-POST /api/v1/projects/{projectId}/tools/{toolId}/approval-requests
-Accept: application/json
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- Tool 생성자
-- `tools.status = DRAFT`
-- `tools.draft_phase = REVIEW`
-
-### 동작
-
-- `tool_approvals`에 `approval_status = PENDING`인 승인 요청을 생성한다.
-- `request_number`는 같은 Tool 안에서 1부터 증가한다.
-- `tools.status = PENDING`으로 변경한다.
-- 승인 요청 메시지는 `message_type = TOOL_APPROVAL_REQUEST`, `content_type = JSON`으로 저장한다.
-
-## 승인 이력 조회
-
-```http
-GET /api/v1/projects/{projectId}/tools/{toolId}/approval-requests
-Accept: application/json
 Authorization: Bearer {accessToken}
 ```
 
 ### 권한
 
 - 프로젝트 멤버
-
-## 승인 요청 목록 조회
-
-```http
-GET /api/v1/projects/{projectId}/tool-approvals?approvalStatus=PENDING&page=0&size=20
-Accept: application/json
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- 프로젝트 `ADMIN`
-- 프로젝트 `MANAGER`
 - `project_members.status = 진행중`
+- Tool 생성자 또는 `project_members.can_update_tool = true`
+- 대상 ToolPlan이 해당 project/session에 속해야 한다.
+- 대상 ToolPlan 상태는 `REVIEW` 또는 `REJECTED`여야 한다.
 
-### Query Parameters
-
-| 이름 | 필수 | 기본값 | 설명 |
-| --- | --- | --- | --- |
-| `approvalStatus` | N | 없음 | `PENDING`, `APPROVED`, `REJECTED` 중 하나로 필터링한다. 생략하면 전체 승인 요청을 조회한다. |
-| `page` | N | `0` | 0부터 시작하는 페이지 번호다. |
-| `size` | N | `20` | 페이지 크기다. |
-
-### 동작
-
-- 프로젝트 `ADMIN` 또는 `MANAGER`만 조회할 수 있다.
-- `approvalStatus`가 전달되면 해당 상태의 승인 요청만 조회한다.
-- `approvalStatus`가 전달되지 않으면 프로젝트의 전체 승인 요청을 조회한다.
-- `requested_at DESC` 순서로 조회한다.
-
-### Response Body
+### Request Body
 
 ```json
 {
-  "isSuccess": true,
-  "code": "COMMON-200",
-  "message": "성공입니다.",
-  "result": {
-    "content": [
-      {
-        "toolApprovalId": 11,
-        "projectId": 1,
-        "toolId": 7,
-        "fileName": "sales-summary-tool",
-        "displayName": "매출 요약 Tool",
-        "requestNumber": 1,
-        "approvalStatus": "PENDING",
-        "requestedByProjectMemberId": 3,
-        "requestedByUserId": 5,
-        "requestedByUserName": "홍길동",
-        "reviewedByProjectMemberId": null,
-        "reviewedByUserId": null,
-        "reviewedByUserName": null,
-        "reviewFeedback": null,
-        "requestedAt": "2026-04-30T10:20:00",
-        "reviewedAt": null,
-        "toolStatus": "PENDING",
-        "draftPhase": "REVIEW"
-      }
-    ],
-    "page": 0,
-    "size": 20,
-    "totalElements": 1,
-    "totalPages": 1
-  }
+  "mode": "PLAN",
+  "basePlanVersion": 1,
+  "feedbackItems": [
+    {
+      "blockId": "input-format",
+      "comment": "입력 파일 형식 예시를 더 자세히 작성해줘."
+    }
+  ],
+  "instruction": "코멘트가 있는 블록을 중심으로 PLAN 전체를 다시 작성해줘."
 }
 ```
 
-## 승인 요청 상세 조회
-
-```http
-GET /api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}
-Accept: application/json
-Authorization: Bearer {accessToken}
-```
-
-### 권한
-
-- 프로젝트 `ADMIN`
-- 프로젝트 `MANAGER`
-- `project_members.status = 진행중`
-
-### 동작
-
-- 프로젝트 `ADMIN` 또는 `MANAGER`만 조회할 수 있다.
-- 요청한 `toolApprovalId`가 해당 프로젝트에 속하지 않으면 조회할 수 없다.
-
 ### Response Body
 
 ```json
 {
   "isSuccess": true,
-  "code": "COMMON-200",
-  "message": "성공입니다.",
+  "code": "COMMON-202",
+  "message": "Tool PLAN 재생성을 시작하였습니다.",
   "result": {
-    "toolApprovalId": 11,
+    "runId": "74bd1c34-b9ab-45cc-9c1f-3baf1efef1c7",
     "projectId": 1,
-    "toolId": 7,
-    "fileName": "sales-summary-tool",
-    "displayName": "매출 요약 Tool",
-    "requestNumber": 1,
-    "approvalStatus": "PENDING",
-    "requestedByProjectMemberId": 3,
-    "requestedByUserId": 5,
-    "requestedByUserName": "홍길동",
-    "reviewedByProjectMemberId": null,
-    "reviewedByUserId": null,
-    "reviewedByUserName": null,
-    "reviewFeedback": null,
-    "requestedAt": "2026-04-30T10:20:00",
-    "reviewedAt": null,
-    "toolStatus": "PENDING",
-    "draftPhase": "REVIEW"
+    "sessionId": 10,
+    "baseToolPlanId": 21,
+    "planGroupId": 5,
+    "status": "GENERATING",
+    "sseUrl": "/api/v1/projects/1/sessions/10/tool-plan-runs/74bd1c34-b9ab-45cc-9c1f-3baf1efef1c7/events"
   }
 }
 ```
 
-## Tool 승인
+### 동작
+
+- `basePlanVersion`은 사용자가 피드백한 시점의 `tool_plans.plan_version` 값이다.
+- 현재 ToolPlan의 `plan_version`과 `basePlanVersion`이 다르면 재생성을 시작하지 않는다.
+- 재생성 요청 시점에도 새 ToolPlan은 즉시 생성하지 않는다.
+- Core Server가 `TOOL_PLAN_COMPLETED` 이벤트를 발행하면 같은 `planGroupId` 아래 새 ToolPlan 버전을 생성한다.
+- Core Server는 수정된 블록만 반환하지 않고 최신 전체 PLAN을 반환한다.
+
+## ToolPlanRun SSE 구독
 
 ```http
-PATCH /api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/approve
+GET /api/v1/projects/{projectId}/sessions/{sessionId}/tool-plan-runs/{runId}/events
+Accept: text/event-stream
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 프로젝트 멤버
+- `project_members.status = 진행중`
+- run이 해당 project/session에 속해야 한다.
+
+### 이벤트 이름
+
+```text
+connected
+progress
+chunk
+completed
+skipped
+failed
+```
+
+### completed 예시
+
+```text
+event: completed
+data: {"eventType":"completed","runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","projectId":1,"chatSessionId":10,"toolPlanGroupId":5,"toolPlanId":21,"planVersion":1,"status":"REVIEW"}
+```
+
+### skipped 예시
+
+```text
+event: skipped
+data: {"eventType":"skipped","runId":"3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11","message":"Tool 명세로 만들 목표, 입력, 출력, 실행 조건을 더 구체적으로 알려주세요."}
+```
+
+## ToolPlanRun 상태 조회
+
+```http
+GET /api/v1/projects/{projectId}/sessions/{sessionId}/tool-plan-runs/{runId}/state
+Accept: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 동작
+
+- Redis `tool:plan:{runId}:state` 최신 상태가 있으면 Redis 값을 우선 반환한다.
+- Redis 상태가 없거나 조회에 실패하면 DB의 `tool_plan_runs`, `tool_plans`, `tool_plan_groups` 기준으로 fallback 응답을 반환한다.
+- `FAILED`, `SKIPPED`, `COMPLETED`도 run 기준으로 복구한다.
+
+### Response Body
+
+```json
+{
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
+    "projectId": 1,
+    "chatSessionId": 10,
+    "toolPlanGroupId": 5,
+    "toolPlanId": 21,
+    "planVersion": 1,
+    "eventType": "completed",
+    "status": "REVIEW",
+    "progressRate": 100,
+    "message": "Tool PLAN 생성이 완료되었습니다.",
+    "updatedAt": "2026-05-08T10:10:00"
+  }
+}
+```
+
+## ToolPlan 승인 요청
+
+```http
+POST /api/v1/projects/{projectId}/tool-plans/{toolPlanId}/approval-requests
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 프로젝트 멤버
+- `project_members.status = 진행중`
+- 대상 ToolPlan이 해당 프로젝트에 속해야 한다.
+- 대상 ToolPlan 상태는 `REVIEW`여야 한다.
+
+### Request Body
+
+```json
+{
+  "requestComment": "현재 PLAN으로 Tool 생성을 승인 요청합니다."
+}
+```
+
+### 동작
+
+- `tool_approvals.tool_plan_id`에 승인 대상 ToolPlan을 저장한다.
+- `tool_plans.status = PENDING`으로 변경한다.
+- `tool_plan_groups.status = PENDING`으로 변경한다.
+- 이 시점에도 `tools` row는 생성하지 않는다.
+
+## ToolPlan 승인
+
+```http
+PATCH /api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/approve
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer {accessToken}
+```
+
+### 권한
+
+- 프로젝트 `ADMIN` 또는 `MANAGER`
+
+### 동작
+
+- `tool_plans.status = APPROVED`로 변경한다.
+- `tool_plan_groups.status = APPROVED`로 변경한다.
+- API Server가 `TOOL_BUILD_REQUESTED` Kafka 이벤트를 발행한다.
+- Core Server가 실제 코드/파일을 생성한다.
+- Core Server가 `TOOL_BUILD_COMPLETED` 이벤트를 발행하면 API Server가 `tools` row를 생성한다.
+
+## ToolPlan 반려
+
+```http
+PATCH /api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/reject
 Accept: application/json
 Content-Type: application/json
 Authorization: Bearer {accessToken}
@@ -529,38 +373,44 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "toolGrade": 3,
-  "reviewFeedback": "승인합니다."
+  "reviewFeedback": "입력과 출력 형식을 더 구체적으로 작성해주세요."
 }
 ```
 
 ### 동작
 
-- `tool_approvals.approval_status = APPROVED`로 변경한다.
-- `tool_approvals.reviewed_by_project_member_id`에 검토자를 저장한다.
-- `tools.status = APPROVED`로 변경한다.
-- `tools.tool_grade`를 저장한다.
+- `tool_plans.status = REJECTED`로 변경한다.
+- `tool_plan_groups.status = REJECTED`로 변경한다.
+- 사용자는 반려된 ToolPlan을 기준으로 재생성을 요청할 수 있다.
 
-## Tool 반려
+## ToolPlan 상세 조회
 
 ```http
-PATCH /api/v1/projects/{projectId}/tool-approvals/{toolApprovalId}/reject
+GET /api/v1/projects/{projectId}/tool-plans/{toolPlanId}
 Accept: application/json
-Content-Type: application/json
 Authorization: Bearer {accessToken}
 ```
 
-### Request Body
+### Response Body
 
 ```json
 {
-  "reviewFeedback": "보안 검증 단계가 더 필요합니다."
+  "isSuccess": true,
+  "code": "COMMON-200",
+  "message": "성공입니다.",
+  "result": {
+    "toolPlanId": 21,
+    "planGroupId": 5,
+    "projectId": 1,
+    "chatSessionId": 10,
+    "planVersion": 1,
+    "status": "REVIEW",
+    "mode": "PLAN",
+    "rawMarkdown": "## Tool Plan...",
+    "structuredPlanJson": "{\"version\":1,\"blocks\":[]}",
+    "planSnapshot": "{\"schemaVersion\":1,\"blocks\":[]}",
+    "createdAt": "2026-05-08T10:00:00",
+    "updatedAt": "2026-05-08T10:10:00"
+  }
 }
 ```
-
-### 동작
-
-- `tool_approvals.approval_status = REJECTED`로 변경한다.
-- `tool_approvals.reviewed_by_project_member_id`에 검토자를 저장한다.
-- `tools.status = REJECTED`로 변경한다.
-- 반려 이후 생성자는 Draft Tool 재생성 API로 계획을 수정할 수 있다.
