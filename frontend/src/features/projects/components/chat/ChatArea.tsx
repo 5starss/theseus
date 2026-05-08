@@ -7,6 +7,8 @@ import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
+import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
+import { TypingIndicator } from '@/components/ui/TypingIndicator';
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -103,7 +105,7 @@ export function ChatArea() {
   };
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="flex flex-col h-full relative overflow-hidden">
       {/* Background Grid Effect */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 pointer-events-none" />
 
@@ -128,13 +130,17 @@ export function ChatArea() {
           <div className="space-y-6">
             {messages.map(msg => (
               <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[70%] p-4 rounded-lg whitespace-pre-wrap ${msg.senderType === 'USER'
+                <div className={`max-w-[70%] p-4 rounded-lg overflow-x-auto ${msg.senderType === 'USER'
                   ? 'bg-[#3e495d] text-[#aeb9d0]'
                   : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM'
                     ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
-                    : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa]'
+                    : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
                   }`}>
-                  {msg.content || (isGenerating && msg.senderType === 'ASSISTANT' ? '생성 중...' : '')}
+                  {msg.senderType === 'ASSISTANT' ? (
+                    msg.content ? <MarkdownViewer content={msg.content} /> : (isGenerating ? <TypingIndicator /> : '')
+                  ) : (
+                    <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>
+                  )}
                 </div>
               </div>
             ))}

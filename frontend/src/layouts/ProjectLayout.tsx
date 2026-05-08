@@ -38,12 +38,12 @@ export default function ProjectLayout() {
   }, [projectId, setProject, setError, setIsLoading, reset]);
 
   return (
-    <div className="min-h-screen bg-[#010f1f] text-foreground flex relative overflow-hidden">
+    <div className="h-screen bg-[#010f1f] text-foreground flex relative overflow-hidden">
       {/* Global Left Sidebar */}
       <Sidebar projectId={projectId} />
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-auto relative z-10 flex flex-col">
+      <main className="flex-1 overflow-hidden relative z-10 flex flex-col">
         <Outlet />
       </main>
     </div>

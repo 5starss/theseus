@@ -6,6 +6,8 @@ import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 export function InspectorPanel() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -229,8 +231,14 @@ export function InspectorPanel() {
                     READY TO APPROVE
                   </div>
                 </div>
-                <div className="flex-1 p-4 overflow-auto font-mono text-xs text-blue-200 leading-relaxed scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                  <pre>{JSON.stringify(toolResult, null, 2)}</pre>
+                <div className="flex-1 overflow-auto font-mono text-xs leading-relaxed scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                  <SyntaxHighlighter
+                    language="json"
+                    style={vscDarkPlus}
+                    customStyle={{ margin: 0, padding: '1rem', background: 'transparent', height: '100%' }}
+                  >
+                    {JSON.stringify(toolResult, null, 2)}
+                  </SyntaxHighlighter>
                 </div>
               </div>
             ) : isBuilding ? (
