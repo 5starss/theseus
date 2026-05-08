@@ -69,6 +69,32 @@ class ToolPlanTest {
 	}
 
 	@Test
+	@DisplayName("승인 요청 중인 ToolPlan은 supersede 처리할 수 없다")
+	void cannotSupersedePendingToolPlan() {
+		// Given
+		ToolPlan toolPlan = createToolPlan(1L);
+		toolPlan.requestApproval();
+
+		// When & Then
+		assertThatThrownBy(toolPlan::supersede)
+			.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	@DisplayName("반려된 ToolPlan은 supersede 처리할 수 있다")
+	void supersedeRejectedToolPlan() {
+		// Given
+		ToolPlan toolPlan = createToolPlan(1L);
+		toolPlan.reject();
+
+		// When
+		toolPlan.supersede();
+
+		// Then
+		assertThat(toolPlan.getStatus()).isEqualTo(ToolPlanStatus.SUPERSEDED);
+	}
+
+	@Test
 	@DisplayName("planVersion은 1 이상이어야 한다")
 	void createToolPlanFailsWhenPlanVersionIsInvalid() {
 		// When & Then

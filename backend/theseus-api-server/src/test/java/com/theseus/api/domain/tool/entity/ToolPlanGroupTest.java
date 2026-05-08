@@ -61,6 +61,33 @@ class ToolPlanGroupTest {
 			.isInstanceOf(BusinessException.class);
 	}
 
+	@Test
+	@DisplayName("REVIEW 상태가 아니면 ToolPlanGroup을 PENDING으로 전환할 수 없다")
+	void markPendingFailsWhenStatusIsNotReview() {
+		// Given
+		TestFixture fixture = createFixture();
+		ToolPlanGroup planGroup = createToolPlanGroup(fixture);
+		ToolPlan toolPlan = createToolPlan(fixture, planGroup);
+
+		// When & Then
+		assertThatThrownBy(() -> planGroup.markPending(toolPlan))
+			.isInstanceOf(BusinessException.class);
+	}
+
+	@Test
+	@DisplayName("PENDING 상태가 아니면 ToolPlanGroup을 승인할 수 없다")
+	void approveFailsWhenStatusIsNotPending() {
+		// Given
+		TestFixture fixture = createFixture();
+		ToolPlanGroup planGroup = createToolPlanGroup(fixture);
+		ToolPlan toolPlan = createToolPlan(fixture, planGroup);
+		planGroup.markReview(toolPlan);
+
+		// When & Then
+		assertThatThrownBy(() -> planGroup.approve(toolPlan))
+			.isInstanceOf(BusinessException.class);
+	}
+
 	private ToolPlanGroup createToolPlanGroup(TestFixture fixture) {
 		return ToolPlanGroup.builder()
 			.project(fixture.project())
