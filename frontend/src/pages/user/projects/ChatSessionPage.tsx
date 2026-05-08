@@ -25,6 +25,7 @@ export default function ChatSessionPage() {
             plan: (details.currentPlan as StructuredPlan) || null,
             phase: (details.draftPhase as DraftPhase) || null,
             toolId: (details.currentToolId as string) || null,
+            toolResult: (details.draftSnapshot as Record<string, unknown>) || null,
             title: (details.title as string) || '새 세션',
             isClosed: (details.isClosed as boolean) || false
           });
