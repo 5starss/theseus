@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,7 @@ from src.tool_build.schemas import (
     ToolBuildRequestedEvent,
 )
 from theseus_engine.models.messages import ConversationMessage, TextBlock
+from src.tooling.service import ToolCreationError
 from theseus_engine.wrappers.llm_clients.api_types import ApiMessageCompleteEvent, UsageSnapshot
 
 
@@ -31,6 +33,12 @@ class FakeBuilder:
         return self.artifact
 
 
+class SlowBuilder:
+    async def build(self, event, *, progress_callback=None, chunk_callback=None):
+        await asyncio.sleep(1)
+        return create_artifact()
+
+
 class FakeLlmClient:
     def __init__(self, text: str):
         self.text = text
@@ -40,6 +48,20 @@ class FakeLlmClient:
         self.requests.append(request)
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=[TextBlock(text=self.text)]),
+            usage=UsageSnapshot(),
+        )
+
+
+class SequentialFakeLlmClient:
+    def __init__(self, texts: list[str]):
+        self.texts = list(texts)
+        self.requests = []
+
+    async def stream_message(self, request):
+        self.requests.append(request)
+        text = self.texts.pop(0)
+        yield ApiMessageCompleteEvent(
+            message=ConversationMessage(role="assistant", content=[TextBlock(text=text)]),
             usage=UsageSnapshot(),
         )
 
@@ -95,7 +117,49 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("class IncidentRecoveryTool", artifact.code_snapshot)
             self.assertEqual(artifact.metadata_json["toolName"], "incident_recovery_tool")
             self.assertEqual(artifact.metadata_json["generatedSpec"]["displayName"], "Incident Recovery Tool")
+            self.assertEqual(artifact.display_name, "Incident Recovery Tool")
+            self.assertEqual(artifact.display_description, "Analyzes incident logs and suggests recovery steps.")
+            self.assertEqual(artifact.permission_level, 1)
             self.assertEqual(len(llm.requests), 1)
+
+    async def test_builder_repairs_llm_code_after_validation_failure(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            llm = SequentialFakeLlmClient([create_llm_json(), create_llm_json()])
+            builder = ToolBuilder(llm_client=llm, storage_root=Path(tmpdir))
+
+            fake_tool_class = type("IncidentRecoveryTool", (), {"name": "incident_recovery_tool"})
+            validation_error = ToolCreationError("validation_failed", "Missing execute method.")
+            with patch("src.tool_build.builder.validate_draft_tool", side_effect=[validation_error, fake_tool_class]), \
+                patch("src.tool_build.builder.run_tool_sandbox_gate_for_artifact", new=AsyncMock(return_value={"success": True})), \
+                patch("src.tool_build.builder.activate_tool_artifact", return_value=False):
+                artifact = await builder.build(ToolBuildRequestedEvent.model_validate(create_build_payload()))
+
+            self.assertEqual(artifact.file_name, "incident_recovery_tool.py")
+            self.assertEqual(len(llm.requests), 2)
+            self.assertIn("Missing execute method.", llm.requests[1].messages[0].text)
+
+    async def test_builder_fails_after_repair_attempts_are_exhausted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            llm = SequentialFakeLlmClient([create_llm_json(), create_llm_json(), create_llm_json()])
+            builder = ToolBuilder(llm_client=llm, storage_root=Path(tmpdir))
+
+            validation_error = ToolCreationError("validation_failed", "Still invalid.")
+            with patch("src.tool_build.builder.validate_draft_tool", side_effect=validation_error):
+                with self.assertRaisesRegex(Exception, "Still invalid."):
+                    await builder.build(ToolBuildRequestedEvent.model_validate(create_build_payload()))
+
+            self.assertEqual(len(llm.requests), 3)
+
+    async def test_processor_publishes_failed_event_on_build_timeout(self):
+        publisher = AsyncMock()
+        processor = ToolBuildProcessor(publisher=publisher, builder=SlowBuilder())
+
+        with patch("src.tool_build.processor.settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS", 0.01):
+            await processor.process_message(create_build_payload())
+
+        failed = publisher.publish.await_args_list[-1].args[1]
+        self.assertEqual(failed.event_type, "TOOL_BUILD_FAILED")
+        self.assertEqual(failed.code, "TOOL_BUILD_TIMEOUT")
 
     async def test_build_request_contract_requires_api_fields_and_no_tool_id(self):
         event = ToolBuildRequestedEvent.model_validate(create_build_payload())

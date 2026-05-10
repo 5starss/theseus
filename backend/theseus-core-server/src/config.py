@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_GENERATION_EVENT: str = "theseus.tool-generation.event"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
+    CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS: int = 2
+    CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
     
     # Database Settings (PostgreSQL + pgvector)
     CORE_POSTGRES_HOST: str = "localhost"

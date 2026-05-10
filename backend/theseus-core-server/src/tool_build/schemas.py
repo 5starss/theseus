@@ -49,6 +49,9 @@ class ToolArtifactPayload(BaseModel):
     artifact_path: str | None = Field(default=None, alias="artifactPath")
     code_snapshot: str | None = Field(default=None, alias="codeSnapshot")
     metadata_json: dict[str, Any] | None = Field(default=None, alias="metadataJson")
+    display_name: str | None = Field(default=None, alias="displayName")
+    display_description: str | None = Field(default=None, alias="displayDescription")
+    permission_level: int | None = Field(default=None, alias="permissionLevel")
 
 
 class ToolBuildProgressEvent(BaseModel):
