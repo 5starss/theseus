@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,7 +51,7 @@ class ToolRegenerationRequestEvent(BaseModel):
     requested_by_project_member_id: int = Field(alias="requestedByProjectMemberId")
     base_draft_version: int | None = Field(default=None, alias="baseDraftVersion")
     feedback_items: list[ToolFeedbackItem] = Field(alias="feedbackItems")
-    base_draft: "ToolDraftPayload" | None = Field(default=None, alias="baseDraft")
+    base_draft: Optional["ToolDraftPayload"] = Field(default=None, alias="baseDraft")
     project_role: str = Field(alias="projectRole")
     tool_permission: ToolPermissionPayload = Field(alias="toolPermission")
     requested_at: datetime | None = Field(default=None, alias="requestedAt")
