@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -85,3 +85,50 @@ class ToolPlan(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class CoreRunCheckpoint(Base):
+    __tablename__ = "core_run_checkpoints"
+
+    run_id = Column(String(64), primary_key=True)
+    project_id = Column(Integer, index=True, nullable=False)
+    chat_session_id = Column(Integer, index=True, nullable=False)
+    request_type = Column(String(50), nullable=False)
+    mode = Column(String(30), nullable=False)
+    status = Column(String(30), index=True, nullable=False)
+    checkpoint_version = Column(Integer, nullable=False, default=1)
+    state_machine_json = Column(JSONB, nullable=False, default=dict)
+    conversation_json = Column(JSONB, nullable=False, default=list)
+    tool_trace_json = Column(JSONB, nullable=True)
+    progress_json = Column(JSONB, nullable=True)
+    last_event_sequence = Column(Integer, nullable=False, default=0)
+    retry_count = Column(Integer, nullable=False, default=0)
+    last_error_code = Column(String(100), nullable=True)
+    last_error_message = Column(Text, nullable=True)
+    lease_owner = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    events = relationship("CoreRunEvent", back_populates="checkpoint", cascade="all, delete-orphan")
+
+
+class CoreRunEvent(Base):
+    __tablename__ = "core_run_events"
+    __table_args__ = (
+        UniqueConstraint("run_id", "event_sequence", name="uk_core_run_events_run_sequence"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(64), ForeignKey("core_run_checkpoints.run_id"), index=True, nullable=False)
+    event_sequence = Column(Integer, nullable=False)
+    event_type = Column(String(80), nullable=False)
+    payload_json = Column(JSONB, nullable=False)
+    publish_status = Column(String(30), nullable=False, default="pending", index=True)
+    publish_attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    checkpoint = relationship("CoreRunCheckpoint", back_populates="events")

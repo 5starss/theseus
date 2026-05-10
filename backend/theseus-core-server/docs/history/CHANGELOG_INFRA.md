@@ -2,6 +2,63 @@
 
 인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
 
+## [2026-05-10] Tool Build Worker, Runtime Hardening & Core Run Checkpoint
+
+### Tool Build Kafka worker 신규 연결 (`src/tool_build/`, `src/main.py`, `.env.example`)
+- 승인된 ToolPlan 기반 Tool build 요청을 처리하는 `tool_build` worker 경로를 추가했습니다.
+- `theseus.tool-build.request` 토픽의 `TOOL_BUILD_REQUESTED` 이벤트를 소비하고, build 진행/완료/실패 이벤트를 `theseus.tool-build.event` 토픽으로 발행하도록 정리했습니다.
+- Core 서버 기동 시 기존 Tool generation consumer와 함께 Tool build consumer를 시작/종료하도록 `main.py` lifecycle에 연결했습니다.
+- Tool build Kafka 설정을 환경 변수로 외부화했습니다.
+  - `CORE_KAFKA_TOOL_BUILD_CONSUMER_GROUP_ID`
+  - `KAFKA_TOPIC_TOOL_BUILD_REQUEST`
+  - `KAFKA_TOPIC_TOOL_BUILD_EVENT`
+
+### Tool build 계약을 ToolPlan 중심으로 고정 (`src/tool_build/schemas.py`)
+- build 요청/응답 payload에서 승인 전 Tool 식별자인 `toolId` 의존성을 제거하고 `toolPlanId`, `planGroupId`, `approvedPlan` 기준으로 정렬했습니다.
+- `TOOL_BUILD_REQUESTED` payload에 `approvedByProjectMemberId`, `requestedAt`을 필수 필드로 검증하도록 보강했습니다.
+- `TOOL_BUILD_COMPLETED` artifact payload는 API 서버가 최종 `tools` row를 만들 수 있도록 `fileName` 중심으로 고정하고, `moduleName`, `artifactPath`, `codeSnapshot`, `metadataJson`은 nullable로 처리했습니다.
+
+### LLM 기반 Tool build 및 검증 파이프라인 (`src/tool_build/builder.py`, `src/tool_build/prompts.py`)
+- 승인된 PLAN 내용을 LLM prompt로 전달해 Python Tool artifact spec을 생성하도록 build 경로를 전환했습니다.
+- LLM 출력은 JSON spec으로 파싱한 뒤 기존 서버 Tool 생성 경로에 연결했습니다.
+  - draft 파일 저장
+  - `ToolValidator` 검증
+  - 샌드박스 gate 실행
+  - active artifact 승격
+  - metadata 읽기 및 completed artifact 구성
+- build 결과에 표시용 메타데이터(`displayName`, `displayDescription`, `permissionLevel`)를 포함해 API 서버가 Tool row 표시 정보를 구성할 수 있도록 했습니다.
+
+### Tool build hardening (`src/tool_build/builder.py`, `src/tool_build/processor.py`, `src/config.py`)
+- LLM이 생성한 코드가 검증 또는 샌드박스 gate에서 실패할 경우, 오류 내용을 포함한 repair prompt로 재생성을 시도하도록 보강했습니다.
+- repair 횟수와 run timeout을 설정값으로 분리했습니다.
+  - `CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS`
+  - `CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS`
+- timeout 발생 시 `TOOL_BUILD_TIMEOUT` 코드로 failed 이벤트를 발행하도록 정리했습니다.
+
+### Core PostgreSQL run checkpoint 기본 구조 (`src/db/models.py`, `src/db/repositories/core_runs.py`, `src/tool_build/processor.py`)
+- Core 내부 장기 실행 run을 `runId` 기준으로 추적하는 checkpoint 테이블 모델을 추가했습니다.
+  - `core_run_checkpoints`
+  - `core_run_events`
+- Tool build processor가 run 시작 시 checkpoint를 생성/획득하고, 이미 terminal 상태인 run이나 다른 worker lease가 살아있는 run은 중복 실행하지 않도록 막았습니다.
+- `eventSequence`를 메모리가 아니라 checkpoint DB의 `last_event_sequence` 기준으로 증가시키도록 연결했습니다.
+- progress/chunk/completed/failed 이벤트는 Kafka publish 전에 `core_run_events`에 먼저 기록하고, publish 성공 시 `sent`, 실패 시 `failed`로 상태를 남기도록 했습니다.
+- worker 시작 시 pending/failed publish event를 batch로 재발행하는 기본 구조를 추가했습니다.
+- lease TTL과 재발행 batch size를 설정값으로 분리했습니다.
+  - `CORE_RUN_LEASE_TTL_SECONDS`
+  - `CORE_RUN_EVENT_REPUBLISH_BATCH_SIZE`
+
+### Production runtime 기동 보강 (`Dockerfile`, `infra/docker/prod/`)
+- Production compose/env 예시를 최신 Core 런타임 설정에 맞춰 정리했습니다.
+- Core 서버 컨테이너 기동 시 필요한 파일 경로와 schema import 문제가 배포 환경에서 터지지 않도록 런타임 구성을 보정했습니다.
+
+### 테스트 및 검증 (`tests/test_tool_build_processor.py`)
+- Tool build request/completed/failed Kafka 계약에서 `toolId`가 제거되었는지 검증했습니다.
+- LLM artifact 생성, repair 성공/실패, timeout failed 이벤트를 테스트했습니다.
+- checkpoint 기반 event sequence, terminal status 기록, heartbeat, pending event 재발행, publish 실패 시 failed event 오인 방지 케이스를 추가했습니다.
+- 검증 상태는 다음과 같습니다.
+  - `.venv/Scripts/python.exe -m pytest -q tests/test_tool_build_processor.py` 통과
+  - `python3 -m compileall src/db/repositories/core_runs.py src/tool_build/processor.py src/tool_build/consumer.py` 통과
+
 ## [2026-05-08] Sandbox Execution Hardening & Operational Readiness
 
 ### 샌드박스 실행 경로 안정성 및 진단 능력 보강 (`src/sandbox/`, `src/main.py`)
