@@ -228,7 +228,7 @@ class StreamRouteTests(unittest.TestCase):
         persist_assistant = AsyncMock()
         with patch(
             "src.routes.stream.get_query_engine",
-            side_effect=EngineInitializationError("OpenHarness is not available"),
+            side_effect=EngineInitializationError("Theseus engine is not available"),
         ):
             with patch(
                 "src.routes.stream.get_project_tool_permissions",
@@ -249,7 +249,7 @@ class StreamRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: connected", response.text)
         self.assertIn(
-            'event: error\ndata: {"message": "OpenHarness is not available"}',
+            'event: error\ndata: {"message": "Theseus engine is not available"}',
             response.text,
         )
         persist_assistant.assert_not_awaited()

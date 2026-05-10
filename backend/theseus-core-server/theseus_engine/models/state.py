@@ -448,7 +448,7 @@ creating non-Python files), explain what the user needs to do manually and move 
 
 # create_tool code requirements:
   When using `create_tool`, you MUST produce a complete, self-contained Python module that:
-   (1) imports BaseTool, ToolExecutionContext, ToolResult from openharness.tools.base
+   (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
   (2) imports BaseModel, Field from pydantic
   (3) defines an input model inheriting BaseModel — the class name MUST be `<ToolClassName>Input` \
 (e.g., WeatherFetcherInput for WeatherFetcherTool)

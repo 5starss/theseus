@@ -440,7 +440,7 @@ class ToolRetriever:
         """
         used: set[str] = set()
         for m in history_messages:
-            # --- ConversationMessage 객체 처리 (OpenHarness 기본 형식) ---
+            # --- ConversationMessage 객체 처리 ---
             if hasattr(m, "tool_uses"):
                 for tool_use_block in m.tool_uses:
                     name = getattr(tool_use_block, "name", None)

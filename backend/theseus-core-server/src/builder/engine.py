@@ -8,8 +8,25 @@ from src.auth.schemas import SessionContext
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
 from src.tooling import load_custom_tools_for_project
+from theseus_engine.engine.query_engine import QueryEngine
+from theseus_engine.engine.stream_events import (
+    AssistantTextDelta,
+    ErrorEvent,
+    ToolExecutionCompleted,
+    ToolExecutionStarted,
+)
+from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissionSettings
 from theseus_engine.models.state import AgentMode, TheseusStateMachine
 from theseus_engine.models.state import PlanPhase
+from theseus_engine.tools.core import ALL_CORE_TOOLS, build_filtered_registry, load_custom_tools
+from theseus_engine.tools.core.base_tools import ToolRegistry
+from theseus_engine.wrappers.hooks.theseus_hook_executor import (
+    AggregatedHookResult,
+    HookEvent,
+    HookResult,
+    TheseusHookExecutor,
+)
+from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +127,37 @@ async def _deny_permission_prompt(tool_name: str, reason: str) -> bool:
     return False
 
 
+class ServerHookExecutor:
+    """Adds server-only guards around the native Theseus hook executor."""
+
+    def __init__(
+        self,
+        *,
+        delegate: TheseusHookExecutor,
+        pre_tool_guard: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
+        self._delegate = delegate
+        self._pre_tool_guard = pre_tool_guard
+
+    async def execute(self, event: HookEvent, payload: dict[str, Any]) -> AggregatedHookResult:
+        if event == HookEvent.PRE_TOOL_USE and self._pre_tool_guard is not None:
+            tool_name = str(payload.get("tool_name") or "")
+            try:
+                await self._pre_tool_guard(tool_name)
+            except Exception as exc:
+                return AggregatedHookResult(
+                    results=[
+                        HookResult(
+                            hook_type="server_plan_guard",
+                            success=False,
+                            blocked=True,
+                            reason=str(exc),
+                        )
+                    ]
+                )
+        return await self._delegate.execute(event, payload)
+
+
 def _coerce_context(
     context: EngineBuildContext | SessionContext,
 ) -> EngineBuildContext:
@@ -138,38 +186,13 @@ def get_query_engine(
 
     build_context = _coerce_context(context)
 
-    try:
-        from openharness.config.settings import PermissionSettings
-        from openharness.engine.query_engine import QueryEngine
-        from openharness.engine.stream_events import (
-            AssistantTextDelta,
-            ErrorEvent,
-            ToolExecutionCompleted,
-            ToolExecutionStarted,
-        )
-        from openharness.hooks.executor import HookExecutionContext
-        from openharness.hooks.loader import HookRegistry
-        from openharness.tools import create_default_tool_registry
-        from theseus_engine.models.rbac import TheseusPermissionChecker
-        from theseus_engine.tools.core import ALL_CORE_TOOLS, build_filtered_registry, load_custom_tools
-        from theseus_engine.wrappers.hooks.theseus_hook_executor import (
-            TheseusHookExecutor,
-        )
-        from theseus_engine.wrappers.llm_clients.theseus_client import (
-            TheseusLLMClient,
-        )
-    except ImportError as exc:
-        raise EngineInitializationError(
-            "OpenHarness is not available in the current Python environment."
-        ) from exc
-
     if not isinstance(build_context.mode, AgentMode):
         raise EngineInitializationError("Engine mode must be a valid AgentMode.")
 
     model_name = _resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
-    full_registry = create_default_tool_registry()
+    full_registry = ToolRegistry()
     for tool_cls in ALL_CORE_TOOLS:
         full_registry.register(tool_cls())
 
@@ -210,22 +233,18 @@ def get_query_engine(
         if build_context.plan_content is not None:
             state_machine.plan = str(build_context.plan_content)
     permission_checker = TheseusPermissionChecker(
-        settings=PermissionSettings(),
+        settings=TheseusPermissionSettings(),
         user_level=build_context.user_level,
         tool_permissions=tool_permissions,
     )
 
-    hook_registry = HookRegistry()
-    hook_context = HookExecutionContext(
-        cwd=Path.cwd(),
-        api_client=api_client,
-        default_model=model_name,
-    )
-    hook_executor = TheseusHookExecutor(
-        hook_registry,
-        hook_context,
+    base_hook_executor = TheseusHookExecutor(
         active_registry=active_registry,
-        full_registry=None,
+        full_registry=full_registry,
+        llm_client=api_client,
+    )
+    hook_executor = ServerHookExecutor(
+        delegate=base_hook_executor,
         pre_tool_guard=lambda tool_name: _enforce_executing_plan_guard(build_context, tool_name),
     )
 

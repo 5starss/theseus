@@ -30,9 +30,10 @@ def _install_stubs() -> type:
     pydantic_module.Field = Field
     sys.modules["pydantic"] = pydantic_module
 
-    openharness_module = types.ModuleType("openharness")
-    tools_module = types.ModuleType("openharness.tools")
-    base_module = types.ModuleType("openharness.tools.base")
+    theseus_engine_module = types.ModuleType("theseus_engine")
+    theseus_tools_module = types.ModuleType("theseus_engine.tools")
+    core_module = types.ModuleType("theseus_engine.tools.core")
+    base_module = types.ModuleType("theseus_engine.tools.core.base_tools")
 
     class BaseTool:
         pass
@@ -53,12 +54,14 @@ def _install_stubs() -> type:
     base_module.ToolExecutionContext = ToolExecutionContext
     base_module.ToolResult = ToolResult
     base_module.ToolRegistry = ToolRegistry
-    tools_module.base = base_module
-    openharness_module.tools = tools_module
+    core_module.base_tools = base_module
+    theseus_tools_module.core = core_module
+    theseus_engine_module.tools = theseus_tools_module
 
-    sys.modules["openharness"] = openharness_module
-    sys.modules["openharness.tools"] = tools_module
-    sys.modules["openharness.tools.base"] = base_module
+    sys.modules["theseus_engine"] = theseus_engine_module
+    sys.modules["theseus_engine.tools"] = theseus_tools_module
+    sys.modules["theseus_engine.tools.core"] = core_module
+    sys.modules["theseus_engine.tools.core.base_tools"] = base_module
     return BaseTool
 
 
