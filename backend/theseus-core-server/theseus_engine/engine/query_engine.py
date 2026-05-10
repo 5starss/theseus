@@ -125,7 +125,7 @@ def _bounded_completion_tokens(
 
 
 def _tool_artifact_dir() -> Path:
-    data_dir = Path(os.getenv("THESEUS_DATA_DIR", Path.home() / ".openharness" / "data"))
+    data_dir = Path(os.getenv("THESEUS_DATA_DIR", Path.home() / ".theseus" / "data"))
     artifact_dir = data_dir / "tool_artifacts"
     artifact_dir.mkdir(parents=True, exist_ok=True)
     return artifact_dir

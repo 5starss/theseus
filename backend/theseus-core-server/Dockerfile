@@ -12,9 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# 로컬 editable 의존성 설치를 위해 OpenHarness 소스를 먼저 복사
 COPY requirements.txt .
-COPY OpenHarness/ ./OpenHarness/
 RUN pip install --user --no-cache-dir -r requirements.txt
 
 # 런타임 스테이지
@@ -35,7 +33,6 @@ ENV PATH=/home/appuser/.local/bin:$PATH \
 
 # 소스 코드 복사
 COPY --chown=appuser:appuser src/ ./src/
-COPY --chown=appuser:appuser OpenHarness/ ./OpenHarness/
 # 설정 파일 등 복사 (필요시)
 # COPY --chown=appuser:appuser .env.example ./.env.example
 

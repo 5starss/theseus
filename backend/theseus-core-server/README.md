@@ -4,7 +4,7 @@
 
 * **목표:** 엔터프라이즈 환경에서 보안 통제력을 갖추고 토큰 비용을 최적화할 수 있는 사내 맞춤형 AI 에이전트 시스템(Theseus)의 Python 코어 서버 구축.
 * **주요 역할:**
-  * **Theseus-Native 엔진**: OpenHarness 의존성을 완전히 제거하고 자체 QueryEngine, Tool Primitives, Stream Events를 갖춘 독립적인 에이전트 오케스트레이션 엔진
+  * **Theseus-Native 엔진**: 자체 QueryEngine, Tool Primitives, Stream Events를 갖춘 독립적인 에이전트 오케스트레이션 엔진
   * **RBAC 기반 툴 필터링**: 사용자 권한(Level)에 따른 동적 도구 주입으로 보안 강화 및 컨텍스트 압축
   * **메타-툴링 (Meta-Tooling)**: 자연어를 통한 툴 생성 파이프라인 (Planning -> Code Gen -> Validation)
   * **Direct SSE 스트리밍**: 클라이언트와의 실시간 통신 및 Zero-Trust 과금 처리
@@ -23,7 +23,7 @@
 
 * **Web Framework:** `fastapi`, `uvicorn`, `pydantic` (엄격한 파라미터 검증)
 * **Streaming & I/O:** `sse-starlette`, `httpx` (비동기 HTTP 통신)
-* **Agent Engine:** `theseus_engine` (자체 구현 코어 엔진 — OpenHarness 의존성 없음)
+* **Agent Engine:** `theseus_engine` (자체 구현 코어 엔진)
 * **LLM Clients:** `anthropic>=0.40.0`, `openai>=1.0.0` (직접 SDK 호출)
 * **Vector DB / RAG:** `psycopg2`, `pgvector`, `sentence-transformers`, `langchain-core`
 * **Tracing:** `langsmith`
@@ -208,7 +208,7 @@ FastAPI 서버 구축, Spring Boot와의 통신, Vector DB 연동 등 시스템�
   * DinD (Docker-in-Docker) 샌드박스 실행 환경 또는 Serverless 원격 실행 환경(Remote Execution) 인프라 구축.
 
 ### 👨‍💻 개발자 B: AI 에이전트 & 툴링 엔지니어 (AI & Tooling)
-OpenHarness 엔진 래핑, 프롬프트 엔지니어링, 권한 필터링, 그리고 코드 검증을 책임집니다.
+Theseus-native 엔진, 프롬프트 엔지니어링, 권한 필터링, 그리고 코드 검증을 책임집니다.
 
 * **엔진 연동 및 관측성 (Engine & Observability)**
   * Theseus-native `QueryEngine`(`theseus_engine/engine/query_engine.py`) 실행 제너레이터(`run_query`)를 스트리밍 엔드포인트 내부에 연동.

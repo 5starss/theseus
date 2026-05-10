@@ -100,7 +100,7 @@ class CostTracker:
     """세션 단위 비용 추적기 (싱글톤).
 
     engine_builder.setup_engine()에서 get_or_create()로 초기화.
-    OpenHarness UsageEvent 또는 직접 record() 호출로 데이터 수집.
+    UsageEvent 또는 직접 record() 호출로 데이터 수집.
     """
 
     _instance: Optional["CostTracker"] = None
@@ -128,7 +128,7 @@ class CostTracker:
     # --- 기록 ---
 
     def record(self, event: Any) -> None:
-        """OpenHarness UsageEvent 또는 dict 형태의 사용량을 기록합니다."""
+        """UsageEvent 또는 dict 형태의 사용량을 기록합니다."""
         # dict 또는 객체 모두 처리
         if isinstance(event, dict):
             model = event.get("model", "unknown")
