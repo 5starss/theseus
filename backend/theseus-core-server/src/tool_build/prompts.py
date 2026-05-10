@@ -36,3 +36,26 @@ def build_tool_prompt(*, approved_plan: dict, project_id: int, chat_session_id: 
         f"{approved_plan}\n\n"
         "Return only the JSON object described in the system prompt."
     )
+
+
+def build_tool_repair_prompt(
+    *,
+    approved_plan: dict,
+    previous_spec: dict,
+    error_code: str,
+    error_message: str,
+    attempt: int,
+) -> str:
+    return (
+        "The previous generated tool failed Core validation or sandbox execution.\n"
+        f"Repair attempt: {attempt}\n"
+        f"Error code: {error_code}\n"
+        f"Error message: {error_message}\n\n"
+        "Approved plan payload:\n"
+        f"{approved_plan}\n\n"
+        "Previous generated JSON spec:\n"
+        f"{previous_spec}\n\n"
+        "Return a corrected complete JSON object using the same schema. "
+        "Preserve the approved plan intent. Prefer keeping the same toolName unless "
+        "the name itself caused the failure. Return only JSON."
+    )

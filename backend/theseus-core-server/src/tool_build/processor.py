@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
 from pydantic import ValidationError
 
+from src.config import settings
 from src.tool_build.builder import ToolBuildError, ToolBuilder
 from src.tool_build.publisher import ToolBuildEventPublisher
 from src.tool_build.schemas import (
@@ -48,10 +50,13 @@ class ToolBuildProcessor:
 
         try:
             await self.publish_progress(event, "REQUEST_RECEIVED", 5)
-            artifact = await self.builder.build(
-                event,
-                progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
-                chunk_callback=lambda content: self.publish_chunk(event, content),
+            artifact = await asyncio.wait_for(
+                self.builder.build(
+                    event,
+                    progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
+                    chunk_callback=lambda content: self.publish_chunk(event, content),
+                ),
+                timeout=settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS,
             )
             completed = ToolBuildCompletedEvent(
                 runId=event.run_id,
@@ -66,6 +71,17 @@ class ToolBuildProcessor:
         except ToolBuildError as exc:
             logger.error("Tool build failed. runId=%s code=%s error=%s", event.run_id, exc.code, exc.message)
             await self.publish_failed(event, exc.code, exc.message)
+        except TimeoutError:
+            logger.error(
+                "Tool build timed out. runId=%s timeoutSeconds=%s",
+                event.run_id,
+                settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS,
+            )
+            await self.publish_failed(
+                event,
+                "TOOL_BUILD_TIMEOUT",
+                f"Tool build exceeded {settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS} seconds.",
+            )
         except Exception as exc:
             logger.error("Unexpected Tool build failure. runId=%s error=%s", event.run_id, exc, exc_info=True)
             await self.publish_failed(event, "TOOL_BUILD_FAILED", str(exc))

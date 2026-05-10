@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from src.tool_build.prompts import TOOL_BUILD_SYSTEM_PROMPT, build_tool_prompt
+from src.config import settings
+from src.tool_build.prompts import TOOL_BUILD_SYSTEM_PROMPT, build_tool_prompt, build_tool_repair_prompt
 from src.tool_build.schemas import GeneratedToolSpec, ToolArtifactPayload, ToolBuildRequestedEvent
 from src.tooling.service import (
     CUSTOM_TOOLS_DIR,
@@ -53,6 +54,7 @@ class ToolBuilder:
         self.model_name = model_name or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
         self.storage_root = storage_root
+        self.max_repair_attempts = max(settings.CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS, 0)
 
     async def build(
         self,
@@ -62,8 +64,48 @@ class ToolBuilder:
         chunk_callback: ChunkCallback | None = None,
     ) -> ToolArtifactPayload:
         await self._emit_progress(progress_callback, "TOOL_BUILD_LLM_DRAFTING", 20)
-        spec = await self._generate_tool_spec(event, chunk_callback=chunk_callback)
+        approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
+        spec = await self._generate_tool_spec(
+            build_tool_prompt(
+                approved_plan=approved_plan,
+                project_id=event.project_id,
+                chat_session_id=event.chat_session_id,
+                tool_plan_id=event.tool_plan_id,
+            ),
+            chunk_callback=chunk_callback,
+        )
 
+        last_error: ToolBuildError | None = None
+        for attempt in range(0, self.max_repair_attempts + 1):
+            try:
+                return await self._validate_and_package_spec(event, spec, progress_callback=progress_callback)
+            except ToolBuildError as exc:
+                last_error = exc
+                if attempt >= self.max_repair_attempts:
+                    break
+                await self._emit_progress(progress_callback, "TOOL_BUILD_REPAIRING", 60 + min(attempt * 5, 10))
+                spec = await self._generate_tool_spec(
+                    build_tool_repair_prompt(
+                        approved_plan=approved_plan,
+                        previous_spec=spec.model_dump(mode="json", by_alias=True),
+                        error_code=exc.code,
+                        error_message=exc.message,
+                        attempt=attempt + 1,
+                    ),
+                    chunk_callback=chunk_callback,
+                )
+
+        if last_error is not None:
+            raise last_error
+        raise ToolBuildError("TOOL_BUILD_FAILED", "Tool build failed without a captured error.")
+
+    async def _validate_and_package_spec(
+        self,
+        event: ToolBuildRequestedEvent,
+        spec: GeneratedToolSpec,
+        *,
+        progress_callback: ProgressCallback | None = None,
+    ) -> ToolArtifactPayload:
         await self._emit_progress(progress_callback, "TOOL_BUILD_VALIDATING", 55)
         creation_request = ServerToolCreationRequest(
             tool_name=spec.tool_name,
@@ -110,21 +152,17 @@ class ToolBuilder:
             artifactPath=self._artifact_path(paths.module_path),
             codeSnapshot=paths.module_path.read_text(encoding="utf-8"),
             metadataJson=merged_metadata,
+            displayName=spec.display_name,
+            displayDescription=spec.display_description,
+            permissionLevel=spec.permission_level,
         )
 
     async def _generate_tool_spec(
         self,
-        event: ToolBuildRequestedEvent,
+        prompt: str,
         *,
         chunk_callback: ChunkCallback | None = None,
     ) -> GeneratedToolSpec:
-        approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
-        prompt = build_tool_prompt(
-            approved_plan=approved_plan,
-            project_id=event.project_id,
-            chat_session_id=event.chat_session_id,
-            tool_plan_id=event.tool_plan_id,
-        )
         request = ApiMessageRequest(
             model=self.model_name,
             messages=[ConversationMessage.from_user_text(prompt)],
