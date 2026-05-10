@@ -1,1 +1,131 @@
-# Production Docker Compose placeholder
+services:
+  theseus-prod-kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: theseus-prod-kafka
+    restart: unless-stopped
+    ports:
+      - "19092:19092"
+    volumes:
+      - theseus-prod-kafka-data:/var/lib/kafka/data
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID:?KAFKA_CLUSTER_ID must be set}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@theseus-prod-kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:19092,CONTROLLER://0.0.0.0:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://theseus-prod-kafka:29092,EXTERNAL://${KAFKA_EXTERNAL_HOST:?KAFKA_EXTERNAL_HOST must be set}:19092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    networks:
+      - theseus-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server theseus-prod-kafka:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  theseus-prod-kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: theseus-prod-kafka-init
+    depends_on:
+      theseus-prod-kafka:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.request --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-regeneration.request --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.event --partitions 3 --replication-factor 1
+    networks:
+      - theseus-prod-network
+
+  theseus-api-server:
+    build:
+      context: ../../../backend/theseus-api-server
+      dockerfile: Dockerfile
+    image: theseus-api-server:prod
+    container_name: theseus-prod-api-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_PORT: 8080
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
+      SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST:-redis-stg.ssafyapp.com}
+      SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
+    ports:
+      - "8080:8080"
+    depends_on:
+      theseus-prod-kafka:
+        condition: service_healthy
+      theseus-prod-kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - theseus-prod-network
+
+  theseus-core-server:
+    build:
+      context: ../../../backend/theseus-core-server
+      dockerfile: Dockerfile
+    image: theseus-core-server:prod
+    container_name: theseus-prod-core-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ENV: prod
+      AUTH_MODE: spring
+      CORE_KAFKA_CONSUMER_ENABLED: true
+      CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
+      SPRING_BOOT_INTERNAL_URL: http://theseus-api-server:8080
+      SPRING_BOOT_AUTH_VERIFY_URL: http://theseus-api-server:8080/api/internal/auth/verify
+      SPRING_BOOT_PROJECT_PERMISSIONS_URL: http://theseus-api-server:8080/api/internal/project/permissions
+      SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
+      SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
+      SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
+    ports:
+      - "8086:8086"
+    depends_on:
+      theseus-prod-kafka:
+        condition: service_healthy
+      theseus-prod-kafka-init:
+        condition: service_completed_successfully
+      theseus-api-server:
+        condition: service_started
+    networks:
+      - theseus-prod-network
+
+  theseus-frontend:
+    build:
+      context: ../../../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:?VITE_API_BASE_URL must be set}
+    image: theseus-frontend:prod
+    container_name: theseus-prod-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      theseus-api-server:
+        condition: service_started
+    networks:
+      - theseus-prod-network
+
+networks:
+  theseus-prod-network:
+    name: theseus-prod-network
+    driver: bridge
+
+volumes:
+  theseus-prod-kafka-data:
+    name: theseus-prod-kafka-data

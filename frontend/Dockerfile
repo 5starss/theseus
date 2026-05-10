@@ -13,6 +13,8 @@ RUN npm ci
 
 # 소스 코드 전체 복사 후, Vite 빌드 실행
 COPY . .
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
 
