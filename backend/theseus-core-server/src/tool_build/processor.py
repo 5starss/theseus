@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from contextlib import AbstractContextManager, nullcontext
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
 from src.config import settings
+from src.db.repositories.core_runs import CoreRunAlreadyFinished, CoreRunLeaseHeld, CoreRunRepository
 from src.tool_build.builder import ToolBuildError, ToolBuilder
 from src.tool_build.publisher import ToolBuildEventPublisher
 from src.tool_build.schemas import (
@@ -20,15 +22,21 @@ from src.tool_build.schemas import (
 logger = logging.getLogger(__name__)
 
 
+class ToolBuildPublishError(RuntimeError):
+    pass
+
+
 class ToolBuildProcessor:
     def __init__(
         self,
         *,
         publisher: ToolBuildEventPublisher,
         builder: ToolBuilder | None = None,
+        checkpoint_repo_factory: Callable[[], AbstractContextManager[CoreRunRepository]] | None = None,
     ) -> None:
         self.publisher = publisher
         self.builder = builder or ToolBuilder()
+        self.checkpoint_repo_factory = checkpoint_repo_factory
         self._event_sequences: dict[str, int] = {}
         self._finished_runs: set[str] = set()
 
@@ -48,6 +56,24 @@ class ToolBuildProcessor:
             logger.info("Duplicate finished Tool build run skipped. runId=%s", event.run_id)
             return
 
+        with self._checkpoint_repo() as repo:
+            if repo is not None:
+                try:
+                    repo.begin_run(
+                        run_id=event.run_id,
+                        project_id=event.project_id,
+                        chat_session_id=event.chat_session_id,
+                        request_type="BUILD_TOOL",
+                        mode="BUILD",
+                        requested_at=event.requested_at,
+                    )
+                except CoreRunAlreadyFinished:
+                    logger.info("Duplicate terminal Tool build run skipped. runId=%s", event.run_id)
+                    return
+                except CoreRunLeaseHeld:
+                    logger.info("Tool build run lease is held by another worker. runId=%s", event.run_id)
+                    return
+
         try:
             await self.publish_progress(event, "REQUEST_RECEIVED", 5)
             artifact = await asyncio.wait_for(
@@ -66,11 +92,17 @@ class ToolBuildProcessor:
                 toolPlanId=event.tool_plan_id,
                 artifact=artifact,
             )
-            await self.publisher.publish(event.run_id, completed)
+            await self.publish_event(event.run_id, completed)
+            with self._checkpoint_repo() as repo:
+                if repo is not None:
+                    repo.mark_completed(event.run_id)
             self._finished_runs.add(event.run_id)
         except ToolBuildError as exc:
             logger.error("Tool build failed. runId=%s code=%s error=%s", event.run_id, exc.code, exc.message)
             await self.publish_failed(event, exc.code, exc.message)
+        except ToolBuildPublishError:
+            logger.error("Tool build event publish failed. runId=%s", event.run_id, exc_info=True)
+            raise
         except TimeoutError:
             logger.error(
                 "Tool build timed out. runId=%s timeoutSeconds=%s",
@@ -101,7 +133,7 @@ class ToolBuildProcessor:
             message=message,
             progressRate=progress_rate,
         )
-        await self.publisher.publish(event.run_id, progress)
+        await self.publish_event(event.run_id, progress)
 
     async def publish_chunk(self, event: ToolBuildRequestedEvent, content: str) -> None:
         if not content:
@@ -114,7 +146,7 @@ class ToolBuildProcessor:
             toolPlanId=event.tool_plan_id,
             content=content,
         )
-        await self.publisher.publish(event.run_id, chunk)
+        await self.publish_event(event.run_id, chunk)
 
     async def publish_failed(self, event: ToolBuildRequestedEvent, code: str, message: str) -> None:
         failed = ToolBuildFailedEvent(
@@ -126,10 +158,52 @@ class ToolBuildProcessor:
             code=code,
             message=message,
         )
-        await self.publisher.publish(event.run_id, failed)
+        await self.publish_event(event.run_id, failed)
+        with self._checkpoint_repo() as repo:
+            if repo is not None:
+                repo.mark_failed(event.run_id, code, message)
         self._finished_runs.add(event.run_id)
 
+    async def publish_event(self, key: str, event) -> None:
+        with self._checkpoint_repo() as repo:
+            record_id = None
+            if repo is not None:
+                repo.heartbeat(key)
+                record = repo.record_event(event)
+                record_id = record.id
+            try:
+                await self.publisher.publish(key, event)
+            except Exception as exc:
+                if repo is not None and record_id is not None:
+                    repo.mark_event_failed(record_id, str(exc))
+                raise ToolBuildPublishError(str(exc)) from exc
+            if repo is not None and record_id is not None:
+                repo.mark_event_sent(record_id)
+
+    async def republish_pending_events(self, limit: int = 50) -> int:
+        sent = 0
+        with self._checkpoint_repo() as repo:
+            if repo is None:
+                return 0
+            for record in repo.pending_events(limit=limit):
+                try:
+                    await self.publisher.publish(record.run_id, record.payload_json)
+                except Exception as exc:
+                    repo.mark_event_failed(record.id, str(exc))
+                    continue
+                repo.mark_event_sent(record.id)
+                sent += 1
+        return sent
+
     def next_sequence(self, run_id: str) -> int:
+        with self._checkpoint_repo() as repo:
+            if repo is not None:
+                return repo.next_event_sequence(run_id)
         next_value = self._event_sequences.get(run_id, 0) + 1
         self._event_sequences[run_id] = next_value
         return next_value
+
+    def _checkpoint_repo(self):
+        if self.checkpoint_repo_factory is None:
+            return nullcontext(None)
+        return self.checkpoint_repo_factory()

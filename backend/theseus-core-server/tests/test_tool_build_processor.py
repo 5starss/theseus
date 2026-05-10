@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from pydantic import ValidationError
 
 from src.tool_build.builder import ToolBuilder
-from src.tool_build.processor import ToolBuildProcessor
+from src.tool_build.processor import ToolBuildProcessor, ToolBuildPublishError
 from src.tool_build.schemas import (
     ToolArtifactPayload,
     ToolBuildCompletedEvent,
@@ -37,6 +37,63 @@ class SlowBuilder:
     async def build(self, event, *, progress_callback=None, chunk_callback=None):
         await asyncio.sleep(1)
         return create_artifact()
+
+
+class FakeRepoContext:
+    def __init__(self, repo):
+        self.repo = repo
+
+    def __enter__(self):
+        return self.repo
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return None
+
+
+class FakeCheckpointRepo:
+    def __init__(self):
+        self.started = []
+        self.completed = []
+        self.failed = []
+        self.sequence = 0
+        self.events = []
+        self.sent = []
+        self.event_failures = []
+        self.pending = []
+        self.heartbeats = []
+
+    def begin_run(self, **kwargs):
+        self.started.append(kwargs)
+
+    def heartbeat(self, run_id):
+        self.heartbeats.append(run_id)
+
+    def next_event_sequence(self, run_id):
+        self.sequence += 1
+        return self.sequence
+
+    def record_event(self, event):
+        record = type("Record", (), {})()
+        record.id = len(self.events) + 1
+        record.run_id = event.run_id
+        record.payload_json = event.model_dump(mode="json", by_alias=True)
+        self.events.append(record)
+        return record
+
+    def mark_event_sent(self, event_id):
+        self.sent.append(event_id)
+
+    def mark_event_failed(self, event_id, error):
+        self.event_failures.append((event_id, error))
+
+    def pending_events(self, limit=50):
+        return self.pending[:limit]
+
+    def mark_completed(self, run_id):
+        self.completed.append(run_id)
+
+    def mark_failed(self, run_id, code, message):
+        self.failed.append((run_id, code, message))
 
 
 class FakeLlmClient:
@@ -160,6 +217,59 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
         failed = publisher.publish.await_args_list[-1].args[1]
         self.assertEqual(failed.event_type, "TOOL_BUILD_FAILED")
         self.assertEqual(failed.code, "TOOL_BUILD_TIMEOUT")
+
+    async def test_processor_uses_checkpoint_repo_for_sequence_and_terminal_status(self):
+        publisher = AsyncMock()
+        repo = FakeCheckpointRepo()
+        processor = ToolBuildProcessor(
+            publisher=publisher,
+            builder=FakeBuilder(create_artifact()),
+            checkpoint_repo_factory=lambda: FakeRepoContext(repo),
+        )
+
+        await processor.process_message(create_build_payload())
+
+        self.assertEqual(repo.started[0]["run_id"], "build-run-1")
+        self.assertEqual(repo.started[0]["request_type"], "BUILD_TOOL")
+        self.assertEqual(repo.completed, ["build-run-1"])
+        self.assertEqual([event.payload_json["eventSequence"] for event in repo.events], [1, 2, 3, 4])
+        self.assertEqual(repo.sent, [1, 2, 3, 4])
+        self.assertEqual(repo.heartbeats, ["build-run-1", "build-run-1", "build-run-1", "build-run-1"])
+
+    async def test_republish_pending_events_marks_sent(self):
+        publisher = AsyncMock()
+        repo = FakeCheckpointRepo()
+        record = type("Record", (), {})()
+        record.id = 42
+        record.run_id = "build-run-1"
+        record.payload_json = {"eventType": "TOOL_BUILD_COMPLETED", "runId": "build-run-1", "eventSequence": 9}
+        repo.pending.append(record)
+        processor = ToolBuildProcessor(
+            publisher=publisher,
+            checkpoint_repo_factory=lambda: FakeRepoContext(repo),
+        )
+
+        sent = await processor.republish_pending_events()
+
+        self.assertEqual(sent, 1)
+        publisher.publish.assert_awaited_once_with("build-run-1", record.payload_json)
+        self.assertEqual(repo.sent, [42])
+
+    async def test_publish_failure_records_event_without_marking_run_failed(self):
+        publisher = AsyncMock()
+        publisher.publish.side_effect = RuntimeError("kafka down")
+        repo = FakeCheckpointRepo()
+        processor = ToolBuildProcessor(
+            publisher=publisher,
+            builder=FakeBuilder(create_artifact()),
+            checkpoint_repo_factory=lambda: FakeRepoContext(repo),
+        )
+
+        with self.assertRaises(ToolBuildPublishError):
+            await processor.process_message(create_build_payload())
+
+        self.assertEqual(repo.event_failures, [(1, "kafka down")])
+        self.assertEqual(repo.failed, [])
 
     async def test_build_request_contract_requires_api_fields_and_no_tool_id(self):
         event = ToolBuildRequestedEvent.model_validate(create_build_payload())

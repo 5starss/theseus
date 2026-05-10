@@ -5,6 +5,8 @@ import json
 import logging
 
 from src.config import settings
+from src.db.postgres import SessionLocal
+from src.db.repositories.core_runs import CoreRunRepositoryContext
 from src.tool_build.processor import ToolBuildProcessor
 from src.tool_build.publisher import KafkaToolBuildEventPublisher
 
@@ -17,7 +19,13 @@ class ToolBuildKafkaConsumer:
         self.group_id = settings.CORE_KAFKA_TOOL_BUILD_CONSUMER_GROUP_ID
         self.topic = settings.KAFKA_TOPIC_TOOL_BUILD_REQUEST
         self.publisher = KafkaToolBuildEventPublisher()
-        self.processor = ToolBuildProcessor(publisher=self.publisher)
+        self.processor = ToolBuildProcessor(
+            publisher=self.publisher,
+            checkpoint_repo_factory=lambda: CoreRunRepositoryContext(
+                SessionLocal,
+                lease_ttl_seconds=settings.CORE_RUN_LEASE_TTL_SECONDS,
+            ),
+        )
         self._consumer = None
         self._task: asyncio.Task | None = None
 
@@ -37,6 +45,7 @@ class ToolBuildKafkaConsumer:
         )
         await self._consumer.start()
         await self.publisher.start()
+        await self.processor.republish_pending_events(limit=settings.CORE_RUN_EVENT_REPUBLISH_BATCH_SIZE)
         self._task = asyncio.create_task(self._consume_loop())
         logger.info(
             "Tool build Kafka consumer started. bootstrap=%s topic=%s group=%s",

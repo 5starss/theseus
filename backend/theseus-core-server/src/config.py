@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
+    CORE_RUN_LEASE_TTL_SECONDS: int = 60
+    CORE_RUN_EVENT_REPUBLISH_BATCH_SIZE: int = 50
     
     # Database Settings (PostgreSQL + pgvector)
     CORE_POSTGRES_HOST: str = "localhost"
