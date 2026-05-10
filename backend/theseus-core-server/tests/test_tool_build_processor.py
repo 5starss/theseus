@@ -3,10 +3,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from pydantic import ValidationError
+
 from src.tool_build.builder import ToolBuilder
 from src.tool_build.processor import ToolBuildProcessor
 from src.tool_build.schemas import (
     ToolArtifactPayload,
+    ToolBuildCompletedEvent,
+    ToolBuildFailedEvent,
     ToolBuildRequestedEvent,
 )
 from theseus_engine.models.messages import ConversationMessage, TextBlock
@@ -93,6 +97,59 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(artifact.metadata_json["generatedSpec"]["displayName"], "Incident Recovery Tool")
             self.assertEqual(len(llm.requests), 1)
 
+    async def test_build_request_contract_requires_api_fields_and_no_tool_id(self):
+        event = ToolBuildRequestedEvent.model_validate(create_build_payload())
+
+        dumped = event.model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(dumped["eventType"], "TOOL_BUILD_REQUESTED")
+        self.assertEqual(dumped["approvedByProjectMemberId"], 5)
+        self.assertEqual(dumped["requestedAt"], "2026-05-08T14:10:00")
+        self.assertIn("approvedPlan", dumped)
+        self.assertNotIn("toolId", dumped)
+
+        invalid_payload = dict(create_build_payload())
+        invalid_payload.pop("requestedAt")
+        with self.assertRaises(ValidationError):
+            ToolBuildRequestedEvent.model_validate(invalid_payload)
+
+    async def test_completed_event_contract_uses_optional_artifact_fields_and_no_tool_id(self):
+        completed = ToolBuildCompletedEvent(
+            runId="build-run-1",
+            eventSequence=3,
+            projectId=1,
+            chatSessionId=2,
+            toolPlanId=10,
+            artifact=ToolArtifactPayload(fileName="incident_tool.py"),
+        )
+
+        dumped = completed.model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(dumped["eventType"], "TOOL_BUILD_COMPLETED")
+        self.assertEqual(dumped["eventSequence"], 3)
+        self.assertEqual(dumped["artifact"]["fileName"], "incident_tool.py")
+        self.assertIsNone(dumped["artifact"]["moduleName"])
+        self.assertIsNone(dumped["artifact"]["metadataJson"])
+        self.assertNotIn("toolId", dumped)
+
+    async def test_failed_event_contract_includes_event_sequence_and_no_tool_id(self):
+        failed = ToolBuildFailedEvent(
+            runId="build-run-1",
+            eventSequence=4,
+            projectId=1,
+            chatSessionId=2,
+            toolPlanId=10,
+            code="VALIDATION_FAILED",
+            message="Tool validation failed.",
+        )
+
+        dumped = failed.model_dump(mode="json", by_alias=True)
+
+        self.assertEqual(dumped["eventType"], "TOOL_BUILD_FAILED")
+        self.assertEqual(dumped["eventSequence"], 4)
+        self.assertEqual(dumped["code"], "VALIDATION_FAILED")
+        self.assertNotIn("toolId", dumped)
+
 
 def create_build_payload():
     return {
@@ -103,6 +160,7 @@ def create_build_payload():
         "toolPlanId": 10,
         "planGroupId": 4,
         "approvedByProjectMemberId": 5,
+        "requestedAt": "2026-05-08T14:10:00",
         "approvedPlan": {
             "rawMarkdown": "## Incident recovery tool",
             "structuredPlanJson": {"version": 1, "blocks": []},

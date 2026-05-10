@@ -23,9 +23,9 @@ class ToolBuildRequestedEvent(BaseModel):
     chat_session_id: int = Field(alias="chatSessionId")
     tool_plan_id: int = Field(alias="toolPlanId")
     plan_group_id: int = Field(alias="planGroupId")
-    approved_by_project_member_id: int | None = Field(default=None, alias="approvedByProjectMemberId")
+    approved_by_project_member_id: int = Field(alias="approvedByProjectMemberId")
     approved_plan: ApprovedPlanPayload = Field(alias="approvedPlan")
-    requested_at: datetime | None = Field(default=None, alias="requestedAt")
+    requested_at: datetime = Field(alias="requestedAt")
 
 
 class GeneratedToolSpec(BaseModel):
@@ -45,10 +45,10 @@ class ToolArtifactPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     file_name: str = Field(alias="fileName")
-    module_name: str = Field(alias="moduleName")
-    artifact_path: str = Field(alias="artifactPath")
-    code_snapshot: str = Field(alias="codeSnapshot")
-    metadata_json: dict[str, Any] = Field(alias="metadataJson")
+    module_name: str | None = Field(default=None, alias="moduleName")
+    artifact_path: str | None = Field(default=None, alias="artifactPath")
+    code_snapshot: str | None = Field(default=None, alias="codeSnapshot")
+    metadata_json: dict[str, Any] | None = Field(default=None, alias="metadataJson")
 
 
 class ToolBuildProgressEvent(BaseModel):

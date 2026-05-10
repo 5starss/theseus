@@ -70,7 +70,7 @@ class ToolBuilder:
             python_code=spec.python_code,
             permission_level=spec.permission_level,
             project_id=str(event.project_id),
-            creator_user_id=str(event.approved_by_project_member_id or "unknown"),
+            creator_user_id=str(event.approved_by_project_member_id),
             chat_session_id=event.chat_session_id,
             plan_id=str(event.tool_plan_id),
         )
