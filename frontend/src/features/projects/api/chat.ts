@@ -82,4 +82,16 @@ export const chatApi = {
     );
     return response.data.result;
   },
+
+  // Tool 생성/재생성 상태 조회 (HTTP GET)
+  getToolGenerationState: async (
+    projectId: string,
+    sessionId: string,
+    toolId: string
+  ) => {
+    const response = await apiClient.get<ApiResponse<import('@/features/projects/types/chat').ToolGenerationStateResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/generation-state`
+    );
+    return response.data.result;
+  },
 };

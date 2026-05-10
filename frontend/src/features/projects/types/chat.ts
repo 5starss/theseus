@@ -69,6 +69,23 @@ export interface ToolGenerationRunResponse {
   sseUrl: string;
 }
 
+// Tool 생성/재생성 상태 조회 HTTP 응답
+export interface ToolGenerationStateResponse {
+  projectId: number;
+  chatSessionId: number;
+  toolId: number;
+  eventType: string;
+  status: string;
+  draftPhase: string;
+  progressRate?: number;
+  message?: string;
+  content?: string;
+  draftVersion?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt: string;
+}
+
 // SSE 이벤트 데이터 구조
 export interface ToolGenerationSseEvent {
   eventType: 'connected' | 'progress' | 'chunk' | 'completed' | 'failed';
