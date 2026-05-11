@@ -1,6 +1,16 @@
-export type DraftPhase = null | 'DRAFT' | 'PLAN' | 'REVIEW' | 'APPROVED' | 'REJECTED';
+export type DraftPhase = null | 'DRAFT' | 'PLAN' | 'REVIEW' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'BUILDING' | 'BUILT' | 'FAILED';
 export type SenderType = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'SYSTEM_NOTICE' | 'TOOL_FEEDBACK' | 'TOOL_APPROVAL_REQUEST';
-export type MessageType = 'CHAT' | 'TOOL_DRAFT_REQUEST' | 'TOOL_DRAFT_RESPONSE' | 'TOOL_REGENERATE_REQUEST' | 'TOOL_REGENERATE_RESPONSE' | 'TOOL_FEEDBACK' | 'SYSTEM_NOTICE';
+export type MessageType =
+  | 'CHAT'
+  | 'TOOL_DRAFT_REQUEST'
+  | 'TOOL_DRAFT_RESPONSE'
+  | 'TOOL_REGENERATE_REQUEST'
+  | 'TOOL_REGENERATE_RESPONSE'
+  | 'TOOL_PLAN_REQUEST'
+  | 'TOOL_PLAN_RESPONSE'
+  | 'TOOL_FEEDBACK'
+  | 'TOOL_APPROVAL_REQUEST'
+  | 'SYSTEM_NOTICE';
 export type ContentType = 'TEXT' | 'MARKDOWN' | 'JSON';
 
 export interface ChatMessage {
@@ -10,6 +20,7 @@ export interface ChatMessage {
   contentType?: ContentType;
   content: string;
   toolId?: number | string;
+  messageOrder?: number;
   createdAt: string;
 }
 
@@ -20,7 +31,7 @@ export interface PlanBlock {
 }
 
 export interface StructuredPlan {
-  version: string;
+  version: string | number;
   blocks: PlanBlock[];
 }
 
@@ -41,16 +52,24 @@ export interface ChatSession {
   updatedAt: string;
 }
 
-// 세션 상세 조회 API 응답 (GET /sessions/:sessionId)
+export interface CurrentPlanRecovery {
+  runId: string | null;
+  toolPlanGroupId: number | null;
+  toolPlanId: number | null;
+  planVersion: number | null;
+  status: string;
+}
+
+export interface CreatedToolRecovery {
+  toolId: number;
+  sourceToolPlanId: number | null;
+  status: string;
+}
+
 export interface ChatSessionDetailResponse {
   messages: ChatMessage[];
-  currentPlan: StructuredPlan | null;
-  currentToolId: string | null;
-  currentToolPlanId: string | null;
-  draftPhase: DraftPhase;
-  draftVersion: number;
-  planVersion: number;
-  draftSnapshot: Record<string, unknown> | null;
+  currentPlan: CurrentPlanRecovery | null;
+  createdTool: CreatedToolRecovery | null;
   title: string;
   isClosed: boolean;
 }
@@ -63,48 +82,65 @@ export const ToolPlanMode = {
 
 export type ToolPlanMode = typeof ToolPlanMode[keyof typeof ToolPlanMode];
 
-// Tool Plan 생성/재생성 HTTP 응답
 export interface ToolPlanGenerationResponse {
   runId: string;
-  toolPlanId: number;
+  projectId: number;
+  sessionId: number;
+  status: string;
   sseUrl: string;
 }
 
-// Tool Build 생성 HTTP 응답
 export interface ToolBuildGenerationResponse {
   toolId: number;
   sseUrl: string;
 }
 
-// Tool Plan 생성 요청 DTO (Backend spec)
 export interface ToolPlanGenerationRequest {
   mode: ToolPlanMode;
   prompt: string;
 }
 
-// Tool Plan 재생성 요청 DTO (Backend spec)
 export interface ToolPlanRegenerationRequest {
   mode: ToolPlanMode;
   basePlanVersion: number;
   feedbackItems: Array<{ blockId: string; comment: string }>;
 }
 
-// Tool Plan 상태 조회 응답
-export interface ToolPlanGenerationStateResponse {
-  status: string;
+export interface ToolPlanDetailResponse {
   toolPlanId: number;
-  runId?: string;
+  toolPlanGroupId: number;
+  projectId: number;
+  chatSessionId: number;
+  createdByProjectMemberId: number;
+  baseToolPlanId: number | null;
   planVersion: number;
-  messages: ChatMessage[];
-  currentPlan?: StructuredPlan;
-  isClosed: boolean;
-  title: string;
+  status: string;
+  mode: ToolPlanMode;
+  requestedPrompt: string | null;
+  rawMarkdown: string;
+  structuredPlanJson: string;
+  planSnapshot: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ToolPlanRunStateResponse {
+  runId: string;
+  projectId: number;
+  chatSessionId: number;
+  toolPlanGroupId?: number | null;
+  toolPlanId?: number | null;
+  planVersion?: number | null;
+  eventType: string;
+  status: string;
   progressRate?: number;
   message?: string;
   content?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt?: string;
 }
 
-// Tool Build 상태 조회 응답
 export interface ToolBuildGenerationStateResponse {
   status: string;
   toolId: number;
@@ -115,11 +151,11 @@ export interface ToolBuildGenerationStateResponse {
   content?: string;
 }
 
-// SSE 이벤트 데이터 구조
 export interface ToolGenerationSseEvent {
-  eventType: 'CONNECTED' | 'PROGRESS' | 'CHUNK' | 'TOOL_PLAN_COMPLETED' | 'TOOL_GENERATION_COMPLETED' | 'ERROR';
+  eventType: string;
   projectId: number;
   chatSessionId: number;
+  toolPlanGroupId?: number;
   toolPlanId?: number;
   toolId?: number;
   runId?: string;
