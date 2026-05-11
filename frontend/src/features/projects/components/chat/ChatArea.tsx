@@ -85,11 +85,15 @@ export function ChatArea() {
       }
 
       // 응답에서 toolId와 draftVersion을 store에 저장
-      setCurrentToolId(String(result.toolId));
-      setDraftVersion(result.draftVersion);
+      if (result.toolId) {
+        setCurrentToolId(String(result.toolId));
+      }
+      if (result.draftVersion) {
+        setDraftVersion(result.draftVersion);
+      }
 
       // sseUrl로 SSE 구독 시작
-      connectSSE(result.sseUrl, result.toolId);
+      connectSSE(result.sseUrl, result.toolId as number);
     } catch (err) {
       console.error('Tool generation request failed:', err);
       setIsGenerating(false);

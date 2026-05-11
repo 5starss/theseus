@@ -43,7 +43,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
             <h2 className="text-xl font-bold text-slate-100">{toolItem.name}</h2>
             {detail && (
               <span className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded bg-slate-800 text-slate-400">
-                v{detail.version}
+                v{detail.draftVersion}
               </span>
             )}
           </div>
@@ -108,7 +108,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
                 </div>
                 <div className="bg-[#1e1e1e] rounded-lg border border-slate-800 overflow-hidden">
                   <pre className="p-4 max-h-[50vh] overflow-auto text-sm font-mono text-slate-300 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                    <code>{detail.pythonCode}</code>
+                    <code>{detail.rawMarkdown}</code>
                   </pre>
                 </div>
               </div>
