@@ -219,13 +219,21 @@ if __name__ == "__main__":
       // 목업 데이터 반환 (실제 API에러 시 보여줄 임시 데이터)
       return {
         toolId: typeof toolId === 'number' ? toolId : parseInt(idStr.replace(/\D/g, '') || '0', 10),
+        projectId: Number(projectId),
+        chatSessionId: 1,
+        createdByProjectMemberId: 1,
+        createdByUserId: 1,
+        createdByUserName: 'Mock User',
         fileName: 'complex_data_analyzer.py',
-        version: 2,
-        pythonCode: longMockCode,
+        displayName: '복합 데이터 분석기',
+        displayDescription: '데이터 패턴을 분석하고 시각화합니다.',
         status: isReview ? 'REVIEW' : 'APPROVED',
+        draftPhase: isReview ? 'REVIEW' : 'PLAN',
+        draftVersion: 2,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        createdByProjectMemberId: 1
+        rawMarkdown: `### Generated Code\n\n\`\`\`python\n${longMockCode}\n\`\`\``,
+        structuredPlanJson: JSON.stringify({ summary: 'Mock plan summary', blocks: [] })
       };
     }
   },

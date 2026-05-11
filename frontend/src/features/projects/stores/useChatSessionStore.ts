@@ -33,7 +33,7 @@ interface ChatSessionState {
   setIsBuilding: (isBuilding: boolean) => void;
   addMessage: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
-  setPlan: (plan: StructuredPlan) => void;
+  setCurrentPlan: (plan: StructuredPlan) => void;
   setDraftPhase: (phase: DraftPhase) => void;
   setIsGenerating: (isGen: boolean) => void;
   setProgressInfo: (info: ProgressInfo | null) => void;
@@ -94,7 +94,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
     return { messages };
   }),
 
-  setPlan: (plan) => set({ currentPlan: plan }),
+  setCurrentPlan: (plan) => set({ currentPlan: plan }),
   setDraftPhase: (phase) => set({ draftPhase: phase }),
   setIsGenerating: (isGen) => set({ isGenerating: isGen }),
   setProgressInfo: (info) => set({ progressInfo: info }),

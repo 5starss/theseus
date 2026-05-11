@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ChatDashboard } from '@/features/projects/components/chat/ChatDashboard';
 import { chatApi } from '@/features/projects/api/chat';
+import { toolApi } from '@/features/tools/api';
 import { useChatSessionStore } from '@/features/projects/stores/useChatSessionStore';
 import { useToolGenerationSSE } from '@/features/projects/hooks/useToolGenerationSSE';
 import type { ChatMessage, StructuredPlan, DraftPhase } from '@/features/projects/types/chat';
@@ -12,6 +13,10 @@ export default function ChatSessionPage() {
   const initSession = useChatSessionStore(state => state.initSession);
   const setIsGenerating = useChatSessionStore(state => state.setIsGenerating);
   const setProgressInfo = useChatSessionStore(state => state.setProgressInfo);
+  const setCurrentToolId = useChatSessionStore(state => state.setCurrentToolId);
+  const setCurrentPlan = useChatSessionStore(state => state.setCurrentPlan);
+  const setDraftPhase = useChatSessionStore(state => state.setDraftPhase);
+  const setDraftVersion = useChatSessionStore(state => state.setDraftVersion);
   const updateLastMessageContent = useChatSessionStore(state => state.updateLastMessageContent);
   const { connectSSE } = useToolGenerationSSE();
 
@@ -36,11 +41,14 @@ export default function ChatSessionPage() {
           });
 
           // 복구 로직: 현재 진행 중인 Tool이 있는지 확인
-          const currentToolId = details.currentToolId as string;
-          if (currentToolId) {
+          const currentToolIdVal = details.currentToolId as string;
+          if (currentToolIdVal) {
             try {
-              const stateResult = await chatApi.getToolGenerationState(projectId, sessionId, currentToolId);
+              // 1. 우선 Redis/진행 상태 조회
+              const stateResult = await chatApi.getToolGenerationState(projectId, sessionId, currentToolIdVal);
+              
               if (stateResult.status === 'GENERATING' && isMounted) {
+                // 생성 중인 경우: SSE 재연결 및 진행바 표시
                 setIsGenerating(true);
                 setProgressInfo({
                   step: stateResult.message || '생성 중...',
@@ -48,14 +56,27 @@ export default function ChatSessionPage() {
                   percent: stateResult.progressRate ?? 0,
                 });
                 if (stateResult.content) {
-                  // 기존 내용이 store.messages에 포함되어 있을 수 있으므로 바로 덮어쓰거나 무시할지 결정.
-                  // 최신 content를 반영하기 위해 빈 값 전송 후 업데이트
                   updateLastMessageContent(stateResult.content);
                 }
                 
-                // SSE 재연결
-                const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${currentToolId}/events`;
-                connectSSE(sseUrl, Number(currentToolId));
+                const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${currentToolIdVal}/events`;
+                connectSSE(sseUrl, Number(currentToolIdVal));
+              } else if (stateResult.status === 'REVIEW' && isMounted) {
+                // 이미 생성이 완료된 경우: DB에서 전체 Plan 정보(structuredPlanJson)를 가져와서 UI 복구
+                const toolDetail = await toolApi.getTool(projectId, currentToolIdVal);
+                if (toolDetail && isMounted) {
+                  if (toolDetail.structuredPlanJson) {
+                    try {
+                      const planObj = JSON.parse(toolDetail.structuredPlanJson);
+                      setCurrentPlan(planObj);
+                    } catch (e) {
+                      console.error('Failed to parse structuredPlanJson:', e);
+                    }
+                  }
+                  setDraftPhase(toolDetail.draftPhase);
+                  setDraftVersion(toolDetail.draftVersion);
+                  setCurrentToolId(currentToolIdVal);
+                }
               }
             } catch (stateError) {
               console.error('Failed to restore generation state:', stateError);
@@ -74,7 +95,7 @@ export default function ChatSessionPage() {
     return () => {
       isMounted = false;
     };
-  }, [projectId, sessionId, initSession, setIsGenerating, setProgressInfo, updateLastMessageContent, connectSSE]);
+  }, [projectId, sessionId, initSession, setIsGenerating, setProgressInfo, updateLastMessageContent, connectSSE, setCurrentPlan, setCurrentToolId, setDraftPhase, setDraftVersion]);
 
   if (isLoading) {
     return (
