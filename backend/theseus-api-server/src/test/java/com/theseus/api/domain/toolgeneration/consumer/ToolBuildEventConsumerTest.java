@@ -55,7 +55,7 @@ class ToolBuildEventConsumerTest {
 
 	@Test
 	@DisplayName("progress와 chunk 이벤트는 DB 처리 없이 건너뛴다")
-	void skipProgressAndChunkEvents() {
+	void consumeProgressAndChunkEvents() {
 		// Given
 		ToolBuildEvent progressEvent = createEvent("progress");
 		ToolBuildEvent chunkEvent = createEvent("chunk");
@@ -65,7 +65,8 @@ class ToolBuildEventConsumerTest {
 		consumer.consume(chunkEvent);
 
 		// Then
-		verifyNoInteractions(toolBuildEventService);
+		verify(toolBuildEventService).handleProgress(progressEvent);
+		verify(toolBuildEventService).handleChunk(chunkEvent);
 	}
 
 	@Test

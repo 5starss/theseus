@@ -94,6 +94,8 @@ public enum ErrorCode {
     TOOL_PLAN_FEEDBACK_REQUIRED(HttpStatus.BAD_REQUEST, "TPLN-011", "ToolPlan 피드백 항목이 필요합니다."),
     TOOL_PLAN_PAYLOAD_INVALID(HttpStatus.CONFLICT, "TPLN-012", "ToolPlan payload가 유효하지 않습니다."),
 
+    TOOL_PLAN_RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "TPLN-013", "ToolPlanRun??李얠쓣 ???놁뒿?덈떎."),
+
     // ToolBuild
     TOOL_BUILD_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TBLD-001", "유효하지 않은 Tool build 이벤트입니다."),
 

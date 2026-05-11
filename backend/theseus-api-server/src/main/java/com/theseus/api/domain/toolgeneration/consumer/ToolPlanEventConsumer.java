@@ -39,13 +39,12 @@ public class ToolPlanEventConsumer {
 				toolPlanEventService.handleFailed(event);
 				return;
 			}
-			if (ToolPlanEventType.PROGRESS.equals(eventType) || ToolPlanEventType.CHUNK.equals(eventType)) {
-				log.info(
-					">>>> ToolPlan progress event skipped for DB handling. runId={}, eventType={}, sequence={}",
-					event.getRunId(),
-					event.getEventType(),
-					event.getEventSequence()
-				);
+			if (ToolPlanEventType.PROGRESS.equals(eventType)) {
+				toolPlanEventService.handleProgress(event);
+				return;
+			}
+			if (ToolPlanEventType.CHUNK.equals(eventType)) {
+				toolPlanEventService.handleChunk(event);
 				return;
 			}
 

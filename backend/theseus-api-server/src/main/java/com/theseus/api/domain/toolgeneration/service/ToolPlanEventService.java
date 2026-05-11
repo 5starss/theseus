@@ -16,6 +16,7 @@ import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.repository.ToolPlanGroupRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolPlanRunState;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanAssistantMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanPayload;
@@ -37,6 +38,16 @@ public class ToolPlanEventService {
 
 	private static final String SKIPPED_CODE = "TOOL_PLAN_SKIPPED";
 	private static final String FAILED_CODE = "TOOL_PLAN_FAILED";
+	private static final String EVENT_TYPE_PROGRESS = "progress";
+	private static final String EVENT_TYPE_CHUNK = "chunk";
+	private static final String EVENT_TYPE_COMPLETED = "completed";
+	private static final String EVENT_TYPE_SKIPPED = "skipped";
+	private static final String EVENT_TYPE_FAILED = "failed";
+	private static final String STATUS_GENERATING = "GENERATING";
+	private static final String STATUS_REVIEW = "REVIEW";
+	private static final String STATUS_SKIPPED = "SKIPPED";
+	private static final String STATUS_FAILED = "FAILED";
+	private static final String COMPLETED_MESSAGE = "Tool PLAN 생성이 완료되었습니다.";
 	private static final String DEFAULT_FAILED_MESSAGE = "Tool PLAN 생성에 실패했습니다.";
 
 	private final ToolPlanRunRepository toolPlanRunRepository;
@@ -44,6 +55,37 @@ public class ToolPlanEventService {
 	private final ToolPlanRepository toolPlanRepository;
 	private final ChatMessageService chatMessageService;
 	private final ObjectMapper objectMapper;
+	private final ToolPlanRunStatePublisher toolPlanRunStatePublisher;
+
+	/**
+	 * Core PLAN progress 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
+	 */
+	public void handleProgress(ToolPlanEvent event) {
+		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> {
+				if (shouldSkipStateEvent(event, toolPlanRun, "progress")) {
+					return;
+				}
+				toolPlanRunStatePublisher.publishProgress(createProgressState(event, toolPlanRun));
+			},
+			() -> log.warn(">>>> ToolPlan progress event skipped. runId={} not found.", event.getRunId())
+		);
+	}
+
+	/**
+	 * Core PLAN chunk 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
+	 */
+	public void handleChunk(ToolPlanEvent event) {
+		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> {
+				if (shouldSkipStateEvent(event, toolPlanRun, "chunk")) {
+					return;
+				}
+				toolPlanRunStatePublisher.publishChunk(createChunkState(event, toolPlanRun));
+			},
+			() -> log.warn(">>>> ToolPlan chunk event skipped. runId={} not found.", event.getRunId())
+		);
+	}
 
 	/**
 	 * Core가 완성한 PLAN을 ToolPlan 버전으로 저장하고 실행 Run을 완료 처리합니다.
@@ -101,6 +143,7 @@ public class ToolPlanEventService {
 					assistantContent,
 					createIdempotencyKey(event, "assistant")
 				);
+				toolPlanRunStatePublisher.publishCompletedAfterCommit(createCompletedState(event, toolPlanRun, toolPlan));
 
 				log.info(
 					">>>> ToolPlan completed event handled. runId={}, toolPlanId={}, version={}",
@@ -146,6 +189,7 @@ public class ToolPlanEventService {
 					content,
 					createIdempotencyKey(event, "assistant")
 				);
+				toolPlanRunStatePublisher.publishSkippedAfterCommit(createSkippedState(event, toolPlanRun, content));
 
 				log.info(">>>> ToolPlan skipped event handled. runId={}", event.getRunId());
 			},
@@ -183,11 +227,94 @@ public class ToolPlanEventService {
 					createFailedNoticeMessage(code, message),
 					createIdempotencyKey(event, "system")
 				);
+				toolPlanRunStatePublisher.publishFailedAfterCommit(createFailedState(event, toolPlanRun, code, message));
 
 				log.warn(">>>> ToolPlan failed event handled. runId={}, code={}", event.getRunId(), code);
 			},
 			() -> log.warn(">>>> ToolPlan failed event skipped. runId={} not found.", event.getRunId())
 		);
+	}
+
+	private boolean shouldSkipStateEvent(ToolPlanEvent event, ToolPlanRun toolPlanRun, String eventName) {
+		if (!hasSameProjectAndSession(event, toolPlanRun.getProject().getId(), toolPlanRun.getChatSession().getId())) {
+			log.warn(">>>> ToolPlan {} event target mismatch. runId={}", eventName, event.getRunId());
+			return true;
+		}
+		if (toolPlanRun.isFinished()) {
+			log.info(">>>> ToolPlan {} event skipped by terminal run. runId={}", eventName, event.getRunId());
+			return true;
+		}
+		return false;
+	}
+
+	private ToolPlanRunState createProgressState(ToolPlanEvent event, ToolPlanRun toolPlanRun) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_PROGRESS)
+			.status(STATUS_GENERATING)
+			.progressRate(event.getProgressRate())
+			.message(event.getMessage())
+			.build();
+	}
+
+	private ToolPlanRunState createChunkState(ToolPlanEvent event, ToolPlanRun toolPlanRun) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_CHUNK)
+			.status(STATUS_GENERATING)
+			.content(event.getContent())
+			.build();
+	}
+
+	private ToolPlanRunState createCompletedState(ToolPlanEvent event, ToolPlanRun toolPlanRun, ToolPlan toolPlan) {
+		return createBaseState(event, toolPlanRun)
+			.toolPlanGroupId(toolPlan.getPlanGroup().getId())
+			.toolPlanId(toolPlan.getId())
+			.planVersion(toolPlan.getPlanVersion())
+			.eventType(EVENT_TYPE_COMPLETED)
+			.status(STATUS_REVIEW)
+			.message(COMPLETED_MESSAGE)
+			.build();
+	}
+
+	private ToolPlanRunState createSkippedState(ToolPlanEvent event, ToolPlanRun toolPlanRun, String message) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_SKIPPED)
+			.status(STATUS_SKIPPED)
+			.message(message)
+			.errorCode(SKIPPED_CODE)
+			.errorMessage(message)
+			.build();
+	}
+
+	private ToolPlanRunState createFailedState(
+		ToolPlanEvent event,
+		ToolPlanRun toolPlanRun,
+		String code,
+		String message
+	) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_FAILED)
+			.status(STATUS_FAILED)
+			.message(message)
+			.errorCode(code)
+			.errorMessage(message)
+			.build();
+	}
+
+	private ToolPlanRunState.ToolPlanRunStateBuilder createBaseState(ToolPlanEvent event, ToolPlanRun toolPlanRun) {
+		ToolPlan baseToolPlan = toolPlanRun.getBaseToolPlan();
+		ToolPlanGroup planGroup = toolPlanRun.getPlanGroup();
+		if (planGroup == null && baseToolPlan != null) {
+			planGroup = baseToolPlan.getPlanGroup();
+		}
+
+		return ToolPlanRunState.builder()
+			.runId(toolPlanRun.getRunId())
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolPlanGroupId(planGroup == null ? null : planGroup.getId())
+			.toolPlanId(baseToolPlan == null ? null : baseToolPlan.getId())
+			.planVersion(baseToolPlan == null ? null : baseToolPlan.getPlanVersion())
+			.updatedAt(LocalDateTime.now());
 	}
 
 	private ToolPlanGroup resolvePlanGroup(ToolPlanRun toolPlanRun) {
