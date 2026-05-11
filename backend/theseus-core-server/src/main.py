@@ -11,6 +11,7 @@ from src.routes import health, plan, sandbox, stream
 from src.sandbox.docker_executor import DockerExecutor, SandboxStartupCheckError
 from src.tool_build.consumer import start_tool_build_consumer
 from src.tool_generation.consumer import start_tool_generation_consumer
+from src.tool_plan.consumer import start_tool_plan_consumer
 import logging
 
 # 로깅 설정
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     scheduler = setup_scheduler()
     app.state.billing_scheduler = scheduler
     app.state.tool_generation_consumer = None
+    app.state.tool_plan_consumer = None
     app.state.tool_build_consumer = None
 
     if scheduler is not None:
@@ -58,6 +60,11 @@ async def lifespan(app: FastAPI):
         logger.error("Tool generation Kafka consumer startup failed: %s", exc, exc_info=True)
 
     try:
+        app.state.tool_plan_consumer = await start_tool_plan_consumer()
+    except Exception as exc:
+        logger.error("ToolPlan Kafka consumer startup failed: %s", exc, exc_info=True)
+
+    try:
         app.state.tool_build_consumer = await start_tool_build_consumer()
     except Exception as exc:
         logger.error("Tool build Kafka consumer startup failed: %s", exc, exc_info=True)
@@ -67,6 +74,8 @@ async def lifespan(app: FastAPI):
     finally:
         if app.state.tool_build_consumer is not None:
             await app.state.tool_build_consumer.stop()
+        if app.state.tool_plan_consumer is not None:
+            await app.state.tool_plan_consumer.stop()
         if app.state.tool_generation_consumer is not None:
             await app.state.tool_generation_consumer.stop()
         if scheduler is not None and scheduler.running:

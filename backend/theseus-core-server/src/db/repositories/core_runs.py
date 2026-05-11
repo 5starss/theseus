@@ -125,12 +125,13 @@ class CoreRunRepository:
         self.db.refresh(checkpoint)
         return checkpoint.last_event_sequence
 
-    def record_event(self, event: BaseModel) -> CoreRunEvent:
+    def record_event(self, event: BaseModel, *, publish_channel: str | None = None) -> CoreRunEvent:
         payload = event.model_dump(mode="json", by_alias=True)
         record = CoreRunEvent(
             run_id=payload["runId"],
             event_sequence=payload["eventSequence"],
             event_type=payload["eventType"],
+            publish_channel=publish_channel,
             payload_json=payload,
             publish_status=EVENT_STATUS_PENDING,
         )
@@ -157,13 +158,15 @@ class CoreRunRepository:
         record.last_error = error
         self.db.commit()
 
-    def pending_events(self, limit: int = 50) -> list[CoreRunEvent]:
+    def pending_events(self, limit: int = 50, *, publish_channel: str | None = None) -> list[CoreRunEvent]:
         stmt = (
             select(CoreRunEvent)
             .where(CoreRunEvent.publish_status.in_([EVENT_STATUS_PENDING, EVENT_STATUS_FAILED]))
             .order_by(CoreRunEvent.created_at.asc(), CoreRunEvent.event_sequence.asc())
             .limit(limit)
         )
+        if publish_channel is not None:
+            stmt = stmt.where(CoreRunEvent.publish_channel == publish_channel)
         return list(self.db.execute(stmt).scalars().all())
 
     def mark_completed(self, run_id: str) -> None:
