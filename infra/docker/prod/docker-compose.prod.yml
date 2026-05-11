@@ -53,6 +53,26 @@ services:
     networks:
       - theseus-prod-network
 
+  theseus-prod-kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: theseus-prod-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${KAFKA_UI_HOST_PORT:-8091}:8080"
+    environment:
+      AUTH_TYPE: DISABLED
+      DYNAMIC_CONFIG_ENABLED: "false"
+      KAFKA_CLUSTERS_0_NAME: theseus-prod
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: theseus-prod-kafka:29092
+      KAFKA_CLUSTERS_0_READONLY: "true"
+    depends_on:
+      theseus-prod-kafka:
+        condition: service_healthy
+      theseus-prod-kafka-init:
+        condition: service_completed_successfully
+    networks:
+      - theseus-prod-network
+
   theseus-api-server:
     build:
       context: ../../../backend/theseus-api-server
