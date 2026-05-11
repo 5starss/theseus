@@ -41,18 +41,33 @@ export interface ChatSession {
   updatedAt: string;
 }
 
+export interface CurrentPlanResponse {
+  runId: string | null;
+  toolPlanGroupId: number | null;
+  toolPlanId: number | null;
+  planVersion: number | null;
+  status: string;
+}
+
+export interface CreatedToolResponse {
+  toolId: number;
+  sourceToolPlanId: number | null;
+  status: string;
+}
+
 // 세션 상세 조회 API 응답 (GET /sessions/:sessionId)
 export interface ChatSessionDetailResponse {
-  messages: ChatMessage[];
-  currentPlan: StructuredPlan | null;
-  currentToolId: string | null;
-  currentToolPlanId: string | null;
-  draftPhase: DraftPhase;
-  draftVersion: number;
-  planVersion: number;
-  draftSnapshot: Record<string, unknown> | null;
+  sessionId: number;
+  projectId: number;
+  projectMemberId: number;
   title: string;
   isClosed: boolean;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+  currentPlan: CurrentPlanResponse | null;
+  createdTool: CreatedToolResponse | null;
 }
 
 export const ToolPlanMode = {
