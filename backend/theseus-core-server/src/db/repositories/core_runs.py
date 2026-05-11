@@ -115,6 +115,32 @@ class CoreRunRepository:
         checkpoint.updated_at = now
         self.db.commit()
 
+    def get_checkpoint(self, run_id: str) -> CoreRunCheckpoint | None:
+        return self.db.get(CoreRunCheckpoint, run_id)
+
+    def update_checkpoint(
+        self,
+        run_id: str,
+        *,
+        state_machine_json: dict[str, Any] | None = None,
+        conversation_json: list[dict[str, Any]] | None = None,
+        tool_trace_json: list[dict[str, Any]] | None = None,
+        progress_json: dict[str, Any] | None = None,
+    ) -> None:
+        checkpoint = self.db.get(CoreRunCheckpoint, run_id)
+        if checkpoint is None:
+            return
+        if state_machine_json is not None:
+            checkpoint.state_machine_json = state_machine_json
+        if conversation_json is not None:
+            checkpoint.conversation_json = conversation_json
+        if tool_trace_json is not None:
+            checkpoint.tool_trace_json = tool_trace_json
+        if progress_json is not None:
+            checkpoint.progress_json = progress_json
+        checkpoint.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+
     def next_event_sequence(self, run_id: str) -> int:
         checkpoint = self._get_checkpoint_for_update(run_id)
         if checkpoint is None:
