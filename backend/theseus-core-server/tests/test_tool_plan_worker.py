@@ -10,8 +10,9 @@ from src.tool_plan.schemas import (
     ToolPlanResult,
     ToolPlanSkippedResult,
 )
-from theseus_engine.models.messages import ConversationMessage, TextBlock
+from theseus_engine.models.messages import ConversationMessage, TextBlock, ToolUseBlock
 from theseus_engine.wrappers.llm_clients.api_types import ApiMessageCompleteEvent, UsageSnapshot
+from pydantic import BaseModel
 
 
 class FakeRepoContext:
@@ -36,6 +37,7 @@ class FakeCheckpointRepo:
         self.event_failures = []
         self.pending = []
         self.heartbeats = []
+        self.agent_checkpoints = []
 
     def begin_run(self, **kwargs):
         self.started.append(kwargs)
@@ -73,32 +75,104 @@ class FakeCheckpointRepo:
     def mark_failed(self, run_id, code, message):
         self.failed.append((run_id, code, message))
 
+    def get_checkpoint(self, run_id):
+        if not self.agent_checkpoints:
+            checkpoint = type("Checkpoint", (), {})()
+            checkpoint.state_machine_json = None
+            checkpoint.conversation_json = None
+            checkpoint.tool_trace_json = None
+            checkpoint.progress_json = None
+            return checkpoint
+        return self.agent_checkpoints[-1]
+
+    def update_checkpoint(
+        self,
+        run_id,
+        *,
+        state_machine_json=None,
+        conversation_json=None,
+        tool_trace_json=None,
+        progress_json=None,
+    ):
+        checkpoint = type("Checkpoint", (), {})()
+        checkpoint.state_machine_json = state_machine_json
+        checkpoint.conversation_json = conversation_json
+        checkpoint.tool_trace_json = tool_trace_json
+        checkpoint.progress_json = progress_json
+        self.agent_checkpoints.append(checkpoint)
+
 
 class FakePlanner:
     def __init__(self, result):
         self.result = result
         self.events = []
 
-    async def plan(self, event, *, progress_callback=None, chunk_callback=None):
+    async def plan(self, event, *, progress_callback=None, chunk_callback=None, **kwargs):
         self.events.append(event)
         if progress_callback is not None:
             await progress_callback("PLAN_DRAFTING", 35)
         if chunk_callback is not None:
             await chunk_callback("draft")
+        if kwargs.get("checkpoint_callback") is not None:
+            checkpoint = kwargs.get("checkpoint") or {}
+            kwargs["checkpoint_callback"]({
+                "stateMachine": {"schemaVersion": 1, "mode": "Plan", "planPhase": "Drafting"},
+                "conversation": [],
+                "toolTrace": checkpoint.get("toolTrace") or [],
+                "progress": {"completedTurns": 1},
+            })
         return self.result
 
 
 class FakeLlmClient:
-    def __init__(self, text: str):
+    def __init__(self, text: str | list[ConversationMessage]):
         self.text = text
         self.requests = []
 
     async def stream_message(self, request):
         self.requests.append(request)
+        if isinstance(self.text, list):
+            message = self.text.pop(0)
+            yield ApiMessageCompleteEvent(message=message, usage=UsageSnapshot())
+            return
         yield ApiMessageCompleteEvent(
             message=ConversationMessage(role="assistant", content=[TextBlock(text=self.text)]),
             usage=UsageSnapshot(),
         )
+
+
+class LookupInput(BaseModel):
+    query: str
+
+
+class FakeToolRegistry:
+    def __init__(self):
+        self.tools = {}
+
+    def register(self, tool):
+        self.tools[tool.name] = tool
+
+    def get(self, name):
+        return self.tools.get(name)
+
+    def to_api_schema(self):
+        return [tool.to_api_schema() for tool in self.tools.values()]
+
+
+class LookupTool:
+    name = "lookup_context"
+    description = "Looks up context for a ToolPlan."
+    input_model = LookupInput
+
+    def to_api_schema(self):
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_model.model_json_schema(),
+        }
+
+    async def execute(self, arguments: LookupInput, context):
+        return type("ToolResult", (), {"output": f"context:{arguments.query}", "is_error": False})()
 
 
 class ToolPlanWorkerTests(unittest.IsolatedAsyncioTestCase):
@@ -196,6 +270,167 @@ class ToolPlanWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, ToolPlanSkippedResult)
         self.assertIn("목표", result.message)
+
+    async def test_planner_runs_multiturn_tool_loop_and_checkpoints_trace(self):
+        first = ConversationMessage(
+            role="assistant",
+            content=[
+                ToolUseBlock(
+                    id="toolu_lookup_1",
+                    name="lookup_context",
+                    input={"query": "incident logs"},
+                )
+            ],
+        )
+        second = ConversationMessage(
+            role="assistant",
+            content=[TextBlock(text=json.dumps({
+                "intent": "TOOL_PLAN",
+                "title": "Incident Recovery Tool",
+                "summary": "Uses looked up context.",
+                "blocks": [
+                    {
+                        "blockId": "analysis-summary",
+                        "title": "Analysis Summary",
+                        "content": "Analyze incidents with retrieved context.",
+                        "order": 1,
+                    }
+                ],
+                "inputs": [],
+                "outputs": [],
+                "constraints": [],
+            }))],
+        )
+        registry = FakeToolRegistry()
+        registry.register(LookupTool())
+        checkpoints = []
+        planner = ToolPlanPlanner(llm_client=FakeLlmClient([first, second]), tool_registry=registry)
+
+        result = await planner.plan(
+            ToolPlanRequestedEvent.model_validate(create_generate_payload()),
+            checkpoint_callback=lambda checkpoint: checkpoints.append(checkpoint),
+        )
+
+        self.assertEqual(result.plan_snapshot["blocks"][0]["blockId"], "analysis-summary")
+        self.assertGreaterEqual(len(checkpoints), 4)
+        self.assertEqual(checkpoints[-1]["stateMachine"]["mode"], "Plan")
+        self.assertEqual(checkpoints[-1]["stateMachine"]["planPhase"], "Drafting")
+        self.assertEqual(checkpoints[-1]["toolTrace"][0]["toolName"], "lookup_context")
+        self.assertEqual(checkpoints[-1]["toolTrace"][0]["status"], "completed")
+        self.assertIn("context:incident logs", checkpoints[-1]["toolTrace"][0]["toolOutput"])
+
+    async def test_processor_passes_restored_checkpoint_to_planner_and_persists_updates(self):
+        publisher = AsyncMock()
+        repo = FakeCheckpointRepo()
+        repo.update_checkpoint(
+            "plan-run-1",
+            state_machine_json={"schemaVersion": 1, "mode": "Plan", "planPhase": "Drafting"},
+            conversation_json=[],
+            tool_trace_json=[{"toolName": "previous"}],
+            progress_json={"completedTurns": 0},
+        )
+        processor = ToolPlanProcessor(
+            publisher=publisher,
+            planner=FakePlanner(create_plan_result()),
+            checkpoint_repo_factory=lambda: FakeRepoContext(repo),
+        )
+
+        await processor.process_message(create_generate_payload())
+
+        self.assertGreaterEqual(len(repo.agent_checkpoints), 2)
+        self.assertEqual(repo.completed, ["plan-run-1"])
+
+    async def test_planner_restores_legacy_plan_mode_checkpoint_name(self):
+        llm = FakeLlmClient(json.dumps({
+            "intent": "TOOL_PLAN",
+            "title": "Incident Recovery Tool",
+            "summary": "Restored from checkpoint.",
+            "blocks": [
+                {
+                    "blockId": "analysis-summary",
+                    "title": "Analysis Summary",
+                    "content": "Analyze after restore.",
+                    "order": 1,
+                }
+            ],
+            "inputs": [],
+            "outputs": [],
+            "constraints": [],
+        }))
+        planner = ToolPlanPlanner(llm_client=llm)
+
+        result = await planner.plan(
+            ToolPlanRequestedEvent.model_validate(create_generate_payload()),
+            checkpoint={
+                "stateMachine": {"schemaVersion": 1, "mode": "PLAN", "planPhase": "DRAFTING"},
+                "conversation": [],
+                "toolTrace": [],
+                "progress": {"completedTurns": 0},
+            },
+        )
+
+        self.assertEqual(result.plan_snapshot["blocks"][0]["blockId"], "analysis-summary")
+
+    async def test_planner_resumes_pending_tool_use_before_next_llm_turn(self):
+        final_message = ConversationMessage(
+            role="assistant",
+            content=[TextBlock(text=json.dumps({
+                "intent": "TOOL_PLAN",
+                "title": "Incident Recovery Tool",
+                "summary": "Resumed after tool use.",
+                "blocks": [
+                    {
+                        "blockId": "analysis-summary",
+                        "title": "Analysis Summary",
+                        "content": "Use resumed tool result.",
+                        "order": 1,
+                    }
+                ],
+                "inputs": [],
+                "outputs": [],
+                "constraints": [],
+            }))],
+        )
+        registry = FakeToolRegistry()
+        registry.register(LookupTool())
+        planner = ToolPlanPlanner(llm_client=FakeLlmClient([final_message]), tool_registry=registry)
+
+        result = await planner.plan(
+            ToolPlanRequestedEvent.model_validate(create_generate_payload()),
+            checkpoint={
+                "stateMachine": {"schemaVersion": 1, "mode": "Plan", "planPhase": "Drafting"},
+                "conversation": [
+                    ConversationMessage.from_user_text("Create a tool plan").model_dump(mode="json"),
+                    ConversationMessage(
+                        role="assistant",
+                        content=[
+                            ToolUseBlock(
+                                id="toolu_lookup_2",
+                                name="lookup_context",
+                                input={"query": "resume"},
+                            )
+                        ],
+                    ).model_dump(mode="json"),
+                ],
+                "toolTrace": [
+                    {
+                        "toolUseId": "toolu_lookup_2",
+                        "toolName": "lookup_context",
+                        "toolInput": {"query": "resume"},
+                        "status": "started",
+                        "turn": 1,
+                    }
+                ],
+                "progress": {"completedTurns": 1},
+            },
+        )
+
+        request_messages = planner.llm_client.requests[0].messages
+        resumed_tool_result_message = request_messages[-2]
+        self.assertEqual(resumed_tool_result_message.role, "user")
+        self.assertEqual(resumed_tool_result_message.content[0].tool_use_id, "toolu_lookup_2")
+        self.assertIn("context:resume", resumed_tool_result_message.content[0].content)
+        self.assertEqual(result.plan_snapshot["blocks"][0]["blockId"], "analysis-summary")
 
 
 def create_plan_result(version: int = 1) -> ToolPlanResult:

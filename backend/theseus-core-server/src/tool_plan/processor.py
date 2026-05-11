@@ -74,6 +74,8 @@ class ToolPlanProcessor:
                 event,
                 progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
                 chunk_callback=lambda content: self.publish_chunk(event, content),
+                checkpoint=self.load_agent_checkpoint(event.run_id),
+                checkpoint_callback=lambda checkpoint: self.save_agent_checkpoint(event.run_id, checkpoint),
             )
             if isinstance(result, ToolPlanSkippedResult):
                 await self.publish_skipped(event, result.message)
@@ -109,6 +111,32 @@ class ToolPlanProcessor:
                 logger.info("ToolPlan run lease is held by another worker. runId=%s", event.run_id)
                 return False
         return True
+
+    def load_agent_checkpoint(self, run_id: str) -> dict | None:
+        with self._checkpoint_repo() as repo:
+            if repo is None or not hasattr(repo, "get_checkpoint"):
+                return None
+            checkpoint = repo.get_checkpoint(run_id)
+            if checkpoint is None:
+                return None
+            return {
+                "stateMachine": checkpoint.state_machine_json or None,
+                "conversation": checkpoint.conversation_json or None,
+                "toolTrace": checkpoint.tool_trace_json or None,
+                "progress": checkpoint.progress_json or None,
+            }
+
+    def save_agent_checkpoint(self, run_id: str, checkpoint: dict) -> None:
+        with self._checkpoint_repo() as repo:
+            if repo is None or not hasattr(repo, "update_checkpoint"):
+                return
+            repo.update_checkpoint(
+                run_id,
+                state_machine_json=checkpoint.get("stateMachine"),
+                conversation_json=checkpoint.get("conversation"),
+                tool_trace_json=checkpoint.get("toolTrace"),
+                progress_json=checkpoint.get("progress"),
+            )
 
     async def publish_progress(self, event: ToolPlanRequestEvent, message: str, progress_rate: int | None) -> None:
         progress = ToolPlanProgressEvent(
