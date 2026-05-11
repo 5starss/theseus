@@ -16,12 +16,13 @@ RUN_STATUS_REQUESTED = "REQUESTED"
 RUN_STATUS_RUNNING = "RUNNING"
 RUN_STATUS_COMPLETED = "COMPLETED"
 RUN_STATUS_FAILED = "FAILED"
+RUN_STATUS_SKIPPED = "SKIPPED"
 
 EVENT_STATUS_PENDING = "pending"
 EVENT_STATUS_SENT = "sent"
 EVENT_STATUS_FAILED = "failed"
 
-TERMINAL_STATUSES = {RUN_STATUS_COMPLETED, RUN_STATUS_FAILED, "SKIPPED", "CANCELLED"}
+TERMINAL_STATUSES = {RUN_STATUS_COMPLETED, RUN_STATUS_FAILED, RUN_STATUS_SKIPPED, "CANCELLED"}
 
 
 class CoreRunAlreadyFinished(RuntimeError):
@@ -197,6 +198,9 @@ class CoreRunRepository:
 
     def mark_completed(self, run_id: str) -> None:
         self._mark_terminal(run_id, RUN_STATUS_COMPLETED, None, None)
+
+    def mark_skipped(self, run_id: str) -> None:
+        self._mark_terminal(run_id, RUN_STATUS_SKIPPED, None, None)
 
     def mark_failed(self, run_id: str, code: str, message: str) -> None:
         self._mark_terminal(run_id, RUN_STATUS_FAILED, code, message)

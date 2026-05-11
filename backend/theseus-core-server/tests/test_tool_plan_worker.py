@@ -30,6 +30,7 @@ class FakeCheckpointRepo:
     def __init__(self):
         self.started = []
         self.completed = []
+        self.skipped = []
         self.failed = []
         self.sequence = 0
         self.events = []
@@ -71,6 +72,9 @@ class FakeCheckpointRepo:
 
     def mark_completed(self, run_id):
         self.completed.append(run_id)
+
+    def mark_skipped(self, run_id):
+        self.skipped.append(run_id)
 
     def mark_failed(self, run_id, code, message):
         self.failed.append((run_id, code, message))
@@ -203,8 +207,13 @@ class ToolPlanWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_plan_generate_skipped_event_does_not_publish_tool_plan(self):
         publisher = AsyncMock()
+        repo = FakeCheckpointRepo()
         planner = FakePlanner(ToolPlanSkippedResult(message="목표와 입력을 더 구체적으로 알려주세요."))
-        processor = ToolPlanProcessor(publisher=publisher, planner=planner)
+        processor = ToolPlanProcessor(
+            publisher=publisher,
+            planner=planner,
+            checkpoint_repo_factory=lambda: FakeRepoContext(repo),
+        )
 
         await processor.process_message(create_generate_payload(prompt="안녕"))
 
@@ -213,6 +222,8 @@ class ToolPlanWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dumped["eventType"], "TOOL_PLAN_SKIPPED")
         self.assertEqual(dumped["assistantMessage"]["messageType"], "CHAT")
         self.assertNotIn("toolPlan", dumped)
+        self.assertEqual(repo.skipped, ["plan-run-1"])
+        self.assertEqual(repo.completed, [])
 
     async def test_plan_regenerate_request_is_consumed_as_regenerate_run(self):
         publisher = AsyncMock()

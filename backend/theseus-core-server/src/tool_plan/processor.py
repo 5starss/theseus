@@ -194,7 +194,7 @@ class ToolPlanProcessor:
             ),
         )
         await self.publish_event(event.run_id, skipped)
-        self._mark_completed(event.run_id)
+        self._mark_skipped(event.run_id)
 
     async def publish_failed(self, event: ToolPlanRequestEvent, code: str, message: str) -> None:
         failed = ToolPlanFailedEvent(
@@ -254,6 +254,12 @@ class ToolPlanProcessor:
         with self._checkpoint_repo() as repo:
             if repo is not None:
                 repo.mark_completed(run_id)
+        self._finished_runs.add(run_id)
+
+    def _mark_skipped(self, run_id: str) -> None:
+        with self._checkpoint_repo() as repo:
+            if repo is not None and hasattr(repo, "mark_skipped"):
+                repo.mark_skipped(run_id)
         self._finished_runs.add(run_id)
 
     def _checkpoint_repo(self):
