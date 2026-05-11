@@ -9,6 +9,7 @@ export interface ChatMessage {
   messageType?: MessageType;
   contentType?: ContentType;
   content: string;
+  toolId?: number | string;
   createdAt: string;
 }
 
