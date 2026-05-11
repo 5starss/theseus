@@ -4,7 +4,6 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
 import com.theseus.api.domain.tool.entity.ToolApprovalStatus;
-import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.entity.ToolStatus;
@@ -36,7 +35,6 @@ public class ToolApprovalResponse {
 	private LocalDateTime requestedAt;
 	private LocalDateTime reviewedAt;
 	private ToolStatus toolStatus;
-	private ToolDraftPhase draftPhase;
 	private ToolPlanStatus toolPlanStatus;
 
 	public static ToolApprovalResponse createFrom(ToolApproval toolApproval) {
@@ -78,7 +76,6 @@ public class ToolApprovalResponse {
 			.requestedAt(toolApproval.getRequestedAt())
 			.reviewedAt(toolApproval.getReviewedAt())
 			.toolStatus(tool == null ? null : tool.getStatus())
-			.draftPhase(tool == null ? null : tool.getDraftPhase())
 			.toolPlanStatus(toolPlan == null ? null : toolPlan.getStatus())
 			.build();
 	}

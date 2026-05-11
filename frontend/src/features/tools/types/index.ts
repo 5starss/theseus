@@ -20,13 +20,13 @@ export interface ToolDetailResponse {
   fileName: string;
   displayName: string;
   displayDescription: string;
-  status: 'DRAFT' | 'REVIEW' | 'APPROVED' | 'REJECTED' | 'DELETED';
-  draftPhase: 'PLAN' | 'REVIEW';
-  draftVersion: number;
   toolGrade?: number;
-  rawMarkdown?: string;
-  structuredPlanJson?: string;
-  draftSnapshot?: string;
+  status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DELETED';
+  sourceToolPlanId?: number;
+  moduleName?: string;
+  artifactPath?: string;
+  codeSnapshot?: string;
+  metadataJson?: string;
   createdAt: string;
   updatedAt: string;
 }

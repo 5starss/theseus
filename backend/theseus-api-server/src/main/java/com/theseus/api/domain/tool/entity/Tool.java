@@ -78,27 +78,11 @@ public class Tool {
 	private String displayDescription;
 
 	@Enumerated(EnumType.STRING)
-	@Column(nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'DRAFT'")
+	@Column(nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'APPROVED'")
 	private ToolStatus status;
-
-	@Enumerated(EnumType.STRING)
-	@Column(name = "draft_phase", nullable = false, length = 30, columnDefinition = "VARCHAR(30) DEFAULT 'PLAN'")
-	private ToolDraftPhase draftPhase;
-
-	@Column(name = "draft_version", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
-	private Long draftVersion;
 
 	@Column(name = "tool_grade", columnDefinition = "INT UNSIGNED")
 	private Integer toolGrade;
-
-	@Column(name = "raw_markdown", columnDefinition = "LONGTEXT")
-	private String rawMarkdown;
-
-	@Column(name = "structured_plan_json", columnDefinition = "LONGTEXT")
-	private String structuredPlanJson;
-
-	@Column(name = "draft_snapshot", columnDefinition = "LONGTEXT")
-	private String draftSnapshot;
 
 	@Column(name = "module_name", length = 160)
 	private String moduleName;
@@ -128,12 +112,7 @@ public class Tool {
 		String displayName,
 		String displayDescription,
 		ToolStatus status,
-		ToolDraftPhase draftPhase,
-		Long draftVersion,
 		Integer toolGrade,
-		String rawMarkdown,
-		String structuredPlanJson,
-		String draftSnapshot,
 		String moduleName,
 		String artifactPath,
 		String codeSnapshot,
@@ -148,60 +127,13 @@ public class Tool {
 		this.fileName = validateFileName(fileName);
 		this.displayName = displayName;
 		this.displayDescription = displayDescription;
-		this.status = status == null ? ToolStatus.DRAFT : status;
-		this.draftPhase = draftPhase == null ? ToolDraftPhase.PLAN : draftPhase;
-		this.draftVersion = draftVersion == null ? 0L : draftVersion;
+		this.status = status == null ? ToolStatus.APPROVED : status;
 		this.toolGrade = toolGrade;
-		this.rawMarkdown = rawMarkdown;
-		this.structuredPlanJson = structuredPlanJson;
-		this.draftSnapshot = draftSnapshot;
 		this.sourceToolPlan = sourceToolPlan;
 		this.moduleName = moduleName;
 		this.artifactPath = artifactPath;
 		this.codeSnapshot = codeSnapshot;
 		this.metadataJson = metadataJson;
-	}
-
-	public void updateDraft(
-		String rawMarkdown,
-		String structuredPlanJson,
-		String draftSnapshot,
-		ToolDraftPhase draftPhase
-	) {
-		if (rawMarkdown != null) {
-			this.rawMarkdown = rawMarkdown;
-		}
-		if (structuredPlanJson != null) {
-			this.structuredPlanJson = structuredPlanJson;
-		}
-		if (draftSnapshot != null) {
-			this.draftSnapshot = draftSnapshot;
-		}
-		if (draftPhase != null) {
-			this.draftPhase = draftPhase;
-		}
-	}
-
-	public void startRegeneration() {
-		status = ToolStatus.DRAFT;
-		draftPhase = ToolDraftPhase.PLAN;
-	}
-
-	public void completeDraftReview(
-		String rawMarkdown,
-		String structuredPlanJson,
-		String draftSnapshot
-	) {
-		updateDraft(rawMarkdown, structuredPlanJson, draftSnapshot, ToolDraftPhase.REVIEW);
-		increaseDraftVersion();
-	}
-
-	public void markAsPlan() {
-		draftPhase = ToolDraftPhase.PLAN;
-	}
-
-	public void markAsReview() {
-		draftPhase = ToolDraftPhase.REVIEW;
 	}
 
 	public void requestApproval() {
@@ -215,7 +147,6 @@ public class Tool {
 
 	public void reject() {
 		status = ToolStatus.REJECTED;
-		draftPhase = ToolDraftPhase.REVIEW;
 	}
 
 	public void updateDisplayInfo(String displayName, String displayDescription, Integer toolGrade) {
@@ -270,15 +201,6 @@ public class Tool {
 		return ToolStatus.DELETED.equals(status);
 	}
 
-	public boolean canRequestApproval() {
-		return ToolStatus.DRAFT.equals(status) && ToolDraftPhase.REVIEW.equals(draftPhase);
-	}
-
-	public boolean canRegenerate() {
-		return (ToolStatus.DRAFT.equals(status) || ToolStatus.REJECTED.equals(status))
-			&& ToolDraftPhase.REVIEW.equals(draftPhase);
-	}
-
 	public boolean isAccessibleWithAccessLevel(Integer accessLevel) {
 		if (toolGrade == null) {
 			return true;
@@ -292,9 +214,6 @@ public class Tool {
 		LocalDateTime now = LocalDateTime.now();
 		createdAt = now;
 		updatedAt = now;
-		if (draftVersion == null) {
-			draftVersion = 0L;
-		}
 	}
 
 	@PreUpdate
@@ -308,9 +227,5 @@ public class Tool {
 		}
 
 		return fileName;
-	}
-
-	private void increaseDraftVersion() {
-		draftVersion = draftVersion == null ? 1L : draftVersion + 1;
 	}
 }

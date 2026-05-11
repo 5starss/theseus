@@ -43,7 +43,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
             <h2 className="text-xl font-bold text-slate-100">{toolItem.name}</h2>
             {detail && (
               <span className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded bg-slate-800 text-slate-400">
-                v{detail.draftVersion}
+                PLAN #{detail.sourceToolPlanId ?? '-'}
               </span>
             )}
           </div>
@@ -98,6 +98,20 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
                     {new Date(detail.updatedAt).toLocaleDateString()}
                   </p>
                 </div>
+                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">
+                  <div className="flex items-center gap-2 text-slate-500 mb-1">
+                    <Code className="w-4 h-4" />
+                    <span className="text-xs uppercase tracking-wider">Module</span>
+                  </div>
+                  <p className="text-sm text-slate-300 font-mono truncate">{detail.moduleName || '-'}</p>
+                </div>
+                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">
+                  <div className="flex items-center gap-2 text-slate-500 mb-1">
+                    <FileText className="w-4 h-4" />
+                    <span className="text-xs uppercase tracking-wider">Artifact</span>
+                  </div>
+                  <p className="text-sm text-slate-300 font-mono truncate">{detail.artifactPath || '-'}</p>
+                </div>
               </div>
 
               {/* Code Viewer */}
@@ -108,7 +122,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
                 </div>
                 <div className="bg-[#1e1e1e] rounded-lg border border-slate-800 overflow-hidden">
                   <pre className="p-4 max-h-[50vh] overflow-auto text-sm font-mono text-slate-300 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                    <code>{detail.rawMarkdown}</code>
+                    <code>{detail.codeSnapshot || detail.metadataJson || '# 생성된 코드 정보를 불러올 수 없습니다.'}</code>
                   </pre>
                 </div>
               </div>

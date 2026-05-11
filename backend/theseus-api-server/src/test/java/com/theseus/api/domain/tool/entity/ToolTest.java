@@ -15,97 +15,71 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ToolTest {
 
 	@Test
-	@DisplayName("Tool 생성 시 기본 상태는 DRAFT와 PLAN이다")
-	void createToolWithDefaultStatusAndDraftPhase() {
+	@DisplayName("Tool is approved by default after artifact creation")
+	void createToolWithDefaultApprovedStatus() {
 		// Given & When
 		Tool tool = createTool(null);
 
 		// Then
-		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DRAFT);
-		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
-		assertThat(tool.getDraftVersion()).isZero();
-		assertThat(tool.canRegenerate()).isFalse();
-		assertThat(tool.canRequestApproval()).isFalse();
+		assertThat(tool.getStatus()).isEqualTo(ToolStatus.APPROVED);
+		assertThat(tool.isApproved()).isTrue();
 	}
 
 	@Test
-	@DisplayName("Tool 초안 검토 완료 시 draft 데이터와 REVIEW 상태를 반영한다")
-	void completeDraftReviewUpdatesDraftDataAndPhase() {
+	@DisplayName("Tool keeps source plan and artifact metadata")
+	void createToolWithSourcePlanAndArtifact() {
+		// Given
+		ToolPlan sourceToolPlan = createToolPlan();
+
+		// When
+		Tool tool = createTool(null, sourceToolPlan);
+
+		// Then
+		assertThat(tool.getSourceToolPlan()).isEqualTo(sourceToolPlan);
+		assertThat(tool.getModuleName()).isEqualTo("sales_summary");
+		assertThat(tool.getArtifactPath()).isEqualTo("projects/1/sales_summary.py");
+		assertThat(tool.getCodeSnapshot()).isEqualTo("print('ok')");
+		assertThat(tool.getMetadataJson()).isEqualTo("{\"language\":\"python\"}");
+	}
+
+	@Test
+	@DisplayName("Tool artifact metadata can be updated")
+	void updateArtifactChangesStoredMetadata() {
 		// Given
 		Tool tool = createTool(null);
 
 		// When
-		tool.completeDraftReview("raw markdown", "{\"steps\":[]}", "{\"version\":1}");
+		tool.updateArtifact(
+			"incident_recovery",
+			"projects/1/incident_recovery.py",
+			"print('updated')",
+			"{\"language\":\"python\",\"version\":2}"
+		);
 
 		// Then
-		assertThat(tool.getRawMarkdown()).isEqualTo("raw markdown");
-		assertThat(tool.getStructuredPlanJson()).isEqualTo("{\"steps\":[]}");
-		assertThat(tool.getDraftSnapshot()).isEqualTo("{\"version\":1}");
-		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
-		assertThat(tool.getDraftVersion()).isEqualTo(1L);
-		assertThat(tool.canRegenerate()).isTrue();
-		assertThat(tool.canRequestApproval()).isTrue();
+		assertThat(tool.getModuleName()).isEqualTo("incident_recovery");
+		assertThat(tool.getArtifactPath()).isEqualTo("projects/1/incident_recovery.py");
+		assertThat(tool.getCodeSnapshot()).isEqualTo("print('updated')");
+		assertThat(tool.getMetadataJson()).isEqualTo("{\"language\":\"python\",\"version\":2}");
 	}
 
 	@Test
-	@DisplayName("PLAN 전환은 draftVersion을 증가시키지 않는다")
-	void planTransitionsDoNotIncreaseDraftVersion() {
+	@DisplayName("Tool display fields can be updated")
+	void updateDisplayInfoChangesDisplayFields() {
 		// Given
 		Tool tool = createTool(null);
-
-		// When & Then
-		tool.startRegeneration();
-		assertThat(tool.getDraftVersion()).isZero();
-		assertThat(tool.canRegenerate()).isFalse();
-
-		tool.markAsPlan();
-		assertThat(tool.getDraftVersion()).isZero();
-
-		tool.completeDraftReview("raw markdown", "{\"steps\":[]}", "{\"version\":1}");
-		assertThat(tool.getDraftVersion()).isEqualTo(1L);
-
-		tool.startRegeneration();
-		assertThat(tool.getDraftVersion()).isEqualTo(1L);
-		assertThat(tool.canRegenerate()).isFalse();
-
-		tool.markAsPlan();
-		assertThat(tool.getDraftVersion()).isEqualTo(1L);
-	}
-
-	@Test
-	@DisplayName("반려된 Tool은 재생성을 시작하면 DRAFT와 PLAN 상태가 된다")
-	void startRegenerationChangesRejectedToolToDraftPlan() {
-		// Given
-		Tool tool = createTool(null);
-		tool.reject();
 
 		// When
-		tool.startRegeneration();
+		tool.updateDisplayInfo("Incident Recovery", "Builds recovery guide.", 3);
 
 		// Then
-		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DRAFT);
-		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.PLAN);
-		assertThat(tool.canRegenerate()).isFalse();
+		assertThat(tool.getDisplayName()).isEqualTo("Incident Recovery");
+		assertThat(tool.getDisplayDescription()).isEqualTo("Builds recovery guide.");
+		assertThat(tool.getToolGrade()).isEqualTo(3);
 	}
 
 	@Test
-	@DisplayName("REJECTED와 REVIEW 상태의 Tool은 재생성할 수 있다")
-	void rejectedReviewToolCanRegenerate() {
-		// Given
-		Tool tool = createTool(null);
-		tool.completeDraftReview("raw markdown", "{\"steps\":[]}", "{\"version\":1}");
-
-		// When
-		tool.reject();
-
-		// Then
-		assertThat(tool.getStatus()).isEqualTo(ToolStatus.REJECTED);
-		assertThat(tool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
-		assertThat(tool.canRegenerate()).isTrue();
-	}
-
-	@Test
-	@DisplayName("Tool 등급이 없으면 모든 접근 레벨에서 접근할 수 있다")
+	@DisplayName("Tool is accessible when grade is empty")
 	void accessibleWhenToolGradeIsNull() {
 		// Given
 		Tool tool = createTool(null);
@@ -116,7 +90,7 @@ class ToolTest {
 	}
 
 	@Test
-	@DisplayName("Tool 등급이 있으면 접근 레벨이 등급 이상이어야 한다")
+	@DisplayName("Tool requires access level greater than or equal to grade")
 	void accessibleWhenAccessLevelIsGreaterThanOrEqualToToolGrade() {
 		// Given
 		Tool tool = createTool(3);
@@ -129,7 +103,21 @@ class ToolTest {
 	}
 
 	@Test
-	@DisplayName("fileName이 비어 있으면 Tool을 생성할 수 없다")
+	@DisplayName("Tool can be deleted")
+	void deleteChangesStatusToDeleted() {
+		// Given
+		Tool tool = createTool(null);
+
+		// When
+		tool.delete();
+
+		// Then
+		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DELETED);
+		assertThat(tool.isDeleted()).isTrue();
+	}
+
+	@Test
+	@DisplayName("Tool cannot be created with blank fileName")
 	void createToolFailsWhenFileNameIsBlank() {
 		// Given
 		Project project = createProject();
@@ -147,6 +135,10 @@ class ToolTest {
 	}
 
 	private Tool createTool(Integer toolGrade) {
+		return createTool(toolGrade, null);
+	}
+
+	private Tool createTool(Integer toolGrade, ToolPlan sourceToolPlan) {
 		Project project = createProject();
 		ProjectMember projectMember = createProjectMember(project);
 		ChatSession chatSession = createChatSession(project, projectMember);
@@ -155,8 +147,37 @@ class ToolTest {
 			.project(project)
 			.chatSession(chatSession)
 			.createdByProjectMember(projectMember)
+			.sourceToolPlan(sourceToolPlan)
 			.fileName("sales-summary-tool")
+			.displayName("Sales Summary")
+			.displayDescription("Summarizes sales data.")
 			.toolGrade(toolGrade)
+			.moduleName("sales_summary")
+			.artifactPath("projects/1/sales_summary.py")
+			.codeSnapshot("print('ok')")
+			.metadataJson("{\"language\":\"python\"}")
+			.build();
+	}
+
+	private ToolPlan createToolPlan() {
+		Project project = createProject();
+		ProjectMember projectMember = createProjectMember(project);
+		ChatSession chatSession = createChatSession(project, projectMember);
+		ToolPlanGroup planGroup = ToolPlanGroup.builder()
+			.project(project)
+			.chatSession(chatSession)
+			.createdByProjectMember(projectMember)
+			.build();
+
+		return ToolPlan.builder()
+			.planGroup(planGroup)
+			.project(project)
+			.chatSession(chatSession)
+			.createdByProjectMember(projectMember)
+			.planVersion(1L)
+			.rawMarkdown("## plan")
+			.structuredPlanJson("{\"blocks\":[]}")
+			.planSnapshot("{\"source\":\"test\"}")
 			.build();
 	}
 

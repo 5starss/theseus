@@ -32,7 +32,6 @@ import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.repository.ToolApprovalRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
-import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildApprovedPlanPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildKafkaPublishEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildRequestEvent;
@@ -61,7 +60,6 @@ public class ToolApprovalService {
 	private static final String TOOL_BUILD_REQUESTED = "TOOL_BUILD_REQUESTED";
 
 	private final ToolApprovalRepository toolApprovalRepository;
-	private final ToolRepository toolRepository;
 	private final ToolPlanRepository toolPlanRepository;
 	private final ToolPlanRunRepository toolPlanRunRepository;
 	private final ProjectRepository projectRepository;
@@ -117,36 +115,6 @@ public class ToolApprovalService {
 	/**
 	 * Tool 생성자가 REVIEW 단계의 Draft Tool에 대해 승인 요청을 등록합니다.
 	 */
-	@Transactional
-	public ToolApprovalResponse requestToolApproval(
-		AuthenticatedUser currentUser,
-		Long projectId,
-		Long toolId
-	) {
-		User user = getCurrentUserEntity(currentUser);
-		Project project = getProjectEntity(projectId);
-		ProjectMember projectMember = getActiveProjectMember(project, user);
-		Tool tool = getToolForUpdate(project, toolId);
-
-		validateToolCreator(tool, projectMember);
-		validateRequestableTool(tool);
-
-		ToolApproval toolApproval = toolApprovalRepository.save(ToolApproval.builder()
-			.tool(tool)
-			.requestNumber(getNextRequestNumber(tool))
-			.requestedByProjectMember(projectMember)
-			.build());
-		tool.requestApproval();
-		chatMessageService.saveUserToolMessage(
-			tool.getChatSession(),
-			tool,
-			ChatMessageType.TOOL_APPROVAL_REQUEST,
-			ChatMessageContentType.JSON,
-			createToolApprovalRequestMessageContent(toolApproval)
-		);
-
-		return ToolApprovalResponse.createFrom(toolApproval);
-	}
 
 	/**
 	 * REVIEW 상태의 ToolPlan을 승인 요청 대상으로 등록합니다.
@@ -269,15 +237,6 @@ public class ToolApprovalService {
 		);
 	}
 
-	private Integer getNextRequestNumber(Tool tool) {
-		List<ToolApproval> toolApprovals = toolApprovalRepository.findByToolOrderByRequestNumberDescForUpdate(tool);
-
-		return toolApprovals.stream()
-			.findFirst()
-			.map(toolApproval -> toolApproval.getRequestNumber() + 1)
-			.orElse(1);
-	}
-
 	private Integer getNextRequestNumber(ToolPlan toolPlan) {
 		List<ToolApproval> toolApprovals = toolApprovalRepository.findByToolPlanOrderByRequestNumberDescForUpdate(toolPlan);
 
@@ -364,17 +323,6 @@ public class ToolApprovalService {
 		);
 	}
 
-	private String createToolApprovalRequestMessageContent(ToolApproval toolApproval) {
-		return """
-			{"toolApprovalId":%d,"toolId":%d,"requestNumber":%d,"approvalStatus":"%s"}
-			""".formatted(
-			toolApproval.getId(),
-			toolApproval.getTool().getId(),
-			toolApproval.getRequestNumber(),
-			toolApproval.getApprovalStatus()
-		).trim();
-	}
-
 	private String createToolPlanApprovalRequestMessageContent(ToolApproval toolApproval) {
 		return """
 			{"toolApprovalId":%d,"toolPlanId":%d,"planGroupId":%d,"planVersion":%d,"requestNumber":%d,"approvalStatus":"%s"}
@@ -423,11 +371,6 @@ public class ToolApprovalService {
 		return projectMember;
 	}
 
-	private Tool getToolForUpdate(Project project, Long toolId) {
-		return toolRepository.findByIdAndProjectForUpdate(toolId, project)
-			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));
-	}
-
 	private ToolPlan getToolPlanForUpdate(Project project, Long toolPlanId) {
 		return toolPlanRepository.findByIdAndProjectForUpdate(toolPlanId, project)
 			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_PLAN_NOT_FOUND));
@@ -438,21 +381,9 @@ public class ToolApprovalService {
 			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_APPROVAL_NOT_FOUND));
 	}
 
-	private void validateToolCreator(Tool tool, ProjectMember projectMember) {
-		if (!Objects.equals(tool.getCreatedByProjectMember().getId(), projectMember.getId())) {
-			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
-		}
-	}
-
 	private void validateToolPlanCreator(ToolPlan toolPlan, ProjectMember projectMember) {
 		if (!Objects.equals(toolPlan.getCreatedByProjectMember().getId(), projectMember.getId())) {
 			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_CREATOR_REQUIRED);
-		}
-	}
-
-	private void validateRequestableTool(Tool tool) {
-		if (!tool.canRequestApproval()) {
-			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_REVIEW_PHASE_REQUIRED);
 		}
 	}
 

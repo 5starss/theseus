@@ -1,9 +1,12 @@
 export interface ToolApprovalResponse {
   toolApprovalId: number;
   projectId: number;
-  toolId: number;
-  fileName: string;
-  displayName: string;
+  toolId: number | null;
+  toolPlanId: number | null;
+  planGroupId: number | null;
+  planVersion: number | null;
+  fileName: string | null;
+  displayName: string | null;
   requestNumber: number;
   approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
   requestedByProjectMemberId: number;
@@ -15,8 +18,8 @@ export interface ToolApprovalResponse {
   reviewFeedback: string | null;
   requestedAt: string;
   reviewedAt: string | null;
-  toolStatus: string;
-  draftPhase: string;
+  toolStatus: string | null;
+  toolPlanStatus: string | null;
 }
 
 export interface ToolApprovalApproveRequest {

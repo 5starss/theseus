@@ -38,7 +38,6 @@ spring:
       auto-offset-reset: earliest
       properties:
         spring.json.trusted.packages: com.theseus.api.domain.toolgeneration.event,java.util,java.lang,com.fasterxml.jackson.databind
-        spring.json.value.default.type: com.theseus.api.domain.toolgeneration.event.ToolGenerationEvent
         spring.json.use.type.headers: false
 
 theseus:
@@ -48,9 +47,6 @@ theseus:
       tool-plan-event: ${KAFKA_TOPIC_TOOL_PLAN_EVENT:theseus.tool-plan.event}
       tool-build-request: ${KAFKA_TOPIC_TOOL_BUILD_REQUEST:theseus.tool-build.request}
       tool-build-event: ${KAFKA_TOPIC_TOOL_BUILD_EVENT:theseus.tool-build.event}
-      tool-generation-request: ${KAFKA_TOPIC_TOOL_GENERATION_REQUEST:theseus.tool-generation.request}
-      tool-regeneration-request: ${KAFKA_TOPIC_TOOL_REGENERATION_REQUEST:theseus.tool-regeneration.request}
-      tool-generation-event: ${KAFKA_TOPIC_TOOL_GENERATION_EVENT:theseus.tool-generation.event}
   tool-generation:
     state-ttl-minutes: ${THESEUS_TOOL_GENERATION_STATE_TTL_MINUTES:30}
     sse-timeout-millis: ${THESEUS_TOOL_GENERATION_SSE_TIMEOUT_MILLIS:1800000}
