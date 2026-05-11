@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout, FileCode, CheckCircle, RotateCcw } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
@@ -12,27 +13,39 @@ import { ToolPlanMode } from '../../types/chat';
 
 export function InspectorPanel() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
-  const currentPlan = useChatSessionStore(state => state.currentPlan);
-  const toolResult = useChatSessionStore(state => state.toolResult);
-  const activeTab = useChatSessionStore(state => state.activeTab);
-  const setActiveTab = useChatSessionStore(state => state.setActiveTab);
-  const isBuilding = useChatSessionStore(state => state.isBuilding);
-  const setIsBuilding = useChatSessionStore(state => state.setIsBuilding);
 
-  const progressInfo = useChatSessionStore(state => state.progressInfo);
-  const draftPhase = useChatSessionStore(state => state.draftPhase);
-  const commentMode = useChatSessionStore(state => state.commentMode);
-  const setCommentMode = useChatSessionStore(state => state.setCommentMode);
-  const draftComments = useChatSessionStore(state => state.draftComments);
-  const setDraftComment = useChatSessionStore(state => state.setDraftComment);
-  const clearDraftComments = useChatSessionStore(state => state.clearDraftComments);
-  const currentToolPlanId = useChatSessionStore(state => state.currentToolPlanId);
-  const planVersion = useChatSessionStore(state => state.planVersion);
-  const currentToolId = useChatSessionStore(state => state.currentToolId);
-  const isGenerating = useChatSessionStore(state => state.isGenerating);
-  const isClosed = useChatSessionStore(state => state.isClosed);
-  const setIsGenerating = useChatSessionStore(state => state.setIsGenerating);
-  const addMessage = useChatSessionStore(state => state.addMessage);
+  const {
+    currentPlan, toolResult, activeTab, isBuilding, progressInfo,
+    draftPhase, commentMode, draftComments, currentToolPlanId, planVersion,
+    currentToolId, isGenerating, isClosed,
+  } = useChatSessionStore(useShallow(state => ({
+    currentPlan: state.currentPlan,
+    toolResult: state.toolResult,
+    activeTab: state.activeTab,
+    isBuilding: state.isBuilding,
+    progressInfo: state.progressInfo,
+    draftPhase: state.draftPhase,
+    commentMode: state.commentMode,
+    draftComments: state.draftComments,
+    currentToolPlanId: state.currentToolPlanId,
+    planVersion: state.planVersion,
+    currentToolId: state.currentToolId,
+    isGenerating: state.isGenerating,
+    isClosed: state.isClosed,
+  })));
+
+  const {
+    setActiveTab, setIsBuilding, setCommentMode, setDraftComment,
+    clearDraftComments, setIsGenerating, addMessage,
+  } = useChatSessionStore(useShallow(state => ({
+    setActiveTab: state.setActiveTab,
+    setIsBuilding: state.setIsBuilding,
+    setCommentMode: state.setCommentMode,
+    setDraftComment: state.setDraftComment,
+    clearDraftComments: state.clearDraftComments,
+    setIsGenerating: state.setIsGenerating,
+    addMessage: state.addMessage,
+  })));
 
   const { connectSSE } = useToolGenerationSSE();
   const [isApproving, setIsApproving] = useState(false);

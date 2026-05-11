@@ -3,7 +3,8 @@ import type { ApiResponse } from '@/api/auth';
 import type { PageResponse } from '@/features/admin/api';
 import { ToolPlanMode } from '@/features/projects/types/chat';
 import type { 
-  ChatSession, 
+  ChatSession,
+  ChatSessionDetailResponse,
   ToolPlanGenerationResponse, 
   ToolBuildGenerationResponse,
   ToolPlanGenerationStateResponse,
@@ -33,8 +34,8 @@ export const chatApi = {
   },
 
   // 세션의 기존 채팅 내역 및 상태 조회
-  getSessionDetails: async (projectId: string, sessionId: string) => {
-    const response = await apiClient.get<ApiResponse<unknown>>(
+  getSessionDetails: async (projectId: string, sessionId: string): Promise<ChatSessionDetailResponse> => {
+    const response = await apiClient.get<ApiResponse<ChatSessionDetailResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}`
     );
     return response.data.result;
