@@ -80,12 +80,15 @@ public class ToolBuildEventService {
 	/**
 	 * Core build progress 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
 	 */
+	@Transactional
 	public void handleProgress(ToolBuildEvent event) {
-		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+		toolPlanRunRepository.findByRunIdForUpdate(event.getRunId()).ifPresentOrElse(
 			toolPlanRun -> {
 				if (shouldSkipEvent(event, toolPlanRun, "progress")) {
 					return;
 				}
+				toolPlanRun.startGeneratingIfRequested();
+				toolPlanRun.updateLastEvent(event.getEventType(), event.getEventSequence());
 				toolPlanRunStatePublisher.publishProgress(createBuildProgressState(event, toolPlanRun));
 			},
 			() -> log.warn(">>>> ToolBuild progress event skipped. runId={} not found.", event.getRunId())
@@ -95,12 +98,15 @@ public class ToolBuildEventService {
 	/**
 	 * Core build chunk 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
 	 */
+	@Transactional
 	public void handleChunk(ToolBuildEvent event) {
-		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+		toolPlanRunRepository.findByRunIdForUpdate(event.getRunId()).ifPresentOrElse(
 			toolPlanRun -> {
 				if (shouldSkipEvent(event, toolPlanRun, "chunk")) {
 					return;
 				}
+				toolPlanRun.startGeneratingIfRequested();
+				toolPlanRun.updateLastEvent(event.getEventType(), event.getEventSequence());
 				toolPlanRunStatePublisher.publishChunk(createBuildChunkState(event, toolPlanRun));
 			},
 			() -> log.warn(">>>> ToolBuild chunk event skipped. runId={} not found.", event.getRunId())
@@ -228,7 +234,25 @@ public class ToolBuildEventService {
 			log.info(">>>> ToolBuild {} event skipped by terminal run. runId={}", eventName, event.getRunId());
 			return true;
 		}
+		if (shouldSkipProcessedEventSequence(event, toolPlanRun, eventName)) {
+			return true;
+		}
 		return false;
+	}
+
+	private boolean shouldSkipProcessedEventSequence(ToolBuildEvent event, ToolPlanRun toolPlanRun, String eventName) {
+		if (!toolPlanRun.hasProcessedEventSequence(event.getEventSequence())) {
+			return false;
+		}
+
+		log.info(
+			">>>> ToolBuild {} event skipped by processed sequence. runId={}, eventSequence={}, lastEventSequence={}",
+			eventName,
+			event.getRunId(),
+			event.getEventSequence(),
+			toolPlanRun.getLastEventSequence()
+		);
+		return true;
 	}
 
 	private ToolPlanRunState createBuildProgressState(ToolBuildEvent event, ToolPlanRun toolPlanRun) {

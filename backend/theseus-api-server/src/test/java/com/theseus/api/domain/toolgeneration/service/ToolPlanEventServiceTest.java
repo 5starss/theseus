@@ -82,13 +82,13 @@ class ToolPlanEventServiceTest {
 	}
 
 	@Test
-	@DisplayName("completed 이벤트는 ToolPlanGroup과 ToolPlan v1을 생성하고 Run을 완료한다")
+	@DisplayName("completed 이벤트는 ToolPlanGroup과 ToolPlan v1을 생성하고 Run을 완료 처리한다")
 	void handleCompletedCreatesToolPlanGroupAndToolPlan() throws Exception {
 		// Given
 		TestFixture fixture = createFixture();
 		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
 		ToolPlanEvent event = createCompletedEvent();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 		when(toolPlanGroupRepository.save(any(ToolPlanGroup.class))).thenAnswer(invocation -> invocation.getArgument(0));
 		when(toolPlanRepository.findByPlanGroupOrderByPlanVersionDesc(any(ToolPlanGroup.class))).thenReturn(List.of());
 		when(toolPlanRepository.save(any(ToolPlan.class))).thenAnswer(invocation -> {
@@ -109,7 +109,7 @@ class ToolPlanEventServiceTest {
 		assertThat(savedToolPlan.getRawMarkdown()).isEqualTo("## PLAN v1");
 		assertThat(savedToolPlan.getStructuredPlanJson()).isEqualTo("{\"blocks\":[]}");
 		assertThat(savedToolPlan.getPlanSnapshot()).isEqualTo("{\"source\":\"core\"}");
-		assertThat(savedToolPlan.getRequestedPrompt()).isEqualTo("장애 로그 분석 Tool을 만들어줘.");
+		assertThat(savedToolPlan.getRequestedPrompt()).isEqualTo("?μ븷 濡쒓렇 遺꾩꽍 Tool??留뚮뱾?댁쨾.");
 
 		assertThat(toolPlanRun.getStatus()).isEqualTo(ToolPlanRunStatus.COMPLETED);
 		assertThat(toolPlanRun.getResultToolPlan()).isEqualTo(savedToolPlan);
@@ -142,7 +142,7 @@ class ToolPlanEventServiceTest {
 			previousPlan
 		);
 		ToolPlanEvent event = createCompletedEvent();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 		when(toolPlanRepository.findByPlanGroupOrderByPlanVersionDesc(planGroup)).thenReturn(List.of(previousPlan));
 		when(toolPlanRepository.save(any(ToolPlan.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -168,7 +168,7 @@ class ToolPlanEventServiceTest {
 		TestFixture fixture = createFixture();
 		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
 		ToolPlanEvent event = createSkippedEvent();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleSkipped(event);
@@ -184,7 +184,7 @@ class ToolPlanEventServiceTest {
 			eq(ChatMessageSenderType.ASSISTANT),
 			eq(ChatMessageType.CHAT),
 			eq(ChatMessageContentType.TEXT),
-			eq("Tool 명세 생성을 위해 목적과 입출력을 알려주세요."),
+			eq("Tool 紐낆꽭 ?앹꽦???꾪빐 紐⑹쟻怨??낆텧?μ쓣 ?뚮젮二쇱꽭??"),
 			eq("tool-plan-event:run-250:TOOL_PLAN_SKIPPED:assistant")
 		);
 	}
@@ -196,7 +196,7 @@ class ToolPlanEventServiceTest {
 		TestFixture fixture = createFixture();
 		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
 		ToolPlanEvent event = createFailedEvent();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleFailed(event);
@@ -227,12 +227,13 @@ class ToolPlanEventServiceTest {
 		ToolPlanEvent event = ToolPlanEvent.builder()
 			.eventType("progress")
 			.runId(RUN_ID)
+			.eventSequence(1L)
 			.projectId(PROJECT_ID)
 			.chatSessionId(CHAT_SESSION_ID)
 			.progressRate(35)
 			.message("Generating PLAN")
 			.build();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleProgress(event);
@@ -244,6 +245,9 @@ class ToolPlanEventServiceTest {
 		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("progress");
 		assertThat(stateCaptor.getValue().getStatus()).isEqualTo("GENERATING");
 		assertThat(stateCaptor.getValue().getProgressRate()).isEqualTo(35);
+		assertThat(toolPlanRun.getStatus()).isEqualTo(ToolPlanRunStatus.GENERATING);
+		assertThat(toolPlanRun.getLastEventType()).isEqualTo("progress");
+		assertThat(toolPlanRun.getLastEventSequence()).isEqualTo(1L);
 	}
 
 	@Test
@@ -255,11 +259,12 @@ class ToolPlanEventServiceTest {
 		ToolPlanEvent event = ToolPlanEvent.builder()
 			.eventType("chunk")
 			.runId(RUN_ID)
+			.eventSequence(2L)
 			.projectId(PROJECT_ID)
 			.chatSessionId(CHAT_SESSION_ID)
 			.content("PLAN chunk")
 			.build();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleChunk(event);
@@ -270,6 +275,9 @@ class ToolPlanEventServiceTest {
 		assertThat(stateCaptor.getValue().getRunId()).isEqualTo(RUN_ID);
 		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("chunk");
 		assertThat(stateCaptor.getValue().getContent()).isEqualTo("PLAN chunk");
+		assertThat(toolPlanRun.getStatus()).isEqualTo(ToolPlanRunStatus.GENERATING);
+		assertThat(toolPlanRun.getLastEventType()).isEqualTo("chunk");
+		assertThat(toolPlanRun.getLastEventSequence()).isEqualTo(2L);
 	}
 
 	@Test
@@ -281,7 +289,7 @@ class ToolPlanEventServiceTest {
 		ToolPlan resultToolPlan = createToolPlan(fixture, planGroup, 1L);
 		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
 		toolPlanRun.complete(resultToolPlan, java.time.LocalDateTime.of(2026, 5, 11, 12, 0));
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleCompleted(createCompletedEvent());
@@ -304,7 +312,7 @@ class ToolPlanEventServiceTest {
 			.assistantMessage(createAssistantMessage(ChatMessageType.TOOL_PLAN_RESPONSE, ChatMessageContentType.MARKDOWN))
 			.toolPlan(createToolPlanPayload())
 			.build();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
 
 		// When
 		toolPlanEventService.handleCompleted(event);
@@ -314,6 +322,33 @@ class ToolPlanEventServiceTest {
 		verifyNoInteractions(toolPlanGroupRepository, toolPlanRepository, chatMessageService);
 	}
 
+	@Test
+	@DisplayName("이미 처리한 eventSequence보다 오래된 이벤트는 중복 처리하지 않는다")
+	void skipStaleEventSequence() throws Exception {
+		// Given
+		TestFixture fixture = createFixture();
+		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
+		toolPlanRun.updateLastEvent("progress", 5L);
+		ToolPlanEvent event = ToolPlanEvent.builder()
+			.eventType("TOOL_PLAN_COMPLETED")
+			.runId(RUN_ID)
+			.eventSequence(4L)
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.assistantMessage(createAssistantMessage(ChatMessageType.TOOL_PLAN_RESPONSE, ChatMessageContentType.MARKDOWN))
+			.toolPlan(createToolPlanPayload())
+			.completedAt("2026-05-11T12:00:00+09:00")
+			.build();
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(toolPlanRun));
+
+		// When
+		toolPlanEventService.handleCompleted(event);
+
+		// Then
+		assertThat(toolPlanRun.getStatus()).isEqualTo(ToolPlanRunStatus.REQUESTED);
+		assertThat(toolPlanRun.getLastEventSequence()).isEqualTo(5L);
+		verifyNoInteractions(toolPlanGroupRepository, toolPlanRepository, chatMessageService, toolPlanRunStatePublisher);
+	}
 	private ToolPlanEvent createCompletedEvent() throws Exception {
 		return ToolPlanEvent.builder()
 			.eventType("TOOL_PLAN_COMPLETED")
@@ -337,7 +372,7 @@ class ToolPlanEventServiceTest {
 			.assistantMessage(ToolPlanAssistantMessagePayload.builder()
 				.messageType(ChatMessageType.CHAT.name())
 				.contentType(ChatMessageContentType.TEXT.name())
-				.content("Tool 명세 생성을 위해 목적과 입출력을 알려주세요.")
+				.content("Tool 紐낆꽭 ?앹꽦???꾪빐 紐⑹쟻怨??낆텧?μ쓣 ?뚮젮二쇱꽭??")
 				.build())
 			.completedAt("2026-05-11T12:00:00+09:00")
 			.build();
@@ -389,7 +424,7 @@ class ToolPlanEventServiceTest {
 			.requestedByProjectMember(fixture.projectMember())
 			.planGroup(planGroup)
 			.baseToolPlan(baseToolPlan)
-			.requestPayloadJson("{\"prompt\":\"장애 로그 분석 Tool을 만들어줘.\"}")
+			.requestPayloadJson("{\"prompt\":\"?μ븷 濡쒓렇 遺꾩꽍 Tool??留뚮뱾?댁쨾.\"}")
 			.build();
 	}
 
