@@ -1,12 +1,15 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
 import type { PageResponse } from '@/features/admin/api';
+import { ToolPlanMode } from '@/features/projects/types/chat';
 import type { 
   ChatSession, 
   ToolPlanGenerationResponse, 
   ToolBuildGenerationResponse,
   ToolPlanGenerationStateResponse,
-  ToolBuildGenerationStateResponse
+  ToolBuildGenerationStateResponse,
+  ToolPlanGenerationRequest,
+  ToolPlanRegenerationRequest
 } from '@/features/projects/types/chat';
 
 export const chatApi = {
@@ -66,9 +69,10 @@ export const chatApi = {
   generateToolPlan: async (
     projectId: string,
     sessionId: string,
-    payload: { userMessage: string }
+    payload: { userMessage: string; mode?: ToolPlanMode }
   ): Promise<ToolPlanGenerationResponse> => {
-    const apiPayload = {
+    const apiPayload: ToolPlanGenerationRequest = {
+      mode: payload.mode || ToolPlanMode.PLAN,
       prompt: payload.userMessage
     };
     const response = await apiClient.post<ApiResponse<ToolPlanGenerationResponse>>(
@@ -83,11 +87,16 @@ export const chatApi = {
     projectId: string,
     sessionId: string,
     toolPlanId: string,
-    payload: { basePlanVersion: number; feedbackItems: Array<{ blockId: string; comment: string }> }
+    payload: { basePlanVersion: number; feedbackItems: Array<{ blockId: string; comment: string }>; mode?: ToolPlanMode }
   ): Promise<ToolPlanGenerationResponse> => {
+    const apiPayload: ToolPlanRegenerationRequest = {
+      mode: payload.mode || ToolPlanMode.PLAN,
+      basePlanVersion: payload.basePlanVersion,
+      feedbackItems: payload.feedbackItems
+    };
     const response = await apiClient.patch<ApiResponse<ToolPlanGenerationResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${toolPlanId}/regenerate`,
-      payload
+      apiPayload
     );
     return response.data.result;
   },

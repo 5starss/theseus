@@ -9,6 +9,7 @@ import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import { TypingIndicator } from '@/components/ui/TypingIndicator';
+import { ToolPlanMode } from '../../types/chat';
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -70,7 +71,8 @@ export function ChatArea() {
           currentToolPlanId,
           {
             basePlanVersion: useChatSessionStore.getState().planVersion,
-            feedbackItems: [{ blockId: 'user-input', comment: userMessage }]
+            feedbackItems: [{ blockId: 'user-input', comment: userMessage }],
+            mode: ToolPlanMode.PLAN
           }
         );
       } else {
@@ -78,7 +80,7 @@ export function ChatArea() {
         result = await chatApi.generateToolPlan(
           projectId,
           sessionId,
-          { userMessage }
+          { userMessage, mode: ToolPlanMode.PLAN }
         );
       }
 
