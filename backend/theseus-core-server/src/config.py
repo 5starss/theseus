@@ -44,12 +44,8 @@ class Settings(BaseSettings):
     # Kafka Settings
     CORE_KAFKA_CONSUMER_ENABLED: bool = False
     CORE_KAFKA_BOOTSTRAP_SERVERS: str = "localhost:19092"
-    CORE_KAFKA_CONSUMER_GROUP_ID: str = "theseus-core-tool-generation"
     CORE_KAFKA_TOOL_PLAN_CONSUMER_GROUP_ID: str = "theseus-core-tool-plan"
     CORE_KAFKA_TOOL_BUILD_CONSUMER_GROUP_ID: str = "theseus-core-tool-build"
-    KAFKA_TOPIC_TOOL_GENERATION_REQUEST: str = "theseus.tool-generation.request"
-    KAFKA_TOPIC_TOOL_REGENERATION_REQUEST: str = "theseus.tool-regeneration.request"
-    KAFKA_TOPIC_TOOL_GENERATION_EVENT: str = "theseus.tool-generation.event"
     KAFKA_TOPIC_TOOL_PLAN_REQUEST: str = "theseus.tool-plan.request"
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"

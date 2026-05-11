@@ -2,6 +2,51 @@
 
 인프라 및 서버 런타임 관점의 변경 사항만 별도로 기록합니다!
 
+## [2026-05-11] ToolPlan Worker, Contract Tests & Legacy Cleanup
+
+### ToolPlan Kafka worker 신규 전환 (`src/tool_plan/`, `src/main.py`, `.env.example`)
+- `theseus.tool-plan.request` 토픽을 소비하는 신규 `tool_plan` worker 경로를 추가했습니다.
+- `TOOL_PLAN_REQUESTED`, `TOOL_PLAN_REGENERATION_REQUESTED` payload를 Core 계약 기준으로 검증하고 처리하도록 정리했습니다.
+- Core 서버 기동 시 `tool_plan` consumer와 `tool_build` consumer만 시작/종료하도록 lifecycle을 정리했습니다.
+- PLAN 생성 결과는 `theseus.tool-plan.event` 토픽으로 `progress`, `chunk`, `TOOL_PLAN_COMPLETED`, `TOOL_PLAN_SKIPPED`, `TOOL_PLAN_FAILED` 이벤트를 발행하도록 구성했습니다.
+
+### ToolPlan 생성/재생성 실행 모델 (`src/tool_plan/planner.py`, `src/tool_plan/agent_loop.py`, `src/tool_plan/processor.py`)
+- PLAN 모드 입력을 즉시 Tool 생성으로 처리하지 않고, Core가 ToolPlan 생성 대상 여부를 판단하도록 분리했습니다.
+- 유효한 요청은 `rawMarkdown`, `structuredPlanJson`, `planSnapshot`을 포함한 `TOOL_PLAN_COMPLETED` 이벤트로 반환합니다.
+- 유효하지 않은 요청은 ToolPlan 없이 안내 메시지만 포함하는 `TOOL_PLAN_SKIPPED` 이벤트로 반환합니다.
+- 재생성 요청은 `baseToolPlanId`, `planGroupId`, `basePlan`, `feedbackItems`, `history`를 기준으로 전체 PLAN을 다시 생성하도록 연결했습니다.
+- `blockId`는 동일 의미 블록을 재사용하고 신규 의미 블록은 kebab-case semantic id를 생성하는 기본 규칙으로 정리했습니다.
+
+### TheseusStateMachine 기반 장기 실행 run 보강 (`src/db/repositories/core_runs.py`, `src/tool_plan/agent_loop.py`)
+- ToolPlan worker도 Core PostgreSQL checkpoint를 사용해 `runId` 기준 실행 상태를 추적하도록 연결했습니다.
+- LLM turn, tool-use trace, progress 발행, 최종 이벤트 발행 흐름을 checkpoint 대상에 포함했습니다.
+- terminal run 중복 실행 방지, lease/heartbeat 기반 실행 소유권 확인, DB 기반 `eventSequence` 증가 흐름을 ToolPlan 경로에 맞췄습니다.
+- worker 재시작 시 pending/failed publish event를 재발행할 수 있는 공통 run event 구조를 ToolPlan 이벤트에도 적용했습니다.
+
+### Tool build 계약 및 LLM build 경로 유지 (`src/tool_build/`)
+- 승인된 ToolPlan 기반 실제 artifact 생성 경로는 `theseus.tool-build.request` / `theseus.tool-build.event`로 유지했습니다.
+- build request는 PLAN 생성 topic과 분리해, 승인 이후 실제 코드/파일 생성, 검증, sandbox gate, artifact payload 구성을 담당하도록 역할을 고정했습니다.
+- legacy Tool generation topic과 달리 `tool-build.request`는 신규 ToolPlan 구조의 build 단계 topic으로 남기는 기준을 문서화했습니다.
+
+### Worker 계약 회귀 테스트 추가 (`tests/test_worker_contracts.py`, `tests/snapshots/worker_contracts/`)
+- ToolPlan request/regenerate/progress/chunk/completed/skipped/failed payload snapshot 테스트를 추가했습니다.
+- Tool build request/progress/chunk/completed/failed payload snapshot 테스트를 추가했습니다.
+- 문서 예시 payload를 파싱해 Core schema와 어긋나는 변경을 조기에 감지할 수 있도록 계약 회귀 테스트를 구성했습니다.
+- PLAN generate payload에 `toolId`가 포함되지 않고, build payload에는 `toolPlanId`, `planGroupId`, `approvedPlan`이 포함되는지 검증했습니다.
+
+### Legacy generation 제거 (`src/legacy generation worker`, `src/config.py`, `.env.example`)
+- 더 이상 사용하지 않는 legacy generation worker 패키지를 제거했습니다.
+- old generation request/regeneration/event topic 관련 설정을 Core 설정과 공용 예시 환경 파일에서 제거했습니다.
+- legacy generation consumer group 설정을 제거하고, ToolPlan/ToolBuild consumer group만 남겼습니다.
+- legacy generation processor 테스트를 제거하고 신규 ToolPlan/ToolBuild worker 테스트로 검증 기준을 전환했습니다.
+- 문서와 테스트에서 이전 draft 계열 용어와 old generation topic 표현이 남지 않도록 정리했습니다.
+
+### 테스트 및 검증
+- legacy worker, 이전 draft 계열 용어, old generation topic 검색 기준으로 잔여 참조가 없는지 확인했습니다.
+- 검증 상태는 다음과 같습니다.
+  - `python3 -m compileall src/main.py src/config.py src/tool_plan src/tool_build tests/test_worker_contracts.py` 통과
+  - `.venv/Scripts/python.exe -m pytest -q tests/test_worker_contracts.py tests/test_tool_plan_worker.py tests/test_tool_build_processor.py` 통과
+
 ## [2026-05-10] Tool Build Worker, Runtime Hardening & Core Run Checkpoint
 
 ### Tool Build Kafka worker 신규 연결 (`src/tool_build/`, `src/main.py`, `.env.example`)
@@ -81,7 +126,7 @@
 ### Core 서버 로컬 런타임 및 compose 설정 보강 (`infra/docker/local/docker-compose.core.yml`)
 - `theseus-core-server` 컨테이너 환경 변수에 `AUTH_MODE: spring`을 추가했습니다.
 - `CORE_KAFKA_CONSUMER_ENABLED: true`를 추가해 로컬 Docker 환경에서도 Kafka consumer가 기본 활성화되도록 맞췄습니다.
-- 더 이상 사용하지 않는 `SPRING_BOOT_INTERNAL_TOOL_DRAFT_URL` 환경 변수는 제거해 Kafka 이벤트에 draft 컨텍스트를 포함하는 최신 계약과 설정이 어긋나지 않도록 정리했습니다.
+- 더 이상 사용하지 않는 내부 ToolPlan 조회 환경 변수는 제거해 Kafka 이벤트에 PLAN 컨텍스트를 포함하는 최신 계약과 설정이 어긋나지 않도록 정리했습니다.
 
 ### Kafka 설정 외부화 및 실행 구성 정리 (`backend/theseus-core-server/src/config.py`, `.env.example`)
 - Core 서버 설정에 Kafka bootstrap server 및 topic 이름 구성을 반영해 환경 변수 기반으로 워커 실행 구성을 제어할 수 있게 정리했습니다.
@@ -92,7 +137,7 @@
 - 후속 검증 포인트는 다음 흐름 기준으로 정리했습니다.
   - Tool regeneration 요청 발행
   - Core worker consume 및 draft 생성 처리
-  - `theseus.tool-generation.event` 토픽으로 progress/chunk/completed/failed 이벤트 발행
+  - `theseus.tool-plan.event` 토픽으로 progress/chunk/completed/skipped/failed 이벤트 발행
   - API 서버 SSE 또는 WebSocket 중계 확인
 
 ## [2026-05-06] Sandbox Enforcement + Persistence
@@ -410,9 +455,9 @@
 - progress/chunk 비영속, 최종 메시지 영속이라는 채팅 대시보드 설계 원칙을 서버 런타임 레벨에서 반영했습니다.
 
 ### 다음 작업
-- Tool generate/regenerate/approval API에서 `TOOL_DRAFT_REQUEST`, `TOOL_DRAFT_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_REGENERATE_RESPONSE`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE`를 실제로 history 저장 경로에 연결
-- AI 요청 계약의 `llmInput.history` 구성 규칙을 Tool 플로우와 맞춰 구체화
-- `completed` / `failed` 이벤트와 DB 반영 성공 조건을 tool 상태 전이와 함께 정렬
+- ToolPlan generate/regenerate/approval API에서 `TOOL_PLAN_REQUEST`, `TOOL_PLAN_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_APPROVAL_REQUEST`, `SYSTEM_NOTICE`를 실제 history 저장 경로에 연결
+- AI 요청 계약의 `history` 구성 규칙을 ToolPlan 플로우와 맞춰 구체화
+- `completed` / `failed` 이벤트와 DB 반영 성공 조건을 ToolPlan 상태 전이와 함께 정렬
 
 ## [2026-05-02] Permission Inquiry Layer - Phase 1
 
