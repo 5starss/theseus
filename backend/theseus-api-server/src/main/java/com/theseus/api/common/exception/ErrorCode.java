@@ -94,6 +94,9 @@ public enum ErrorCode {
     TOOL_PLAN_FEEDBACK_REQUIRED(HttpStatus.BAD_REQUEST, "TPLN-011", "ToolPlan 피드백 항목이 필요합니다."),
     TOOL_PLAN_PAYLOAD_INVALID(HttpStatus.CONFLICT, "TPLN-012", "ToolPlan payload가 유효하지 않습니다."),
 
+    // ToolBuild
+    TOOL_BUILD_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TBLD-001", "유효하지 않은 Tool build 이벤트입니다."),
+
     // Billing
     BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),
     BILLING_USAGE_PAYLOAD_INVALID(HttpStatus.BAD_REQUEST, "BILL-002", "유효하지 않은 Billing 사용량 요청입니다.");

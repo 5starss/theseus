@@ -47,6 +47,7 @@ theseus:
       tool-plan-request: ${KAFKA_TOPIC_TOOL_PLAN_REQUEST:theseus.tool-plan.request}
       tool-plan-event: ${KAFKA_TOPIC_TOOL_PLAN_EVENT:theseus.tool-plan.event}
       tool-build-request: ${KAFKA_TOPIC_TOOL_BUILD_REQUEST:theseus.tool-build.request}
+      tool-build-event: ${KAFKA_TOPIC_TOOL_BUILD_EVENT:theseus.tool-build.event}
       tool-generation-request: ${KAFKA_TOPIC_TOOL_GENERATION_REQUEST:theseus.tool-generation.request}
       tool-regeneration-request: ${KAFKA_TOPIC_TOOL_REGENERATION_REQUEST:theseus.tool-regeneration.request}
       tool-generation-event: ${KAFKA_TOPIC_TOOL_GENERATION_EVENT:theseus.tool-generation.event}

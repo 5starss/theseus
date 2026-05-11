@@ -20,6 +20,7 @@ class ToolGenerationKafkaProducerTest {
 	private static final String TOOL_PLAN_REQUEST_TOPIC = "theseus.tool-plan.request";
 	private static final String TOOL_PLAN_EVENT_TOPIC = "theseus.tool-plan.event";
 	private static final String TOOL_BUILD_REQUEST_TOPIC = "theseus.tool-build.request";
+	private static final String TOOL_BUILD_EVENT_TOPIC = "theseus.tool-build.event";
 	private static final String TOOL_GENERATION_REQUEST_TOPIC = "theseus.tool-generation.request";
 	private static final String TOOL_REGENERATION_REQUEST_TOPIC = "theseus.tool-regeneration.request";
 	private static final String TOOL_GENERATION_EVENT_TOPIC = "theseus.tool-generation.event";
@@ -35,6 +36,7 @@ class ToolGenerationKafkaProducerTest {
 			TOOL_PLAN_REQUEST_TOPIC,
 			TOOL_PLAN_EVENT_TOPIC,
 			TOOL_BUILD_REQUEST_TOPIC,
+			TOOL_BUILD_EVENT_TOPIC,
 			TOOL_GENERATION_REQUEST_TOPIC,
 			TOOL_REGENERATION_REQUEST_TOPIC,
 			TOOL_GENERATION_EVENT_TOPIC
