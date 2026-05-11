@@ -37,6 +37,7 @@ class ToolBuildProcessor:
         self.publisher = publisher
         self.builder = builder or ToolBuilder()
         self.checkpoint_repo_factory = checkpoint_repo_factory
+        self.publish_channel = "tool-build"
         self._event_sequences: dict[str, int] = {}
         self._finished_runs: set[str] = set()
 
@@ -169,7 +170,7 @@ class ToolBuildProcessor:
             record_id = None
             if repo is not None:
                 repo.heartbeat(key)
-                record = repo.record_event(event)
+                record = repo.record_event(event, publish_channel=self.publish_channel)
                 record_id = record.id
             try:
                 await self.publisher.publish(key, event)
@@ -185,7 +186,7 @@ class ToolBuildProcessor:
         with self._checkpoint_repo() as repo:
             if repo is None:
                 return 0
-            for record in repo.pending_events(limit=limit):
+            for record in repo.pending_events(limit=limit, publish_channel=self.publish_channel):
                 try:
                     await self.publisher.publish(record.run_id, record.payload_json)
                 except Exception as exc:

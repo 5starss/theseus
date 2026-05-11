@@ -72,10 +72,11 @@ class FakeCheckpointRepo:
         self.sequence += 1
         return self.sequence
 
-    def record_event(self, event):
+    def record_event(self, event, *, publish_channel=None):
         record = type("Record", (), {})()
         record.id = len(self.events) + 1
         record.run_id = event.run_id
+        record.publish_channel = publish_channel
         record.payload_json = event.model_dump(mode="json", by_alias=True)
         self.events.append(record)
         return record
@@ -86,8 +87,10 @@ class FakeCheckpointRepo:
     def mark_event_failed(self, event_id, error):
         self.event_failures.append((event_id, error))
 
-    def pending_events(self, limit=50):
-        return self.pending[:limit]
+    def pending_events(self, limit=50, *, publish_channel=None):
+        if publish_channel is None:
+            return self.pending[:limit]
+        return [record for record in self.pending if getattr(record, "publish_channel", publish_channel) == publish_channel][:limit]
 
     def mark_completed(self, run_id):
         self.completed.append(run_id)

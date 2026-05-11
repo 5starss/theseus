@@ -124,6 +124,7 @@ class CoreRunEvent(Base):
     run_id = Column(String(64), ForeignKey("core_run_checkpoints.run_id"), index=True, nullable=False)
     event_sequence = Column(Integer, nullable=False)
     event_type = Column(String(80), nullable=False)
+    publish_channel = Column(String(80), nullable=True, index=True)
     payload_json = Column(JSONB, nullable=False)
     publish_status = Column(String(30), nullable=False, default="pending", index=True)
     publish_attempts = Column(Integer, nullable=False, default=0)
