@@ -41,6 +41,7 @@ services:
       - -c
       - |
         set -e
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-plan.request --partitions 3 --replication-factor 1
         kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.request --partitions 3 --replication-factor 1
         kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-regeneration.request --partitions 3 --replication-factor 1
         kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.event --partitions 3 --replication-factor 1
