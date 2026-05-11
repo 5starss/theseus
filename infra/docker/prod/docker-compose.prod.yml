@@ -149,7 +149,6 @@ services:
       theseus-core-server:
         condition: service_started
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     networks:
