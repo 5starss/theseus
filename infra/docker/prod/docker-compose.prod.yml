@@ -123,11 +123,33 @@ services:
     image: theseus-frontend:prod
     container_name: theseus-prod-frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       theseus-api-server:
         condition: service_started
+    networks:
+      - theseus-prod-network
+
+  theseus-nginx:
+    image: nginx:1.27-alpine
+    container_name: theseus-prod-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      theseus-frontend:
+        condition: service_started
+      theseus-api-server:
+        condition: service_started
+      theseus-core-server:
+        condition: service_started
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
     networks:
       - theseus-prod-network
 
