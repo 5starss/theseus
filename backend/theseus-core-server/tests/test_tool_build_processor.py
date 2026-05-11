@@ -249,6 +249,7 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
         repo.pending.append(record)
         processor = ToolBuildProcessor(
             publisher=publisher,
+            builder=FakeBuilder(create_artifact()),
             checkpoint_repo_factory=lambda: FakeRepoContext(repo),
         )
 
