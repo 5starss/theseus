@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record KafkaTopicProperties(
 	String toolPlanRequest,
 	String toolPlanEvent,
+	String toolBuildRequest,
 	String toolGenerationRequest,
 	String toolRegenerationRequest,
 	String toolGenerationEvent

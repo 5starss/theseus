@@ -19,6 +19,7 @@ class ToolGenerationKafkaProducerTest {
 
 	private static final String TOOL_PLAN_REQUEST_TOPIC = "theseus.tool-plan.request";
 	private static final String TOOL_PLAN_EVENT_TOPIC = "theseus.tool-plan.event";
+	private static final String TOOL_BUILD_REQUEST_TOPIC = "theseus.tool-build.request";
 	private static final String TOOL_GENERATION_REQUEST_TOPIC = "theseus.tool-generation.request";
 	private static final String TOOL_REGENERATION_REQUEST_TOPIC = "theseus.tool-regeneration.request";
 	private static final String TOOL_GENERATION_EVENT_TOPIC = "theseus.tool-generation.event";
@@ -33,6 +34,7 @@ class ToolGenerationKafkaProducerTest {
 		KafkaTopicProperties kafkaTopicProperties = new KafkaTopicProperties(
 			TOOL_PLAN_REQUEST_TOPIC,
 			TOOL_PLAN_EVENT_TOPIC,
+			TOOL_BUILD_REQUEST_TOPIC,
 			TOOL_GENERATION_REQUEST_TOPIC,
 			TOOL_REGENERATION_REQUEST_TOPIC,
 			TOOL_GENERATION_EVENT_TOPIC
@@ -89,6 +91,19 @@ class ToolGenerationKafkaProducerTest {
 
 		assertThatCode(() -> producer.sendToolGenerationRequest(key, event))
 			.doesNotThrowAnyException();
+	}
+
+	@Test
+	@DisplayName("Tool build 요청은 build request topic으로 발행한다")
+	void sendToolBuildRequestSendsToBuildRequestTopic() {
+		String key = "build-run-1";
+		TestKafkaEvent event = new TestKafkaEvent("build");
+		when(kafkaTemplate.send(TOOL_BUILD_REQUEST_TOPIC, key, event))
+			.thenReturn(CompletableFuture.completedFuture(null));
+
+		producer.sendToolBuildRequest(key, event);
+
+		verify(kafkaTemplate).send(TOOL_BUILD_REQUEST_TOPIC, key, event);
 	}
 
 	private record TestKafkaEvent(String type) {
