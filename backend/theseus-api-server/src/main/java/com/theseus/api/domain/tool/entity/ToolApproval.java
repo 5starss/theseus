@@ -46,7 +46,7 @@ public class ToolApproval {
 	private Long id;
 
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "tool_id", nullable = false, foreignKey = @ForeignKey(name = "fk_tool_approvals_tool"))
+	@JoinColumn(name = "tool_id", foreignKey = @ForeignKey(name = "fk_tool_approvals_tool"))
 	private Tool tool;
 
 	@ManyToOne(fetch = FetchType.LAZY)
@@ -91,7 +91,8 @@ public class ToolApproval {
 		Integer requestNumber,
 		ProjectMember requestedByProjectMember
 	) {
-		this.tool = Objects.requireNonNull(tool, "tool must not be null");
+		validateApprovalTarget(tool, toolPlan);
+		this.tool = tool;
 		this.toolPlan = toolPlan;
 		this.requestNumber = validateRequestNumber(requestNumber);
 		this.requestedByProjectMember = Objects.requireNonNull(
@@ -174,5 +175,11 @@ public class ToolApproval {
 		}
 
 		return requestNumber;
+	}
+
+	private void validateApprovalTarget(Tool tool, ToolPlan toolPlan) {
+		if (tool == null && toolPlan == null) {
+			throw BusinessException.of(ErrorCode.TOOL_APPROVAL_TARGET_REQUIRED);
+		}
 	}
 }

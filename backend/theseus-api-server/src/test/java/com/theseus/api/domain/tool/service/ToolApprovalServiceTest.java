@@ -22,8 +22,18 @@ import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolApproval;
 import com.theseus.api.domain.tool.entity.ToolApprovalStatus;
 import com.theseus.api.domain.tool.entity.ToolDraftPhase;
+import com.theseus.api.domain.tool.entity.ToolPlan;
+import com.theseus.api.domain.tool.entity.ToolPlanGroup;
+import com.theseus.api.domain.tool.entity.ToolPlanGroupStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanRun;
+import com.theseus.api.domain.tool.entity.ToolPlanRunRequestType;
+import com.theseus.api.domain.tool.entity.ToolPlanRunStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolApprovalRepository;
+import com.theseus.api.domain.tool.repository.ToolPlanGroupRepository;
+import com.theseus.api.domain.tool.repository.ToolPlanRepository;
+import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -47,6 +57,15 @@ class ToolApprovalServiceTest {
 
 	@Autowired
 	private ToolApprovalRepository toolApprovalRepository;
+
+	@Autowired
+	private ToolPlanRepository toolPlanRepository;
+
+	@Autowired
+	private ToolPlanGroupRepository toolPlanGroupRepository;
+
+	@Autowired
+	private ToolPlanRunRepository toolPlanRunRepository;
 
 	@Autowired
 	private ToolRepository toolRepository;
@@ -290,6 +309,63 @@ class ToolApprovalServiceTest {
 	}
 
 	@Test
+	@DisplayName("REVIEW 상태의 ToolPlan은 생성자가 승인 요청할 수 있다")
+	void requestToolPlanApproval() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A252001");
+		ToolPlan toolPlan = createReviewToolPlan(fixture);
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.requestToolPlanApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolPlan.getId()
+		);
+
+		// Then
+		ToolApproval savedToolApproval = toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+		ToolPlan savedToolPlan = toolPlanRepository.findById(toolPlan.getId()).orElseThrow();
+		ChatMessage savedMessage = chatMessageRepository.findByToolPlanOrderByMessageOrderAsc(savedToolPlan).getFirst();
+		assertThat(response.getToolId()).isNull();
+		assertThat(response.getToolPlanId()).isEqualTo(toolPlan.getId());
+		assertThat(response.getPlanGroupId()).isEqualTo(toolPlan.getPlanGroup().getId());
+		assertThat(response.getPlanVersion()).isEqualTo(1L);
+		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.PENDING);
+		assertThat(response.getToolPlanStatus()).isEqualTo(ToolPlanStatus.PENDING);
+		assertThat(savedToolApproval.getTool()).isNull();
+		assertThat(savedToolApproval.getToolPlan().getId()).isEqualTo(toolPlan.getId());
+		assertThat(savedToolPlan.getStatus()).isEqualTo(ToolPlanStatus.PENDING);
+		assertThat(savedToolPlan.getPlanGroup().getStatus()).isEqualTo(ToolPlanGroupStatus.PENDING);
+		assertThat(savedMessage.getSenderType()).isEqualTo(ChatMessageSenderType.USER);
+		assertThat(savedMessage.getMessageType()).isEqualTo(ChatMessageType.TOOL_APPROVAL_REQUEST);
+		assertThat(savedMessage.getContent()).contains(
+			"\"toolApprovalId\":" + response.getToolApprovalId(),
+			"\"toolPlanId\":" + toolPlan.getId(),
+			"\"requestNumber\":1"
+		);
+	}
+
+	@Test
+	@DisplayName("REVIEW 상태가 아닌 ToolPlan은 승인 요청할 수 없다")
+	void requestToolPlanApprovalFailsWhenPlanIsNotReview() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A252011");
+		ToolPlan toolPlan = createReviewToolPlan(fixture);
+		toolPlan.requestApproval();
+		toolPlan.getPlanGroup().markPending(toolPlan);
+
+		// When & Then
+		assertThatThrownBy(() -> toolApprovalService.requestToolPlanApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolPlan.getId()
+		))
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.TOOL_PLAN_APPROVAL_REVIEW_STATUS_REQUIRED);
+	}
+
+	@Test
 	@DisplayName("Project ADMIN can approve pending ToolApproval")
 	void approveToolApproval() {
 		// Given
@@ -344,6 +420,104 @@ class ToolApprovalServiceTest {
 		assertThat(response.getReviewedAt()).isNotNull();
 		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.REJECTED);
 		assertThat(savedTool.getDraftPhase()).isEqualTo(ToolDraftPhase.REVIEW);
+	}
+
+	@Test
+	@DisplayName("ToolPlan 승인 시 build 요청 Run을 만들고 Tool은 생성하지 않는다")
+	void approveToolPlanApprovalCreatesBuildRunWithoutTool() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A252021");
+		ToolApproval toolApproval = createPendingToolPlanApproval(fixture);
+		ToolPlan toolPlan = toolApproval.getToolPlan();
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.approveToolApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolApproval.getId(),
+			createApproveRequest(null, "approved")
+		);
+
+		// Then
+		ToolApproval savedToolApproval = toolApprovalRepository.findById(toolApproval.getId()).orElseThrow();
+		ToolPlan savedToolPlan = toolPlanRepository.findById(toolPlan.getId()).orElseThrow();
+		ToolPlanGroup savedPlanGroup = toolPlanGroupRepository.findById(savedToolPlan.getPlanGroup().getId())
+			.orElseThrow();
+		ToolPlanRun savedBuildRun = toolPlanRunRepository.findByProjectAndChatSessionAndStatusOrderByRequestedAtDesc(
+			fixture.project(),
+			savedToolPlan.getChatSession(),
+			ToolPlanRunStatus.REQUESTED
+		).getFirst();
+		assertThat(response.getToolId()).isNull();
+		assertThat(response.getToolPlanId()).isEqualTo(toolPlan.getId());
+		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.APPROVED);
+		assertThat(response.getToolPlanStatus()).isEqualTo(ToolPlanStatus.APPROVED);
+		assertThat(response.getReviewedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(savedToolApproval.getTool()).isNull();
+		assertThat(savedToolApproval.getToolPlan().getId()).isEqualTo(toolPlan.getId());
+		assertThat(savedToolPlan.getStatus()).isEqualTo(ToolPlanStatus.APPROVED);
+		assertThat(savedPlanGroup.getStatus()).isEqualTo(ToolPlanGroupStatus.APPROVED);
+		assertThat(savedPlanGroup.getApprovedToolPlan().getId()).isEqualTo(toolPlan.getId());
+		assertThat(savedBuildRun.getRequestType()).isEqualTo(ToolPlanRunRequestType.BUILD_TOOL);
+		assertThat(savedBuildRun.getBaseToolPlan().getId()).isEqualTo(toolPlan.getId());
+		assertThat(savedBuildRun.getPlanGroup().getId()).isEqualTo(savedPlanGroup.getId());
+		assertThat(savedBuildRun.getRequestPayloadJson()).contains(
+			"\"eventType\":\"TOOL_BUILD_REQUESTED\"",
+			"\"toolPlanId\":" + toolPlan.getId(),
+			"\"planGroupId\":" + savedPlanGroup.getId(),
+			"\"approvedByProjectMemberId\":" + fixture.projectMember().getId()
+		);
+		assertThat(toolRepository.findByProjectAndStatusNotOrderByUpdatedAtDesc(
+			fixture.project(),
+			ToolStatus.DELETED
+		)).isEmpty();
+	}
+
+	@Test
+	@DisplayName("ToolPlan 반려 시 ToolPlan과 그룹을 REJECTED로 변경하고 Tool은 생성하지 않는다")
+	void rejectToolPlanApproval() {
+		// Given
+		ProjectFixture creatorFixture = createProjectFixture("A252031");
+		User managerUser = createUser("A252032");
+		ProjectMember manager = createProjectMember(creatorFixture.project(), managerUser, ProjectRole.MANAGER);
+		ToolApproval toolApproval = createPendingToolPlanApproval(creatorFixture);
+		ToolPlan toolPlan = toolApproval.getToolPlan();
+
+		// When
+		ToolApprovalResponse response = toolApprovalService.rejectToolApproval(
+			createAuthenticatedUser(managerUser),
+			creatorFixture.project().getId(),
+			toolApproval.getId(),
+			createRejectRequest("needs revision")
+		);
+
+		// Then
+		ToolPlan savedToolPlan = toolPlanRepository.findById(toolPlan.getId()).orElseThrow();
+		ToolPlanGroup savedPlanGroup = toolPlanGroupRepository.findById(savedToolPlan.getPlanGroup().getId())
+			.orElseThrow();
+		ChatMessage savedNotice = chatMessageRepository.findByToolPlanOrderByMessageOrderAsc(savedToolPlan)
+			.stream()
+			.filter(chatMessage -> ChatMessageType.SYSTEM_NOTICE.equals(chatMessage.getMessageType()))
+			.findFirst()
+			.orElseThrow();
+		assertThat(response.getToolId()).isNull();
+		assertThat(response.getToolPlanId()).isEqualTo(toolPlan.getId());
+		assertThat(response.getApprovalStatus()).isEqualTo(ToolApprovalStatus.REJECTED);
+		assertThat(response.getToolPlanStatus()).isEqualTo(ToolPlanStatus.REJECTED);
+		assertThat(response.getReviewedByProjectMemberId()).isEqualTo(manager.getId());
+		assertThat(response.getReviewFeedback()).isEqualTo("needs revision");
+		assertThat(savedToolPlan.getStatus()).isEqualTo(ToolPlanStatus.REJECTED);
+		assertThat(savedPlanGroup.getStatus()).isEqualTo(ToolPlanGroupStatus.REJECTED);
+		assertThat(savedNotice.getSenderType()).isEqualTo(ChatMessageSenderType.SYSTEM);
+		assertThat(savedNotice.getMessageType()).isEqualTo(ChatMessageType.SYSTEM_NOTICE);
+		assertThat(savedNotice.getContent()).contains(
+			"toolApprovalId=" + toolApproval.getId(),
+			"toolPlanId=" + toolPlan.getId()
+		);
+		assertThat(toolRepository.findByProjectAndStatusNotOrderByUpdatedAtDesc(
+			creatorFixture.project(),
+			ToolStatus.DELETED
+		)).isEmpty();
 	}
 
 	@Test
@@ -405,6 +579,44 @@ class ToolApprovalServiceTest {
 		);
 
 		return toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+	}
+
+	private ToolApproval createPendingToolPlanApproval(ProjectFixture fixture) {
+		ToolPlan toolPlan = createReviewToolPlan(fixture);
+		ToolApprovalResponse response = toolApprovalService.requestToolPlanApproval(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			toolPlan.getId()
+		);
+
+		return toolApprovalRepository.findById(response.getToolApprovalId()).orElseThrow();
+	}
+
+	private ToolPlan createReviewToolPlan(ProjectFixture fixture) {
+		ChatSession chatSession = chatSessionRepository.save(ChatSession.builder()
+			.project(fixture.project())
+			.projectMember(fixture.projectMember())
+			.title("ToolPlan Session " + fixture.user().getEmployeeNumber())
+			.build());
+		ToolPlanGroup planGroup = toolPlanGroupRepository.save(ToolPlanGroup.builder()
+			.project(fixture.project())
+			.chatSession(chatSession)
+			.createdByProjectMember(fixture.projectMember())
+			.build());
+		ToolPlan toolPlan = toolPlanRepository.save(ToolPlan.builder()
+			.planGroup(planGroup)
+			.project(fixture.project())
+			.chatSession(chatSession)
+			.createdByProjectMember(fixture.projectMember())
+			.planVersion(1L)
+			.status(ToolPlanStatus.REVIEW)
+			.rawMarkdown("## PLAN")
+			.structuredPlanJson("{\"blocks\":[{\"blockId\":\"summary\",\"title\":\"요약\",\"content\":\"내용\"}]}")
+			.planSnapshot("{\"schemaVersion\":\"1.0\",\"planVersion\":1}")
+			.build());
+		planGroup.markReview(toolPlan);
+
+		return toolPlan;
 	}
 
 	private Tool createReviewPhaseDraftTool(Project project, ProjectMember projectMember) {

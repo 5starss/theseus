@@ -38,20 +38,25 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 		value = """
 			select toolApproval
 			from ToolApproval toolApproval
-			join fetch toolApproval.tool tool
-			join fetch tool.project project
+			left join fetch toolApproval.tool tool
+			left join fetch tool.project toolProject
+			left join fetch toolApproval.toolPlan toolPlan
+			left join fetch toolPlan.project planProject
 			join fetch toolApproval.requestedByProjectMember requestedByProjectMember
 			join fetch requestedByProjectMember.user requestedByUser
 			left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
 			left join fetch reviewedByProjectMember.user reviewedByUser
-			where project = :project
+			where toolProject = :project
+				or planProject = :project
 			order by toolApproval.requestedAt desc
 		""",
 		countQuery = """
 			select count(toolApproval)
 			from ToolApproval toolApproval
-			join toolApproval.tool tool
+			left join toolApproval.tool tool
+			left join toolApproval.toolPlan toolPlan
 			where tool.project = :project
+				or toolPlan.project = :project
 		"""
 	)
 	Page<ToolApproval> findByProject(
@@ -63,21 +68,26 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 		value = """
 			select toolApproval
 			from ToolApproval toolApproval
-			join fetch toolApproval.tool tool
-			join fetch tool.project project
+			left join fetch toolApproval.tool tool
+			left join fetch tool.project toolProject
+			left join fetch toolApproval.toolPlan toolPlan
+			left join fetch toolPlan.project planProject
 			join fetch toolApproval.requestedByProjectMember requestedByProjectMember
 			join fetch requestedByProjectMember.user requestedByUser
 			left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
 			left join fetch reviewedByProjectMember.user reviewedByUser
-			where project = :project
+			where (toolProject = :project
+				or planProject = :project)
 				and toolApproval.approvalStatus = :approvalStatus
 			order by toolApproval.requestedAt desc
 		""",
 		countQuery = """
 			select count(toolApproval)
 			from ToolApproval toolApproval
-			join toolApproval.tool tool
-			where tool.project = :project
+			left join toolApproval.tool tool
+			left join toolApproval.toolPlan toolPlan
+			where (tool.project = :project
+				or toolPlan.project = :project)
 				and toolApproval.approvalStatus = :approvalStatus
 		"""
 	)
@@ -90,14 +100,17 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 	@Query("""
 		select toolApproval
 		from ToolApproval toolApproval
-		join fetch toolApproval.tool tool
-		join fetch tool.project project
+		left join fetch toolApproval.tool tool
+		left join fetch tool.project toolProject
+		left join fetch toolApproval.toolPlan toolPlan
+		left join fetch toolPlan.project planProject
 		join fetch toolApproval.requestedByProjectMember requestedByProjectMember
 		join fetch requestedByProjectMember.user requestedByUser
 		left join fetch toolApproval.reviewedByProjectMember reviewedByProjectMember
 		left join fetch reviewedByProjectMember.user reviewedByUser
 		where toolApproval.id = :id
-			and project = :project
+			and (toolProject = :project
+				or planProject = :project)
 	""")
 	Optional<ToolApproval> findByIdAndToolProject(
 		@Param("id") Long id,
@@ -108,9 +121,11 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 	@Query("""
 		select toolApproval
 		from ToolApproval toolApproval
-		join fetch toolApproval.tool tool
+		left join fetch toolApproval.tool tool
+		left join fetch toolApproval.toolPlan toolPlan
 		where toolApproval.id = :id
-			and tool.project = :project
+			and (tool.project = :project
+				or toolPlan.project = :project)
 	""")
 	Optional<ToolApproval> findByIdAndToolProjectForUpdate(
 		@Param("id") Long id,
@@ -125,6 +140,15 @@ public interface ToolApprovalRepository extends JpaRepository<ToolApproval, Long
 		order by toolApproval.requestNumber desc
 	""")
 	List<ToolApproval> findByToolOrderByRequestNumberDescForUpdate(@Param("tool") Tool tool);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+		select toolApproval
+		from ToolApproval toolApproval
+		where toolApproval.toolPlan = :toolPlan
+		order by toolApproval.requestNumber desc
+	""")
+	List<ToolApproval> findByToolPlanOrderByRequestNumberDescForUpdate(@Param("toolPlan") ToolPlan toolPlan);
 
 	boolean existsByToolAndApprovalStatus(Tool tool, ToolApprovalStatus approvalStatus);
 

@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 
@@ -25,7 +27,30 @@ public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 	Optional<ToolPlan> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	Optional<ToolPlan> findByIdAndProjectAndChatSessionForUpdate(Long id, Project project, ChatSession chatSession);
+	@Query("""
+		select toolPlan
+		from ToolPlan toolPlan
+		where toolPlan.id = :id
+			and toolPlan.project = :project
+			and toolPlan.chatSession = :chatSession
+	""")
+	Optional<ToolPlan> findByIdAndProjectAndChatSessionForUpdate(
+		@Param("id") Long id,
+		@Param("project") Project project,
+		@Param("chatSession") ChatSession chatSession
+	);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+		select toolPlan
+		from ToolPlan toolPlan
+		where toolPlan.id = :id
+			and toolPlan.project = :project
+	""")
+	Optional<ToolPlan> findByIdAndProjectForUpdate(
+		@Param("id") Long id,
+		@Param("project") Project project
+	);
 
 	boolean existsByPlanGroupAndPlanVersion(ToolPlanGroup planGroup, Long planVersion);
 }
