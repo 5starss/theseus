@@ -2,6 +2,7 @@ package com.theseus.api.domain.toolgeneration.producer;
 
 import com.theseus.api.common.kafka.KafkaTopicProperties;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -24,24 +25,29 @@ public class ToolGenerationKafkaProducer {
 		send(kafkaTopicProperties.toolRegenerationRequest(), key, event);
 	}
 
-	private void send(String topic, String key, Object event) {
+	public CompletableFuture<SendResult<String, Object>> sendToolPlanRequest(String key, Object event) {
+		return send(kafkaTopicProperties.toolPlanRequest(), key, event);
+	}
+
+	private CompletableFuture<SendResult<String, Object>> send(String topic, String key, Object event) {
 		Objects.requireNonNull(event, "Kafka event must not be null");
 
-		kafkaTemplate.send(topic, key, event)
-			.whenComplete((result, exception) -> {
-				if (exception != null) {
-					log.warn(
-						"Failed to send Kafka message. topic={}, key={}, eventType={}",
-						topic,
-						key,
-						event.getClass().getSimpleName(),
-						exception
-					);
-					return;
-				}
+		CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
+		future.whenComplete((result, exception) -> {
+			if (exception != null) {
+				log.warn(
+					"Failed to send Kafka message. topic={}, key={}, eventType={}",
+					topic,
+					key,
+					event.getClass().getSimpleName(),
+					exception
+				);
+				return;
+			}
 
-				logSuccess(topic, key, result);
-			});
+			logSuccess(topic, key, result);
+		});
+		return future;
 	}
 
 	private void logSuccess(String topic, String key, SendResult<String, Object> result) {

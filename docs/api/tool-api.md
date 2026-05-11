@@ -151,12 +151,12 @@ Authorization: Bearer {accessToken}
 {
   "isSuccess": true,
   "code": "COMMON-202",
-  "message": "Tool PLAN 생성을 시작하였습니다.",
+  "message": "요청 처리를 시작했습니다.",
   "result": {
     "runId": "3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11",
     "projectId": 1,
     "sessionId": 10,
-    "status": "GENERATING",
+    "status": "REQUESTED",
     "sseUrl": "/api/v1/projects/1/sessions/10/tool-plan-runs/3f2a2d5e-0e4a-4a3f-8d0f-9b5a3e2c0d11/events"
   }
 }
