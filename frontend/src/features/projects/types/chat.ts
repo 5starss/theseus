@@ -58,60 +58,57 @@ export interface ChatSessionState {
   abortController: AbortController | null;
 }
 
+export const ToolPlanMode = {
+  ASK: 'ASK',
+  PLAN: 'PLAN',
+  AGENT: 'AGENT'
+} as const;
+
+export type ToolPlanMode = typeof ToolPlanMode[keyof typeof ToolPlanMode];
+
 // Tool Plan 생성/재생성 HTTP 응답
 export interface ToolPlanGenerationResponse {
   runId: string;
-  toolPlanId?: number;
-  projectId: number;
-  sessionId: number;
-  status: string;
-  planVersion?: number;
+  toolPlanId: number;
   sseUrl: string;
 }
 
-// Tool Build/Rebuild HTTP 응답
+// Tool Build 생성 HTTP 응답
 export interface ToolBuildGenerationResponse {
   toolId: number;
-  projectId: number;
-  sessionId: number;
-  status: string;
-  draftPhase?: string;
-  draftVersion?: number;
   sseUrl: string;
 }
 
-// Tool Plan 생성 상태 조회 HTTP 응답
-export interface ToolPlanGenerationStateResponse {
-  projectId: number;
-  chatSessionId: number;
-  toolPlanId: number;
-  runId: string;
-  eventType: string;
-  status: string;
-  progressRate?: number;
-  message?: string;
-  content?: string;
-  planVersion?: number;
-  errorCode?: string;
-  errorMessage?: string;
-  updatedAt: string;
+// Tool Plan 생성 요청 DTO (Backend spec)
+export interface ToolPlanGenerationRequest {
+  mode: ToolPlanMode;
+  prompt: string;
 }
 
-// Tool Build 생성 상태 조회 HTTP 응답
-export interface ToolBuildGenerationStateResponse {
-  projectId: number;
-  chatSessionId: number;
-  toolId: number;
-  eventType: string;
+// Tool Plan 재생성 요청 DTO (Backend spec)
+export interface ToolPlanRegenerationRequest {
+  mode: ToolPlanMode;
+  basePlanVersion: number;
+  feedbackItems: Array<{ blockId: string; comment: string }>;
+}
+
+// Tool Plan 상태 조회 응답
+export interface ToolPlanGenerationStateResponse {
   status: string;
+  toolPlanId: number;
+  planVersion: number;
+  messages: ChatMessage[];
+  currentPlan?: StructuredPlan;
+  isClosed: boolean;
+  title: string;
+}
+
+// Tool Build 상태 조회 응답
+export interface ToolBuildGenerationStateResponse {
+  status: string;
+  toolId: number;
+  draftVersion: number;
   draftPhase: string;
-  progressRate?: number;
-  message?: string;
-  content?: string;
-  draftVersion?: number;
-  errorCode?: string;
-  errorMessage?: string;
-  updatedAt: string;
 }
 
 // SSE 이벤트 데이터 구조

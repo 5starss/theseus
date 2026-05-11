@@ -8,6 +8,7 @@ import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { ToolPlanMode } from '../../types/chat';
 
 export function InspectorPanel() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -77,7 +78,8 @@ export function InspectorPanel() {
           currentToolPlanId,
           {
             basePlanVersion: planVersion,
-            feedbackItems
+            feedbackItems,
+            mode: ToolPlanMode.PLAN
           }
         );
 
