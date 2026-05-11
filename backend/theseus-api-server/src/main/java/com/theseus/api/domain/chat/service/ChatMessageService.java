@@ -18,6 +18,7 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanRun;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
@@ -179,6 +180,51 @@ public class ChatMessageService {
 	}
 
 	/**
+	 * ToolPlan 이벤트 처리 결과로 저장되는 Assistant/System 메시지를 멱등 키와 함께 저장합니다.
+	 */
+	@Transactional
+	public ChatMessage saveToolPlanEventMessage(
+		ChatSession chatSession,
+		ToolPlan toolPlan,
+		ToolPlanRun toolPlanRun,
+		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content,
+		String idempotencyKey
+	) {
+		validateToolPlanChatSession(chatSession, toolPlan);
+		validateToolPlanRunChatSession(chatSession, toolPlanRun);
+
+		if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+			return chatMessageRepository.findByIdempotencyKey(idempotencyKey)
+				.orElseGet(() -> saveMessage(
+					chatSession,
+					null,
+					toolPlan,
+					toolPlanRun,
+					senderType,
+					messageType,
+					contentType,
+					content,
+					idempotencyKey
+				));
+		}
+
+		return saveMessage(
+			chatSession,
+			null,
+			toolPlan,
+			toolPlanRun,
+			senderType,
+			messageType,
+			contentType,
+			content,
+			null
+		);
+	}
+
+	/**
 	 * 실패나 상태 안내에 필요한 System Notice 메시지를 저장합니다.
 	 */
 	@Transactional
@@ -209,7 +255,7 @@ public class ChatMessageService {
 		ChatMessageContentType contentType,
 		String content
 	) {
-		return saveMessage(chatSession, tool, null, senderType, messageType, contentType, content);
+		return saveMessage(chatSession, tool, null, null, senderType, messageType, contentType, content, null);
 	}
 
 	private ChatMessage saveMessage(
@@ -221,16 +267,42 @@ public class ChatMessageService {
 		ChatMessageContentType contentType,
 		String content
 	) {
+		return saveMessage(
+			chatSession,
+			tool,
+			null,
+			toolPlanRun,
+			senderType,
+			messageType,
+			contentType,
+			content,
+			null
+		);
+	}
+
+	private ChatMessage saveMessage(
+		ChatSession chatSession,
+		Tool tool,
+		ToolPlan toolPlan,
+		ToolPlanRun toolPlanRun,
+		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content,
+		String idempotencyKey
+	) {
 		Integer nextMessageOrder = getNextMessageOrder(chatSession);
 		ChatMessage chatMessage = ChatMessage.builder()
 			.chatSession(chatSession)
 			.tool(tool)
+			.toolPlan(toolPlan)
 			.toolPlanRun(toolPlanRun)
 			.messageOrder(nextMessageOrder)
 			.senderType(senderType)
 			.messageType(messageType)
 			.contentType(contentType)
 			.content(content)
+			.idempotencyKey(idempotencyKey)
 			.build();
 
 		return chatMessageRepository.save(chatMessage);
@@ -244,6 +316,12 @@ public class ChatMessageService {
 
 	private void validateToolChatSession(ChatSession chatSession, Tool tool) {
 		if (tool == null || !Objects.equals(tool.getChatSession().getId(), chatSession.getId())) {
+			throw BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
+		}
+	}
+
+	private void validateToolPlanChatSession(ChatSession chatSession, ToolPlan toolPlan) {
+		if (toolPlan != null && !Objects.equals(toolPlan.getChatSession().getId(), chatSession.getId())) {
 			throw BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
 		}
 	}
