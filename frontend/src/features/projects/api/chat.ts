@@ -62,9 +62,13 @@ export const chatApi = {
     sessionId: string,
     payload: { userMessage: string; fileName: string }
   ): Promise<ToolGenerationRunResponse> => {
+    const apiPayload = {
+      mode: 'PLAN',
+      prompt: payload.userMessage
+    };
     const response = await apiClient.post<ApiResponse<ToolGenerationRunResponse>>(
-      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/generate`,
-      payload
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/generate`,
+      apiPayload
     );
     return response.data.result;
   },

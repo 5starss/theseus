@@ -60,12 +60,12 @@ export interface ChatSessionState {
 // Tool 생성/재생성 HTTP 응답
 export interface ToolGenerationRunResponse {
   runId: string;
-  toolId: number;
+  toolId?: number;
   projectId: number;
   sessionId: number;
   status: string;
-  draftPhase: string;
-  draftVersion: number;
+  draftPhase?: string;
+  draftVersion?: number;
   sseUrl: string;
 }
 
