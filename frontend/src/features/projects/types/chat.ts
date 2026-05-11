@@ -52,7 +52,7 @@ export interface ChatSession {
   updatedAt: string;
 }
 
-export interface CurrentPlanRecovery {
+export interface CurrentPlanResponse {
   runId: string | null;
   toolPlanGroupId: number | null;
   toolPlanId: number | null;
@@ -60,18 +60,27 @@ export interface CurrentPlanRecovery {
   status: string;
 }
 
-export interface CreatedToolRecovery {
+export interface CreatedToolResponse {
   toolId: number;
   sourceToolPlanId: number | null;
   status: string;
 }
 
+export type CurrentPlanRecovery = CurrentPlanResponse;
+export type CreatedToolRecovery = CreatedToolResponse;
+
 export interface ChatSessionDetailResponse {
-  messages: ChatMessage[];
-  currentPlan: CurrentPlanRecovery | null;
-  createdTool: CreatedToolRecovery | null;
+  sessionId: number;
+  projectId: number;
+  projectMemberId: number;
   title: string;
   isClosed: boolean;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+  currentPlan: CurrentPlanResponse | null;
+  createdTool: CreatedToolResponse | null;
 }
 
 export const ToolPlanMode = {

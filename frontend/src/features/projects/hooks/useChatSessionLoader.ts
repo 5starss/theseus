@@ -63,8 +63,13 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
   ) => {
     if (!toolPlanId) return null;
 
-    const detail = await chatApi.getToolPlanDetail(projId, sessId, String(toolPlanId));
-    return parseStructuredPlan(detail.structuredPlanJson);
+    try {
+      const detail = await chatApi.getToolPlanDetail(projId, sessId, String(toolPlanId));
+      return parseStructuredPlan(detail.structuredPlanJson);
+    } catch (error) {
+      console.warn('Failed to load ToolPlan detail:', error);
+      return null;
+    }
   }, []);
 
   const recoverRunningPlan = useCallback(async (
@@ -75,18 +80,25 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
   ) => {
     if (!isRunningPlan(currentPlan)) return;
 
-    const state = await chatApi.getToolPlanRunState(projId, sessId, currentPlan.runId);
-    if (!mounted) return;
-
     setIsGenerating(true);
-    setProgressInfo({
-      step: state.message || 'PLAN 생성 중',
-      message: state.message || '',
-      percent: state.progressRate ?? 0,
-    });
-    if (state.content) {
-      updateLastMessageContent(state.content);
+
+    try {
+      const state = await chatApi.getToolPlanRunState(projId, sessId, currentPlan.runId);
+      if (!mounted) return;
+
+      setProgressInfo({
+        step: state.message || 'PLAN generation in progress',
+        message: state.message || '',
+        percent: state.progressRate ?? 0,
+      });
+      if (state.content) {
+        updateLastMessageContent(state.content);
+      }
+    } catch (error) {
+      console.warn('Failed to recover ToolPlan run state:', error);
     }
+
+    if (!mounted) return;
 
     connectSSE(
       `/api/v1/projects/${projId}/sessions/${sessId}/tool-plan-runs/${currentPlan.runId}/events`,
@@ -99,7 +111,11 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
     let isMounted = true;
 
     const loadSessionData = async () => {
-      if (!projectId || !sessionId) return;
+      if (!projectId || !sessionId) {
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
 
       try {
@@ -110,10 +126,14 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
         const structuredPlan = await loadStructuredPlan(projectId, sessionId, currentPlan?.toolPlanId);
         if (!isMounted) return;
 
+        const phase = details.createdTool
+          ? phaseFromStatus(details.createdTool.status) || 'BUILT'
+          : phaseFromStatus(currentPlan?.status);
+
         initSession({
           messages: details.messages || [],
           plan: structuredPlan,
-          phase: phaseFromStatus(currentPlan?.status),
+          phase,
           toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
           toolPlanGroupId: currentPlan?.toolPlanGroupId ? String(currentPlan.toolPlanGroupId) : null,
           toolPlanId: currentPlan?.toolPlanId ? String(currentPlan.toolPlanId) : null,
@@ -121,7 +141,7 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
           planStatus: currentPlan?.status || null,
           createdTool: details.createdTool,
           toolResult: details.createdTool ? { ...details.createdTool } : null,
-          title: details.title || '대화 세션',
+          title: details.title || 'Chat session',
           isClosed: details.isClosed,
           planVersion: currentPlan?.planVersion || 0,
           draftVersion: currentPlan?.planVersion || 0,

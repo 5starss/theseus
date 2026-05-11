@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { chatApi } from '../api/chat';
-import type { StructuredPlan, ToolGenerationSseEvent } from '../types/chat';
+import type { DraftPhase, StructuredPlan, ToolGenerationSseEvent } from '../types/chat';
 
 function parseStructuredPlan(structuredPlanJson?: string | null): StructuredPlan | null {
   if (!structuredPlanJson) return null;
@@ -24,6 +24,31 @@ function normalizeEventType(eventName?: string, payloadEventType?: string) {
   return rawEventType.toLowerCase();
 }
 
+function phaseFromStatus(status?: string | null): DraftPhase {
+  switch (status) {
+    case 'REQUESTED':
+    case 'GENERATING':
+      return 'PLAN';
+    case 'REVIEW':
+      return 'REVIEW';
+    case 'PENDING':
+      return 'PENDING';
+    case 'APPROVED':
+      return 'APPROVED';
+    case 'REJECTED':
+      return 'REJECTED';
+    case 'BUILDING':
+      return 'BUILDING';
+    case 'BUILT':
+      return 'BUILT';
+    case 'FAILED':
+    case 'SKIPPED':
+      return 'FAILED';
+    default:
+      return null;
+  }
+}
+
 export function useToolGenerationSSE() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const abortRef = useRef<AbortController | null>(null);
@@ -39,6 +64,9 @@ export function useToolGenerationSSE() {
 
   const connectSSE = useCallback((sseUrl: string, flow: 'PLAN' | 'BUILD', id?: string | number) => {
     const streamId = id == null ? sseUrl : String(id);
+    if (connectedStreamRef.current === streamId && abortRef.current) {
+      return;
+    }
     if (connectedStreamRef.current && connectedStreamRef.current !== streamId) {
       disconnectSSE();
     }
@@ -75,7 +103,7 @@ export function useToolGenerationSSE() {
 
             case 'progress':
               store.setProgressInfo({
-                step: data.message || 'PLAN 생성 중',
+                step: data.message || 'PLAN generation in progress',
                 message: data.message || '',
                 percent: data.progressRate ?? 0,
               });
@@ -94,47 +122,57 @@ export function useToolGenerationSSE() {
                 store.setIsBuilding(false);
                 store.setIsGenerating(false);
                 store.setProgressInfo({
-                  step: '완료',
-                  message: data.message || 'Tool 생성이 완료되었습니다.',
+                  step: 'Completed',
+                  message: data.message || 'Tool build completed.',
                   percent: 100,
                 });
                 if (data.toolId) {
                   store.setCurrentToolId(String(data.toolId));
                 }
-                toast.success('Tool 생성이 완료되었습니다.');
+                toast.success('Tool build completed.');
                 disconnectSSE();
                 break;
               }
 
               store.setProgressInfo({
-                step: '완료',
-                message: data.message || 'Tool PLAN 생성이 완료되었습니다.',
+                step: 'Completed',
+                message: data.message || 'Tool PLAN generation completed.',
                 percent: 100,
               });
 
               if (projectId && sessionId) {
-                const details = await chatApi.getSessionDetails(projectId, sessionId);
-                const toolPlanId = details.currentPlan?.toolPlanId || data.toolPlanId || null;
-                const detail = toolPlanId
-                  ? await chatApi.getToolPlanDetail(projectId, sessionId, String(toolPlanId))
-                  : null;
+                try {
+                  const details = await chatApi.getSessionDetails(projectId, sessionId);
+                  const toolPlanId = details.currentPlan?.toolPlanId || data.toolPlanId || null;
+                  const toolPlanGroupId = details.currentPlan?.toolPlanGroupId || data.toolPlanGroupId || null;
+                  const detail = toolPlanId
+                    ? await chatApi.getToolPlanDetail(projectId, sessionId, String(toolPlanId))
+                    : null;
+                  const phase = details.createdTool
+                    ? phaseFromStatus(details.createdTool.status) || 'BUILT'
+                    : phaseFromStatus(details.currentPlan?.status) || 'REVIEW';
 
-                store.initSession({
-                  messages: details.messages || [],
-                  plan: parseStructuredPlan(detail?.structuredPlanJson),
-                  phase: 'REVIEW',
-                  toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
-                  toolPlanGroupId: details.currentPlan?.toolPlanGroupId ? String(details.currentPlan.toolPlanGroupId) : null,
-                  toolPlanId: toolPlanId ? String(toolPlanId) : null,
-                  runId: details.currentPlan?.runId || data.runId || null,
-                  planStatus: details.currentPlan?.status || 'REVIEW',
-                  createdTool: details.createdTool,
-                  toolResult: details.createdTool ? { ...details.createdTool } : null,
-                  title: details.title || store.title,
-                  isClosed: details.isClosed || false,
-                  planVersion: details.currentPlan?.planVersion || detail?.planVersion || data.planVersion || store.planVersion,
-                  draftVersion: details.currentPlan?.planVersion || detail?.planVersion || store.draftVersion,
-                });
+                  store.initSession({
+                    messages: details.messages || [],
+                    plan: parseStructuredPlan(detail?.structuredPlanJson) || store.currentPlan,
+                    phase,
+                    toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
+                    toolPlanGroupId: toolPlanGroupId ? String(toolPlanGroupId) : null,
+                    toolPlanId: toolPlanId ? String(toolPlanId) : null,
+                    runId: details.currentPlan?.runId || data.runId || null,
+                    planStatus: details.currentPlan?.status || 'REVIEW',
+                    createdTool: details.createdTool,
+                    toolResult: details.createdTool ? { ...details.createdTool } : null,
+                    title: details.title || store.title,
+                    isClosed: details.isClosed || false,
+                    planVersion: details.currentPlan?.planVersion || detail?.planVersion || data.planVersion || store.planVersion,
+                    draftVersion: details.currentPlan?.planVersion || detail?.planVersion || store.draftVersion,
+                  });
+                } catch (error) {
+                  console.error('[SSE] Failed to refresh session details for plan:', error);
+                  store.setDraftPhase('REVIEW');
+                  store.setPlanStatus('REVIEW');
+                }
               } else {
                 store.setDraftPhase('REVIEW');
                 store.setPlanStatus('REVIEW');
@@ -148,7 +186,7 @@ export function useToolGenerationSSE() {
 
               store.setIsGenerating(false);
               store.setAbortController(null);
-              toast.success('Tool PLAN 생성이 완료되었습니다.');
+              toast.success('Tool PLAN generation completed.');
               disconnectSSE();
               break;
 
@@ -163,10 +201,10 @@ export function useToolGenerationSSE() {
                 senderType: 'ASSISTANT',
                 messageType: 'CHAT',
                 contentType: 'TEXT',
-                content: data.message || '이 요청은 Tool PLAN 생성 대상이 아닙니다.',
+                content: data.message || 'This request was handled as a general chat message.',
                 createdAt: new Date().toISOString(),
               });
-              toast.info('Tool PLAN 생성 없이 안내 메시지로 처리되었습니다.');
+              toast.info('Tool PLAN generation was skipped.');
               disconnectSSE();
               break;
 
@@ -179,14 +217,14 @@ export function useToolGenerationSSE() {
               store.setPlanStatus('FAILED');
               store.setAbortController(null);
 
-              const errorMessage = data.errorMessage || data.message || 'Tool PLAN 생성에 실패했습니다.';
+              const errorMessage = data.errorMessage || data.message || 'Tool PLAN generation failed.';
               toast.error(errorMessage);
               store.addMessage({
                 messageId: crypto.randomUUID(),
                 senderType: 'SYSTEM_NOTICE',
                 messageType: 'SYSTEM_NOTICE',
                 contentType: 'TEXT',
-                content: `생성 실패: ${errorMessage}`,
+                content: `Generation failed: ${errorMessage}`,
                 createdAt: new Date().toISOString(),
               });
               disconnectSSE();
@@ -207,7 +245,7 @@ export function useToolGenerationSSE() {
         store.setIsGenerating(false);
         store.setIsBuilding(false);
         store.setAbortController(null);
-        toast.error('SSE 연결이 끊어졌습니다.');
+        toast.error('SSE connection was lost.');
         disconnectSSE();
         throw err;
       },
