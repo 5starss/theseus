@@ -29,15 +29,22 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.tool.entity.ToolPlan;
+import com.theseus.api.domain.tool.entity.ToolPlanGroup;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
 import com.theseus.api.domain.tool.entity.ToolPlanRun;
 import com.theseus.api.domain.tool.entity.ToolPlanRunRequestType;
 import com.theseus.api.domain.tool.entity.ToolPlanRunStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanStatus;
+import com.theseus.api.domain.tool.repository.ToolPlanRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
+import com.theseus.api.domain.toolgeneration.dto.request.ToolFeedbackItemRequest;
 import com.theseus.api.domain.toolgeneration.dto.request.ToolPlanGenerationRequest;
+import com.theseus.api.domain.toolgeneration.dto.request.ToolPlanRegenerationRequest;
 import com.theseus.api.domain.toolgeneration.dto.response.ToolPlanGenerationRunResponse;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanGenerationRequestEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanKafkaPublishEvent;
+import com.theseus.api.domain.toolgeneration.event.ToolPlanRegenerationRequestEvent;
 import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -59,6 +66,9 @@ class ToolPlanGenerationServiceTest {
 
 	@Mock
 	private ToolPlanRunRepository toolPlanRunRepository;
+
+	@Mock
+	private ToolPlanRepository toolPlanRepository;
 
 	@Mock
 	private ChatSessionRepository chatSessionRepository;
@@ -89,6 +99,7 @@ class ToolPlanGenerationServiceTest {
 		objectMapper.registerModule(new JavaTimeModule());
 		toolPlanGenerationService = new ToolPlanGenerationService(
 			toolPlanRunRepository,
+			toolPlanRepository,
 			chatSessionRepository,
 			chatMessageRepository,
 			projectRepository,
@@ -257,7 +268,226 @@ class ToolPlanGenerationServiceTest {
 	}
 
 	@Test
-	@DisplayName("Kafka 발행 실패를 수신하면 ToolPlanRun을 FAILED로 전환한다")
+	@DisplayName("ToolPlan 재생성 요청은 feedback 메시지와 REGENERATE_PLAN run을 저장하고 Kafka 이벤트를 발행한다")
+	void regeneratePlanCreatesToolPlanRunAndPublishesKafkaEvent() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGroup planGroup = createToolPlanGroup(40L, fixture, chatSession);
+		ToolPlan baseToolPlan = createToolPlan(50L, fixture, chatSession, planGroup, 2L, ToolPlanStatus.REVIEW);
+		ToolPlanRegenerationRequest request = createRegenerationRequest(ToolPlanMode.PLAN, 2L);
+		ChatMessage savedUserMessage = createChatMessage(
+			chatSession,
+			4,
+			ChatMessageSenderType.USER,
+			"{\"feedbackItems\":[]}"
+		);
+		ReflectionTestUtils.setField(savedUserMessage, "id", 401L);
+		List<ChatMessage> history = List.of(
+			createChatMessage(chatSession, 1, ChatMessageSenderType.USER, "이전 질문"),
+			createChatMessage(chatSession, 2, ChatMessageSenderType.ASSISTANT, "PLAN v1"),
+			savedUserMessage
+		);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolPlanRepository.findByIdAndProjectAndChatSessionForUpdate(
+			baseToolPlan.getId(),
+			fixture.project(),
+			chatSession
+		)).thenReturn(Optional.of(baseToolPlan));
+		when(toolPlanRunRepository.save(any(ToolPlanRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(chatMessageService.saveUserToolPlanMessage(
+			same(chatSession),
+			same(baseToolPlan),
+			any(ToolPlanRun.class),
+			eq(ChatMessageType.TOOL_FEEDBACK),
+			eq(ChatMessageContentType.JSON),
+			any(String.class)
+		)).thenReturn(savedUserMessage);
+		when(chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(chatSession)).thenReturn(history);
+
+		ToolPlanGenerationRunResponse response = toolPlanGenerationService.regeneratePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			baseToolPlan.getId(),
+			request
+		);
+
+		assertThat(response.getRunId()).isNotBlank();
+		assertThat(response.getStatus()).isEqualTo(ToolPlanRunStatus.REQUESTED);
+		assertThat(response.getSseUrl())
+			.isEqualTo("/api/v1/projects/10/sessions/30/tool-plan-runs/" + response.getRunId() + "/events");
+
+		ArgumentCaptor<ToolPlanRun> runCaptor = ArgumentCaptor.forClass(ToolPlanRun.class);
+		verify(toolPlanRunRepository).save(runCaptor.capture());
+		ToolPlanRun savedRun = runCaptor.getValue();
+		assertThat(savedRun.getRequestType()).isEqualTo(ToolPlanRunRequestType.REGENERATE_PLAN);
+		assertThat(savedRun.getBaseToolPlan()).isEqualTo(baseToolPlan);
+		assertThat(savedRun.getPlanGroup()).isEqualTo(planGroup);
+		assertThat(savedRun.getUserMessageId()).isEqualTo(401L);
+		assertThat(savedRun.getRequestPayloadJson()).contains("TOOL_PLAN_REGENERATION_REQUESTED");
+		assertThat(savedRun.getHistorySnapshotJson()).contains("PLAN v1");
+
+		ArgumentCaptor<ToolPlanKafkaPublishEvent> eventCaptor =
+			ArgumentCaptor.forClass(ToolPlanKafkaPublishEvent.class);
+		verify(eventPublisher).publishEvent(eventCaptor.capture());
+		ToolPlanKafkaPublishEvent event = eventCaptor.getValue();
+		assertThat(event.key()).isEqualTo(response.getRunId());
+		assertThat(event.payload()).isInstanceOf(ToolPlanRegenerationRequestEvent.class);
+
+		ToolPlanRegenerationRequestEvent payload = (ToolPlanRegenerationRequestEvent) event.payload();
+		assertThat(payload.eventType()).isEqualTo("TOOL_PLAN_REGENERATION_REQUESTED");
+		assertThat(payload.mode()).isEqualTo(ToolPlanMode.PLAN);
+		assertThat(payload.runId()).isEqualTo(response.getRunId());
+		assertThat(payload.projectId()).isEqualTo(fixture.project().getId());
+		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
+		assertThat(payload.baseToolPlanId()).isEqualTo(baseToolPlan.getId());
+		assertThat(payload.planGroupId()).isEqualTo(planGroup.getId());
+		assertThat(payload.basePlanVersion()).isEqualTo(2L);
+		assertThat(payload.basePlan().rawMarkdown()).isEqualTo("raw markdown v2");
+		assertThat(payload.basePlan().structuredPlanJson().get("blocks")).isNotNull();
+		assertThat(payload.feedbackItems()).hasSize(1);
+		assertThat(payload.feedbackItems().get(0).getBlockId()).isEqualTo("analysis-summary");
+		assertThat(payload.history()).hasSize(3);
+		verify(toolPlanRepository, never()).save(any());
+	}
+
+	@Test
+	@DisplayName("REJECTED 상태의 ToolPlan도 재생성 요청을 받을 수 있다")
+	void regeneratePlanAllowsRejectedBaseToolPlan() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGroup planGroup = createToolPlanGroup(40L, fixture, chatSession);
+		ToolPlan baseToolPlan = createToolPlan(50L, fixture, chatSession, planGroup, 1L, ToolPlanStatus.REJECTED);
+		ToolPlanRegenerationRequest request = createRegenerationRequest(ToolPlanMode.PLAN, 1L);
+		ChatMessage savedUserMessage = createChatMessage(chatSession, 3, ChatMessageSenderType.USER, "{}");
+		ReflectionTestUtils.setField(savedUserMessage, "id", 401L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolPlanRepository.findByIdAndProjectAndChatSessionForUpdate(
+			baseToolPlan.getId(),
+			fixture.project(),
+			chatSession
+		)).thenReturn(Optional.of(baseToolPlan));
+		when(toolPlanRunRepository.save(any(ToolPlanRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(chatMessageService.saveUserToolPlanMessage(
+			same(chatSession),
+			same(baseToolPlan),
+			any(ToolPlanRun.class),
+			eq(ChatMessageType.TOOL_FEEDBACK),
+			eq(ChatMessageContentType.JSON),
+			any(String.class)
+		)).thenReturn(savedUserMessage);
+		when(chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(chatSession)).thenReturn(List.of(savedUserMessage));
+
+		ToolPlanGenerationRunResponse response = toolPlanGenerationService.regeneratePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			baseToolPlan.getId(),
+			request
+		);
+
+		assertThat(response.getStatus()).isEqualTo(ToolPlanRunStatus.REQUESTED);
+		verify(eventPublisher).publishEvent(any(ToolPlanKafkaPublishEvent.class));
+	}
+
+	@Test
+	@DisplayName("REVIEW/REJECTED가 아닌 ToolPlan은 재생성할 수 없다")
+	void regeneratePlanFailsWhenBaseToolPlanStatusIsNotRegeneratable() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGroup planGroup = createToolPlanGroup(40L, fixture, chatSession);
+		ToolPlan baseToolPlan = createToolPlan(50L, fixture, chatSession, planGroup, 1L, ToolPlanStatus.PENDING);
+		ToolPlanRegenerationRequest request = createRegenerationRequest(ToolPlanMode.PLAN, 1L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolPlanRepository.findByIdAndProjectAndChatSessionForUpdate(
+			baseToolPlan.getId(),
+			fixture.project(),
+			chatSession
+		)).thenReturn(Optional.of(baseToolPlan));
+
+		assertThatThrownBy(() -> toolPlanGenerationService.regeneratePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			baseToolPlan.getId(),
+			request
+		))
+			.isInstanceOfSatisfying(BusinessException.class, exception ->
+				assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TOOL_PLAN_REGENERATION_STATUS_REQUIRED)
+			);
+
+		verify(toolPlanRunRepository, never()).save(any());
+		verifyNoInteractions(chatMessageService, eventPublisher);
+	}
+
+	@Test
+	@DisplayName("basePlanVersion이 현재 ToolPlan 버전과 다르면 재생성 요청을 거부한다")
+	void regeneratePlanFailsWhenBasePlanVersionMismatches() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGroup planGroup = createToolPlanGroup(40L, fixture, chatSession);
+		ToolPlan baseToolPlan = createToolPlan(50L, fixture, chatSession, planGroup, 2L, ToolPlanStatus.REVIEW);
+		ToolPlanRegenerationRequest request = createRegenerationRequest(ToolPlanMode.PLAN, 1L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(toolPlanRepository.findByIdAndProjectAndChatSessionForUpdate(
+			baseToolPlan.getId(),
+			fixture.project(),
+			chatSession
+		)).thenReturn(Optional.of(baseToolPlan));
+
+		assertThatThrownBy(() -> toolPlanGenerationService.regeneratePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			baseToolPlan.getId(),
+			request
+		))
+			.isInstanceOfSatisfying(BusinessException.class, exception ->
+				assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TOOL_PLAN_VERSION_MISMATCH)
+			);
+
+		verify(toolPlanRunRepository, never()).save(any());
+		verifyNoInteractions(chatMessageService, eventPublisher);
+	}
+
+	@Test
+	@DisplayName("Kafka 諛쒗뻾 ?ㅽ뙣瑜??섏떊?섎㈃ ToolPlanRun??FAILED濡??꾪솚?쒕떎")
 	void markRunPublishFailedChangesRunStatusToFailed() {
 		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
 		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
@@ -286,6 +516,55 @@ class ToolPlanGenerationServiceTest {
 		ReflectionTestUtils.setField(request, "mode", mode);
 		ReflectionTestUtils.setField(request, "prompt", prompt);
 		return request;
+	}
+
+	private ToolPlanRegenerationRequest createRegenerationRequest(ToolPlanMode mode, Long basePlanVersion) {
+		ToolFeedbackItemRequest feedbackItem = new ToolFeedbackItemRequest();
+		ReflectionTestUtils.setField(feedbackItem, "blockId", "analysis-summary");
+		ReflectionTestUtils.setField(feedbackItem, "comment", "장애 원인 분석을 더 구체적으로 작성해줘.");
+
+		ToolPlanRegenerationRequest request = new ToolPlanRegenerationRequest();
+		ReflectionTestUtils.setField(request, "mode", mode);
+		ReflectionTestUtils.setField(request, "basePlanVersion", basePlanVersion);
+		ReflectionTestUtils.setField(request, "feedbackItems", List.of(feedbackItem));
+		return request;
+	}
+
+	private ToolPlanGroup createToolPlanGroup(
+		Long id,
+		ProjectFixture fixture,
+		ChatSession chatSession
+	) {
+		ToolPlanGroup planGroup = ToolPlanGroup.builder()
+			.project(fixture.project())
+			.chatSession(chatSession)
+			.createdByProjectMember(fixture.projectMember())
+			.build();
+		ReflectionTestUtils.setField(planGroup, "id", id);
+		return planGroup;
+	}
+
+	private ToolPlan createToolPlan(
+		Long id,
+		ProjectFixture fixture,
+		ChatSession chatSession,
+		ToolPlanGroup planGroup,
+		Long planVersion,
+		ToolPlanStatus status
+	) {
+		ToolPlan toolPlan = ToolPlan.builder()
+			.planGroup(planGroup)
+			.project(fixture.project())
+			.chatSession(chatSession)
+			.createdByProjectMember(fixture.projectMember())
+			.planVersion(planVersion)
+			.status(status)
+			.rawMarkdown("raw markdown v" + planVersion)
+			.structuredPlanJson("{\"blocks\":[{\"blockId\":\"analysis-summary\",\"title\":\"분석 요약\",\"content\":\"내용\"}]}")
+			.planSnapshot("{\"planVersion\":" + planVersion + "}")
+			.build();
+		ReflectionTestUtils.setField(toolPlan, "id", id);
+		return toolPlan;
 	}
 
 	private ChatMessage createChatMessage(
