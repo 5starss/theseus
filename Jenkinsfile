@@ -10,6 +10,9 @@ pipeline {
         PROD_COMPOSE_FILE = 'infra/docker/prod/docker-compose.prod.yml'
         PROD_ENV_FILE = 'infra/docker/prod/.env'
         PROD_ENV_CREDENTIAL_ID = 'theseus-prod-env'
+        FRONTEND_DIR = 'frontend'
+        API_SERVER_DIR = 'backend/theseus-api-server'
+        CORE_SERVER_DIR = 'backend/theseus-core-server'
     }
 
     stages {
@@ -23,11 +26,17 @@ pipeline {
         stage('Validate Pipeline Context') {
             steps {
                 script {
+                    def branchName = env.BRANCH_NAME ?: ''
+                    def isConventionBranch = branchName ==~ /^(feat|fix|refactor|chore|docs|test|hotfix)\/.+/
+
                     env.IS_MR_BUILD = (env.CHANGE_ID || env.gitlabMergeRequestIid) ? 'true' : 'false'
                     env.IS_DEPLOY_BRANCH = (env.BRANCH_NAME == 'dev' && env.IS_MR_BUILD != 'true') ? 'true' : 'false'
+                    env.IS_CI_BRANCH = (env.IS_MR_BUILD == 'true' || isConventionBranch) ? 'true' : 'false'
 
                     echo "Branch: ${env.BRANCH_NAME}"
                     echo "MR build: ${env.IS_MR_BUILD}"
+                    echo "Convention branch: ${isConventionBranch}"
+                    echo "CI branch: ${env.IS_CI_BRANCH}"
                     echo "Deploy branch: ${env.IS_DEPLOY_BRANCH}"
                 }
 
@@ -36,6 +45,52 @@ pipeline {
                     test -f Jenkinsfile
                     test -f "${PROD_COMPOSE_FILE}"
                     git diff --check
+                '''
+            }
+        }
+
+        stage('Frontend Build') {
+            when {
+                expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
+            }
+            steps {
+                echo '[CI] Building frontend'
+                dir("${FRONTEND_DIR}") {
+                    sh '''
+                        set -eu
+                        npm ci
+                        npm run build
+                    '''
+                }
+            }
+        }
+
+        stage('API Server BootJar') {
+            when {
+                expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
+            }
+            steps {
+                echo '[CI] Building API server bootJar'
+                dir("${API_SERVER_DIR}") {
+                    sh '''
+                        set -eu
+                        sed -i 's/\\r$//' gradlew
+                        chmod +x ./gradlew
+                        ./gradlew bootJar --no-daemon
+                    '''
+                }
+            }
+        }
+
+        stage('Core Server Compile') {
+            when {
+                expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
+            }
+            steps {
+                echo '[CI] Compiling Core server Python sources'
+                sh '''
+                    set -eu
+                    python3 -m compileall "${CORE_SERVER_DIR}/src" "${CORE_SERVER_DIR}/theseus_engine"
                 '''
             }
         }
