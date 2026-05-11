@@ -104,22 +104,27 @@ export function useToolGenerationSSE() {
                 try {
                   const details = await chatApi.getSessionDetails(projectId, sessionId);
 
-                  let finalPlanId = details.currentToolPlanId || store.currentToolPlanId;
-                  if (!finalPlanId && data.toolPlanId) {
-                    finalPlanId = String(data.toolPlanId);
+                  const toolId = details.createdTool ? String(details.createdTool.toolId) : null;
+                  let toolPlanId = details.currentPlan ? String(details.currentPlan.toolPlanId) : store.currentToolPlanId;
+                  if (!toolPlanId && data.toolPlanId) {
+                    toolPlanId = String(data.toolPlanId);
                   }
+
+                  let phase: DraftPhase = 'REVIEW';
+                  if (details.currentPlan?.status === 'REVIEW') phase = 'REVIEW';
+                  else if (details.createdTool) phase = 'APPROVED';
 
                   store.initSession({
                     messages: details.messages || [],
                     plan: store.currentPlan,
-                    phase: details.draftPhase || 'REVIEW',
-                    toolId: details.currentToolId,
-                    toolPlanId: finalPlanId,
-                    toolResult: details.draftSnapshot,
+                    phase: phase,
+                    toolId: toolId,
+                    toolPlanId: toolPlanId,
+                    toolResult: null,
                     title: details.title || store.title,
                     isClosed: details.isClosed || false,
-                    planVersion: data.planVersion || store.planVersion,
-                    draftVersion: details.draftVersion,
+                    planVersion: data.planVersion || details.currentPlan?.planVersion || store.planVersion,
+                    draftVersion: store.draftVersion,
                   });
                 } catch (e) {
                   console.error('[SSE] Failed to refresh session details for plan:', e);

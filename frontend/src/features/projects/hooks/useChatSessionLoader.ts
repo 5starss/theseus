@@ -131,10 +131,23 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
         if (!isMounted) return;
 
         const messages = details.messages || [];
-        let currentToolIdVal = details.currentToolId;
-        let currentToolPlanIdVal = details.currentToolPlanId;
+        
+        // 중첩 객체에서 ID 추출
+        let currentToolIdVal: string | null = details.createdTool ? String(details.createdTool.toolId) : null;
+        let currentToolPlanIdVal: string | null = details.currentPlan ? String(details.currentPlan.toolPlanId) : null;
+        const runIdVal = details.currentPlan?.runId || null;
 
-        // 복구 로직: DTO에 값이 없는 경우 히스토리에서 추출
+        // 초기 Phase 결정 (백엔드 상태 기반)
+        let initialPhase: DraftPhase = null;
+        if (details.createdTool) {
+          initialPhase = 'APPROVED';
+        } else if (details.currentPlan) {
+          const status = details.currentPlan.status;
+          if (status === 'REVIEW') initialPhase = 'REVIEW';
+          else if (status === 'GENERATING' || status === 'REQUESTED') initialPhase = 'PLAN';
+        }
+
+        // 복구 로직: DTO에 ID가 없는 경우 히스토리에서 보조적으로 추출 (하위 호환성)
         if (!currentToolIdVal && !currentToolPlanIdVal && messages.length > 0) {
           const lastToolMessage = [...messages].reverse().find(m => m.toolId);
           if (lastToolMessage) {
@@ -147,10 +160,10 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
         const enriched = await enrichWithToolDetail(
           projectId,
           currentToolIdVal,
-          details.draftPhase,
-          details.draftVersion,
-          details.planVersion,
-          details.currentPlan,
+          initialPhase,
+          0, // draftVersion은 enrich에서 채워짐
+          details.currentPlan?.planVersion || 0,
+          null, // currentPlan은 enrich에서 채워짐
           isMounted
         );
 
@@ -160,21 +173,27 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
           phase: enriched.phase,
           toolId: currentToolIdVal,
           toolPlanId: currentToolPlanIdVal,
-          toolResult: details.draftSnapshot,
+          toolResult: null, // draftSnapshot은 현재 백엔드 상세 응답에 없음
           title: details.title || '새 세션',
           isClosed: details.isClosed,
           planVersion: enriched.planVersion,
           draftVersion: enriched.draftVersion,
         });
 
-        // 진행 중인 생성 작업 복구
-        await recoverActiveGeneration(
-          projectId,
-          sessionId,
-          currentToolIdVal,
-          currentToolPlanIdVal,
-          isMounted,
-        );
+        // 진행 중인 생성 작업 복구 (runId가 있으면 우선 사용)
+        if (runIdVal && (details.currentPlan?.status === 'GENERATING' || details.currentPlan?.status === 'REQUESTED')) {
+          setIsGenerating(true);
+          const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plan-runs/${runIdVal}/events`;
+          connectSSE(sseUrl, 'PLAN', runIdVal);
+        } else {
+          await recoverActiveGeneration(
+            projectId,
+            sessionId,
+            currentToolIdVal,
+            currentToolPlanIdVal,
+            isMounted,
+          );
+        }
       } catch (error) {
         console.error('Failed to load chat session details:', error);
       } finally {
@@ -187,7 +206,7 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
     return () => {
       isMounted = false;
     };
-  }, [projectId, sessionId, initSession, enrichWithToolDetail, recoverActiveGeneration]);
+  }, [projectId, sessionId, initSession, enrichWithToolDetail, recoverActiveGeneration, connectSSE, setIsGenerating]);
 
   return { isLoading };
 }
