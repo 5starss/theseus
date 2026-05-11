@@ -18,5 +18,11 @@ public interface ToolPlanGroupRepository extends JpaRepository<ToolPlanGroup, Lo
 		ToolPlanGroupStatus status
 	);
 
+	Optional<ToolPlanGroup> findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		Project project,
+		ChatSession chatSession,
+		ToolPlanGroupStatus status
+	);
+
 	Optional<ToolPlanGroup> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
 }

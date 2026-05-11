@@ -26,6 +26,12 @@ public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 
 	Optional<ToolPlan> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
 
+	Optional<ToolPlan> findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		Project project,
+		ChatSession chatSession,
+		ToolPlanStatus status
+	);
+
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("""
 		select toolPlan
