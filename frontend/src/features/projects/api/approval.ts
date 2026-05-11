@@ -1,76 +1,71 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
 import type { PageResponse } from '@/features/admin/api';
-import type { ToolApprovalResponse, ToolApprovalApproveRequest, ToolApprovalRejectRequest } from '@/features/projects/types/approval';
+import type {
+  ToolApprovalApproveRequest,
+  ToolApprovalRejectRequest,
+  ToolApprovalResponse
+} from '@/features/projects/types/approval';
 
 const generateMockApprovals = (projectId: number): ToolApprovalResponse[] => [
   {
     toolApprovalId: 101,
     projectId,
-    toolId: 2, // 짝수: REVIEW 시뮬레이션
-    fileName: 'complex_data_analyzer.py',
-    displayName: '데이터 패턴 분석기',
+    toolId: null,
+    toolPlanId: 201,
+    planGroupId: 31,
+    planVersion: 1,
+    fileName: null,
+    displayName: 'Data Pattern Analyzer PLAN',
     requestNumber: 1,
     approvalStatus: 'PENDING',
     requestedByProjectMemberId: 5,
     requestedByUserId: 12,
-    requestedByUserName: '김개발 (Backend)',
+    requestedByUserName: 'Project Member',
     reviewedByProjectMemberId: null,
     reviewedByUserId: null,
     reviewedByUserName: null,
     reviewFeedback: null,
-    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2시간 전
+    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
     reviewedAt: null,
-    toolStatus: 'REVIEW',
-    draftPhase: 'CODE_GENERATION'
+    toolStatus: null,
+    toolPlanStatus: 'PENDING'
   },
   {
     toolApprovalId: 102,
     projectId,
-    toolId: 4,
-    fileName: 'log_parser.py',
-    displayName: '로그 분석 엔진',
+    toolId: null,
+    toolPlanId: 202,
+    planGroupId: 32,
+    planVersion: 1,
+    fileName: null,
+    displayName: 'Log Parser PLAN',
     requestNumber: 1,
     approvalStatus: 'APPROVED',
     requestedByProjectMemberId: 6,
     requestedByUserId: 15,
-    requestedByUserName: '이프론트 (Frontend)',
+    requestedByUserName: 'Project Admin',
     reviewedByProjectMemberId: 1,
     reviewedByUserId: 1,
-    reviewedByUserName: '박관리 (Admin)',
-    reviewFeedback: '코드 컨벤션 훌륭합니다. 승인합니다.',
-    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1일 전
+    reviewedByUserName: 'Reviewer',
+    reviewFeedback: 'Approved.',
+    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
     reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
-    toolStatus: 'APPROVED',
-    draftPhase: 'COMPLETED'
-  },
-  {
-    toolApprovalId: 103,
-    projectId,
-    toolId: 6,
-    fileName: 'insecure_script.py',
-    displayName: '임시 스크립트',
-    requestNumber: 2,
-    approvalStatus: 'REJECTED',
-    requestedByProjectMemberId: 5,
-    requestedByUserId: 12,
-    requestedByUserName: '김개발 (Backend)',
-    reviewedByProjectMemberId: 1,
-    reviewedByUserId: 1,
-    reviewedByUserName: '박관리 (Admin)',
-    reviewFeedback: '보안 취약점이 존재합니다. eval() 사용을 지양해주세요.',
-    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), // 2일 전
-    reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 40).toISOString(),
-    toolStatus: 'DRAFT',
-    draftPhase: 'TESTING'
+    toolStatus: null,
+    toolPlanStatus: 'APPROVED'
   }
 ];
 
 export const approvalApi = {
   /**
-   * Tool 승인 요청 목록 조회
+   * ToolPlan 승인 요청 목록을 조회합니다.
    */
-  getToolApprovals: async (projectId: string | number, page = 0, size = 20, approvalStatus?: string): Promise<PageResponse<ToolApprovalResponse>> => {
+  getToolApprovals: async (
+    projectId: string | number,
+    page = 0,
+    size = 20,
+    approvalStatus?: string
+  ): Promise<PageResponse<ToolApprovalResponse>> => {
     const params: Record<string, string | number> = { page, size };
     if (approvalStatus) {
       params.approvalStatus = approvalStatus;
@@ -83,7 +78,6 @@ export const approvalApi = {
       );
 
       if (!response.data?.result?.content || response.data.result.content.length === 0) {
-        console.warn('API returned empty tool approvals, using mock data.');
         throw new Error('Empty content');
       }
       return response.data.result;
@@ -91,21 +85,22 @@ export const approvalApi = {
       console.warn('Falling back to mock tool approvals.', error);
 
       const allMocks = generateMockApprovals(Number(projectId));
-      const filteredMocks = approvalStatus && approvalStatus !== 'ALL' 
-        ? allMocks.filter(m => m.approvalStatus === approvalStatus)
+      const filteredMocks = approvalStatus && approvalStatus !== 'ALL'
+        ? allMocks.filter((approval) => approval.approvalStatus === approvalStatus)
         : allMocks;
 
       return {
         content: filteredMocks,
-        page: page,
-        size: size,
+        page,
+        size,
         totalElements: filteredMocks.length,
-        totalPages: 1,
+        totalPages: 1
       } as PageResponse<ToolApprovalResponse>;
     }
   },
+
   /**
-   * Tool 승인
+   * ToolPlan 승인 요청을 승인합니다.
    */
   approveTool: async (
     projectId: string | number,
@@ -119,13 +114,13 @@ export const approvalApi = {
       );
       return response.data.result;
     } catch (error) {
-      console.warn('Failed to approve tool via API, simulating success.', error);
+      console.warn('Failed to approve tool plan via API, simulating success.', error);
       return new Promise((resolve) => setTimeout(resolve, 1000));
     }
   },
 
   /**
-   * Tool 반려
+   * ToolPlan 승인 요청을 반려합니다.
    */
   rejectTool: async (
     projectId: string | number,
@@ -139,8 +134,8 @@ export const approvalApi = {
       );
       return response.data.result;
     } catch (error) {
-      console.warn('Failed to reject tool via API, simulating success.', error);
+      console.warn('Failed to reject tool plan via API, simulating success.', error);
       return new Promise((resolve) => setTimeout(resolve, 1000));
     }
-  },
+  }
 };

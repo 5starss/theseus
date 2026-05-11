@@ -21,9 +21,6 @@ class ToolGenerationKafkaProducerTest {
 	private static final String TOOL_PLAN_EVENT_TOPIC = "theseus.tool-plan.event";
 	private static final String TOOL_BUILD_REQUEST_TOPIC = "theseus.tool-build.request";
 	private static final String TOOL_BUILD_EVENT_TOPIC = "theseus.tool-build.event";
-	private static final String TOOL_GENERATION_REQUEST_TOPIC = "theseus.tool-generation.request";
-	private static final String TOOL_REGENERATION_REQUEST_TOPIC = "theseus.tool-regeneration.request";
-	private static final String TOOL_GENERATION_EVENT_TOPIC = "theseus.tool-generation.event";
 
 	@Mock
 	private KafkaTemplate<String, Object> kafkaTemplate;
@@ -36,16 +33,13 @@ class ToolGenerationKafkaProducerTest {
 			TOOL_PLAN_REQUEST_TOPIC,
 			TOOL_PLAN_EVENT_TOPIC,
 			TOOL_BUILD_REQUEST_TOPIC,
-			TOOL_BUILD_EVENT_TOPIC,
-			TOOL_GENERATION_REQUEST_TOPIC,
-			TOOL_REGENERATION_REQUEST_TOPIC,
-			TOOL_GENERATION_EVENT_TOPIC
+			TOOL_BUILD_EVENT_TOPIC
 		);
 		producer = new ToolGenerationKafkaProducer(kafkaTemplate, kafkaTopicProperties);
 	}
 
 	@Test
-	@DisplayName("ToolPlan 생성 요청은 tool plan request topic으로 발행한다")
+	@DisplayName("ToolPlan request is sent to tool-plan request topic")
 	void sendToolPlanRequestSendsToToolPlanRequestTopic() {
 		String key = "plan-run-1";
 		TestKafkaEvent event = new TestKafkaEvent("plan");
@@ -58,45 +52,7 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
-	@DisplayName("Tool 생성 요청은 generation request topic으로 발행한다")
-	void sendToolGenerationRequestSendsToGenerationRequestTopic() {
-		String key = "request-1";
-		TestKafkaEvent event = new TestKafkaEvent("generate");
-		when(kafkaTemplate.send(TOOL_GENERATION_REQUEST_TOPIC, key, event))
-			.thenReturn(CompletableFuture.completedFuture(null));
-
-		producer.sendToolGenerationRequest(key, event);
-
-		verify(kafkaTemplate).send(TOOL_GENERATION_REQUEST_TOPIC, key, event);
-	}
-
-	@Test
-	@DisplayName("Tool 재생성 요청은 regeneration request topic으로 발행한다")
-	void sendToolRegenerationRequestSendsToRegenerationRequestTopic() {
-		String key = "request-2";
-		TestKafkaEvent event = new TestKafkaEvent("regenerate");
-		when(kafkaTemplate.send(TOOL_REGENERATION_REQUEST_TOPIC, key, event))
-			.thenReturn(CompletableFuture.completedFuture(null));
-
-		producer.sendToolRegenerationRequest(key, event);
-
-		verify(kafkaTemplate).send(TOOL_REGENERATION_REQUEST_TOPIC, key, event);
-	}
-
-	@Test
-	@DisplayName("Kafka 발행 실패는 호출부로 예외를 전파하지 않는다")
-	void sendDoesNotThrowWhenKafkaSendCompletesExceptionally() {
-		String key = "request-3";
-		TestKafkaEvent event = new TestKafkaEvent("failed");
-		when(kafkaTemplate.send(TOOL_GENERATION_REQUEST_TOPIC, key, event))
-			.thenReturn(CompletableFuture.failedFuture(new IllegalStateException("kafka send failed")));
-
-		assertThatCode(() -> producer.sendToolGenerationRequest(key, event))
-			.doesNotThrowAnyException();
-	}
-
-	@Test
-	@DisplayName("Tool build 요청은 build request topic으로 발행한다")
+	@DisplayName("Tool build request is sent to build request topic")
 	void sendToolBuildRequestSendsToBuildRequestTopic() {
 		String key = "build-run-1";
 		TestKafkaEvent event = new TestKafkaEvent("build");
@@ -106,6 +62,18 @@ class ToolGenerationKafkaProducerTest {
 		producer.sendToolBuildRequest(key, event);
 
 		verify(kafkaTemplate).send(TOOL_BUILD_REQUEST_TOPIC, key, event);
+	}
+
+	@Test
+	@DisplayName("Kafka send failure is not propagated to caller")
+	void sendDoesNotThrowWhenKafkaSendCompletesExceptionally() {
+		String key = "request-3";
+		TestKafkaEvent event = new TestKafkaEvent("failed");
+		when(kafkaTemplate.send(TOOL_PLAN_REQUEST_TOPIC, key, event))
+			.thenReturn(CompletableFuture.failedFuture(new IllegalStateException("kafka send failed")));
+
+		assertThatCode(() -> producer.sendToolPlanRequest(key, event))
+			.doesNotThrowAnyException();
 	}
 
 	private record TestKafkaEvent(String type) {

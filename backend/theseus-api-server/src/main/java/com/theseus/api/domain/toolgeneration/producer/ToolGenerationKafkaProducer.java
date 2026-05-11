@@ -17,14 +17,6 @@ public class ToolGenerationKafkaProducer {
 	private final KafkaTemplate<String, Object> kafkaTemplate;
 	private final KafkaTopicProperties kafkaTopicProperties;
 
-	public void sendToolGenerationRequest(String key, Object event) {
-		send(kafkaTopicProperties.toolGenerationRequest(), key, event);
-	}
-
-	public void sendToolRegenerationRequest(String key, Object event) {
-		send(kafkaTopicProperties.toolRegenerationRequest(), key, event);
-	}
-
 	public CompletableFuture<SendResult<String, Object>> sendToolPlanRequest(String key, Object event) {
 		return send(kafkaTopicProperties.toolPlanRequest(), key, event);
 	}

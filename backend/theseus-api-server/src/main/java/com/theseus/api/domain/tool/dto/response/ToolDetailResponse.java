@@ -1,7 +1,6 @@
 package com.theseus.api.domain.tool.dto.response;
 
 import com.theseus.api.domain.tool.entity.Tool;
-import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import java.time.LocalDateTime;
 import lombok.Builder;
@@ -21,12 +20,12 @@ public class ToolDetailResponse {
 	private String displayName;
 	private String displayDescription;
 	private ToolStatus status;
-	private ToolDraftPhase draftPhase;
-	private Long draftVersion;
 	private Integer toolGrade;
-	private String rawMarkdown;
-	private String structuredPlanJson;
-	private String draftSnapshot;
+	private Long sourceToolPlanId;
+	private String moduleName;
+	private String artifactPath;
+	private String codeSnapshot;
+	private String metadataJson;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 
@@ -42,12 +41,12 @@ public class ToolDetailResponse {
 			.displayName(tool.getDisplayName())
 			.displayDescription(tool.getDisplayDescription())
 			.status(tool.getStatus())
-			.draftPhase(tool.getDraftPhase())
-			.draftVersion(tool.getDraftVersion())
 			.toolGrade(tool.getToolGrade())
-			.rawMarkdown(tool.getRawMarkdown())
-			.structuredPlanJson(tool.getStructuredPlanJson())
-			.draftSnapshot(tool.getDraftSnapshot())
+			.sourceToolPlanId(tool.getSourceToolPlan() == null ? null : tool.getSourceToolPlan().getId())
+			.moduleName(tool.getModuleName())
+			.artifactPath(tool.getArtifactPath())
+			.codeSnapshot(tool.getCodeSnapshot())
+			.metadataJson(tool.getMetadataJson())
 			.createdAt(tool.getCreatedAt())
 			.updatedAt(tool.getUpdatedAt())
 			.build();

@@ -167,8 +167,12 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                     approvals.map(approval => (
                       <TableRow key={approval.toolApprovalId} className="border-slate-800 hover:bg-slate-900/40 transition-colors">
                         <TableCell>
-                          <div className="font-bold text-slate-200">{approval.displayName || approval.fileName}</div>
-                          <div className="text-[10px] text-blue-400 font-mono mt-0.5 tracking-wider uppercase">{approval.draftPhase}</div>
+                          <div className="font-bold text-slate-200">
+                            {approval.displayName || approval.fileName || `ToolPlan #${approval.toolPlanId ?? '-'}`}
+                          </div>
+                          <div className="text-[10px] text-blue-400 font-mono mt-0.5 tracking-wider uppercase">
+                            {approval.toolPlanStatus || approval.toolStatus || '-'}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm text-slate-300 font-medium">{approval.requestedByUserName}</div>

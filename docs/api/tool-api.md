@@ -20,7 +20,7 @@
 | `toolPlanStatus` | `REVIEW`, `PENDING`, `APPROVED`, `REJECTED`, `SUPERSEDED`, `FAILED` |
 | `toolPlanRunStatus` | `REQUESTED`, `GENERATING`, `COMPLETED`, `FAILED`, `SKIPPED` |
 | `toolPlanRunRequestType` | `GENERATE_PLAN`, `REGENERATE_PLAN`, `BUILD_TOOL` |
-| `toolStatus` | `ACTIVE`, `INACTIVE`, `DELETED`, `BUILD_FAILED` |
+| `toolStatus` | `DRAFT`, `PENDING`, `APPROVED`, `REJECTED`, `DELETED` |
 | `approvalStatus` | `PENDING`, `REJECTED`, `APPROVED` |
 | `senderType` | `USER`, `ASSISTANT`, `SYSTEM` |
 | `messageType` | `CHAT`, `TOOL_PLAN_REQUEST`, `TOOL_PLAN_RESPONSE`, `TOOL_FEEDBACK`, `TOOL_APPROVAL_REQUEST`, `TOOL_BUILD_NOTICE`, `SYSTEM_NOTICE` |
@@ -31,7 +31,7 @@
 실제 build가 완료된 Tool만 조회한다.
 
 ```http
-GET /api/v1/projects/{projectId}/tools?scope=accessible&status=ACTIVE&page=0&size=20
+GET /api/v1/projects/{projectId}/tools?scope=accessible&status=APPROVED&page=0&size=20
 Accept: application/json
 Authorization: Bearer {accessToken}
 ```
@@ -63,7 +63,7 @@ Authorization: Bearer {accessToken}
         "displayDescription": "최근 장애 로그를 분석하고 복구 가이드를 생성합니다.",
         "moduleName": "incident_recovery_guide",
         "artifactPath": "projects/1/incident_recovery_guide.py",
-        "status": "ACTIVE",
+        "status": "APPROVED",
         "toolGrade": 2,
         "createdAt": "2026-05-08T10:00:00",
         "updatedAt": "2026-05-08T10:10:00"
@@ -90,7 +90,7 @@ Authorization: Bearer {accessToken}
 - 프로젝트 멤버
 - `project_members.status = 진행중`
 - `project_members.can_use_tool = true`
-- `tools.status = ACTIVE`
+- `tools.status = APPROVED`
 - `tools.tool_grade IS NULL` 또는 `project_members.access_level >= tools.tool_grade`
 
 ### Response Body
@@ -112,7 +112,7 @@ Authorization: Bearer {accessToken}
     "artifactPath": "projects/1/incident_recovery_guide.py",
     "codeSnapshot": "...",
     "metadataJson": "{\"runtime\":\"python\"}",
-    "status": "ACTIVE",
+    "status": "APPROVED",
     "toolGrade": 2,
     "createdAt": "2026-05-08T10:00:00",
     "updatedAt": "2026-05-08T10:10:00"

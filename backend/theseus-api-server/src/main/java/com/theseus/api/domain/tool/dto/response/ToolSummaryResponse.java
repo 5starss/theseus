@@ -1,7 +1,6 @@
 package com.theseus.api.domain.tool.dto.response;
 
 import com.theseus.api.domain.tool.entity.Tool;
-import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import java.time.LocalDateTime;
 import lombok.Builder;
@@ -21,9 +20,8 @@ public class ToolSummaryResponse {
 	private String displayName;
 	private String displayDescription;
 	private ToolStatus status;
-	private ToolDraftPhase draftPhase;
-	private Long draftVersion;
 	private Integer toolGrade;
+	private Long sourceToolPlanId;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
 
@@ -39,9 +37,8 @@ public class ToolSummaryResponse {
 			.displayName(tool.getDisplayName())
 			.displayDescription(tool.getDisplayDescription())
 			.status(tool.getStatus())
-			.draftPhase(tool.getDraftPhase())
-			.draftVersion(tool.getDraftVersion())
 			.toolGrade(tool.getToolGrade())
+			.sourceToolPlanId(tool.getSourceToolPlan() == null ? null : tool.getSourceToolPlan().getId())
 			.createdAt(tool.getCreatedAt())
 			.updatedAt(tool.getUpdatedAt())
 			.build();

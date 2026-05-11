@@ -13,7 +13,6 @@ import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.dto.response.ToolDetailResponse;
 import com.theseus.api.domain.tool.dto.response.ToolSummaryResponse;
 import com.theseus.api.domain.tool.entity.Tool;
-import com.theseus.api.domain.tool.entity.ToolDraftPhase;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
@@ -98,9 +97,10 @@ class ToolServiceTest {
 		assertThat(response.getToolId()).isEqualTo(tool.getId());
 		assertThat(response.getStatus()).isEqualTo(ToolStatus.APPROVED);
 		assertThat(response.getToolGrade()).isEqualTo(3);
-		assertThat(response.getRawMarkdown()).isEqualTo("raw markdown detail");
-		assertThat(response.getStructuredPlanJson()).isEqualTo("{\"steps\":[\"detail\"]}");
-		assertThat(response.getDraftSnapshot()).isEqualTo("{\"version\":\"detail\"}");
+		assertThat(response.getModuleName()).isEqualTo("module-detail");
+		assertThat(response.getArtifactPath()).isEqualTo("projects/tool-query-detail.py");
+		assertThat(response.getCodeSnapshot()).isEqualTo("print('detail')");
+		assertThat(response.getMetadataJson()).isEqualTo("{\"suffix\":\"detail\"}");
 	}
 
 	@Test
@@ -240,11 +240,11 @@ class ToolServiceTest {
 			.displayName("Tool " + suffix)
 			.displayDescription("Tool query description " + suffix)
 			.status(status)
-			.draftPhase(ToolDraftPhase.REVIEW)
 			.toolGrade(toolGrade)
-			.rawMarkdown("raw markdown " + suffix)
-			.structuredPlanJson("{\"steps\":[\"" + suffix + "\"]}")
-			.draftSnapshot("{\"version\":\"" + suffix + "\"}")
+			.moduleName("module-" + suffix)
+			.artifactPath("projects/tool-query-" + suffix + ".py")
+			.codeSnapshot("print('" + suffix + "')")
+			.metadataJson("{\"suffix\":\"" + suffix + "\"}")
 			.build());
 	}
 

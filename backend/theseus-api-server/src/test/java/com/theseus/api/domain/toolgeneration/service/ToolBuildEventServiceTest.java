@@ -110,7 +110,6 @@ class ToolBuildEventServiceTest {
 		assertThat(savedTool.getDisplayName()).isEqualTo("Incident Recovery");
 		assertThat(savedTool.getDisplayDescription()).isEqualTo("Builds recovery guide.");
 		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.APPROVED);
-		assertThat(savedTool.getDraftVersion()).isEqualTo(1L);
 		assertThat(savedTool.getToolGrade()).isEqualTo(2);
 		assertThat(savedTool.getModuleName()).isEqualTo("incident_recovery");
 		assertThat(savedTool.getArtifactPath()).isEqualTo("projects/10/incident_recovery.py");
