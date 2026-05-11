@@ -17,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 @ExtendWith(MockitoExtension.class)
 class ToolGenerationKafkaProducerTest {
 
+	private static final String TOOL_PLAN_REQUEST_TOPIC = "theseus.tool-plan.request";
 	private static final String TOOL_GENERATION_REQUEST_TOPIC = "theseus.tool-generation.request";
 	private static final String TOOL_REGENERATION_REQUEST_TOPIC = "theseus.tool-regeneration.request";
 	private static final String TOOL_GENERATION_EVENT_TOPIC = "theseus.tool-generation.event";
@@ -29,6 +30,7 @@ class ToolGenerationKafkaProducerTest {
 	@BeforeEach
 	void setUp() {
 		KafkaTopicProperties kafkaTopicProperties = new KafkaTopicProperties(
+			TOOL_PLAN_REQUEST_TOPIC,
 			TOOL_GENERATION_REQUEST_TOPIC,
 			TOOL_REGENERATION_REQUEST_TOPIC,
 			TOOL_GENERATION_EVENT_TOPIC
@@ -37,7 +39,20 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
-	@DisplayName("Tool 생성 요청은 generation request topic으로 발행된다")
+	@DisplayName("ToolPlan 생성 요청은 tool plan request topic으로 발행한다")
+	void sendToolPlanRequestSendsToToolPlanRequestTopic() {
+		String key = "plan-run-1";
+		TestKafkaEvent event = new TestKafkaEvent("plan");
+		when(kafkaTemplate.send(TOOL_PLAN_REQUEST_TOPIC, key, event))
+			.thenReturn(CompletableFuture.completedFuture(null));
+
+		producer.sendToolPlanRequest(key, event);
+
+		verify(kafkaTemplate).send(TOOL_PLAN_REQUEST_TOPIC, key, event);
+	}
+
+	@Test
+	@DisplayName("Tool 생성 요청은 generation request topic으로 발행한다")
 	void sendToolGenerationRequestSendsToGenerationRequestTopic() {
 		String key = "request-1";
 		TestKafkaEvent event = new TestKafkaEvent("generate");
@@ -50,7 +65,7 @@ class ToolGenerationKafkaProducerTest {
 	}
 
 	@Test
-	@DisplayName("Tool 재생성 요청은 regeneration request topic으로 발행된다")
+	@DisplayName("Tool 재생성 요청은 regeneration request topic으로 발행한다")
 	void sendToolRegenerationRequestSendsToRegenerationRequestTopic() {
 		String key = "request-2";
 		TestKafkaEvent event = new TestKafkaEvent("regenerate");
