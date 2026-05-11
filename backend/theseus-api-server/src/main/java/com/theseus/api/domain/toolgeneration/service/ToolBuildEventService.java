@@ -1,0 +1,344 @@
+package com.theseus.api.domain.toolgeneration.service;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.theseus.api.common.exception.BusinessException;
+import com.theseus.api.common.exception.ErrorCode;
+import com.theseus.api.domain.chat.entity.ChatMessageContentType;
+import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
+import com.theseus.api.domain.chat.entity.ChatMessageType;
+import com.theseus.api.domain.chat.service.ChatMessageService;
+import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolDraftPhase;
+import com.theseus.api.domain.tool.entity.ToolPlan;
+import com.theseus.api.domain.tool.entity.ToolPlanGroup;
+import com.theseus.api.domain.tool.entity.ToolPlanGroupStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanRun;
+import com.theseus.api.domain.tool.entity.ToolPlanRunRequestType;
+import com.theseus.api.domain.tool.entity.ToolPlanStatus;
+import com.theseus.api.domain.tool.entity.ToolStatus;
+import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
+import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.event.ToolBuildArtifactPayload;
+import com.theseus.api.domain.toolgeneration.event.ToolBuildEvent;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Slf4j
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+@Service
+public class ToolBuildEventService {
+
+	private static final String DEFAULT_FAILED_CODE = "TOOL_BUILD_FAILED";
+	private static final String DEFAULT_FAILED_MESSAGE = "Tool build에 실패했습니다.";
+
+	private final ToolPlanRunRepository toolPlanRunRepository;
+	private final ToolRepository toolRepository;
+	private final ChatMessageService chatMessageService;
+	private final ObjectMapper objectMapper;
+
+	/**
+	 * Core build 완료 이벤트를 실제 Tool 산출물로 저장하고 run/group 상태를 완료 처리합니다.
+	 */
+	@Transactional
+	public void handleCompleted(ToolBuildEvent event) {
+		toolPlanRunRepository.findByRunIdForUpdate(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> handleCompletedEvent(event, toolPlanRun),
+			() -> log.warn(">>>> ToolBuild completed event skipped. runId={} not found.", event.getRunId())
+		);
+	}
+
+	/**
+	 * Core build 실패 이벤트를 run/group 실패 상태와 System Notice로 기록합니다.
+	 */
+	@Transactional
+	public void handleFailed(ToolBuildEvent event) {
+		toolPlanRunRepository.findByRunIdForUpdate(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> handleFailedEvent(event, toolPlanRun),
+			() -> log.warn(">>>> ToolBuild failed event skipped. runId={} not found.", event.getRunId())
+		);
+	}
+
+	private void handleCompletedEvent(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		if (shouldSkipEvent(event, toolPlanRun, "completed")) {
+			return;
+		}
+
+		ToolPlan toolPlan = requireBuildToolPlan(toolPlanRun, event);
+		ToolBuildArtifactPayload artifact = requireArtifact(event);
+		if (!ToolPlanStatus.APPROVED.equals(toolPlan.getStatus())) {
+			failBuildRun(
+				toolPlanRun,
+				event,
+				ErrorCode.TOOL_BUILD_EVENT_INVALID.getCode(),
+				"Approved ToolPlan만 Tool build 결과를 반영할 수 있습니다.",
+				parseCompletedAt(event)
+			);
+			return;
+		}
+
+		Tool existingTool = toolRepository.findBySourceToolPlan(toolPlan).orElse(null);
+		if (existingTool != null) {
+			completeBuildWithTool(toolPlanRun, event, toolPlan, existingTool, parseCompletedAt(event));
+			log.info(
+				">>>> ToolBuild completed event skipped by existing Tool. runId={}, toolId={}",
+				event.getRunId(),
+				existingTool.getId()
+			);
+			return;
+		}
+
+		String fileName = requireText(artifact.getFileName());
+		if (toolRepository.existsByProjectAndFileName(toolPlan.getProject(), fileName)) {
+			failBuildRun(
+				toolPlanRun,
+				event,
+				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode(),
+				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage(),
+				parseCompletedAt(event)
+			);
+			return;
+		}
+
+		Tool createdTool = toolRepository.save(Tool.builder()
+			.project(toolPlan.getProject())
+			.chatSession(toolPlan.getChatSession())
+			.createdByProjectMember(toolPlan.getCreatedByProjectMember())
+			.sourceToolPlan(toolPlan)
+			.fileName(fileName)
+			.displayName(resolveDisplayName(artifact, fileName))
+			.displayDescription(artifact.getDisplayDescription())
+			.status(ToolStatus.APPROVED)
+			.draftPhase(ToolDraftPhase.REVIEW)
+			.draftVersion(toolPlan.getPlanVersion())
+			.toolGrade(artifact.getPermissionLevel())
+			.rawMarkdown(toolPlan.getRawMarkdown())
+			.structuredPlanJson(toolPlan.getStructuredPlanJson())
+			.draftSnapshot(toolPlan.getPlanSnapshot())
+			.moduleName(artifact.getModuleName())
+			.artifactPath(artifact.getArtifactPath())
+			.codeSnapshot(artifact.getCodeSnapshot())
+			.metadataJson(writeJsonNodeAsString(artifact.getMetadataJson()))
+			.build());
+
+		completeBuildWithTool(toolPlanRun, event, toolPlan, createdTool, parseCompletedAt(event));
+		log.info(
+			">>>> ToolBuild completed event handled. runId={}, toolPlanId={}, toolId={}",
+			event.getRunId(),
+			toolPlan.getId(),
+			createdTool.getId()
+		);
+	}
+
+	private void handleFailedEvent(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		if (shouldSkipEvent(event, toolPlanRun, "failed")) {
+			return;
+		}
+
+		requireBuildToolPlan(toolPlanRun, event);
+		failBuildRun(
+			toolPlanRun,
+			event,
+			resolveCode(event.getCode()),
+			resolveFailedMessage(event.getMessage()),
+			parseFailedAt(event)
+		);
+		log.warn(
+			">>>> ToolBuild failed event handled. runId={}, code={}",
+			event.getRunId(),
+			resolveCode(event.getCode())
+		);
+	}
+
+	private boolean shouldSkipEvent(ToolBuildEvent event, ToolPlanRun toolPlanRun, String eventName) {
+		if (!ToolPlanRunRequestType.BUILD_TOOL.equals(toolPlanRun.getRequestType())) {
+			log.warn(">>>> ToolBuild {} event target run type mismatch. runId={}", eventName, event.getRunId());
+			return true;
+		}
+		if (!hasSameProjectAndSession(event, toolPlanRun)) {
+			log.warn(">>>> ToolBuild {} event target mismatch. runId={}", eventName, event.getRunId());
+			return true;
+		}
+		if (toolPlanRun.isFinished()) {
+			log.info(">>>> ToolBuild {} event skipped by terminal run. runId={}", eventName, event.getRunId());
+			return true;
+		}
+		return false;
+	}
+
+	private ToolPlan requireBuildToolPlan(ToolPlanRun toolPlanRun, ToolBuildEvent event) {
+		ToolPlan toolPlan = toolPlanRun.getBaseToolPlan();
+		if (toolPlan == null || !Objects.equals(toolPlan.getId(), event.getToolPlanId())) {
+			throw BusinessException.of(ErrorCode.TOOL_BUILD_EVENT_INVALID);
+		}
+		return toolPlan;
+	}
+
+	private ToolBuildArtifactPayload requireArtifact(ToolBuildEvent event) {
+		if (event.getArtifact() == null) {
+			throw BusinessException.of(ErrorCode.TOOL_BUILD_EVENT_INVALID);
+		}
+		return event.getArtifact();
+	}
+
+	private void completeBuildWithTool(
+		ToolPlanRun toolPlanRun,
+		ToolBuildEvent event,
+		ToolPlan toolPlan,
+		Tool tool,
+		LocalDateTime completedAt
+	) {
+		completePlanGroupBuild(toolPlan.getPlanGroup(), tool);
+		toolPlanRun.complete(toolPlan, completedAt);
+		toolPlanRun.updateLastEvent(event.getEventType(), event.getEventSequence());
+		chatMessageService.saveToolPlanEventMessage(
+			toolPlanRun.getChatSession(),
+			toolPlan,
+			toolPlanRun,
+			ChatMessageSenderType.SYSTEM,
+			ChatMessageType.TOOL_BUILD_NOTICE,
+			ChatMessageContentType.JSON,
+			createCompletedNoticeContent(event, tool),
+			createIdempotencyKey(event, "system")
+		);
+	}
+
+	private void completePlanGroupBuild(ToolPlanGroup planGroup, Tool tool) {
+		if (ToolPlanGroupStatus.APPROVED.equals(planGroup.getStatus())) {
+			planGroup.startBuilding();
+		}
+		if (ToolPlanGroupStatus.BUILDING.equals(planGroup.getStatus())) {
+			planGroup.completeBuild(tool);
+			return;
+		}
+		if (ToolPlanGroupStatus.BUILT.equals(planGroup.getStatus())
+			&& planGroup.getCreatedTool() != null
+			&& Objects.equals(planGroup.getCreatedTool().getId(), tool.getId())) {
+			return;
+		}
+
+		throw BusinessException.of(ErrorCode.TOOL_PLAN_STATUS_TRANSITION_INVALID);
+	}
+
+	private void failBuildRun(
+		ToolPlanRun toolPlanRun,
+		ToolBuildEvent event,
+		String code,
+		String message,
+		LocalDateTime failedAt
+	) {
+		ToolPlanGroup planGroup = toolPlanRun.getPlanGroup();
+		if (planGroup != null && !planGroup.isFinished()) {
+			planGroup.fail();
+		}
+		toolPlanRun.fail(code, message, failedAt);
+		toolPlanRun.updateLastEvent(event.getEventType(), event.getEventSequence());
+		chatMessageService.saveToolPlanEventMessage(
+			toolPlanRun.getChatSession(),
+			toolPlanRun.getBaseToolPlan(),
+			toolPlanRun,
+			ChatMessageSenderType.SYSTEM,
+			ChatMessageType.SYSTEM_NOTICE,
+			ChatMessageContentType.TEXT,
+			createFailedNoticeMessage(code, message),
+			createIdempotencyKey(event, "system")
+		);
+	}
+
+	private String createCompletedNoticeContent(ToolBuildEvent event, Tool tool) {
+		return """
+			{"runId":"%s","toolPlanId":%d,"toolId":%d,"status":"BUILT","fileName":"%s"}
+			""".formatted(
+			event.getRunId(),
+			event.getToolPlanId(),
+			tool.getId(),
+			tool.getFileName()
+		).trim();
+	}
+
+	private String createFailedNoticeMessage(String code, String message) {
+		return DEFAULT_FAILED_MESSAGE + " code=" + code + ", message=" + message;
+	}
+
+	private String resolveDisplayName(ToolBuildArtifactPayload artifact, String fileName) {
+		if (artifact.getDisplayName() != null && !artifact.getDisplayName().isBlank()) {
+			return artifact.getDisplayName();
+		}
+		return fileName;
+	}
+
+	private String requireText(String value) {
+		if (value == null || value.isBlank()) {
+			throw BusinessException.of(ErrorCode.TOOL_BUILD_EVENT_INVALID);
+		}
+		return value;
+	}
+
+	private String writeJsonNodeAsString(JsonNode jsonNode) {
+		if (jsonNode == null || jsonNode.isNull()) {
+			return null;
+		}
+
+		try {
+			return objectMapper.writeValueAsString(jsonNode);
+		} catch (JsonProcessingException exception) {
+			throw BusinessException.of(ErrorCode.TOOL_BUILD_EVENT_INVALID, exception);
+		}
+	}
+
+	private boolean hasSameProjectAndSession(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		return Objects.equals(event.getProjectId(), toolPlanRun.getProject().getId())
+			&& Objects.equals(event.getChatSessionId(), toolPlanRun.getChatSession().getId());
+	}
+
+	private LocalDateTime parseCompletedAt(ToolBuildEvent event) {
+		return parseDateTime(event.getCompletedAt());
+	}
+
+	private LocalDateTime parseFailedAt(ToolBuildEvent event) {
+		return parseDateTime(event.getFailedAt());
+	}
+
+	private LocalDateTime parseDateTime(String value) {
+		if (value == null || value.isBlank()) {
+			return LocalDateTime.now();
+		}
+
+		try {
+			return OffsetDateTime.parse(value).toLocalDateTime();
+		} catch (DateTimeParseException ignored) {
+			try {
+				return LocalDateTime.parse(value);
+			} catch (DateTimeParseException exception) {
+				log.warn(">>>> ToolBuild event datetime parse failed. value={}", value);
+				return LocalDateTime.now();
+			}
+		}
+	}
+
+	private String createIdempotencyKey(ToolBuildEvent event, String suffix) {
+		return "tool-build-event:" + event.getRunId() + ":" + event.getEventType() + ":" + suffix;
+	}
+
+	private String resolveCode(String code) {
+		if (code == null || code.isBlank()) {
+			return DEFAULT_FAILED_CODE;
+		}
+		return code;
+	}
+
+	private String resolveFailedMessage(String message) {
+		if (message == null || message.isBlank()) {
+			return DEFAULT_FAILED_MESSAGE;
+		}
+		return message;
+	}
+}

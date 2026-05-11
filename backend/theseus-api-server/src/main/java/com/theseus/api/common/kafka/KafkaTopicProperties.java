@@ -7,6 +7,7 @@ public record KafkaTopicProperties(
 	String toolPlanRequest,
 	String toolPlanEvent,
 	String toolBuildRequest,
+	String toolBuildEvent,
 	String toolGenerationRequest,
 	String toolRegenerationRequest,
 	String toolGenerationEvent
