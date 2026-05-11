@@ -30,8 +30,10 @@ export default function ChatSessionPage() {
         const result = await chatApi.getSessionDetails(projectId, sessionId);
         if (isMounted) {
           const details = result as Record<string, unknown>;
+          const messages = (details.messages as ChatMessage[]) || [];
+          
           initSession({
-            messages: (details.messages as ChatMessage[]) || [],
+            messages,
             plan: (details.currentPlan as StructuredPlan) || null,
             phase: (details.draftPhase as DraftPhase) || null,
             toolId: (details.currentToolId as string) || null,
@@ -40,8 +42,15 @@ export default function ChatSessionPage() {
             isClosed: (details.isClosed as boolean) || false
           });
 
-          // 복구 로직: 현재 진행 중인 Tool이 있는지 확인
-          const currentToolIdVal = details.currentToolId as string;
+          // 복구 로직: DTO에 currentToolId가 없는 경우 메시지 히스토리에서 추출
+          let currentToolIdVal = details.currentToolId as string;
+          if (!currentToolIdVal && messages.length > 0) {
+            const lastToolMessage = [...messages].reverse().find(m => m.toolId);
+            if (lastToolMessage) {
+              currentToolIdVal = String(lastToolMessage.toolId);
+            }
+          }
+
           if (currentToolIdVal) {
             try {
               // 1. 우선 Redis/진행 상태 조회
@@ -61,8 +70,8 @@ export default function ChatSessionPage() {
                 
                 const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${currentToolIdVal}/events`;
                 connectSSE(sseUrl, Number(currentToolIdVal));
-              } else if (stateResult.status === 'REVIEW' && isMounted) {
-                // 이미 생성이 완료된 경우: DB에서 전체 Plan 정보(structuredPlanJson)를 가져와서 UI 복구
+              } else if ((stateResult.status === 'REVIEW' || stateResult.status === 'DRAFT') && isMounted) {
+                // 이미 생성이 완료되었거나 중단된 경우: DB에서 전체 Plan 정보(structuredPlanJson)를 가져와서 UI 복구
                 const toolDetail = await toolApi.getTool(projectId, currentToolIdVal);
                 if (toolDetail && isMounted) {
                   if (toolDetail.structuredPlanJson) {

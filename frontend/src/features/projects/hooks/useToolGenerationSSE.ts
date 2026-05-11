@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { chatApi } from '../api/chat';
+import { toolApi } from '@/features/tools/api';
 import type { ToolGenerationSseEvent, ChatMessage, StructuredPlan, DraftPhase } from '../types/chat';
 
 /**
@@ -91,7 +92,7 @@ export function useToolGenerationSSE() {
                 message: data.message || 'Tool PLAN 생성이 완료되었습니다.',
                 percent: 100,
               });
-              
+
               // 최신 세션 정보(Plan 등)를 가져와서 스토어 갱신
               if (projectId && sessionId) {
                 try {
@@ -105,11 +106,37 @@ export function useToolGenerationSSE() {
                     title?: string;
                     isClosed?: boolean;
                   };
+
+                  // currentToolId가 없는 경우 히스토리에서 추출 (복구 로직과 동일)
+                  let finalToolId = details.currentToolId ? String(details.currentToolId) : store.currentToolId;
+                  const messages = details.messages || [];
+                  if (!finalToolId && messages.length > 0) {
+                    const lastToolMessage = [...messages].reverse().find(m => m.toolId);
+                    if (lastToolMessage) finalToolId = String(lastToolMessage.toolId);
+                  }
+
+                  // DB에서 전체 Plan 정보를 가져와서 확실히 UI 복구
+                  if (finalToolId) {
+                    const toolDetail = await toolApi.getTool(projectId, finalToolId);
+                    if (toolDetail) {
+                      if (toolDetail.structuredPlanJson) {
+                        try {
+                          const planObj = JSON.parse(toolDetail.structuredPlanJson);
+                          store.setCurrentPlan(planObj);
+                        } catch (e) {
+                          console.error('Failed to parse completed plan:', e);
+                        }
+                      }
+                      store.setDraftPhase(toolDetail.draftPhase);
+                      store.setDraftVersion(toolDetail.draftVersion);
+                    }
+                  }
+
                   store.initSession({
-                    messages: details.messages || store.messages,
-                    plan: details.currentPlan || null,
+                    messages,
+                    plan: store.currentPlan, // 위에서 업데이트한 plan 사용
                     phase: details.draftPhase || 'REVIEW',
-                    toolId: details.currentToolId ? String(details.currentToolId) : store.currentToolId,
+                    toolId: finalToolId,
                     toolResult: details.draftSnapshot || null,
                     title: details.title || store.title,
                     isClosed: details.isClosed || false
@@ -134,19 +161,22 @@ export function useToolGenerationSSE() {
               disconnectSSE();
               break;
 
-            case 'failed':
+            case 'failed': {
               store.setIsGenerating(false);
               store.setAbortController(null);
-              toast.error(data.errorMessage || 'Tool 생성에 실패했습니다.');
-              // 실패 시 시스템 메시지 추가
+
+              const errorMsg = data.errorMessage || 'Tool 생성에 실패했습니다.';
+              toast.error(errorMsg);
+
               store.addMessage({
                 messageId: crypto.randomUUID(),
                 senderType: 'SYSTEM_NOTICE',
-                content: data.errorMessage || 'Tool 생성에 실패했습니다.',
+                content: `생성 실패: ${errorMsg}`,
                 createdAt: new Date().toISOString(),
               });
               disconnectSSE();
               break;
+            }
 
             default:
               console.warn('[SSE] Unknown event type:', eventType, data);
