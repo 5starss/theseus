@@ -193,7 +193,8 @@ embeddings
 agent_knowledge
 prompt_templates
 rag_indexes
-tool_generation_contexts
+core_run_checkpoints
+core_run_events
 ```
 
 DB 역할 구분:
