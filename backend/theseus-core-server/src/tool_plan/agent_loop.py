@@ -59,10 +59,11 @@ class ToolPlanAgentLoop:
         checkpoint_callback: CheckpointCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
     ) -> ToolPlanAgentLoopResult:
-        state_machine = self._restore_state_machine((checkpoint or {}).get("stateMachine"))
-        messages = self._restore_messages((checkpoint or {}).get("conversation"))
-        tool_trace = list((checkpoint or {}).get("toolTrace") or [])
-        completed_steps = int((checkpoint or {}).get("progress", {}).get("completedTurns") or 0)
+        restored_checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
+        state_machine = self._restore_state_machine(self._dict_or_none(restored_checkpoint.get("stateMachine")))
+        messages = self._restore_messages(self._list_or_empty(restored_checkpoint.get("conversation")))
+        tool_trace = self._restore_tool_trace(restored_checkpoint.get("toolTrace"))
+        completed_steps = self._restore_completed_steps(restored_checkpoint.get("progress"))
 
         if not messages:
             messages = [ConversationMessage.from_user_text(initial_prompt)]
@@ -272,6 +273,25 @@ class ToolPlanAgentLoop:
         if not payload:
             return []
         return [ConversationMessage.model_validate(message) for message in payload]
+
+    def _restore_tool_trace(self, payload: Any) -> list[dict]:
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
+
+    def _restore_completed_steps(self, payload: Any) -> int:
+        if not isinstance(payload, dict):
+            return 0
+        try:
+            return int(payload.get("completedTurns") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _dict_or_none(self, value: Any) -> dict | None:
+        return value if isinstance(value, dict) else None
+
+    def _list_or_empty(self, value: Any) -> list:
+        return value if isinstance(value, list) else []
 
     async def _save_checkpoint(
         self,
