@@ -25,8 +25,9 @@ export function InspectorPanel() {
   const draftComments = useChatSessionStore(state => state.draftComments);
   const setDraftComment = useChatSessionStore(state => state.setDraftComment);
   const clearDraftComments = useChatSessionStore(state => state.clearDraftComments);
+  const currentToolPlanId = useChatSessionStore(state => state.currentToolPlanId);
+  const planVersion = useChatSessionStore(state => state.planVersion);
   const currentToolId = useChatSessionStore(state => state.currentToolId);
-  const draftVersion = useChatSessionStore(state => state.draftVersion);
   const isGenerating = useChatSessionStore(state => state.isGenerating);
   const isClosed = useChatSessionStore(state => state.isClosed);
   const setIsGenerating = useChatSessionStore(state => state.setIsGenerating);
@@ -38,7 +39,7 @@ export function InspectorPanel() {
   // 수정 요청 버튼 클릭 핸들러 (설계 단계)
   const handleRequestFeedbackClick = async () => {
     if (commentMode) {
-      if (!projectId || !sessionId || !currentToolId) return;
+      if (!projectId || !sessionId || !currentToolPlanId) return;
 
       // draftComments를 feedbackItems 형식으로 변환
       const feedbackItems = Object.entries(draftComments)
@@ -70,21 +71,21 @@ export function InspectorPanel() {
       setCommentMode(false);
 
       try {
-        const result = await chatApi.regenerateTool(
+        const result = await chatApi.regenerateToolPlan(
           projectId,
           sessionId,
-          currentToolId,
+          currentToolPlanId,
           {
-            baseDraftVersion: draftVersion,
+            basePlanVersion: planVersion,
             feedbackItems
           }
         );
 
         // SSE 구독 시작
-        connectSSE(result.sseUrl, result.toolId);
+        connectSSE(result.sseUrl, 'PLAN', result.runId);
         clearDraftComments();
       } catch (err) {
-        console.error('Regeneration request failed:', err);
+        console.error('Regeneration plan request failed:', err);
         setIsGenerating(false);
         toast.error('수정 요청에 실패했습니다.');
       }
@@ -97,7 +98,7 @@ export function InspectorPanel() {
 
   // 설계 확정 및 툴 빌드 핸들러
   const handleBuildTool = async () => {
-    if (!projectId || !currentToolId) return;
+    if (!projectId || !sessionId || !currentToolPlanId) return;
 
     setIsBuilding(true);
     addMessage({
@@ -107,14 +108,25 @@ export function InspectorPanel() {
       createdAt: new Date().toISOString()
     });
 
-    // 실제로는 빌드 API가 호출되어야 하지만, 
-    // 현재 백엔드는 regenerate/generate가 한 번에 코드를 생성하므로 
-    // 여기서는 탭 전환 및 로딩 시뮬레이션을 수행하거나 최종 승인 전 단계로 처리합니다.
-    setTimeout(() => {
+    try {
+      const fileName = `tool_${Date.now()}`;
+      const result = await chatApi.buildTool(
+        projectId,
+        sessionId,
+        currentToolPlanId,
+        {
+          basePlanVersion: planVersion,
+          fileName
+        }
+      );
+
+      // SSE 구독 시작
+      connectSSE(result.sseUrl, 'BUILD', result.toolId);
+    } catch (err) {
+      console.error('Build tool request failed:', err);
       setIsBuilding(false);
-      setActiveTab('result');
-      toast.success('도구 생성이 완료되었습니다. 결과물을 확인해 주세요.');
-    }, 1500);
+      toast.error('도구 생성 요청에 실패했습니다.');
+    }
   };
 
   // 최종 승인 요청 핸들러

@@ -13,7 +13,9 @@ interface ChatSessionState {
   activeTab: 'plan' | 'result';
   isBuilding: boolean;
   currentToolId: string | null;
+  currentToolPlanId: string | null;
   draftVersion: number;
+  planVersion: number;
   abortController: AbortController | null;
   title: string;
   isClosed: boolean;
@@ -24,9 +26,12 @@ interface ChatSessionState {
     plan: StructuredPlan | null;
     phase: DraftPhase;
     toolId: string | null;
+    toolPlanId?: string | null;
     toolResult: Record<string, unknown> | null;
     title: string;
     isClosed: boolean;
+    planVersion?: number;
+    draftVersion?: number;
   }) => void;
   setToolResult: (result: Record<string, unknown> | null) => void;
   setActiveTab: (tab: 'plan' | 'result') => void;
@@ -41,7 +46,9 @@ interface ChatSessionState {
   setDraftComment: (blockId: string, comment: string) => void;
   clearDraftComments: () => void;
   setCurrentToolId: (toolId: string | null) => void;
+  setCurrentToolPlanId: (planId: string | null) => void;
   setDraftVersion: (version: number) => void;
+  setPlanVersion: (version: number) => void;
   setAbortController: (ctrl: AbortController | null) => void;
   abortGeneration: () => void;
   updateTitle: (title: string) => void;
@@ -57,7 +64,9 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   commentMode: false,
   draftComments: {},
   currentToolId: null,
+  currentToolPlanId: null,
   draftVersion: 0,
+  planVersion: 0,
   toolResult: null,
   activeTab: 'plan',
   isBuilding: false,
@@ -65,15 +74,17 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   title: '',
   isClosed: false,
 
-  initSession: ({ messages, plan, phase, toolId, toolResult, title, isClosed }) => set({
+  initSession: ({ messages, plan, phase, toolId, toolPlanId, toolResult, title, isClosed, planVersion, draftVersion }) => set({
     messages,
     currentPlan: plan,
     draftPhase: phase,
     currentToolId: toolId,
+    currentToolPlanId: toolPlanId || null,
     toolResult: toolResult || null,
     activeTab: (phase === 'REVIEW' || phase === 'APPROVED') && toolResult ? 'result' : 'plan',
     isBuilding: false,
-    draftVersion: 0,
+    draftVersion: draftVersion || 0,
+    planVersion: planVersion || 0,
     title,
     isClosed,
     isGenerating: false,
@@ -106,7 +117,9 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   clearDraftComments: () => set({ draftComments: {} }),
   
   setCurrentToolId: (toolId) => set({ currentToolId: toolId }),
+  setCurrentToolPlanId: (planId) => set({ currentToolPlanId: planId }),
   setDraftVersion: (version) => set({ draftVersion: version }),
+  setPlanVersion: (version) => set({ planVersion: version }),
   setToolResult: (result) => set({ toolResult: result }),
   setActiveTab: (tab) => set({ activeTab: tab }),
   setIsBuilding: (isBuilding) => set({ isBuilding }),

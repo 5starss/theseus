@@ -18,9 +18,8 @@ export function ChatArea() {
     addMessage,
     isGenerating,
     setIsGenerating,
-    currentToolId,
-    setCurrentToolId,
-    setDraftVersion,
+    currentToolPlanId,
+    setCurrentToolPlanId,
     title,
     isClosed
   } = useChatSessionStore();
@@ -63,41 +62,37 @@ export function ChatArea() {
     try {
       let result;
 
-      if (currentToolId) {
-        // 재생성 — 기존 Tool에 대한 추가 요청
-        result = await chatApi.regenerateTool(
+      if (currentToolPlanId) {
+        // 재생성 — 기존 Plan에 대한 추가 요청
+        result = await chatApi.regenerateToolPlan(
           projectId,
           sessionId,
-          currentToolId,
+          currentToolPlanId,
           {
-            baseDraftVersion: useChatSessionStore.getState().draftVersion,
+            basePlanVersion: useChatSessionStore.getState().planVersion,
             feedbackItems: [{ blockId: 'user-input', comment: userMessage }]
           }
         );
       } else {
-        // 신규 생성 — fileName 자동 생성 (옵션 B)
-        const fileName = `tool_${Date.now()}`;
-        result = await chatApi.generateTool(
+        // 신규 생성
+        result = await chatApi.generateToolPlan(
           projectId,
           sessionId,
-          { userMessage, fileName }
+          { userMessage }
         );
       }
 
-      // 응답에서 toolId와 draftVersion을 store에 저장
-      if (result.toolId) {
-        setCurrentToolId(String(result.toolId));
-      }
-      if (result.draftVersion) {
-        setDraftVersion(result.draftVersion);
+      // 응답에서 toolPlanId를 store에 저장 (없으면 백엔드에서 아직 안준거니 기존거 유지)
+      if (result.toolPlanId) {
+        setCurrentToolPlanId(String(result.toolPlanId));
       }
 
-      // sseUrl로 SSE 구독 시작
-      connectSSE(result.sseUrl, result.toolId as number);
+      // sseUrl로 SSE 구독 시작 (PLAN flow, 식별자는 runId 사용 권장)
+      connectSSE(result.sseUrl, 'PLAN', result.runId);
     } catch (err) {
-      console.error('Tool generation request failed:', err);
+      console.error('Tool Plan generation request failed:', err);
       setIsGenerating(false);
-      toast.error('Tool 생성 요청에 실패했습니다.');
+      toast.error('설계안 생성 요청에 실패했습니다.');
     }
   };
 
