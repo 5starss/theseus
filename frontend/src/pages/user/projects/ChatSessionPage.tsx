@@ -104,6 +104,7 @@ export default function ChatSessionPage() {
                   if (stateResult.content) {
                     updateLastMessageContent(stateResult.content);
                   }
+                  // 빌드 SSE 경로는 toolId 사용
                   const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${currentToolIdVal}/generation-state/stream`;
                   connectSSE(sseUrl, 'BUILD', Number(currentToolIdVal));
                   return; // 빌드 중이면 Plan 상태 복구는 스킵
@@ -123,8 +124,12 @@ export default function ChatSessionPage() {
                   if (planStateResult.content) {
                     updateLastMessageContent(planStateResult.content);
                   }
-                  const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${currentToolPlanIdVal}/generation-state/stream`;
-                  connectSSE(sseUrl, 'PLAN', planStateResult.runId);
+                  
+                  // 설계 SSE 경로는 runId 사용 (백엔드 명세와 일치)
+                  if (planStateResult.runId) {
+                    const sseUrl = `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plan-runs/${planStateResult.runId}/events`;
+                    connectSSE(sseUrl, 'PLAN', planStateResult.runId);
+                  }
                 }
               }
             } catch (stateError) {

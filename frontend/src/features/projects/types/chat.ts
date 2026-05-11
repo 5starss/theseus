@@ -96,11 +96,15 @@ export interface ToolPlanRegenerationRequest {
 export interface ToolPlanGenerationStateResponse {
   status: string;
   toolPlanId: number;
+  runId?: string;
   planVersion: number;
   messages: ChatMessage[];
   currentPlan?: StructuredPlan;
   isClosed: boolean;
   title: string;
+  progressRate?: number;
+  message?: string;
+  content?: string;
 }
 
 // Tool Build 상태 조회 응답
@@ -109,6 +113,9 @@ export interface ToolBuildGenerationStateResponse {
   toolId: number;
   draftVersion: number;
   draftPhase: string;
+  progressRate?: number;
+  message?: string;
+  content?: string;
 }
 
 // SSE 이벤트 데이터 구조
