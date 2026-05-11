@@ -33,6 +33,8 @@ services:
   theseus-prod-kafka-init:
     image: confluentinc/cp-kafka:7.6.1
     container_name: theseus-prod-kafka-init
+    env_file:
+      - .env
     depends_on:
       theseus-prod-kafka:
         condition: service_healthy
@@ -41,13 +43,13 @@ services:
       - -c
       - |
         set -e
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-plan.request --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-plan.event --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-build.request --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-build.event --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.request --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-regeneration.request --partitions 3 --replication-factor 1
-        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic theseus.tool-generation.event --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_PLAN_REQUEST:-theseus.tool-plan.request}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_PLAN_EVENT:-theseus.tool-plan.event}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_BUILD_REQUEST:-theseus.tool-build.request}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_BUILD_EVENT:-theseus.tool-build.event}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_GENERATION_REQUEST:-theseus.tool-generation.request}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_REGENERATION_REQUEST:-theseus.tool-regeneration.request}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server theseus-prod-kafka:29092 --create --if-not-exists --topic "$${KAFKA_TOPIC_TOOL_GENERATION_EVENT:-theseus.tool-generation.event}" --partitions 3 --replication-factor 1
     networks:
       - theseus-prod-network
 
