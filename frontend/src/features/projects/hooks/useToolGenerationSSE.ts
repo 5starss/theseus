@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { chatApi } from '../api/chat';
-import { toolApi } from '@/features/tools/api';
 import type { ToolGenerationSseEvent, ChatMessage, StructuredPlan, DraftPhase } from '../types/chat';
 
 /**
@@ -13,7 +12,7 @@ import type { ToolGenerationSseEvent, ChatMessage, StructuredPlan, DraftPhase } 
  * 
  * 사용 흐름:
  *   1. HTTP로 generate/regenerate API 호출 → 응답에서 sseUrl 획득
- *   2. connectSSE(sseUrl) 호출 → SSE 이벤트를 store에 반영
+ *   2. connectSSE(sseUrl, 'PLAN' 또는 'BUILD') 호출 → SSE 이벤트를 store에 반영
  *   3. completed/failed 시 자동 종료, 또는 disconnectSSE()로 수동 종료
  */
 export function useToolGenerationSSE() {
@@ -29,13 +28,13 @@ export function useToolGenerationSSE() {
     connectedToolIdRef.current = null;
   }, []);
 
-  const connectSSE = useCallback((sseUrl: string, toolId?: number) => {
-    // 기존 연결 정리 (같은 toolId에 대한 중복 방지)
+  const connectSSE = useCallback((sseUrl: string, flow: 'PLAN' | 'BUILD', id?: string | number) => {
+    // 기존 연결 정리
     if (connectedToolIdRef.current !== null) {
       disconnectSSE();
     }
-    if (toolId !== undefined) {
-      connectedToolIdRef.current = toolId;
+    if (id !== undefined && typeof id === 'number') {
+      connectedToolIdRef.current = id;
     }
 
     const controller = new AbortController();
@@ -67,11 +66,12 @@ export function useToolGenerationSSE() {
           const store = useChatSessionStore.getState();
 
           switch (eventType) {
+            case 'CONNECTED':
             case 'connected':
-              // 연결 성공 — 별도 UI 처리 불필요, 로깅만
               console.log('[SSE] Connected to tool generation stream', data);
               break;
 
+            case 'PROGRESS':
             case 'progress':
               store.setProgressInfo({
                 step: data.message || '생성 중...',
@@ -80,13 +80,17 @@ export function useToolGenerationSSE() {
               });
               break;
 
+            case 'CHUNK':
             case 'chunk':
               if (data.content) {
                 store.updateLastMessageContent(data.content);
               }
               break;
 
-            case 'completed':
+            case 'TOOL_PLAN_COMPLETED':
+            case 'completed': // 하위호환
+              if (flow === 'BUILD') break; // 잘못된 흐름 무시
+              
               store.setProgressInfo({
                 step: '완료',
                 message: data.message || 'Tool PLAN 생성이 완료되었습니다.',
@@ -105,64 +109,78 @@ export function useToolGenerationSSE() {
                     draftSnapshot?: Record<string, unknown>;
                     title?: string;
                     isClosed?: boolean;
+                    draftVersion?: number;
+                    planVersion?: number;
                   };
 
-                  // currentToolId가 없는 경우 히스토리에서 추출 (복구 로직과 동일)
-                  let finalToolId = details.currentToolId ? String(details.currentToolId) : store.currentToolId;
-                  const messages = details.messages || [];
-                  if (!finalToolId && messages.length > 0) {
-                    const lastToolMessage = [...messages].reverse().find(m => m.toolId);
-                    if (lastToolMessage) finalToolId = String(lastToolMessage.toolId);
-                  }
-
-                  // DB에서 전체 Plan 정보를 가져와서 확실히 UI 복구
-                  if (finalToolId) {
-                    const toolDetail = await toolApi.getTool(projectId, finalToolId);
-                    if (toolDetail) {
-                      if (toolDetail.structuredPlanJson) {
-                        try {
-                          const planObj = JSON.parse(toolDetail.structuredPlanJson);
-                          store.setCurrentPlan(planObj);
-                        } catch (e) {
-                          console.error('Failed to parse completed plan:', e);
-                        }
-                      }
-                      store.setDraftPhase(toolDetail.draftPhase);
-                      store.setDraftVersion(toolDetail.draftVersion);
-                    }
+                  // currentToolPlanId가 없는 경우 data 파라미터에서 획득
+                  let finalPlanId = details.currentToolId ? String(details.currentToolId) : store.currentToolPlanId; // 백엔드 DTO 반영 전 임시 사용
+                  if (!finalPlanId && data.toolPlanId) {
+                    finalPlanId = String(data.toolPlanId);
                   }
 
                   store.initSession({
-                    messages,
-                    plan: store.currentPlan, // 위에서 업데이트한 plan 사용
+                    messages: details.messages || [],
+                    plan: store.currentPlan, // SSE에서 업데이트된 plan 유지
                     phase: details.draftPhase || 'REVIEW',
-                    toolId: finalToolId,
+                    toolId: details.currentToolId ? String(details.currentToolId) : null,
+                    toolPlanId: finalPlanId,
                     toolResult: details.draftSnapshot || null,
                     title: details.title || store.title,
-                    isClosed: details.isClosed || false
+                    isClosed: details.isClosed || false,
+                    planVersion: data.planVersion || store.planVersion,
+                    draftVersion: details.draftVersion
                   });
                 } catch (e) {
-                  console.error('[SSE] Failed to refresh session details:', e);
+                  console.error('[SSE] Failed to refresh session details for plan:', e);
                 }
               } else {
                 // 파라미터가 없는 경우 기본 처리
                 store.setDraftPhase('REVIEW');
-                if (data.draftVersion !== undefined) {
-                  store.setDraftVersion(data.draftVersion);
+                if (data.planVersion !== undefined) {
+                  store.setPlanVersion(data.planVersion);
                 }
-                if (data.toolId) {
-                  store.setCurrentToolId(String(data.toolId));
+                if (data.toolPlanId) {
+                  store.setCurrentToolPlanId(String(data.toolPlanId));
                 }
               }
 
               store.setIsGenerating(false);
               store.setAbortController(null);
-              toast.success('Tool 생성이 완료되었습니다.');
+              toast.success('설계안 생성이 완료되었습니다.');
               disconnectSSE();
               break;
 
+            case 'TOOL_GENERATION_COMPLETED':
+              if (flow === 'PLAN') break;
+
+              store.setProgressInfo({
+                step: '완료',
+                message: data.message || 'Tool 빌드가 완료되었습니다.',
+                percent: 100,
+              });
+
+              if (data.toolId) {
+                store.setCurrentToolId(String(data.toolId));
+              }
+              if (data.draftVersion !== undefined) {
+                store.setDraftVersion(data.draftVersion);
+              }
+              if (data.draftPhase) {
+                store.setDraftPhase(data.draftPhase as DraftPhase);
+              }
+              
+              store.setIsBuilding(false);
+              store.setIsGenerating(false);
+              store.setAbortController(null);
+              toast.success('도구 빌드가 완료되었습니다.');
+              disconnectSSE();
+              break;
+
+            case 'ERROR':
             case 'failed': {
               store.setIsGenerating(false);
+              store.setIsBuilding(false);
               store.setAbortController(null);
 
               const errorMsg = data.errorMessage || 'Tool 생성에 실패했습니다.';
@@ -190,6 +208,7 @@ export function useToolGenerationSSE() {
         console.error('[SSE] Connection error:', err);
         const store = useChatSessionStore.getState();
         store.setIsGenerating(false);
+        store.setIsBuilding(false);
         store.setAbortController(null);
         toast.error('SSE 연결이 끊어졌습니다.');
         disconnectSSE();

@@ -58,10 +58,20 @@ export interface ChatSessionState {
   abortController: AbortController | null;
 }
 
-// Tool 생성/재생성 HTTP 응답
-export interface ToolGenerationRunResponse {
+// Tool Plan 생성/재생성 HTTP 응답
+export interface ToolPlanGenerationResponse {
   runId: string;
-  toolId?: number;
+  toolPlanId?: number;
+  projectId: number;
+  sessionId: number;
+  status: string;
+  planVersion?: number;
+  sseUrl: string;
+}
+
+// Tool Build/Rebuild HTTP 응답
+export interface ToolBuildGenerationResponse {
+  toolId: number;
   projectId: number;
   sessionId: number;
   status: string;
@@ -70,8 +80,25 @@ export interface ToolGenerationRunResponse {
   sseUrl: string;
 }
 
-// Tool 생성/재생성 상태 조회 HTTP 응답
-export interface ToolGenerationStateResponse {
+// Tool Plan 생성 상태 조회 HTTP 응답
+export interface ToolPlanGenerationStateResponse {
+  projectId: number;
+  chatSessionId: number;
+  toolPlanId: number;
+  runId: string;
+  eventType: string;
+  status: string;
+  progressRate?: number;
+  message?: string;
+  content?: string;
+  planVersion?: number;
+  errorCode?: string;
+  errorMessage?: string;
+  updatedAt: string;
+}
+
+// Tool Build 생성 상태 조회 HTTP 응답
+export interface ToolBuildGenerationStateResponse {
   projectId: number;
   chatSessionId: number;
   toolId: number;
@@ -89,15 +116,18 @@ export interface ToolGenerationStateResponse {
 
 // SSE 이벤트 데이터 구조
 export interface ToolGenerationSseEvent {
-  eventType: 'connected' | 'progress' | 'chunk' | 'completed' | 'failed';
+  eventType: 'CONNECTED' | 'PROGRESS' | 'CHUNK' | 'TOOL_PLAN_COMPLETED' | 'TOOL_GENERATION_COMPLETED' | 'ERROR';
   projectId: number;
   chatSessionId: number;
-  toolId: number;
+  toolPlanId?: number;
+  toolId?: number;
+  runId?: string;
   status?: string;
   draftPhase?: string;
   progressRate?: number;
   message?: string;
   content?: string;
+  planVersion?: number;
   draftVersion?: number;
   errorCode?: string;
   errorMessage?: string;

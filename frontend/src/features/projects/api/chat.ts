@@ -1,7 +1,13 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
 import type { PageResponse } from '@/features/admin/api';
-import type { ChatSession, ToolGenerationRunResponse } from '@/features/projects/types/chat';
+import type { 
+  ChatSession, 
+  ToolPlanGenerationResponse, 
+  ToolBuildGenerationResponse,
+  ToolPlanGenerationStateResponse,
+  ToolBuildGenerationStateResponse
+} from '@/features/projects/types/chat';
 
 export const chatApi = {
   // 채팅 세션 생성
@@ -56,44 +62,83 @@ export const chatApi = {
     return response.data.result;
   },
 
-  // Tool 생성 (HTTP POST) — 응답의 sseUrl로 별도 SSE 구독 필요
-  generateTool: async (
+  // Tool Plan 생성 (HTTP POST) — 응답의 sseUrl로 별도 SSE 구독 필요 (runId 사용)
+  generateToolPlan: async (
     projectId: string,
     sessionId: string,
-    payload: { userMessage: string; fileName: string }
-  ): Promise<ToolGenerationRunResponse> => {
+    payload: { userMessage: string }
+  ): Promise<ToolPlanGenerationResponse> => {
     const apiPayload = {
-      mode: 'PLAN',
       prompt: payload.userMessage
     };
-    const response = await apiClient.post<ApiResponse<ToolGenerationRunResponse>>(
+    const response = await apiClient.post<ApiResponse<ToolPlanGenerationResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/generate`,
       apiPayload
     );
     return response.data.result;
   },
 
-  // Tool 재생성 (HTTP PATCH) — 응답의 sseUrl로 별도 SSE 구독 필요
-  regenerateTool: async (
+  // Tool Plan 재생성 (HTTP PATCH) — 응답의 sseUrl로 별도 SSE 구독 필요 (runId 사용)
+  regenerateToolPlan: async (
     projectId: string,
     sessionId: string,
-    toolId: string,
-    payload: { baseDraftVersion: number; feedbackItems: Array<{ blockId: string; comment: string }> }
-  ): Promise<ToolGenerationRunResponse> => {
-    const response = await apiClient.patch<ApiResponse<ToolGenerationRunResponse>>(
-      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/regenerate`,
+    toolPlanId: string,
+    payload: { basePlanVersion: number; feedbackItems: Array<{ blockId: string; comment: string }> }
+  ): Promise<ToolPlanGenerationResponse> => {
+    const response = await apiClient.patch<ApiResponse<ToolPlanGenerationResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${toolPlanId}/regenerate`,
       payload
     );
     return response.data.result;
   },
 
-  // Tool 생성/재생성 상태 조회 (HTTP GET)
+  // Tool Build 생성 (HTTP POST) — 응답의 sseUrl로 별도 SSE 구독 필요 (toolId 사용)
+  buildTool: async (
+    projectId: string,
+    sessionId: string,
+    toolPlanId: string,
+    payload: { basePlanVersion: number; fileName: string }
+  ): Promise<ToolBuildGenerationResponse> => {
+    const response = await apiClient.post<ApiResponse<ToolBuildGenerationResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${toolPlanId}/build`,
+      payload
+    );
+    return response.data.result;
+  },
+
+  // Tool Rebuild (HTTP PATCH) — 응답의 sseUrl로 별도 SSE 구독 필요 (toolId 사용)
+  rebuildTool: async (
+    projectId: string,
+    sessionId: string,
+    toolId: string,
+    payload: { baseDraftVersion: number; feedbackItems: Array<{ blockId: string; comment: string }> }
+  ): Promise<ToolBuildGenerationResponse> => {
+    const response = await apiClient.patch<ApiResponse<ToolBuildGenerationResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/rebuild`,
+      payload
+    );
+    return response.data.result;
+  },
+
+  // Tool Plan 생성 상태 조회 (HTTP GET)
+  getToolPlanGenerationState: async (
+    projectId: string,
+    sessionId: string,
+    toolPlanId: string
+  ): Promise<ToolPlanGenerationStateResponse> => {
+    const response = await apiClient.get<ApiResponse<ToolPlanGenerationStateResponse>>(
+      `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${toolPlanId}/generation-state`
+    );
+    return response.data.result;
+  },
+
+  // Tool Build 생성 상태 조회 (HTTP GET)
   getToolGenerationState: async (
     projectId: string,
     sessionId: string,
     toolId: string
-  ) => {
-    const response = await apiClient.get<ApiResponse<import('@/features/projects/types/chat').ToolGenerationStateResponse>>(
+  ): Promise<ToolBuildGenerationStateResponse> => {
+    const response = await apiClient.get<ApiResponse<ToolBuildGenerationStateResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}/tools/${toolId}/generation-state`
     );
     return response.data.result;
