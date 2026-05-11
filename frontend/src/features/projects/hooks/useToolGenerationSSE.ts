@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { chatApi } from '../api/chat';
-import type { ToolGenerationSseEvent, ChatMessage, StructuredPlan, DraftPhase } from '../types/chat';
+import type { ToolGenerationSseEvent, DraftPhase } from '../types/chat';
 
 /**
  * Tool 생성/재생성 SSE 스트림을 관리하는 훅.
@@ -60,19 +60,23 @@ export function useToolGenerationSSE() {
 
         try {
           const data: ToolGenerationSseEvent = JSON.parse(ev.data);
-          // ev.event에 이벤트 이름이 있으면 사용, 없으면 data 내부의 eventType 사용
-          const eventType = ev.event || data.eventType;
+
+          // 이벤트 타입 정규화: 백엔드가 소문자(progress, completed, failed)로 보내는 경우 대응
+          const rawEventType = ev.event || data.eventType;
+          const normalized = rawEventType.toUpperCase();
+          // 백엔드 이벤트명 → 프론트 이벤트명 매핑
+          const eventType = normalized === 'COMPLETED' ? 'TOOL_PLAN_COMPLETED'
+                          : normalized === 'FAILED' ? 'ERROR'
+                          : normalized;
 
           const store = useChatSessionStore.getState();
 
           switch (eventType) {
             case 'CONNECTED':
-            case 'connected':
               console.log('[SSE] Connected to tool generation stream', data);
               break;
 
             case 'PROGRESS':
-            case 'progress':
               store.setProgressInfo({
                 step: data.message || '생성 중...',
                 message: data.message || '',
@@ -81,15 +85,13 @@ export function useToolGenerationSSE() {
               break;
 
             case 'CHUNK':
-            case 'chunk':
               if (data.content) {
                 store.updateLastMessageContent(data.content);
               }
               break;
 
             case 'TOOL_PLAN_COMPLETED':
-            case 'completed': // 하위호환
-              if (flow === 'BUILD') break; // 잘못된 흐름 무시
+              if (flow === 'BUILD') break;
               
               store.setProgressInfo({
                 step: '완료',
@@ -100,42 +102,29 @@ export function useToolGenerationSSE() {
               // 최신 세션 정보(Plan 등)를 가져와서 스토어 갱신
               if (projectId && sessionId) {
                 try {
-                  const result = await chatApi.getSessionDetails(projectId, sessionId);
-                  const details = result as {
-                    messages?: ChatMessage[];
-                    currentPlan?: StructuredPlan;
-                    draftPhase?: DraftPhase;
-                    currentToolId?: string | number;
-                    draftSnapshot?: Record<string, unknown>;
-                    title?: string;
-                    isClosed?: boolean;
-                    draftVersion?: number;
-                    planVersion?: number;
-                  };
+                  const details = await chatApi.getSessionDetails(projectId, sessionId);
 
-                  // currentToolPlanId가 없는 경우 data 파라미터에서 획득
-                  let finalPlanId = details.currentToolId ? String(details.currentToolId) : store.currentToolPlanId; // 백엔드 DTO 반영 전 임시 사용
+                  let finalPlanId = details.currentToolPlanId || store.currentToolPlanId;
                   if (!finalPlanId && data.toolPlanId) {
                     finalPlanId = String(data.toolPlanId);
                   }
 
                   store.initSession({
                     messages: details.messages || [],
-                    plan: store.currentPlan, // SSE에서 업데이트된 plan 유지
+                    plan: store.currentPlan,
                     phase: details.draftPhase || 'REVIEW',
-                    toolId: details.currentToolId ? String(details.currentToolId) : null,
+                    toolId: details.currentToolId,
                     toolPlanId: finalPlanId,
-                    toolResult: details.draftSnapshot || null,
+                    toolResult: details.draftSnapshot,
                     title: details.title || store.title,
                     isClosed: details.isClosed || false,
                     planVersion: data.planVersion || store.planVersion,
-                    draftVersion: details.draftVersion
+                    draftVersion: details.draftVersion,
                   });
                 } catch (e) {
                   console.error('[SSE] Failed to refresh session details for plan:', e);
                 }
               } else {
-                // 파라미터가 없는 경우 기본 처리
                 store.setDraftPhase('REVIEW');
                 if (data.planVersion !== undefined) {
                   store.setPlanVersion(data.planVersion);
@@ -177,8 +166,7 @@ export function useToolGenerationSSE() {
               disconnectSSE();
               break;
 
-            case 'ERROR':
-            case 'failed': {
+            case 'ERROR': {
               store.setIsGenerating(false);
               store.setIsBuilding(false);
               store.setAbortController(null);
@@ -197,7 +185,7 @@ export function useToolGenerationSSE() {
             }
 
             default:
-              console.warn('[SSE] Unknown event type:', eventType, data);
+              console.warn('[SSE] Unknown event type:', rawEventType, data);
           }
         } catch {
           console.warn('[SSE] Failed to parse event data:', ev.data);
