@@ -16,6 +16,13 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.tool.entity.ToolPlanGroup;
+import com.theseus.api.domain.tool.entity.ToolPlanGroupStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanRunStatus;
+import com.theseus.api.domain.tool.entity.ToolPlanStatus;
+import com.theseus.api.domain.tool.repository.ToolPlanGroupRepository;
+import com.theseus.api.domain.tool.repository.ToolPlanRepository;
+import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
@@ -37,6 +44,9 @@ public class ChatSessionService {
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
+	private final ToolPlanRunRepository toolPlanRunRepository;
+	private final ToolPlanRepository toolPlanRepository;
+	private final ToolPlanGroupRepository toolPlanGroupRepository;
 
 	/**
 	 * 로그인 사용자의 프로젝트 멤버 권한으로 새 채팅 세션을 생성합니다.
@@ -84,8 +94,12 @@ public class ChatSessionService {
 	) {
 		ChatSession chatSession = getAccessibleChatSession(currentUser, projectId, sessionId);
 		List<ChatMessage> messages = chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(chatSession);
+		ChatSessionDetailResponse.CurrentPlanResponse currentPlan = resolveCurrentPlan(chatSession);
+		ChatSessionDetailResponse.CreatedToolResponse createdTool = currentPlan == null
+			? resolveCreatedTool(chatSession)
+			: null;
 
-		return ChatSessionDetailResponse.createOf(chatSession, messages);
+		return ChatSessionDetailResponse.createOf(chatSession, messages, currentPlan, createdTool);
 	}
 
 	/**
@@ -159,5 +173,46 @@ public class ChatSessionService {
 
 	private Pageable createPageable(int page, int size) {
 		return PageRequest.of(Math.max(page, 0), Math.max(size, 1));
+	}
+
+	/**
+	 * 채팅방 재진입 시 복구할 최신 ToolPlan 진행 또는 검토 상태를 선택합니다.
+	 */
+	private ChatSessionDetailResponse.CurrentPlanResponse resolveCurrentPlan(ChatSession chatSession) {
+		Project project = chatSession.getProject();
+		return toolPlanRunRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
+				project,
+				chatSession,
+				List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)
+			)
+			.map(ChatSessionDetailResponse.CurrentPlanResponse::createFrom)
+			.orElseGet(() -> resolveReviewPlan(project, chatSession));
+	}
+
+	/**
+	 * 진행 중인 run이 없을 때 검토 가능한 최신 PLAN을 복구 대상으로 선택합니다.
+	 */
+	private ChatSessionDetailResponse.CurrentPlanResponse resolveReviewPlan(Project project, ChatSession chatSession) {
+		return toolPlanRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+				project,
+				chatSession,
+				ToolPlanStatus.REVIEW
+			)
+			.map(ChatSessionDetailResponse.CurrentPlanResponse::createFrom)
+			.orElse(null);
+	}
+
+	/**
+	 * 생성이 완료된 최신 Tool 산출물을 채팅방 복구 응답에 포함합니다.
+	 */
+	private ChatSessionDetailResponse.CreatedToolResponse resolveCreatedTool(ChatSession chatSession) {
+		return toolPlanGroupRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+				chatSession.getProject(),
+				chatSession,
+				ToolPlanGroupStatus.BUILT
+			)
+			.map(ToolPlanGroup::getCreatedTool)
+			.map(ChatSessionDetailResponse.CreatedToolResponse::createFrom)
+			.orElse(null);
 	}
 }

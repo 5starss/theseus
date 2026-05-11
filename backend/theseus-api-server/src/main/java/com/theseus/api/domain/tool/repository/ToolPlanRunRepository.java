@@ -46,5 +46,11 @@ public interface ToolPlanRunRepository extends JpaRepository<ToolPlanRun, Long> 
 		ToolPlanRunStatus status
 	);
 
+	Optional<ToolPlanRun> findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
+		Project project,
+		ChatSession chatSession,
+		List<ToolPlanRunStatus> statuses
+	);
+
 	boolean existsByRunId(String runId);
 }
