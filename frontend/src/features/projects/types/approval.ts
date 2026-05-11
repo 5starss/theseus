@@ -19,6 +19,7 @@ export interface ToolApprovalResponse {
   requestedAt: string;
   reviewedAt: string | null;
   toolStatus: string | null;
+  draftPhase: string | null;
   toolPlanStatus: string | null;
 }
 

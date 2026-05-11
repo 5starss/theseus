@@ -168,10 +168,11 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                       <TableRow key={approval.toolApprovalId} className="border-slate-800 hover:bg-slate-900/40 transition-colors">
                         <TableCell>
                           <div className="font-bold text-slate-200">
-                            {approval.displayName || approval.fileName || `ToolPlan #${approval.toolPlanId ?? '-'}`}
+                            {approval.displayName || approval.fileName || `설계안 #${approval.toolPlanId ?? '-'}`}
+                            {approval.toolPlanId && <span className="ml-2 text-[10px] text-blue-400 font-normal border border-blue-400/30 px-1 py-0.5 rounded">설계안</span>}
                           </div>
                           <div className="text-[10px] text-blue-400 font-mono mt-0.5 tracking-wider uppercase">
-                            {approval.toolPlanStatus || approval.toolStatus || '-'}
+                            {approval.draftPhase || approval.toolPlanStatus || approval.toolStatus || '-'}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -222,7 +223,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                 <Clock className="w-5 h-5 text-blue-400" /> 도구 승인 검토
               </DialogTitle>
               <DialogDescription className="text-slate-400 font-medium">
-                <span className="text-blue-400 font-bold">{selectedApproval?.displayName || selectedApproval?.fileName}</span> 도구에 대한 요청을 검토합니다.
+                <span className="text-blue-400 font-bold">{selectedApproval?.displayName || selectedApproval?.fileName || '도구/설계안'}</span>에 대한 승인 요청을 검토합니다.
               </DialogDescription>
             </DialogHeader>
 
@@ -253,7 +254,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                 </div>
               </div>
 
-              {actionType === 'APPROVE' && (
+              {actionType === 'APPROVE' && !selectedApproval?.toolPlanId && (
                 <div className="space-y-2">
                   <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">도구 등급 (Tool Grade)</Label>
                   <Input
