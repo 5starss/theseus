@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -41,11 +42,12 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
         status: editStatus,
       };
       await memberApi.updateMember(projectId, selectedMember.projectMemberId, data);
+      toast.success('멤버 정보가 성공적으로 변경되었습니다.');
       onOpenChange(false);
       onSuccess();
     } catch (err) {
       console.error('Update member failed', err);
-      alert('멤버 수정에 실패했습니다.');
+      toast.error('멤버 수정에 실패했습니다.');
     } finally {
       setIsSubmitting(false);
     }
@@ -61,18 +63,33 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-6 py-4">
+          {selectedMember?.projectRole === 'ADMIN' && (
+            <div className="bg-blue-400/10 border border-blue-400/20 rounded-md p-3 flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+              <p className="text-[12px] text-blue-300 leading-relaxed">
+                프로젝트 담당자 변경은 시스템 관리자만 가능합니다.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-slate-300 uppercase text-[10px] tracking-wider">역할 (Role)</Label>
-              <Select value={editRole} onValueChange={(v: 'MEMBER' | 'MANAGER' | 'ADMIN') => setEditRole(v)}>
-                <SelectTrigger className="bg-slate-950 border-slate-800 text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-slate-800 text-white">
-                  <SelectItem value="MEMBER">Member</SelectItem>
-                  <SelectItem value="MANAGER">Manager</SelectItem>
-                </SelectContent>
-              </Select>
+              {selectedMember?.projectRole === 'ADMIN' ? (
+                <div className="bg-slate-950 border border-slate-800 text-blue-400 font-bold h-10 rounded-md px-3 flex items-center text-sm">
+                  ADMIN
+                </div>
+              ) : (
+                <Select value={editRole} onValueChange={(v: 'MEMBER' | 'MANAGER' | 'ADMIN') => setEditRole(v)}>
+                  <SelectTrigger className="bg-slate-950 border-slate-800 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-800 text-white">
+                    <SelectItem value="MEMBER">Member</SelectItem>
+                    <SelectItem value="MANAGER">Manager</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <Label className="text-slate-300 uppercase text-[10px] tracking-wider">레벨 (Access Level)</Label>
@@ -82,7 +99,7 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
                 max={99}
                 value={editAccessLevel}
                 onChange={(e) => setEditAccessLevel(Number(e.target.value))}
-                className="bg-slate-950 border-slate-800 text-white h-10 rounded-md px-3 text-sm w-full"
+                className="bg-slate-950 border-slate-800 text-white h-10 rounded-md px-3 text-sm w-full focus:ring-1 focus:ring-blue-400 outline-none"
               />
             </div>
           </div>
@@ -91,25 +108,53 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
             <Label className="flex items-center gap-2 mb-2 text-blue-400 font-bold text-[11px] uppercase tracking-wider"><ShieldAlert className="w-3.5 h-3.5" /> 도구 권한 세부 설정</Label>
             <div className="flex items-center justify-between">
               <Label htmlFor="canUse" className="text-slate-300">사용 권한 (Can Use)</Label>
-              <Switch id="canUse" checked={editCanUse} onCheckedChange={setEditCanUse} className="data-[state=checked]:bg-blue-400" />
+              <Switch
+                id="canUse"
+                checked={editCanUse}
+                onCheckedChange={setEditCanUse}
+                disabled={selectedMember?.projectRole === 'ADMIN'}
+                className="data-[state=checked]:bg-blue-400"
+              />
             </div>
             <div className="flex items-center justify-between">
               <Label htmlFor="canCreate" className="text-slate-300">생성 권한 (Can Create)</Label>
-              <Switch id="canCreate" checked={editCanCreate} onCheckedChange={setEditCanCreate} className="data-[state=checked]:bg-blue-400" />
+              <Switch
+                id="canCreate"
+                checked={editCanCreate}
+                onCheckedChange={setEditCanCreate}
+                disabled={selectedMember?.projectRole === 'ADMIN'}
+                className="data-[state=checked]:bg-blue-400"
+              />
             </div>
             <div className="flex items-center justify-between">
               <Label htmlFor="canUpdate" className="text-slate-300">수정 권한 (Can Update)</Label>
-              <Switch id="canUpdate" checked={editCanUpdate} onCheckedChange={setEditCanUpdate} className="data-[state=checked]:bg-blue-400" />
+              <Switch
+                id="canUpdate"
+                checked={editCanUpdate}
+                onCheckedChange={setEditCanUpdate}
+                disabled={selectedMember?.projectRole === 'ADMIN'}
+                className="data-[state=checked]:bg-blue-400"
+              />
             </div>
             <div className="flex items-center justify-between">
               <Label htmlFor="canDelete" className="text-slate-300">삭제 권한 (Can Delete)</Label>
-              <Switch id="canDelete" checked={editCanDelete} onCheckedChange={setEditCanDelete} className="data-[state=checked]:bg-blue-400" />
+              <Switch
+                id="canDelete"
+                checked={editCanDelete}
+                onCheckedChange={setEditCanDelete}
+                disabled={selectedMember?.projectRole === 'ADMIN'}
+                className="data-[state=checked]:bg-blue-400"
+              />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label className="text-slate-300 uppercase text-[10px] tracking-wider">멤버 상태 (Status)</Label>
-            <Select value={editStatus} onValueChange={(v: 'IN_PROGRESS' | 'COMPLETED') => setEditStatus(v)}>
+            <Select
+              value={editStatus}
+              onValueChange={(v: 'IN_PROGRESS' | 'COMPLETED') => setEditStatus(v)}
+              disabled={selectedMember?.projectRole === 'ADMIN'}
+            >
               <SelectTrigger className="bg-slate-950 border-slate-800 text-white">
                 <SelectValue />
               </SelectTrigger>
