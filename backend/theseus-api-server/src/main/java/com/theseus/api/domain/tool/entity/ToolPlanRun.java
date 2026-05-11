@@ -173,6 +173,13 @@ public class ToolPlanRun {
 		status = ToolPlanRunStatus.GENERATING;
 	}
 
+	public void startGeneratingIfRequested() {
+		validateNotFinished();
+		if (ToolPlanRunStatus.REQUESTED.equals(status)) {
+			status = ToolPlanRunStatus.GENERATING;
+		}
+	}
+
 	public void complete(ToolPlan resultToolPlan, LocalDateTime completedAt) {
 		validateNotFinished();
 		this.resultToolPlan = Objects.requireNonNull(resultToolPlan, "resultToolPlan must not be null");
@@ -211,7 +218,15 @@ public class ToolPlanRun {
 
 	public void updateLastEvent(String eventType, Long eventSequence) {
 		this.lastEventType = eventType;
-		this.lastEventSequence = eventSequence;
+		if (eventSequence != null) {
+			this.lastEventSequence = eventSequence;
+		}
+	}
+
+	public boolean hasProcessedEventSequence(Long eventSequence) {
+		return eventSequence != null
+			&& lastEventSequence != null
+			&& eventSequence <= lastEventSequence;
 	}
 
 	public boolean isFinished() {

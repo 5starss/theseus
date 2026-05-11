@@ -218,7 +218,7 @@ class ToolBuildEventServiceTest {
 	}
 
 	@Test
-	@DisplayName("project/session이 맞지 않는 build 이벤트는 DB 변경 없이 건너뛴다")
+	@DisplayName("project/session이 맞지 않는 이벤트는 DB 변경 없이 건너뛴다")
 	void skipMismatchedProjectOrSession() throws Exception {
 		// Given
 		TestFixture fixture = createApprovedBuildFixture();
@@ -242,7 +242,7 @@ class ToolBuildEventServiceTest {
 	}
 
 	@Test
-	@DisplayName("이미 종료된 build run의 terminal 이벤트는 중복 처리하지 않는다")
+	@DisplayName("이미 종료된 Run의 terminal 이벤트는 중복 처리하지 않는다")
 	void skipAlreadyFinishedRun() throws Exception {
 		// Given
 		TestFixture fixture = createApprovedBuildFixture();
@@ -261,7 +261,7 @@ class ToolBuildEventServiceTest {
 	}
 
 	@Test
-	@DisplayName("build progress 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
+	@DisplayName("progress 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
 	void handleProgressPublishesRunState() {
 		// Given
 		TestFixture fixture = createApprovedBuildFixture();
@@ -269,13 +269,14 @@ class ToolBuildEventServiceTest {
 		ToolBuildEvent event = ToolBuildEvent.builder()
 			.eventType("progress")
 			.runId(RUN_ID)
+			.eventSequence(1L)
 			.projectId(PROJECT_ID)
 			.chatSessionId(CHAT_SESSION_ID)
 			.toolPlanId(TOOL_PLAN_ID)
 			.progressRate(70)
 			.message("Building tool")
 			.build();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(buildRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
 
 		// When
 		toolBuildEventService.handleProgress(event);
@@ -287,10 +288,13 @@ class ToolBuildEventServiceTest {
 		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("progress");
 		assertThat(stateCaptor.getValue().getStatus()).isEqualTo("BUILDING");
 		assertThat(stateCaptor.getValue().getProgressRate()).isEqualTo(70);
+		assertThat(buildRun.getStatus()).isEqualTo(ToolPlanRunStatus.GENERATING);
+		assertThat(buildRun.getLastEventType()).isEqualTo("progress");
+		assertThat(buildRun.getLastEventSequence()).isEqualTo(1L);
 	}
 
 	@Test
-	@DisplayName("build chunk 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
+	@DisplayName("chunk 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
 	void handleChunkPublishesRunState() {
 		// Given
 		TestFixture fixture = createApprovedBuildFixture();
@@ -298,12 +302,13 @@ class ToolBuildEventServiceTest {
 		ToolBuildEvent event = ToolBuildEvent.builder()
 			.eventType("chunk")
 			.runId(RUN_ID)
+			.eventSequence(2L)
 			.projectId(PROJECT_ID)
 			.chatSessionId(CHAT_SESSION_ID)
 			.toolPlanId(TOOL_PLAN_ID)
 			.content("Build chunk")
 			.build();
-		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(buildRun));
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
 
 		// When
 		toolBuildEventService.handleChunk(event);
@@ -314,8 +319,38 @@ class ToolBuildEventServiceTest {
 		assertThat(stateCaptor.getValue().getRunId()).isEqualTo(RUN_ID);
 		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("chunk");
 		assertThat(stateCaptor.getValue().getContent()).isEqualTo("Build chunk");
+		assertThat(buildRun.getStatus()).isEqualTo(ToolPlanRunStatus.GENERATING);
+		assertThat(buildRun.getLastEventType()).isEqualTo("chunk");
+		assertThat(buildRun.getLastEventSequence()).isEqualTo(2L);
 	}
 
+	@Test
+	@DisplayName("이미 처리한 eventSequence보다 오래된 이벤트는 중복 처리하지 않는다")
+	void skipStaleEventSequence() throws Exception {
+		// Given
+		TestFixture fixture = createApprovedBuildFixture();
+		ToolPlanRun buildRun = createBuildRun(fixture);
+		buildRun.updateLastEvent("progress", 10L);
+		ToolBuildEvent event = ToolBuildEvent.builder()
+			.eventType("TOOL_BUILD_COMPLETED")
+			.runId(RUN_ID)
+			.eventSequence(7L)
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.toolPlanId(TOOL_PLAN_ID)
+			.artifact(createArtifact())
+			.completedAt("2026-05-11T10:12:00")
+			.build();
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
+
+		// When
+		toolBuildEventService.handleCompleted(event);
+
+		// Then
+		assertThat(buildRun.getStatus()).isEqualTo(ToolPlanRunStatus.REQUESTED);
+		assertThat(buildRun.getLastEventSequence()).isEqualTo(10L);
+		verifyNoInteractions(toolRepository, chatMessageService, toolPlanRunStatePublisher);
+	}
 	private ToolBuildEvent createCompletedEvent() throws Exception {
 		return ToolBuildEvent.builder()
 			.eventType("TOOL_BUILD_COMPLETED")
