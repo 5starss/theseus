@@ -84,17 +84,22 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    group_add:
+      - "988"
     environment:
       ENV: prod
       AUTH_MODE: spring
       CORE_KAFKA_CONSUMER_ENABLED: true
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
+      DOCKER_HOST: unix:///var/run/docker.sock
       SPRING_BOOT_INTERNAL_URL: http://theseus-api-server:8080
       SPRING_BOOT_AUTH_VERIFY_URL: http://theseus-api-server:8080/api/internal/auth/verify
       SPRING_BOOT_PROJECT_PERMISSIONS_URL: http://theseus-api-server:8080/api/internal/project/permissions
       SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
       SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
       SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8086:8086"
     depends_on:
