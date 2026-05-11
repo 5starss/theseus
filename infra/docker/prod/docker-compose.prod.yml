@@ -149,8 +149,8 @@ services:
       theseus-core-server:
         condition: service_started
     volumes:
-      - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
+      - theseus-certbot-www:/var/www/certbot
+      - theseus-certbot-conf:/etc/letsencrypt
     networks:
       - theseus-prod-network
 
@@ -158,8 +158,8 @@ services:
     image: certbot/certbot:latest
     container_name: theseus-certbot
     volumes:
-      - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
+      - theseus-certbot-www:/var/www/certbot
+      - theseus-certbot-conf:/etc/letsencrypt
     networks:
       - theseus-prod-network
 
@@ -171,3 +171,7 @@ networks:
 volumes:
   theseus-prod-kafka-data:
     name: theseus-prod-kafka-data
+  theseus-certbot-www:
+    name: theseus-certbot-www
+  theseus-certbot-conf:
+    name: theseus-certbot-conf
