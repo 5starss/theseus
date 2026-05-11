@@ -30,6 +30,7 @@ import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
 import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolPlanRunState;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildArtifactPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildEvent;
 import com.theseus.api.domain.user.entity.User;
@@ -60,6 +61,9 @@ class ToolBuildEventServiceTest {
 	@Mock
 	private ChatMessageService chatMessageService;
 
+	@Mock
+	private ToolPlanRunStatePublisher toolPlanRunStatePublisher;
+
 	private ObjectMapper objectMapper;
 	private ToolBuildEventService toolBuildEventService;
 
@@ -70,7 +74,8 @@ class ToolBuildEventServiceTest {
 			toolPlanRunRepository,
 			toolRepository,
 			chatMessageService,
-			objectMapper
+			objectMapper,
+			toolPlanRunStatePublisher
 		);
 	}
 
@@ -253,6 +258,62 @@ class ToolBuildEventServiceTest {
 
 		// Then
 		verifyNoInteractions(toolRepository, chatMessageService);
+	}
+
+	@Test
+	@DisplayName("build progress 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
+	void handleProgressPublishesRunState() {
+		// Given
+		TestFixture fixture = createApprovedBuildFixture();
+		ToolPlanRun buildRun = createBuildRun(fixture);
+		ToolBuildEvent event = ToolBuildEvent.builder()
+			.eventType("progress")
+			.runId(RUN_ID)
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.toolPlanId(TOOL_PLAN_ID)
+			.progressRate(70)
+			.message("Building tool")
+			.build();
+		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(buildRun));
+
+		// When
+		toolBuildEventService.handleProgress(event);
+
+		// Then
+		ArgumentCaptor<ToolPlanRunState> stateCaptor = ArgumentCaptor.forClass(ToolPlanRunState.class);
+		verify(toolPlanRunStatePublisher).publishProgress(stateCaptor.capture());
+		assertThat(stateCaptor.getValue().getRunId()).isEqualTo(RUN_ID);
+		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("progress");
+		assertThat(stateCaptor.getValue().getStatus()).isEqualTo("BUILDING");
+		assertThat(stateCaptor.getValue().getProgressRate()).isEqualTo(70);
+	}
+
+	@Test
+	@DisplayName("build chunk 이벤트는 runId 기준 상태로 변환해 Redis/SSE Publisher에 위임한다")
+	void handleChunkPublishesRunState() {
+		// Given
+		TestFixture fixture = createApprovedBuildFixture();
+		ToolPlanRun buildRun = createBuildRun(fixture);
+		ToolBuildEvent event = ToolBuildEvent.builder()
+			.eventType("chunk")
+			.runId(RUN_ID)
+			.projectId(PROJECT_ID)
+			.chatSessionId(CHAT_SESSION_ID)
+			.toolPlanId(TOOL_PLAN_ID)
+			.content("Build chunk")
+			.build();
+		when(toolPlanRunRepository.findByRunId(RUN_ID)).thenReturn(Optional.of(buildRun));
+
+		// When
+		toolBuildEventService.handleChunk(event);
+
+		// Then
+		ArgumentCaptor<ToolPlanRunState> stateCaptor = ArgumentCaptor.forClass(ToolPlanRunState.class);
+		verify(toolPlanRunStatePublisher).publishChunk(stateCaptor.capture());
+		assertThat(stateCaptor.getValue().getRunId()).isEqualTo(RUN_ID);
+		assertThat(stateCaptor.getValue().getEventType()).isEqualTo("chunk");
+		assertThat(stateCaptor.getValue().getContent()).isEqualTo("Build chunk");
 	}
 
 	private ToolBuildEvent createCompletedEvent() throws Exception {
