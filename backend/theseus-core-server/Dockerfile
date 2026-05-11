@@ -34,6 +34,7 @@ ENV PATH=/home/appuser/.local/bin:$PATH \
 # 소스 코드 복사
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser theseus_engine/ ./theseus_engine/
+RUN python -m compileall src theseus_engine
 # 설정 파일 등 복사 (필요시)
 # COPY --chown=appuser:appuser .env.example ./.env.example
 
