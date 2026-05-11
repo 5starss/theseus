@@ -54,14 +54,14 @@ pipeline {
                 expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
             }
             steps {
-                echo '[CI] Building frontend'
-                dir("${FRONTEND_DIR}") {
-                    sh '''
-                        set -eu
-                        npm ci
-                        npm run build
-                    '''
-                }
+                echo '[CI] Building frontend Docker image'
+                sh '''
+                    set -eu
+                    docker build \
+                        --build-arg VITE_API_BASE_URL=http://localhost \
+                        -f "${FRONTEND_DIR}/Dockerfile" \
+                        "${FRONTEND_DIR}"
+                '''
             }
         }
 
@@ -70,15 +70,11 @@ pipeline {
                 expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
             }
             steps {
-                echo '[CI] Building API server bootJar'
-                dir("${API_SERVER_DIR}") {
-                    sh '''
-                        set -eu
-                        sed -i 's/\\r$//' gradlew
-                        chmod +x ./gradlew
-                        ./gradlew bootJar --no-daemon
-                    '''
-                }
+                echo '[CI] Building API server Docker image'
+                sh '''
+                    set -eu
+                    docker build -f "${API_SERVER_DIR}/Dockerfile" "${API_SERVER_DIR}"
+                '''
             }
         }
 
@@ -87,10 +83,10 @@ pipeline {
                 expression { env.IS_CI_BRANCH == 'true' || env.IS_DEPLOY_BRANCH == 'true' }
             }
             steps {
-                echo '[CI] Compiling Core server Python sources'
+                echo '[CI] Building Core server Docker image'
                 sh '''
                     set -eu
-                    python3 -m compileall "${CORE_SERVER_DIR}/src" "${CORE_SERVER_DIR}/theseus_engine"
+                    docker build -f "${CORE_SERVER_DIR}/Dockerfile" "${CORE_SERVER_DIR}"
                 '''
             }
         }
