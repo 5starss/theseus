@@ -132,7 +132,10 @@ services:
       - theseus-prod-network
 
   theseus-nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    image: theseus-nginx:prod
     container_name: theseus-prod-nginx
     restart: unless-stopped
     ports:
@@ -146,8 +149,16 @@ services:
       theseus-core-server:
         condition: service_started
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    networks:
+      - theseus-prod-network
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: theseus-certbot
+    volumes:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     networks:
