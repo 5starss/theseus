@@ -82,6 +82,8 @@ public enum ErrorCode {
     TOOL_PLAN_RUN_ID_REQUIRED(HttpStatus.BAD_REQUEST, "TPLN-002", "ToolPlanRun runId는 비어 있을 수 없습니다."),
     TOOL_PLAN_STATUS_TRANSITION_INVALID(HttpStatus.CONFLICT, "TPLN-003", "ToolPlan 상태를 전환할 수 없습니다."),
     TOOL_PLAN_RUN_ALREADY_FINISHED(HttpStatus.CONFLICT, "TPLN-004", "이미 종료된 ToolPlanRun입니다."),
+    TOOL_PLAN_REQUEST_MODE_INVALID(HttpStatus.BAD_REQUEST, "TPLN-005", "PLAN 모드에서만 PLAN 생성을 요청할 수 있습니다."),
+    TOOL_PLAN_KAFKA_PUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TPLN-006", "ToolPlan 생성 요청 발행에 실패했습니다."),
 
     // Billing
     BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),

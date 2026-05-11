@@ -18,6 +18,7 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.entity.Tool;
+import com.theseus.api.domain.tool.entity.ToolPlanRun;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -154,6 +155,30 @@ public class ChatMessageService {
 	}
 
 	/**
+	 * ToolPlanRun 생성 요청에 해당하는 사용자 메시지를 세션 순서에 맞춰 저장합니다.
+	 */
+	@Transactional
+	public ChatMessage saveUserToolPlanRunMessage(
+		ChatSession chatSession,
+		ToolPlanRun toolPlanRun,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
+		validateToolPlanRunChatSession(chatSession, toolPlanRun);
+
+		return saveMessage(
+			chatSession,
+			null,
+			toolPlanRun,
+			ChatMessageSenderType.USER,
+			messageType,
+			contentType,
+			content
+		);
+	}
+
+	/**
 	 * 실패나 상태 안내에 필요한 System Notice 메시지를 저장합니다.
 	 */
 	@Transactional
@@ -184,10 +209,23 @@ public class ChatMessageService {
 		ChatMessageContentType contentType,
 		String content
 	) {
+		return saveMessage(chatSession, tool, null, senderType, messageType, contentType, content);
+	}
+
+	private ChatMessage saveMessage(
+		ChatSession chatSession,
+		Tool tool,
+		ToolPlanRun toolPlanRun,
+		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
 		Integer nextMessageOrder = getNextMessageOrder(chatSession);
 		ChatMessage chatMessage = ChatMessage.builder()
 			.chatSession(chatSession)
 			.tool(tool)
+			.toolPlanRun(toolPlanRun)
 			.messageOrder(nextMessageOrder)
 			.senderType(senderType)
 			.messageType(messageType)
@@ -206,6 +244,12 @@ public class ChatMessageService {
 
 	private void validateToolChatSession(ChatSession chatSession, Tool tool) {
 		if (tool == null || !Objects.equals(tool.getChatSession().getId(), chatSession.getId())) {
+			throw BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
+		}
+	}
+
+	private void validateToolPlanRunChatSession(ChatSession chatSession, ToolPlanRun toolPlanRun) {
+		if (toolPlanRun == null || !Objects.equals(toolPlanRun.getChatSession().getId(), chatSession.getId())) {
 			throw BusinessException.of(ErrorCode.TOOL_CHAT_SESSION_MISMATCH);
 		}
 	}
