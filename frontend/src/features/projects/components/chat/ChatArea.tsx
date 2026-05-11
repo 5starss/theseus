@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { Lock } from 'lucide-react';
@@ -10,19 +10,33 @@ import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import { TypingIndicator } from '@/components/ui/TypingIndicator';
 import { ToolPlanMode } from '../../types/chat';
+import type { ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+
+const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
+  { value: ToolPlanMode.ASK, label: 'ASK', description: '일반 대화' },
+  { value: ToolPlanMode.PLAN, label: 'PLAN', description: '도구 명세' },
+  { value: ToolPlanMode.AGENT, label: 'AGENT', description: '실행 준비' },
+];
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const { currentProject } = useProjectStore();
   const {
     messages,
+    mode,
     addMessage,
     isGenerating,
     setIsGenerating,
     currentToolPlanId,
-    setCurrentToolPlanId,
+    draftPhase,
     title,
-    isClosed
+    isClosed,
+    planVersion,
+    setMode,
+    setCurrentRunId,
+    setDraftPhase,
+    setPlanStatus,
+    setCurrentPlan,
   } = useChatSessionStore();
 
   const [input, setInput] = useState('');
@@ -37,64 +51,89 @@ export function ChatArea() {
     scrollToBottom();
   }, [messages, isGenerating]);
 
+  const appendUserMessage = (content: string) => {
+    addMessage({
+      messageId: crypto.randomUUID(),
+      senderType: 'USER',
+      messageType: mode === ToolPlanMode.PLAN ? 'TOOL_PLAN_REQUEST' : 'CHAT',
+      contentType: 'TEXT',
+      content,
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  const appendAssistantPlaceholder = () => {
+    addMessage({
+      messageId: crypto.randomUUID(),
+      senderType: 'ASSISTANT',
+      messageType: 'TOOL_PLAN_RESPONSE',
+      contentType: 'MARKDOWN',
+      content: '',
+      createdAt: new Date().toISOString()
+    });
+  };
+
+  const sendAskMessage = async (userMessage: string) => {
+    appendUserMessage(userMessage);
+    await chatApi.createMessage(projectId!, sessionId!, userMessage);
+    toast.info('ASK 메시지를 저장했습니다. AI 응답 스트림은 후속 연동 대상입니다.');
+  };
+
+  const sendPlanMessage = async (userMessage: string) => {
+    appendUserMessage(userMessage);
+    appendAssistantPlaceholder();
+    setIsGenerating(true);
+    setDraftPhase('PLAN');
+    setPlanStatus('REQUESTED');
+    setCurrentPlan(null);
+
+    const regeneratableToolPlanId = (draftPhase === 'REVIEW' || draftPhase === 'REJECTED')
+      ? currentToolPlanId
+      : null;
+    const result = regeneratableToolPlanId
+      ? await chatApi.regenerateToolPlan(
+        projectId!,
+        sessionId!,
+        regeneratableToolPlanId,
+        {
+          basePlanVersion: planVersion,
+          feedbackItems: [{ blockId: 'general-feedback', comment: userMessage }],
+          mode: ToolPlanMode.PLAN
+        }
+      )
+      : await chatApi.generateToolPlan(
+        projectId!,
+        sessionId!,
+        { userMessage, mode: ToolPlanMode.PLAN }
+      );
+
+    setCurrentRunId(result.runId);
+    setPlanStatus(result.status);
+    connectSSE(result.sseUrl, 'PLAN', result.runId);
+  };
+
   const handleSend = async () => {
     if (!input.trim() || isGenerating || !projectId || !sessionId) return;
 
     const userMessage = input.trim();
     setInput('');
-    setIsGenerating(true);
-
-    // 사용자 메시지 추가
-    addMessage({
-      messageId: crypto.randomUUID(),
-      senderType: 'USER',
-      content: userMessage,
-      createdAt: new Date().toISOString()
-    });
-
-    // 어시스턴트 임시 메시지 추가 (SSE chunk가 여기에 append됨)
-    addMessage({
-      messageId: crypto.randomUUID(),
-      senderType: 'ASSISTANT',
-      content: '',
-      createdAt: new Date().toISOString()
-    });
 
     try {
-      let result;
-
-      if (currentToolPlanId) {
-        // 재생성 — 기존 Plan에 대한 추가 요청
-        result = await chatApi.regenerateToolPlan(
-          projectId,
-          sessionId,
-          currentToolPlanId,
-          {
-            basePlanVersion: useChatSessionStore.getState().planVersion,
-            feedbackItems: [{ blockId: 'user-input', comment: userMessage }],
-            mode: ToolPlanMode.PLAN
-          }
-        );
-      } else {
-        // 신규 생성
-        result = await chatApi.generateToolPlan(
-          projectId,
-          sessionId,
-          { userMessage, mode: ToolPlanMode.PLAN }
-        );
+      if (mode === ToolPlanMode.ASK) {
+        await sendAskMessage(userMessage);
+        return;
       }
 
-      // 응답에서 toolPlanId를 store에 저장 (없으면 백엔드에서 아직 안준거니 기존거 유지)
-      if (result.toolPlanId) {
-        setCurrentToolPlanId(String(result.toolPlanId));
+      if (mode === ToolPlanMode.AGENT) {
+        toast.info('AGENT 모드는 Tool 실행 계약 확정 후 연결됩니다.');
+        return;
       }
 
-      // sseUrl로 SSE 구독 시작 (PLAN flow, 식별자는 runId 사용 권장)
-      connectSSE(result.sseUrl, 'PLAN', result.runId);
+      await sendPlanMessage(userMessage);
     } catch (err) {
-      console.error('Tool Plan generation request failed:', err);
+      console.error('Chat request failed:', err);
       setIsGenerating(false);
-      toast.error('설계안 생성 요청에 실패했습니다.');
+      toast.error('요청 처리에 실패했습니다.');
     }
   };
 
@@ -107,15 +146,13 @@ export function ChatArea() {
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
-      {/* Background Grid Effect */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 pointer-events-none" />
 
-      {/* Top App Bar (Workspace Info) */}
       <div className="h-14 border-b border-slate-800 bg-[#0b0e14]/60 backdrop-blur flex items-center justify-between px-6 z-20">
         <div className="flex items-center gap-1">
           <span className="text-base font-bold text-blue-400 uppercase tracking-wider">{currentProject?.projectName || 'Loading...'}</span>
           <span className="mx-1.5 text-slate-600">/</span>
-          <span className="text-sm font-medium text-slate-400">{title || '새 세션'}</span>
+          <span className="text-sm font-medium text-slate-400">{title || '대화 세션'}</span>
           {isClosed && (
             <div className="ml-3 flex items-center gap-1.5 px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-[10px] text-red-400 font-bold uppercase tracking-wider">
               <Lock size={10} />
@@ -125,7 +162,6 @@ export function ChatArea() {
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
         {messages.length > 0 ? (
           <div className="space-y-6">
@@ -149,13 +185,31 @@ export function ChatArea() {
           </div>
         ) : (
           <div className="text-slate-500 flex justify-center items-center h-full">
-            새로운 지시를 내려 AI와 대화를 시작하세요.
+            모드를 선택하고 대화를 시작하세요.
           </div>
         )}
       </div>
 
-      {/* Input Area */}
       <div className="px-8 pb-8 pt-4 bg-gradient-to-t from-[#051424] via-[#051424]/90 to-transparent z-10">
+        <div className="mb-3 flex gap-2">
+          {MODE_OPTIONS.map(option => (
+            <button
+              key={option.value}
+              type="button"
+              disabled={isGenerating || isClosed || option.value === ToolPlanMode.AGENT}
+              onClick={() => setMode(option.value)}
+              className={`px-3 py-2 rounded border text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                mode === option.value
+                  ? 'bg-blue-400 border-blue-400 text-slate-950'
+                  : 'bg-[#0d1c2d] border-slate-700 text-slate-400 hover:text-blue-200 hover:border-blue-400/50'
+              }`}
+              title={option.description}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
         <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : isClosed ? 'border-red-900/30' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
           <textarea
             value={input}
@@ -169,7 +223,9 @@ export function ChatArea() {
                 ? 'AI가 작업 중입니다...'
                 : isClosed
                   ? '종료된 세션입니다. 새로운 세션을 시작해 주세요.'
-                  : 'AI에게 다음 작업을 지시하세요... (Enter로 전송, Shift+Enter로 줄바꿈)'
+                  : mode === ToolPlanMode.ASK
+                    ? '일반 질문을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
+                    : 'Tool PLAN 요청 또는 피드백을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
             }
           />
           <button

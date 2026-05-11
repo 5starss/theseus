@@ -3,6 +3,8 @@ package com.theseus.api.domain.toolgeneration.controller;
 import com.theseus.api.common.response.ApiResponse;
 import com.theseus.api.common.response.status.SuccessCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
+import com.theseus.api.domain.tool.dto.response.ToolPlanDetailResponse;
+import com.theseus.api.domain.tool.service.ToolPlanQueryService;
 import com.theseus.api.domain.toolgeneration.dto.request.ToolPlanGenerationRequest;
 import com.theseus.api.domain.toolgeneration.dto.request.ToolPlanRegenerationRequest;
 import com.theseus.api.domain.toolgeneration.dto.response.ToolPlanGenerationRunResponse;
@@ -13,6 +15,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,6 +30,27 @@ import org.springframework.web.bind.annotation.RestController;
 public class ToolPlanGenerationController {
 
 	private final ToolPlanGenerationService toolPlanGenerationService;
+	private final ToolPlanQueryService toolPlanQueryService;
+
+	@Operation(
+		summary = "ToolPlan 상세 조회",
+		description = "toolPlanId 기준으로 PLAN 원문과 구조화 JSON을 조회합니다."
+	)
+	@GetMapping("/{toolPlanId}")
+	public ResponseEntity<ApiResponse<ToolPlanDetailResponse>> getToolPlanDetail(
+		@AuthenticationPrincipal AuthenticatedUser currentUser,
+		@PathVariable Long projectId,
+		@PathVariable Long sessionId,
+		@PathVariable Long toolPlanId
+	) {
+		ToolPlanDetailResponse response = toolPlanQueryService.getToolPlanDetail(
+			currentUser,
+			projectId,
+			sessionId,
+			toolPlanId
+		);
+		return ApiResponse.onSuccess(SuccessCode.OK, response);
+	}
 
 	@Operation(
 		summary = "PLAN 생성 요청",
