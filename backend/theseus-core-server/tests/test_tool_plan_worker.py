@@ -282,6 +282,68 @@ class ToolPlanWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result, ToolPlanSkippedResult)
         self.assertIn("목표", result.message)
 
+    async def test_planner_treats_null_checkpoint_sections_as_empty(self):
+        llm = FakeLlmClient(json.dumps({
+            "intent": "TOOL_PLAN",
+            "title": "Incident Recovery Tool",
+            "summary": "Starts from an empty checkpoint.",
+            "blocks": [
+                {
+                    "blockId": "analysis-summary",
+                    "title": "Analysis Summary",
+                    "content": "Analyze incident logs.",
+                    "order": 1,
+                }
+            ],
+            "inputs": [],
+            "outputs": [],
+            "constraints": [],
+        }))
+        planner = ToolPlanPlanner(llm_client=llm)
+
+        result = await planner.plan(
+            ToolPlanRequestedEvent.model_validate(create_generate_payload()),
+            checkpoint={
+                "stateMachine": None,
+                "conversation": None,
+                "toolTrace": None,
+                "progress": None,
+            },
+        )
+
+        self.assertEqual(result.plan_snapshot["blocks"][0]["blockId"], "analysis-summary")
+
+    async def test_planner_ignores_malformed_checkpoint_progress_and_trace(self):
+        llm = FakeLlmClient(json.dumps({
+            "intent": "TOOL_PLAN",
+            "title": "Incident Recovery Tool",
+            "summary": "Ignores malformed checkpoint fields.",
+            "blocks": [
+                {
+                    "blockId": "analysis-summary",
+                    "title": "Analysis Summary",
+                    "content": "Analyze incident logs.",
+                    "order": 1,
+                }
+            ],
+            "inputs": [],
+            "outputs": [],
+            "constraints": [],
+        }))
+        planner = ToolPlanPlanner(llm_client=llm)
+
+        result = await planner.plan(
+            ToolPlanRequestedEvent.model_validate(create_generate_payload()),
+            checkpoint={
+                "stateMachine": [],
+                "conversation": {},
+                "toolTrace": {"toolUseId": "bad"},
+                "progress": {"completedTurns": "not-a-number"},
+            },
+        )
+
+        self.assertEqual(result.plan_snapshot["blocks"][0]["blockId"], "analysis-summary")
+
     async def test_planner_runs_multiturn_tool_loop_and_checkpoints_trace(self):
         first = ConversationMessage(
             role="assistant",
