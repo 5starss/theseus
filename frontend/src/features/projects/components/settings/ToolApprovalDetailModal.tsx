@@ -110,7 +110,7 @@ export function ToolApprovalDetailModal({ projectId, approvalItem, onClose, onAc
                 </div>
                 <div className="bg-[#1e1e1e] rounded-lg border border-slate-800 overflow-hidden">
                   <pre className="p-4 max-h-[50vh] overflow-auto text-sm font-mono text-slate-300 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                    <code>{detail ? detail.pythonCode : '# 파이썬 코드 정보를 불러올 수 없습니다.'}</code>
+                    <code>{detail ? (detail.rawMarkdown || '# 파이썬 코드 정보를 불러올 수 없습니다.') : '# 파이썬 코드 정보를 불러올 수 없습니다.'}</code>
                   </pre>
                 </div>
               </div>
