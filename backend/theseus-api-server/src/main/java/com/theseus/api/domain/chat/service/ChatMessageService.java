@@ -180,6 +180,34 @@ public class ChatMessageService {
 	}
 
 	/**
+	 * 특정 ToolPlan 재생성 요청에 해당하는 사용자 피드백 메시지를 저장합니다.
+	 */
+	@Transactional
+	public ChatMessage saveUserToolPlanMessage(
+		ChatSession chatSession,
+		ToolPlan toolPlan,
+		ToolPlanRun toolPlanRun,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
+		validateToolPlanChatSession(chatSession, toolPlan);
+		validateToolPlanRunChatSession(chatSession, toolPlanRun);
+
+		return saveMessage(
+			chatSession,
+			null,
+			toolPlan,
+			toolPlanRun,
+			ChatMessageSenderType.USER,
+			messageType,
+			contentType,
+			content,
+			null
+		);
+	}
+
+	/**
 	 * ToolPlan 이벤트 처리 결과로 저장되는 Assistant/System 메시지를 멱등 키와 함께 저장합니다.
 	 */
 	@Transactional

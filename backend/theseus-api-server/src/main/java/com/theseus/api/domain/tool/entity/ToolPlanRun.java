@@ -203,6 +203,12 @@ public class ToolPlanRun {
 		this.userMessageId = userMessageId;
 	}
 
+	public void attachRequestPayload(String requestPayloadJson, String historySnapshotJson) {
+		validateNotFinished();
+		this.requestPayloadJson = requestPayloadJson;
+		this.historySnapshotJson = historySnapshotJson;
+	}
+
 	public void updateLastEvent(String eventType, Long eventSequence) {
 		this.lastEventType = eventType;
 		this.lastEventSequence = eventSequence;

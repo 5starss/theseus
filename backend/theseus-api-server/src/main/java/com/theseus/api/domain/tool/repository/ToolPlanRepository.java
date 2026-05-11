@@ -5,9 +5,11 @@ import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanGroup;
 import com.theseus.api.domain.tool.entity.ToolPlanStatus;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 
 public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 
@@ -21,6 +23,9 @@ public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 	Optional<ToolPlan> findByPlanGroupAndPlanVersion(ToolPlanGroup planGroup, Long planVersion);
 
 	Optional<ToolPlan> findByIdAndProjectAndChatSession(Long id, Project project, ChatSession chatSession);
+
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	Optional<ToolPlan> findByIdAndProjectAndChatSessionForUpdate(Long id, Project project, ChatSession chatSession);
 
 	boolean existsByPlanGroupAndPlanVersion(ToolPlanGroup planGroup, Long planVersion);
 }

@@ -85,6 +85,11 @@ public enum ErrorCode {
     TOOL_PLAN_REQUEST_MODE_INVALID(HttpStatus.BAD_REQUEST, "TPLN-005", "PLAN 모드에서만 PLAN 생성을 요청할 수 있습니다."),
     TOOL_PLAN_KAFKA_PUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TPLN-006", "ToolPlan 생성 요청 발행에 실패했습니다."),
     TOOL_PLAN_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TPLN-007", "유효하지 않은 ToolPlan 이벤트입니다."),
+    TOOL_PLAN_NOT_FOUND(HttpStatus.NOT_FOUND, "TPLN-008", "ToolPlan을 찾을 수 없습니다."),
+    TOOL_PLAN_REGENERATION_STATUS_REQUIRED(HttpStatus.CONFLICT, "TPLN-009", "REVIEW 또는 REJECTED 상태의 ToolPlan만 재생성할 수 있습니다."),
+    TOOL_PLAN_VERSION_MISMATCH(HttpStatus.CONFLICT, "TPLN-010", "최신 ToolPlan 버전과 일치하지 않습니다."),
+    TOOL_PLAN_FEEDBACK_REQUIRED(HttpStatus.BAD_REQUEST, "TPLN-011", "ToolPlan 피드백 항목이 필요합니다."),
+    TOOL_PLAN_PAYLOAD_INVALID(HttpStatus.CONFLICT, "TPLN-012", "ToolPlan payload가 유효하지 않습니다."),
 
     // Billing
     BILLING_USAGE_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "BILL-001", "토큰 사용량은 0 이상이어야 합니다."),
