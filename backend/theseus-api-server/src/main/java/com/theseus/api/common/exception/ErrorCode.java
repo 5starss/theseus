@@ -73,6 +73,9 @@ public enum ErrorCode {
     TOOL_APPROVAL_ALREADY_REVIEWED(HttpStatus.CONFLICT, "TAPP-005", "이미 검토된 Tool 승인 요청입니다."),
     TOOL_APPROVAL_PENDING_TOOL_REQUIRED(HttpStatus.CONFLICT, "TAPP-006", "승인 대기 중인 Tool만 검토할 수 있습니다."),
     TOOL_APPROVAL_REQUEST_NUMBER_INVALID(HttpStatus.BAD_REQUEST, "TAPP-007", "Tool 승인 요청 번호는 1 이상이어야 합니다."),
+    TOOL_APPROVAL_TARGET_REQUIRED(HttpStatus.BAD_REQUEST, "TAPP-008", "Tool 승인 대상이 필요합니다."),
+    TOOL_PLAN_APPROVAL_REVIEW_STATUS_REQUIRED(HttpStatus.CONFLICT, "TAPP-009", "REVIEW 상태의 ToolPlan만 승인 요청할 수 있습니다."),
+    TOOL_BUILD_KAFKA_PUBLISH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "TAPP-010", "Tool build 요청 발행에 실패했습니다."),
 
     // ToolGeneration
     TOOL_GENERATION_EVENT_INVALID(HttpStatus.BAD_REQUEST, "TGEN-001", "유효하지 않은 Tool 생성 이벤트입니다."),

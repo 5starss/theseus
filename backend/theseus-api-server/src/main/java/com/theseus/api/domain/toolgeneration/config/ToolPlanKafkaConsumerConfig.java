@@ -19,7 +19,8 @@ public class ToolPlanKafkaConsumerConfig {
 	public ConcurrentKafkaListenerContainerFactory<String, ToolPlanEvent> toolPlanKafkaListenerContainerFactory(
 		@Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
 		@Value("${spring.kafka.consumer.group-id}") String groupId,
-		@Value("${spring.kafka.consumer.auto-offset-reset:earliest}") String autoOffsetReset
+		@Value("${spring.kafka.consumer.auto-offset-reset:earliest}") String autoOffsetReset,
+		@Value("${spring.kafka.listener.auto-startup:true}") boolean autoStartup
 	) {
 		Map<String, Object> properties = new HashMap<>();
 		properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
@@ -35,6 +36,7 @@ public class ToolPlanKafkaConsumerConfig {
 		ConcurrentKafkaListenerContainerFactory<String, ToolPlanEvent> factory =
 			new ConcurrentKafkaListenerContainerFactory<>();
 		factory.setConsumerFactory(consumerFactory);
+		factory.setAutoStartup(autoStartup);
 		return factory;
 	}
 }

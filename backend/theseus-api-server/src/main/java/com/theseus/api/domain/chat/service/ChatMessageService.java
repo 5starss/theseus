@@ -186,6 +186,56 @@ public class ChatMessageService {
 	public ChatMessage saveUserToolPlanMessage(
 		ChatSession chatSession,
 		ToolPlan toolPlan,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
+		validateToolPlanChatSession(chatSession, toolPlan);
+
+		return saveMessage(
+			chatSession,
+			null,
+			toolPlan,
+			null,
+			ChatMessageSenderType.USER,
+			messageType,
+			contentType,
+			content,
+			null
+		);
+	}
+
+	/**
+	 * ToolPlan 상태 변경에 필요한 System Notice 메시지를 저장합니다.
+	 */
+	@Transactional
+	public ChatMessage saveSystemToolPlanMessage(
+		ChatSession chatSession,
+		ToolPlan toolPlan,
+		String content
+	) {
+		validateToolPlanChatSession(chatSession, toolPlan);
+
+		return saveMessage(
+			chatSession,
+			null,
+			toolPlan,
+			null,
+			ChatMessageSenderType.SYSTEM,
+			ChatMessageType.SYSTEM_NOTICE,
+			ChatMessageContentType.TEXT,
+			content,
+			null
+		);
+	}
+
+	/**
+	 * 특정 ToolPlan에 연결되는 사용자 메시지를 저장합니다.
+	 */
+	@Transactional
+	public ChatMessage saveUserToolPlanMessage(
+		ChatSession chatSession,
+		ToolPlan toolPlan,
 		ToolPlanRun toolPlanRun,
 		ChatMessageType messageType,
 		ChatMessageContentType contentType,

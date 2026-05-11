@@ -84,6 +84,20 @@ public class ToolApprovalController {
 	}
 
 	@Operation(
+		summary = "ToolPlan 승인 요청",
+		description = "ToolPlan 생성자가 REVIEW 상태의 ToolPlan에 대한 승인을 요청합니다."
+	)
+	@PostMapping("/tool-plans/{toolPlanId}/approval-requests")
+	public ResponseEntity<ApiResponse<ToolApprovalResponse>> requestToolPlanApproval(
+		@AuthenticationPrincipal AuthenticatedUser currentUser,
+		@PathVariable Long projectId,
+		@PathVariable Long toolPlanId
+	) {
+		ToolApprovalResponse response = toolApprovalService.requestToolPlanApproval(currentUser, projectId, toolPlanId);
+		return ApiResponse.onSuccess(SuccessCode.CREATED, response);
+	}
+
+	@Operation(
 		summary = "Tool 승인",
 		description = "프로젝트 ADMIN 또는 MANAGER가 대기 중인 Tool 승인 요청을 승인합니다."
 	)
