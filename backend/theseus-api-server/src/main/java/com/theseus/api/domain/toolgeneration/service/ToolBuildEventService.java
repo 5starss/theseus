@@ -20,6 +20,7 @@ import com.theseus.api.domain.tool.entity.ToolPlanStatus;
 import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
 import com.theseus.api.domain.tool.repository.ToolRepository;
+import com.theseus.api.domain.toolgeneration.dto.ToolPlanRunState;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildArtifactPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildEvent;
 import java.time.LocalDateTime;
@@ -38,12 +39,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class ToolBuildEventService {
 
 	private static final String DEFAULT_FAILED_CODE = "TOOL_BUILD_FAILED";
+	private static final String EVENT_TYPE_PROGRESS = "progress";
+	private static final String EVENT_TYPE_CHUNK = "chunk";
+	private static final String EVENT_TYPE_COMPLETED = "completed";
+	private static final String EVENT_TYPE_FAILED = "failed";
+	private static final String STATUS_BUILDING = "BUILDING";
+	private static final String STATUS_BUILT = "BUILT";
+	private static final String STATUS_FAILED = "FAILED";
+	private static final String COMPLETED_MESSAGE = "Tool build completed.";
 	private static final String DEFAULT_FAILED_MESSAGE = "Tool build에 실패했습니다.";
 
 	private final ToolPlanRunRepository toolPlanRunRepository;
 	private final ToolRepository toolRepository;
 	private final ChatMessageService chatMessageService;
 	private final ObjectMapper objectMapper;
+	private final ToolPlanRunStatePublisher toolPlanRunStatePublisher;
 
 	/**
 	 * Core build 완료 이벤트를 실제 Tool 산출물로 저장하고 run/group 상태를 완료 처리합니다.
@@ -67,6 +77,36 @@ public class ToolBuildEventService {
 		);
 	}
 
+	/**
+	 * Core build progress 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
+	 */
+	public void handleProgress(ToolBuildEvent event) {
+		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> {
+				if (shouldSkipEvent(event, toolPlanRun, "progress")) {
+					return;
+				}
+				toolPlanRunStatePublisher.publishProgress(createBuildProgressState(event, toolPlanRun));
+			},
+			() -> log.warn(">>>> ToolBuild progress event skipped. runId={} not found.", event.getRunId())
+		);
+	}
+
+	/**
+	 * Core build chunk 이벤트를 runId 기준 Redis 상태와 SSE 이벤트로 전달합니다.
+	 */
+	public void handleChunk(ToolBuildEvent event) {
+		toolPlanRunRepository.findByRunId(event.getRunId()).ifPresentOrElse(
+			toolPlanRun -> {
+				if (shouldSkipEvent(event, toolPlanRun, "chunk")) {
+					return;
+				}
+				toolPlanRunStatePublisher.publishChunk(createBuildChunkState(event, toolPlanRun));
+			},
+			() -> log.warn(">>>> ToolBuild chunk event skipped. runId={} not found.", event.getRunId())
+		);
+	}
+
 	private void handleCompletedEvent(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
 		if (shouldSkipEvent(event, toolPlanRun, "completed")) {
 			return;
@@ -75,6 +115,8 @@ public class ToolBuildEventService {
 		ToolPlan toolPlan = requireBuildToolPlan(toolPlanRun, event);
 		ToolBuildArtifactPayload artifact = requireArtifact(event);
 		if (!ToolPlanStatus.APPROVED.equals(toolPlan.getStatus())) {
+			String code = ErrorCode.TOOL_BUILD_EVENT_INVALID.getCode();
+			String message = ErrorCode.TOOL_BUILD_EVENT_INVALID.getMessage();
 			failBuildRun(
 				toolPlanRun,
 				event,
@@ -82,12 +124,16 @@ public class ToolBuildEventService {
 				"Approved ToolPlan만 Tool build 결과를 반영할 수 있습니다.",
 				parseCompletedAt(event)
 			);
+			toolPlanRunStatePublisher.publishFailedAfterCommit(
+				createBuildFailedState(event, toolPlanRun, toolPlan, code, message)
+			);
 			return;
 		}
 
 		Tool existingTool = toolRepository.findBySourceToolPlan(toolPlan).orElse(null);
 		if (existingTool != null) {
 			completeBuildWithTool(toolPlanRun, event, toolPlan, existingTool, parseCompletedAt(event));
+			toolPlanRunStatePublisher.publishCompletedAfterCommit(createBuildCompletedState(event, toolPlanRun, toolPlan));
 			log.info(
 				">>>> ToolBuild completed event skipped by existing Tool. runId={}, toolId={}",
 				event.getRunId(),
@@ -98,12 +144,17 @@ public class ToolBuildEventService {
 
 		String fileName = requireText(artifact.getFileName());
 		if (toolRepository.existsByProjectAndFileName(toolPlan.getProject(), fileName)) {
+			String code = ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode();
+			String message = ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage();
 			failBuildRun(
 				toolPlanRun,
 				event,
 				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode(),
 				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage(),
 				parseCompletedAt(event)
+			);
+			toolPlanRunStatePublisher.publishFailedAfterCommit(
+				createBuildFailedState(event, toolPlanRun, toolPlan, code, message)
 			);
 			return;
 		}
@@ -130,6 +181,7 @@ public class ToolBuildEventService {
 			.build());
 
 		completeBuildWithTool(toolPlanRun, event, toolPlan, createdTool, parseCompletedAt(event));
+		toolPlanRunStatePublisher.publishCompletedAfterCommit(createBuildCompletedState(event, toolPlanRun, toolPlan));
 		log.info(
 			">>>> ToolBuild completed event handled. runId={}, toolPlanId={}, toolId={}",
 			event.getRunId(),
@@ -143,18 +195,23 @@ public class ToolBuildEventService {
 			return;
 		}
 
-		requireBuildToolPlan(toolPlanRun, event);
+		ToolPlan toolPlan = requireBuildToolPlan(toolPlanRun, event);
+		String code = resolveCode(event.getCode());
+		String message = resolveFailedMessage(event.getMessage());
 		failBuildRun(
 			toolPlanRun,
 			event,
-			resolveCode(event.getCode()),
-			resolveFailedMessage(event.getMessage()),
+			code,
+			message,
 			parseFailedAt(event)
+		);
+		toolPlanRunStatePublisher.publishFailedAfterCommit(
+			createBuildFailedState(event, toolPlanRun, toolPlan, code, message)
 		);
 		log.warn(
 			">>>> ToolBuild failed event handled. runId={}, code={}",
 			event.getRunId(),
-			resolveCode(event.getCode())
+			code
 		);
 	}
 
@@ -172,6 +229,74 @@ public class ToolBuildEventService {
 			return true;
 		}
 		return false;
+	}
+
+	private ToolPlanRunState createBuildProgressState(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_PROGRESS)
+			.status(STATUS_BUILDING)
+			.progressRate(event.getProgressRate())
+			.message(event.getMessage())
+			.build();
+	}
+
+	private ToolPlanRunState createBuildChunkState(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		return createBaseState(event, toolPlanRun)
+			.eventType(EVENT_TYPE_CHUNK)
+			.status(STATUS_BUILDING)
+			.content(event.getContent())
+			.build();
+	}
+
+	private ToolPlanRunState createBuildCompletedState(
+		ToolBuildEvent event,
+		ToolPlanRun toolPlanRun,
+		ToolPlan toolPlan
+	) {
+		return createBaseState(event, toolPlanRun)
+			.toolPlanGroupId(toolPlan.getPlanGroup().getId())
+			.toolPlanId(toolPlan.getId())
+			.planVersion(toolPlan.getPlanVersion())
+			.eventType(EVENT_TYPE_COMPLETED)
+			.status(STATUS_BUILT)
+			.message(COMPLETED_MESSAGE)
+			.build();
+	}
+
+	private ToolPlanRunState createBuildFailedState(
+		ToolBuildEvent event,
+		ToolPlanRun toolPlanRun,
+		ToolPlan toolPlan,
+		String code,
+		String message
+	) {
+		return createBaseState(event, toolPlanRun)
+			.toolPlanGroupId(toolPlan.getPlanGroup().getId())
+			.toolPlanId(toolPlan.getId())
+			.planVersion(toolPlan.getPlanVersion())
+			.eventType(EVENT_TYPE_FAILED)
+			.status(STATUS_FAILED)
+			.message(message)
+			.errorCode(code)
+			.errorMessage(message)
+			.build();
+	}
+
+	private ToolPlanRunState.ToolPlanRunStateBuilder createBaseState(ToolBuildEvent event, ToolPlanRun toolPlanRun) {
+		ToolPlan baseToolPlan = toolPlanRun.getBaseToolPlan();
+		ToolPlanGroup planGroup = toolPlanRun.getPlanGroup();
+		if (planGroup == null && baseToolPlan != null) {
+			planGroup = baseToolPlan.getPlanGroup();
+		}
+
+		return ToolPlanRunState.builder()
+			.runId(toolPlanRun.getRunId())
+			.projectId(event.getProjectId())
+			.chatSessionId(event.getChatSessionId())
+			.toolPlanGroupId(planGroup == null ? null : planGroup.getId())
+			.toolPlanId(baseToolPlan == null ? null : baseToolPlan.getId())
+			.planVersion(baseToolPlan == null ? null : baseToolPlan.getPlanVersion())
+			.updatedAt(LocalDateTime.now());
 	}
 
 	private ToolPlan requireBuildToolPlan(ToolPlanRun toolPlanRun, ToolBuildEvent event) {
