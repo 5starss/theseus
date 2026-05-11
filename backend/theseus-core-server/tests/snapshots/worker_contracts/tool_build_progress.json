@@ -1,0 +1,10 @@
+{
+  "chatSessionId": 2,
+  "eventSequence": 1,
+  "eventType": "progress",
+  "message": "TOOL_BUILD_VALIDATING",
+  "progressRate": 55,
+  "projectId": 1,
+  "runId": "build-run-1",
+  "toolPlanId": 10
+}

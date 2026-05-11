@@ -1,0 +1,9 @@
+{
+  "chatSessionId": 2,
+  "content": "building",
+  "eventSequence": 2,
+  "eventType": "chunk",
+  "projectId": 1,
+  "runId": "build-run-1",
+  "toolPlanId": 10
+}

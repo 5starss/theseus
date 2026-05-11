@@ -1,0 +1,49 @@
+{
+  "approvedByProjectMemberId": 5,
+  "approvedPlan": {
+    "planSnapshot": {
+      "blocks": [
+        {
+          "blockId": "analysis-summary",
+          "content": "Collect and classify recent incident logs.",
+          "order": 1,
+          "title": "Analysis Summary"
+        }
+      ],
+      "constraints": [],
+      "generatedAt": "2026-05-11T10:01:00+00:00",
+      "inputs": [],
+      "outputs": [],
+      "planVersion": 1,
+      "schemaVersion": 1,
+      "summary": "Analyzes incident logs and suggests recovery steps.",
+      "title": "Incident Recovery Guide Tool"
+    },
+    "rawMarkdown": "## Incident Recovery Guide Tool",
+    "structuredPlanJson": {
+      "blocks": [
+        {
+          "blockId": "analysis-summary",
+          "content": "Collect and classify recent incident logs.",
+          "order": 1,
+          "title": "Analysis Summary"
+        }
+      ],
+      "constraints": [],
+      "generatedAt": "2026-05-11T10:01:00+00:00",
+      "inputs": [],
+      "outputs": [],
+      "planVersion": 1,
+      "schemaVersion": 1,
+      "summary": "Analyzes incident logs and suggests recovery steps.",
+      "title": "Incident Recovery Guide Tool"
+    }
+  },
+  "chatSessionId": 2,
+  "eventType": "TOOL_BUILD_REQUESTED",
+  "planGroupId": 1,
+  "projectId": 1,
+  "requestedAt": "2026-05-11T10:10:00",
+  "runId": "build-run-1",
+  "toolPlanId": 10
+}

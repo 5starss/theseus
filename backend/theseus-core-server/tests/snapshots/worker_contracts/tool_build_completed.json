@@ -1,0 +1,21 @@
+{
+  "artifact": {
+    "artifactPath": "projects/1/incident_recovery_guide.py",
+    "codeSnapshot": "print('ok')",
+    "displayDescription": "Analyzes incident logs and suggests recovery steps.",
+    "displayName": "Incident Recovery Guide",
+    "fileName": "incident_recovery_guide.py",
+    "metadataJson": {
+      "toolName": "incident_recovery_guide"
+    },
+    "moduleName": "incident_recovery_guide",
+    "permissionLevel": 1
+  },
+  "chatSessionId": 2,
+  "completedAt": "2026-05-11T10:12:00",
+  "eventSequence": 7,
+  "eventType": "TOOL_BUILD_COMPLETED",
+  "projectId": 1,
+  "runId": "build-run-1",
+  "toolPlanId": 10
+}
