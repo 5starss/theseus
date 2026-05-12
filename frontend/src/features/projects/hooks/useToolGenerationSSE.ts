@@ -42,11 +42,14 @@ function phaseFromStatus(status?: string | null): DraftPhase {
     case 'BUILT':
       return 'BUILT';
     case 'FAILED':
-    case 'SKIPPED':
       return 'FAILED';
     default:
       return null;
   }
+}
+
+function planStatusFrom(status?: string | null) {
+  return status === 'SKIPPED' ? null : status || null;
 }
 
 export function useToolGenerationSSE() {
@@ -193,18 +196,57 @@ export function useToolGenerationSSE() {
             case 'skipped':
             case 'tool_plan_skipped':
               store.setIsGenerating(false);
+              store.setIsBuilding(false);
               store.setDraftPhase(null);
-              store.setPlanStatus('SKIPPED');
+              store.setPlanStatus(null);
+              store.setProgressInfo(null);
               store.setAbortController(null);
-              store.addMessage({
+              store.setCurrentRunId(null);
+
+              const chatMessage = {
                 messageId: crypto.randomUUID(),
                 senderType: 'ASSISTANT',
                 messageType: 'CHAT',
                 contentType: 'TEXT',
                 content: data.message || 'This request was handled as a general chat message.',
                 createdAt: new Date().toISOString(),
-              });
-              toast.info('Tool PLAN generation was skipped.');
+              } as const;
+
+              if (projectId && sessionId) {
+                try {
+                  const details = await chatApi.getSessionDetails(projectId, sessionId);
+                  const toolPlanId = details.currentPlan?.toolPlanId || null;
+                  const detail = toolPlanId
+                    ? await chatApi.getToolPlanDetail(projectId, sessionId, String(toolPlanId))
+                    : null;
+                  const phase = details.createdTool
+                    ? phaseFromStatus(details.createdTool.status) || 'BUILT'
+                    : phaseFromStatus(details.currentPlan?.status);
+
+                  store.initSession({
+                    messages: details.messages || [],
+                    plan: parseStructuredPlan(detail?.structuredPlanJson) || null,
+                    phase,
+                    toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
+                    toolPlanGroupId: details.currentPlan?.toolPlanGroupId ? String(details.currentPlan.toolPlanGroupId) : null,
+                    toolPlanId: toolPlanId ? String(toolPlanId) : null,
+                    runId: null,
+                    planStatus: planStatusFrom(details.currentPlan?.status),
+                    createdTool: details.createdTool,
+                    toolResult: details.createdTool ? { ...details.createdTool } : null,
+                    title: details.title || store.title,
+                    isClosed: details.isClosed || false,
+                    planVersion: details.currentPlan?.planVersion || detail?.planVersion || 0,
+                    draftVersion: details.currentPlan?.planVersion || detail?.planVersion || 0,
+                  });
+                } catch (error) {
+                  console.warn('[SSE] Failed to refresh skipped ToolPlan response:', error);
+                  store.completeAssistantPlaceholder(chatMessage);
+                }
+              } else {
+                store.completeAssistantPlaceholder(chatMessage);
+              }
+
               disconnectSSE();
               break;
 
