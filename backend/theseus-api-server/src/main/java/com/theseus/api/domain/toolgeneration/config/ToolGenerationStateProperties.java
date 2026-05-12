@@ -10,6 +10,8 @@ public class ToolGenerationStateProperties {
 	private long sseTimeoutMillis = 1800000;
 	private long runTimeoutMinutes = 30;
 	private long runTimeoutCheckDelayMillis = 60000;
+	private boolean runTimeoutSchedulerEnabled = false;
+	private int runTimeoutBatchSize = 20;
 
 	public ToolGenerationStateProperties() {
 	}
@@ -61,5 +63,25 @@ public class ToolGenerationStateProperties {
 
 	public void setRunTimeoutCheckDelayMillis(long runTimeoutCheckDelayMillis) {
 		this.runTimeoutCheckDelayMillis = runTimeoutCheckDelayMillis;
+	}
+
+	public boolean isRunTimeoutSchedulerEnabled() {
+		return runTimeoutSchedulerEnabled;
+	}
+
+	public void setRunTimeoutSchedulerEnabled(boolean runTimeoutSchedulerEnabled) {
+		this.runTimeoutSchedulerEnabled = runTimeoutSchedulerEnabled;
+	}
+
+	public int runTimeoutBatchSize() {
+		return Math.max(1, runTimeoutBatchSize);
+	}
+
+	public int getRunTimeoutBatchSize() {
+		return runTimeoutBatchSize;
+	}
+
+	public void setRunTimeoutBatchSize(int runTimeoutBatchSize) {
+		this.runTimeoutBatchSize = runTimeoutBatchSize;
 	}
 }

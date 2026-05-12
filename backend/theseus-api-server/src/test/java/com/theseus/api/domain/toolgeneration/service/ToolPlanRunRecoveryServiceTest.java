@@ -35,6 +35,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,11 +73,12 @@ class ToolPlanRunRecoveryServiceTest {
 		ToolPlanRun toolPlanRun = createRun(fixture, ToolPlanRunRequestType.GENERATE_PLAN, null, null);
 		when(toolPlanRunRepository.findTimedOutRunsForUpdate(
 			eq(List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)),
-			any(LocalDateTime.class)
+			any(LocalDateTime.class),
+			any(Pageable.class)
 		)).thenReturn(List.of(toolPlanRun));
 
 		// When
-		int failedCount = recoveryService.failTimedOutRuns(Duration.ofMinutes(30));
+		int failedCount = recoveryService.failTimedOutRuns(Duration.ofMinutes(30), 20);
 
 		// Then
 		assertThat(failedCount).isEqualTo(1);
@@ -110,11 +112,12 @@ class ToolPlanRunRecoveryServiceTest {
 		ToolPlanRun buildRun = createRun(fixture, ToolPlanRunRequestType.BUILD_TOOL, planGroup, toolPlan);
 		when(toolPlanRunRepository.findTimedOutRunsForUpdate(
 			eq(List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)),
-			any(LocalDateTime.class)
+			any(LocalDateTime.class),
+			any(Pageable.class)
 		)).thenReturn(List.of(buildRun));
 
 		// When
-		int failedCount = recoveryService.failTimedOutRuns(Duration.ofMinutes(30));
+		int failedCount = recoveryService.failTimedOutRuns(Duration.ofMinutes(30), 20);
 
 		// Then
 		assertThat(failedCount).isEqualTo(1);
@@ -136,7 +139,7 @@ class ToolPlanRunRecoveryServiceTest {
 	@DisplayName("timeout 설정이 유효하지 않으면 Run을 조회하지 않는다")
 	void skipInvalidTimeout() {
 		// When
-		int failedCount = recoveryService.failTimedOutRuns(Duration.ZERO);
+		int failedCount = recoveryService.failTimedOutRuns(Duration.ZERO, 20);
 
 		// Then
 		assertThat(failedCount).isZero();

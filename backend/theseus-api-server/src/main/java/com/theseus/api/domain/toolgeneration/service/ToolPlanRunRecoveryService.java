@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,16 +38,21 @@ public class ToolPlanRunRecoveryService {
 	 * 제한 시간을 넘긴 REQUESTED/GENERATING Run을 실패 처리합니다.
 	 */
 	@Transactional
-	public int failTimedOutRuns(Duration timeout) {
+	public int failTimedOutRuns(Duration timeout, int batchSize) {
 		if (timeout == null || timeout.isZero() || timeout.isNegative()) {
 			log.warn(">>>> ToolPlanRun timeout recovery skipped. invalidTimeout={}", timeout);
+			return 0;
+		}
+		if (batchSize <= 0) {
+			log.warn(">>>> ToolPlanRun timeout recovery skipped. invalidBatchSize={}", batchSize);
 			return 0;
 		}
 
 		LocalDateTime cutoff = LocalDateTime.now().minus(timeout);
 		List<ToolPlanRun> timedOutRuns = toolPlanRunRepository.findTimedOutRunsForUpdate(
 			List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING),
-			cutoff
+			cutoff,
+			PageRequest.of(0, batchSize)
 		);
 
 		timedOutRuns.forEach(this::failTimedOutRun);
