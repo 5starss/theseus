@@ -107,6 +107,7 @@ def _normalize_generic_news_docs(ticker: str, items: List[Dict[str, Any]]) -> Li
         docs.append(
             Document(
                 id=str(item.get("id") or f"SIM_{ticker}_{idx}"),
+                ticker=ticker,
                 source=str(item.get("source") or "SIM_NEWS"),
                 published_at=published_at or datetime.now().isoformat(),
                 title=title or body[:80],
