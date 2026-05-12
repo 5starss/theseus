@@ -17,6 +17,7 @@ public class ToolApprovalResponse {
 
 	private Long toolApprovalId;
 	private Long projectId;
+	private Long chatSessionId;
 	private Long toolId;
 	private Long toolPlanId;
 	private Long planGroupId;
@@ -46,6 +47,7 @@ public class ToolApprovalResponse {
 		return ToolApprovalResponse.builder()
 			.toolApprovalId(toolApproval.getId())
 			.projectId(resolveProjectId(tool, toolPlan))
+			.chatSessionId(resolveChatSessionId(tool, toolPlan))
 			.toolId(tool == null ? null : tool.getId())
 			.toolPlanId(toolPlan == null ? null : toolPlan.getId())
 			.planGroupId(toolPlan == null ? null : toolPlan.getPlanGroup().getId())
@@ -85,5 +87,12 @@ public class ToolApprovalResponse {
 			return tool.getProject().getId();
 		}
 		return toolPlan.getProject().getId();
+	}
+
+	private static Long resolveChatSessionId(Tool tool, ToolPlan toolPlan) {
+		if (tool != null) {
+			return tool.getChatSession().getId();
+		}
+		return toolPlan.getChatSession().getId();
 	}
 }

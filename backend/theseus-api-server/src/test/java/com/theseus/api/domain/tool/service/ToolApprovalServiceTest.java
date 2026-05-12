@@ -98,6 +98,7 @@ class ToolApprovalServiceTest {
 		ChatMessage savedMessage = chatMessageRepository.findByToolPlanOrderByMessageOrderAsc(savedToolPlan).getFirst();
 
 		assertThat(response.getToolPlanId()).isEqualTo(toolPlan.getId());
+		assertThat(response.getChatSessionId()).isEqualTo(toolPlan.getChatSession().getId());
 		assertThat(response.getToolId()).isNull();
 		assertThat(response.getToolPlanStatus()).isEqualTo(ToolPlanStatus.PENDING);
 		assertThat(savedToolApproval.getTool()).isNull();

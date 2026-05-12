@@ -357,7 +357,7 @@ Authorization: Bearer {accessToken}
 ## ToolPlan 승인
 
 ```http
-PATCH /api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/approve
+PATCH /api/v1/projects/{projectId}/tool-approvals/{approvalId}/approve
 Accept: application/json
 Content-Type: application/json
 Authorization: Bearer {accessToken}
@@ -378,7 +378,7 @@ Authorization: Bearer {accessToken}
 ## ToolPlan 반려
 
 ```http
-PATCH /api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/reject
+PATCH /api/v1/projects/{projectId}/tool-approvals/{approvalId}/reject
 Accept: application/json
 Content-Type: application/json
 Authorization: Bearer {accessToken}
@@ -401,7 +401,7 @@ Authorization: Bearer {accessToken}
 ## ToolPlan 상세 조회
 
 ```http
-GET /api/v1/projects/{projectId}/tool-plans/{toolPlanId}
+GET /api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/{toolPlanId}
 Accept: application/json
 Authorization: Bearer {accessToken}
 ```

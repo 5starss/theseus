@@ -199,7 +199,7 @@ sequenceDiagram
     API->>DB: ToolApproval 생성
     API->>DB: ToolPlan PENDING, ToolPlanGroup PENDING
 
-    FE->>API: PATCH /tool-plan-approvals/{approvalId}/approve
+    FE->>API: PATCH /tool-approvals/{approvalId}/approve
     API->>DB: ToolPlan APPROVED, ToolPlanGroup APPROVED
     API->>DB: BUILD_TOOL ToolPlanRun 생성
     API->>DB: DB commit

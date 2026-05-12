@@ -172,7 +172,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                             {approval.toolPlanId && <span className="ml-2 text-[10px] text-blue-400 font-normal border border-blue-400/30 px-1 py-0.5 rounded">설계안</span>}
                           </div>
                           <div className="text-[10px] text-blue-400 font-mono mt-0.5 tracking-wider uppercase">
-                            {approval.draftPhase || approval.toolPlanStatus || approval.toolStatus || '-'}
+                            {approval.toolPlanStatus || approval.toolStatus || '-'}
                           </div>
                         </TableCell>
                         <TableCell>

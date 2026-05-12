@@ -1,6 +1,7 @@
 export interface ToolApprovalResponse {
   toolApprovalId: number;
   projectId: number;
+  chatSessionId: number | null;
   toolId: number | null;
   toolPlanId: number | null;
   planGroupId: number | null;
@@ -19,7 +20,6 @@ export interface ToolApprovalResponse {
   requestedAt: string;
   reviewedAt: string | null;
   toolStatus: string | null;
-  draftPhase: string | null;
   toolPlanStatus: string | null;
 }
 
