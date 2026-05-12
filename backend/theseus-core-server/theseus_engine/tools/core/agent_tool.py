@@ -92,7 +92,7 @@ class AgentTool(BaseTool):
         )
 
         # 사용할 모델 결정
-        model = arguments.model or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+        model = arguments.model or os.getenv("THESEUS_MODEL", "gpt-4o")
 
         # 에이전트 모드 컨텍스트 (coordinator 또는 일반)
         agent_mode = (
@@ -101,35 +101,48 @@ class AgentTool(BaseTool):
             else "normal"
         )
 
-        escaped_prompt = arguments.prompt.replace('"', '\\"').replace("'", "\\'")
+        # 프롬프트를 임시 파일로 저장해 셸 인젝션 방지
+        # (python -c "..." 인라인 문자열 삽입 시 메타문자 이스케이프 불가)
+        import tempfile, json as _json
+        prompt_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        _json.dump({"prompt": arguments.prompt}, prompt_file)
+        prompt_file.flush()
+        prompt_file.close()
+        prompt_file_path = prompt_file.name
 
         # THESEUS_SUBAGENT=1 환경 변수로 서브 에이전트임을 표시
-        env_overrides = f"os.environ['THESEUS_SUBAGENT'] = '1'; "
-        env_overrides += f"os.environ['OPENHARNESS_MODEL'] = '{model}'; "
+        env_overrides = "os.environ['THESEUS_SUBAGENT'] = '1'; "
+        env_overrides += f"os.environ['THESEUS_MODEL'] = {model!r}; "
         if arguments.inherit_context:
-            env_overrides += f"os.environ['THESEUS_AGENT_MODE'] = '{agent_mode}'; "
+            env_overrides += f"os.environ['THESEUS_AGENT_MODE'] = {agent_mode!r}; "
 
         agent_script = (
-            "import sys, os; "
+            "import sys, os, json, asyncio; "
             "sys.path.insert(0, os.getcwd()); "
             "from dotenv import load_dotenv; load_dotenv(); "
             f"{env_overrides}"
-            "import asyncio; "
             "from theseus_engine.core.engine_builder import setup_engine; "
             "from theseus_engine.models.state import TheseusStateMachine; "
+            f"_data = json.load(open({prompt_file_path!r}, encoding='utf-8')); "
+            f"os.unlink({prompt_file_path!r}); "
             "async def run(): "
             "    sm = TheseusStateMachine(); "
             f"    engine, _ = await setup_engine(sm, {sub_rbac}, {{}}, lambda x: asyncio.sleep(0)); "
-            f"    result = await engine.query('{escaped_prompt}'); "
-            "    print(result.text if hasattr(result, 'text') else str(result)); "
+            "    output_parts = []; "
+            "    async for event in engine.submit_message(_data['prompt']): "
+            "        t = getattr(event, 'text', None) or getattr(event, 'delta', None); "
+            "        output_parts.append(str(t)) if t else None; "
+            "    print(''.join(output_parts)); "
             "asyncio.run(run())"
         )
 
-        command = f'python -c "{agent_script}"'
+        command = ["python", "-c", agent_script]
 
         try:
             task = await manager.create_shell_task(
-                command=command,
+                command=command if isinstance(command, str) else " ".join(command),
                 description=f"[Sub-Agent] {arguments.description}",
                 cwd=cwd,
             )

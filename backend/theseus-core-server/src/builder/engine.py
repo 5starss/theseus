@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
 from src.auth.schemas import SessionContext
+from src.builder.system_prompt import build_theseus_system_prompt
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
 from src.tooling import load_custom_tools_for_project
@@ -16,8 +17,7 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionStarted,
 )
 from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissionSettings
-from theseus_engine.models.state import AgentMode, TheseusStateMachine
-from theseus_engine.models.state import PlanPhase
+from theseus_engine.models.state import AgentMode, PlanPhase
 from theseus_engine.tools.core import ALL_CORE_TOOLS, build_filtered_registry, load_custom_tools
 from theseus_engine.tools.core.base_tools import ToolRegistry
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
@@ -227,11 +227,11 @@ def get_query_engine(
             "No tools are available for the current server session."
         )
 
-    state_machine = TheseusStateMachine(initial_mode=build_context.mode)
-    if build_context.mode == AgentMode.PLAN:
-        state_machine.set_plan_phase(PlanPhase.EXECUTING)
-        if build_context.plan_content is not None:
-            state_machine.plan = str(build_context.plan_content)
+    system_prompt = build_theseus_system_prompt(
+        mode=build_context.mode,
+        plan_phase=PlanPhase.EXECUTING if build_context.mode == AgentMode.PLAN else None,
+        plan_content=build_context.plan_content,
+    )
     permission_checker = TheseusPermissionChecker(
         settings=TheseusPermissionSettings(),
         user_level=build_context.user_level,
@@ -255,7 +255,7 @@ def get_query_engine(
         hook_executor=hook_executor,
         cwd=Path.cwd(),
         model=model_name,
-        system_prompt=state_machine.get_system_prompt(),
+        system_prompt=system_prompt,
         max_turns=30,
         permission_prompt=_deny_permission_prompt,
         tool_metadata={

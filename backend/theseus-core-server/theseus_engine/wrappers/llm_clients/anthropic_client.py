@@ -133,6 +133,8 @@ class TheseusAnthropicClient:
             if isinstance(last_error, APIError):
                 raise _translate_api_error(last_error) from last_error
             raise RequestFailure(str(last_error)) from last_error
+        # 이론상 도달 불가 — 루프가 return 없이 완료된 경우 방어
+        raise RequestFailure("Exhausted retries without result or error.")
 
     async def _stream_once(
         self, request: ApiMessageRequest

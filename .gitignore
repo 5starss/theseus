@@ -76,9 +76,9 @@ text.md
 /certbot/www/*
 !/certbot/conf/.gitkeep
 !/certbot/www/.gitkeep
-/infra/docker/prod/certbot/conf/*
-/infra/docker/prod/certbot/www/*
-!/infra/docker/prod/certbot/conf/.gitkeep
-!/infra/docker/prod/certbot/www/.gitkeep
+
 *.pem
 *.key
+# Theseus local memory (not shared)
+.theseus/memory-local/
+.theseus/runner.json

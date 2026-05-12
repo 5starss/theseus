@@ -82,8 +82,9 @@ class TheseusPermissionChecker:
 
         # 민감 경로 보호
         if file_path:
-            normalized = file_path.rstrip("/")
-            for candidate in (normalized, normalized + "/"):
+            # Windows/Unix 경로 통일: 백슬래시 → 슬래시로 정규화
+            posix_path = file_path.replace("\\", "/").rstrip("/")
+            for candidate in (posix_path, posix_path + "/"):
                 for pattern in SENSITIVE_PATH_PATTERNS:
                     if fnmatch.fnmatch(candidate, pattern):
                         return PermissionDecision(

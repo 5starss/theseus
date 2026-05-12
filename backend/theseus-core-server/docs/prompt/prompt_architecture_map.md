@@ -121,7 +121,30 @@ DRAFTING 단계에서 LLM이 출력하는 JSON의 구조입니다. `_display_pla
 
 ---
 
-## 4. 도구 설명 (Tool Descriptions, LLM-facing)
+## 4. 서버 Worker 프롬프트 주입 (Server Worker Prompt Injection)
+
+FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당합니다. LLM 호출이 필요한 서버 worker도 별도 시스템 프롬프트를 소유하지 않고 `src/builder/system_prompt.py`를 통해 `theseus_engine.models.state.TheseusStateMachine.get_system_prompt()`를 mode/phase별로 주입합니다.
+
+### `src/builder/system_prompt.py`
+
+| 함수 | 역할 | 설명 |
+|---|---|---|
+| `build_theseus_system_prompt()` | 서버 요청용 시스템 프롬프트 조립 | `AgentMode`, `PlanPhase`, `CoordinatorPhase`, 승인 plan payload를 받아 `state.py`의 기존 프롬프트를 반환합니다. |
+
+### 적용 경로
+
+| `src` 경로 | 주입 모드/단계 | 요청별 입력 계약 |
+|---|---|---|
+| `src/routes/stream.py` → `src/builder/engine.py` | `AGENT`, 또는 plan 실행 시 `PLAN/EXECUTING` | 사용자 prompt와 Spring history를 `QueryEngine` 메시지로 전달합니다. |
+| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | ToolPlan JSON schema, base plan, feedback, history snapshot은 user message에 포함합니다. |
+| `src/tool_build/builder.py` | `PLAN/EXECUTING` | ToolBuild JSON/code schema와 검증 실패 repair context는 user message에 포함합니다. |
+| `src/tool_generation/processor.py` | legacy 요청을 `PLAN/DRAFTING` 또는 `PLAN/WAIT_FOR_REVIEW`로 변환 | 기존 `theseus.tool-generation.*` 통신을 임시 유지하기 위한 adapter입니다. |
+
+레거시 ToolGeneration consumer는 최종 ToolPlan markdown을 여러 `chunk` 이벤트로 나누어 기존 UI의 스트리밍형 표시를 유지합니다. API 서버가 새 `tool-plan`/`tool-build` 토픽으로 전환되면 Core 코드 변경 없이 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=false`로 legacy adapter만 끌 수 있습니다.
+
+---
+
+## 5. 도구 설명 (Tool Descriptions, LLM-facing)
 
 이것들은 도구 호출 API 스키마의 일부로서 LLM에 직접 전달되는 도구 클래스의 `description` 속성입니다.
 
@@ -148,7 +171,7 @@ DRAFTING 단계에서 LLM이 출력하는 JSON의 구조입니다. `_display_pla
 
 ---
 
-## 5. RBAC 권한 메시지 (RBAC Permission Messages)
+## 6. RBAC 권한 메시지 (RBAC Permission Messages)
 
 ### `theseus_engine/models/rbac.py`
 
@@ -160,7 +183,7 @@ DRAFTING 단계에서 LLM이 출력하는 JSON의 구조입니다. `_display_pla
 
 ---
 
-## 6. 관측성 프롬프트 (Observability Prompts)
+## 7. 관측성 프롬프트 (Observability Prompts)
 
 ### `theseus_engine/observability/tracer.py`
 
@@ -168,7 +191,7 @@ LLM 프롬프트는 없지만, LangSmith 관측성 기능의 활성화 여부를
 
 ---
 
-## 7. 컨텍스트 관리 (Context Management)
+## 8. 컨텍스트 관리 (Context Management)
 
 ### `theseus_engine/core/context_compressor.py`
 

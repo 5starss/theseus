@@ -1,0 +1,123 @@
+{
+  "name": "theseus-vscode",
+  "displayName": "Theseus",
+  "description": "VSCode sidebar client for the Theseus agent core.",
+  "version": "0.0.1",
+  "publisher": "theseus",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:theseus.chatView",
+    "onCommand:theseus.start",
+    "onCommand:theseus.stop",
+    "onCommand:theseus.showLogs",
+    "onCommand:theseus.moveToSecondarySidebar",
+    "onCommand:theseus.moveToPanel",
+    "onCommand:theseus.askSelected",
+    "onCommand:theseus.explainSelected"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Theseus",
+      "properties": {
+        "theseus.corePath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the theseus-core-server directory (the folder that contains theseus_engine/). Required when the workspace root is not the core server directory."
+        },
+        "theseus.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable used to start Theseus. Use the full path if 'python' is not on PATH (e.g. C:\\Python311\\python.exe or /usr/bin/python3)."
+        },
+        "theseus.serverUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Theseus server URL. Empty means standalone mode."
+        },
+        "theseus.workspacePath": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory for the agent (your project root). Defaults to the first VSCode workspace folder."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "theseus.start",
+        "title": "Theseus: Start Agent"
+      },
+      {
+        "command": "theseus.stop",
+        "title": "Theseus: Stop Agent"
+      },
+      {
+        "command": "theseus.showLogs",
+        "title": "Theseus: Show Logs"
+      },
+      {
+        "command": "theseus.moveToSecondarySidebar",
+        "title": "Theseus: Move to Secondary Side Bar"
+      },
+      {
+        "command": "theseus.moveToPanel",
+        "title": "Theseus: Move to Panel"
+      },
+      {
+        "command": "theseus.askSelected",
+        "title": "Ask Theseus"
+      },
+      {
+        "command": "theseus.explainSelected",
+        "title": "Theseus: Explain Selection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "theseus.askSelected",
+          "when": "editorHasSelection",
+          "group": "theseus@1"
+        },
+        {
+          "command": "theseus.explainSelected",
+          "when": "editorHasSelection",
+          "group": "theseus@2"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "theseus",
+          "title": "Theseus",
+          "icon": "resources/theseus.svg"
+        }
+      ]
+    },
+    "views": {
+      "theseus": [
+        {
+          "id": "theseus.chatView",
+          "type": "webview",
+          "name": "Chat"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/vscode": "1.90.0",
+    "typescript": "^5.4.5"
+  }
+}

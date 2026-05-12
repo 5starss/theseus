@@ -193,3 +193,8 @@ OpenHarness/
 
 # Theseus local memory (not shared)
 .theseus/memory-local/
+.theseus/runner.json
+
+# VSCode extension local build artifacts
+vscode-extension/node_modules/
+vscode-extension/out/

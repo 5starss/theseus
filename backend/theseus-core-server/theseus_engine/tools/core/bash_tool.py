@@ -10,6 +10,7 @@ from typing import Iterable
 from pydantic import BaseModel, Field
 
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.file_utils import _check_path_security
 
 log = logging.getLogger(__name__)
 
@@ -44,11 +45,17 @@ class BashTool(BaseTool):
     async def execute(
         self, arguments: BashInput, context: ToolExecutionContext
     ) -> ToolResult:
-        cwd = (
-            Path(arguments.cwd).expanduser()
-            if arguments.cwd
-            else context.cwd
-        )
+        if arguments.cwd:
+            cwd = Path(arguments.cwd).expanduser()
+            if not cwd.is_absolute():
+                cwd = (context.cwd / cwd).resolve()
+            else:
+                cwd = cwd.resolve()
+            security_err = _check_path_security(cwd, context.cwd)
+            if security_err:
+                return ToolResult(output=security_err, is_error=True)
+        else:
+            cwd = context.cwd
 
         # 대화형 명령어 사전 차단
         preflight = _preflight_interactive(arguments.command)

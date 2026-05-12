@@ -181,6 +181,9 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(artifact.display_description, "Analyzes incident logs and suggests recovery steps.")
             self.assertEqual(artifact.permission_level, 1)
             self.assertEqual(len(llm.requests), 1)
+            self.assertIn("# Current Mode: PLAN", llm.requests[0].system_prompt)
+            self.assertIn("Phase: EXECUTING", llm.requests[0].system_prompt)
+            self.assertIn("Incident Recovery Tool", llm.requests[0].system_prompt)
 
     async def test_builder_repairs_llm_code_after_validation_failure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -249,7 +252,6 @@ class ToolBuildProcessorTests(unittest.IsolatedAsyncioTestCase):
         repo.pending.append(record)
         processor = ToolBuildProcessor(
             publisher=publisher,
-            builder=FakeBuilder(create_artifact()),
             checkpoint_repo_factory=lambda: FakeRepoContext(repo),
         )
 

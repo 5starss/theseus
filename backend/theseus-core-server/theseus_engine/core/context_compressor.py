@@ -98,6 +98,12 @@ async def _build_summary(old_msgs: list, api_client, model: Optional[str]) -> st
             "간결하게 3~5문장으로 요약해주세요.\n\n"
             f"{raw_text}"
         )
+        # TheseusAnthropicClient 등은 chat_completion() 미지원 — stream_message() 사용
+        if not hasattr(api_client, "chat_completion"):
+            raise AttributeError(
+                f"{type(api_client).__name__} does not support chat_completion(). "
+                "Falling back to structural summary."
+            )
         response = await api_client.chat_completion(
             messages=[{"role": "user", "content": prompt}],
             model=model,

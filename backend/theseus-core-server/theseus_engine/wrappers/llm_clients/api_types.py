@@ -26,6 +26,16 @@ class UsageSnapshot(BaseModel):
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
 
+    @property
+    def prompt_tokens(self) -> int:
+        """Compatibility alias for server/TUI usage readers."""
+        return self.input_tokens
+
+    @property
+    def completion_tokens(self) -> int:
+        """Compatibility alias for server/TUI usage readers."""
+        return self.output_tokens
+
 
 # ── Request ───────────────────────────────────────────────────
 

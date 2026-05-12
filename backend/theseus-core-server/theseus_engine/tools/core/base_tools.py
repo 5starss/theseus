@@ -25,9 +25,13 @@ class ToolExecutionContext:
     cwd: Path
     metadata: dict[str, Any] = field(default_factory=dict)
     hook_executor: Any | None = None
+    run_id: str | None = None
+    """Kafka runId — 실행 중 로깅·트레이싱에 사용. src에서 주입."""
+    tool_draft_id: str | None = None
+    """Kafka toolDraftId — 실행 결과를 특정 draft와 연결할 때 사용. src에서 주입."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolResult:
     """Normalized tool execution result."""
 

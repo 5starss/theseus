@@ -87,6 +87,7 @@ URLs provided by the user in their messages or local files.
  - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal code and framework guarantees. Only validate at system boundaries.
  - Don't create helpers, utilities, or abstractions for one-time operations. Three similar lines of code is better than a premature abstraction.
  - Do NOT read or write to sensitive credential paths (.ssh, .aws, .gnupg, etc.).
+ - Some server routes may include a task-specific output contract in the user message. When present, follow that contract for response shape and exact JSON keys instead of generic examples in this mode prompt, while still obeying all Theseus mode, security, and tool-use rules.
 
 # Executing actions with care
 Carefully consider the reversibility and blast radius of actions. Freely take local, \
@@ -153,6 +154,30 @@ with "[TheseusHook]". When this happens:
 """
 
 
+_git_branch_cache: dict[str, str] = {}  # cwd → branch 캐시 (프로세스 수명 동안 유효)
+
+
+def _get_git_branch(cwd: str) -> str:
+    """Git 브랜치 정보를 캐시하여 반환합니다.
+
+    매 시스템 프롬프트 생성 시 subprocess를 호출하면 async 이벤트 루프를
+    블로킹하므로 프로세스 수명 단위로 결과를 캐싱합니다.
+    """
+    if cwd in _git_branch_cache:
+        return _git_branch_cache[cwd]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, cwd=cwd, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+        branch = f"yes (branch: {result.stdout.strip()})" if result.returncode == 0 else "no"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        branch = "no"
+    _git_branch_cache[cwd] = branch
+    return branch
+
+
 def _get_environment_section() -> str:
     """현재 런타임 환경 정보를 동적으로 생성합니다."""
     os_name = platform.system()
@@ -165,18 +190,8 @@ def _get_environment_section() -> str:
     venv = os.environ.get("VIRTUAL_ENV") or os.environ.get("CONDA_DEFAULT_ENV")
     date = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
 
-    # Git 정보 탐지
-    git_info = "no"
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=cwd, timeout=5,
-            stdin=subprocess.DEVNULL,
-        )
-        if result.returncode == 0:
-            git_info = f"yes (branch: {result.stdout.strip()})"
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    # Git 정보 탐지 (캐시 사용 — 매 턴 subprocess 호출 방지)
+    git_info = _get_git_branch(cwd)
 
     lines = [
         "# Environment",

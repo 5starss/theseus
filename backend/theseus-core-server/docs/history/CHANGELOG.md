@@ -4,6 +4,546 @@
 
 ## [Unreleased]
 
+### 🧰 Session 68 — VSCode Extension 간편 설치 스크립트 추가 (2026-05-12)
+
+#### `scripts/install-vscode-extension.ps1`, `scripts/install-vscode-extension.sh`
+
+- Windows PowerShell과 Git Bash/Linux/macOS 환경에서 Extension 실행 준비를 한 번에 처리하는 설치 스크립트 추가
+- `.venv` 생성, `requirements.txt` 설치, `theseus-vscode-0.0.1.vsix` 설치, 워크스페이스 `.vscode/settings.json` 병합을 자동화
+- `CorePath`, `WorkspacePath`, Python/VSCode CLI, VSIX 경로를 옵션으로 지정할 수 있게 하고, requirements/Extension/settings 단계는 필요 시 건너뛸 수 있게 함
+- Playwright 브라우저 바이너리가 필요한 도구를 위해 선택형 설치 옵션을 추가
+
+#### `README.md`
+
+- VSCode Extension 간편 설치 절차와 기본/옵션 실행 예시를 Quick Start에 추가
+- 설치 스크립트가 local daemon 기본 실행 경로와 stdio fallback 설정에 필요한 Extension 설정을 기록하도록 문서화
+
+#### 검증
+
+- PowerShell AST parser로 `scripts/install-vscode-extension.ps1` 구문 검증 성공
+- `bash -n scripts/install-vscode-extension.sh` 구문 검증 성공
+- `git diff --check` 성공
+
+---
+
+### 🔧 Session 67 — VSCode Extension 권한 승인 프롬프트 복구 (2026-05-12)
+
+#### `theseus_engine/daemon.py`
+
+- local daemon 기본 실행 경로에서 민감 도구 실행 시 `PermissionRequest` 이벤트를 발행하고 Extension 응답을 기다리도록 수정
+- `POST /runs/{run_id}/permissions/{request_id}` 엔드포인트를 추가해 VSCode Extension이 허용/거부 결과를 daemon runtime에 전달할 수 있게 함
+- 권한 응답이 제한 시간 내 도착하지 않으면 도구 실행을 거부하는 fail-closed 동작을 추가
+
+#### `theseus_engine/cli_runner.py`
+
+- stdio fallback runner에서도 `PermissionRequest` 후 즉시 자동 승인하지 않고 `PermissionResponse` 입력을 기다리도록 변경
+
+#### `vscode-extension/src/session`, `vscode-extension/src/shared/protocol.ts`
+
+- `PermissionRequest` 수신 시 VSCode 모달로 사용자에게 `허용`/`거부`를 묻고, local daemon은 HTTP 응답으로, stdio runner는 JSON Lines 입력으로 결과를 전달
+- SSE replay나 재연결로 같은 권한 요청이 중복 수신되어도 동일 `request_id`는 한 번만 처리하도록 보호
+
+#### `tests`
+
+- `tests/test_local_daemon.py`에 daemon 권한 요청이 Extension 응답을 기다린 뒤 승인 결과를 반환하는 테스트 추가
+
+#### 검증
+
+- `python -m unittest tests.test_local_daemon` 성공
+- `python -m unittest tests.test_runner_runtime_plan_flow tests.test_query_engine_execution` 성공
+- `python -m py_compile theseus_engine\cli_runner.py theseus_engine\daemon.py theseus_engine\runner_runtime.py tests\test_local_daemon.py` 성공
+- `npm.cmd run compile` 성공
+
+---
+
+### 🔧 Session 66 — PLAN 자동 검증 턴 연결 (2026-05-12)
+
+#### `theseus_engine/core/plan_flow.py`
+
+- PLAN 실행 완료/검증 완료 문구 감지와 자동 검증 continuation prompt를 공용 헬퍼로 분리
+- 실행 완료 신호(`Plan complete`, `execution complete`)와 검증 완료 신호(`Verification complete`, `검증 완료`)를 standalone runtime들이 같은 기준으로 처리하도록 정리
+
+#### `theseus_engine/runner_runtime.py`
+
+- local daemon/stdio runner 경로에서 PLAN EXECUTING 완료 감지 시 VERIFYING으로 전환한 뒤 자동으로 검증 턴을 이어서 실행
+- 검증 턴의 assistant 응답이 `Verification complete.`를 포함하면 추가 auto-resume 없이 최종 응답으로 반환되도록 처리
+- 서버 라우트(`src/**`) 변경 없이 standalone runtime 내부 흐름만 보완
+
+#### `theseus_engine/tui/tui_main.py`
+
+- TUI PLAN 실행 완료 후 `user>`로 바로 돌아가지 않고 자동 검증 prompt를 이어서 실행하도록 수정
+- 검증 완료 신호를 감지하면 auto-resume을 멈추고 PLAN 검증 완료 상태 메시지만 표시
+
+#### `tests`
+
+- `tests/test_runner_runtime_plan_flow.py` 추가
+  - PLAN 실행 완료 후 자동 검증 턴이 실행되는지 검증
+  - 검증 완료 신호가 최종 응답으로 반환되고 추가 루프가 발생하지 않는지 검증
+
+#### 검증
+
+- `python -m unittest tests.test_runner_runtime_plan_flow` 성공
+- `python -m unittest tests.test_local_daemon tests.test_query_engine_execution` 성공
+- `python -m py_compile theseus_engine\core\plan_flow.py theseus_engine\runner_runtime.py theseus_engine\tui\tui_main.py tests\test_runner_runtime_plan_flow.py` 성공
+
+---
+### 🔧 Session 65 — theseus_engine 실행 안정성 1차 리팩토링 (2026-05-12)
+
+#### `theseus_engine/engine/query_engine.py`
+
+- tool 실행 순서를 정리해 RBAC/permission 평가가 PRE hook, 감사 LLM, HITL보다 먼저 수행되도록 변경
+- 단일 tool 실행 중 예외가 발생해도 agent loop가 중단되지 않고 `ToolExecutionCompleted(is_error=True)`로 회복 가능하게 처리
+- POST hook이 `tool_output`을 보정하거나 self-reflection 경고를 추가한 경우, 해당 출력이 StreamEvent와 다음 LLM 입력에 반영되도록 수정
+- `auto_compact_threshold_tokens` 기존 인자를 유지하면서 engine 내부 auto-compact 메시지 임계값으로 적용
+- `total_usage` 누적 property와 `UsageSnapshot.prompt_tokens` / `completion_tokens` 호환 alias를 추가해 서버 코드 변경 없이 usage 조회가 가능하도록 보완
+
+#### `theseus_engine/tools/core/lsp_tool.py`
+
+- `lsp` tool의 파일 경로 해석을 공용 `_resolve_path()` / `_check_path_security()`로 통일
+- `document_symbol`, `go_to_definition`, `find_references`, `hover`가 workspace 밖 파일을 읽지 못하도록 차단
+
+#### `theseus_engine/daemon.py`, `theseus_engine/tasks/manager.py`
+
+- local daemon의 동시 run 요청을 `409`으로 거부해 단일 `EditorRuntime` 공유 상태가 겹치지 않도록 보호
+- daemon run event buffer와 run 목록에 env 기반 retention 상한을 추가
+- background task output buffer와 task 목록에 env 기반 retention 상한을 추가
+
+#### `tests`
+
+- `tests/test_query_engine_execution.py`, `tests/test_lsp_tool.py`, `tests/test_task_manager.py` 추가
+- `tests/test_local_daemon.py`에 concurrent run 거부 및 event buffer retention 검증 추가
+
+#### 범위
+
+- 서버 라우트 및 builder 계층(`src/**`)은 변경하지 않음
+- 기존 VSCode Extension/서버 StreamEvent 및 API shape은 유지
+
+#### 검증
+
+- `python -m unittest tests.test_query_engine_execution tests.test_lsp_tool tests.test_task_manager tests.test_local_daemon` 성공
+- `python -m py_compile theseus_engine\engine\query_engine.py theseus_engine\tools\core\lsp_tool.py theseus_engine\daemon.py theseus_engine\tasks\manager.py theseus_engine\wrappers\llm_clients\api_types.py` 성공
+
+---
+
+### ✨ Session 48~64 — VSCode Extension 통합 기능 추가 (2026-05-11~2026-05-12)
+
+기존 Session 48~64에 나뉘어 있던 VSCode Extension, JSON Lines runner, local daemon, WebView UX, runner 복구 안정화 작업을 하나의 feature 단위로 통합 기록합니다.
+
+#### 신규 Extension / Editor Runtime
+
+- `vscode-extension/` 기반 VSCode Activity Bar / Sidebar Extension 추가
+  - `package.json`, `tsconfig.json`, `.vscodeignore`, `resources/theseus.svg`, `theseus-vscode-0.0.1.vsix` 포함
+  - `theseus.chatView` WebView View, Start/Stop 명령, core/python path 설정, workspace path 설정 추가
+- `theseus_engine/cli_runner.py`에 stdio JSON Lines runner 추가
+  - `RunnerReady`, `RunnerStopped`, `RunnerError`, StreamEvent JSON 직렬화, stdin 기반 사용자 입력 처리 지원
+  - Extension 외부에서 raw `/agent`, `/ask`, `/plan`, `/coordinator`가 직접 모드를 바꾸지 않도록 내부 JSON 명령 경로로 분리
+- `theseus_engine/runner_runtime.py`로 EditorRuntime 공용화
+  - QueryEngine 초기화, session/slash 명령, mode 전환, PLAN 승인/거부 처리를 stdio runner와 local daemon이 공유
+- `theseus_engine/daemon.py`에 local HTTP/SSE daemon 추가
+  - `127.0.0.1` 전용 bearer token 인증
+  - `GET /health`, `GET /status`, `POST /runs`, `GET /runs/{runId}/events`, `POST /runs/{runId}/interrupt` 제공
+  - `.theseus/runner.json`에 pid, host, port, token, runtime mode, workspace/coreRoot, schemaVersion, sessionId, workspaceHash 저장
+  - Extension은 local daemon을 기본 경로로 사용하고 실패 시 stdio fallback으로 복구
+
+#### WebView UX / 에디터 연동
+
+- `vscode-extension/media/main.js`, `styles.css`를 채팅형 WebView UI로 정리
+  - 스트리밍 assistant 메시지, markdown/code block 렌더링, 코드 복사, 툴 패널, Stop 버튼, 로딩 인디케이터, 메시지 재전송, 긴 응답 fold, 타임스탬프 지원
+  - `vscode.getState()` / `setState()` 기반 대화 기록과 PLAN 체크리스트 복원
+  - `/clear`, `/quit`, 세션 목록, mode selector, 내부 `setMode` 메시지 처리
+- `@` 파일 경로 자동완성 안정화
+  - 검색어 기반 glob, workspacePath 기준 상대경로, 제외 디렉터리, 경로 정렬, 공백 포함 경로 `@"..."` 삽입 지원
+- 현재 열린 파일/선택 코드 컨텍스트 연동
+  - active editor 변경 이벤트, `Ask Theseus`, `Theseus: Explain Selection`, `injectText`, `openFile` 처리
+- 파일 변경 및 PLAN 실행 가시화
+  - `custom_tools/` watcher 알림
+  - `write_file` / `edit_file` 성공 시 `vscode.diff` 자동 표시
+  - `PlanDraftedEvent.structured_plan.tasks`를 WebView PLAN 체크리스트로 렌더링
+
+#### 이벤트 / 상태 / 복구 안정성
+
+- StreamEvent 확장
+  - `ToolExecutionStarted` / `ToolExecutionCompleted`에 `tool_use_id`, `tool_input`, 변경 파일 metadata 추가
+  - `AgentLoopStatus` 이벤트로 모델 턴, tool 실행, loop 완료/오류 상태를 WebView에 전달
+- Runner 상태 모델 정리
+  - `RunnerStatus`를 WebView 단일 source of truth로 사용
+  - `processRunning`, `lifecycle`, `runtimeMode`, `daemonPort`, `pythonExec`, `coreRoot`, `workspaceCwd`, `lastDiagnostic` 제공
+  - `running`과 process 생존 여부를 분리해 시작 중/재연결/입력 대기 상태를 명확히 표시
+- stale/reattach 복구 정책 정리
+  - `this.proc && lastReadyEvent`가 있는 stale/starting/error 상태는 재시작보다 revive/reattach 우선
+  - pending input을 유지하고 `attachSession` 요청을 throttle 처리
+  - Extension Host 재시작으로 pipe를 잃은 stdio runner는 orphan cleanup 후 clean restart
+- local daemon heartbeat/replay 안정화
+  - runner state schema validation과 workspace/coreRoot mismatch 차단
+  - `/status` polling heartbeat, 연속 실패 시 stale/ready_timeout 진단
+  - SSE reconnect 최대 5회, `after=<eventCount>` 기반 event replay, completed run buffered event 중복 방지
+
+#### 설정 / 문서 / 패키징
+
+- 모델 환경변수 우선순위를 CLI/TUI/Extension에서 `THESEUS_MODEL` → `OPENHARNESS_MODEL` 순서로 통일
+- Gemini/Anthropic/DeepSeek/OpenAI-compatible API key 누락·placeholder 진단과 Gemini `GOOGLE_API_KEY` fallback 추가
+- `.gitignore`, `backend/theseus-core-server/.gitignore`에 Extension 빌드 산출물과 `.theseus/runner.json` 정리 반영
+- `docs/roadmap/vscode-extension-plan.md`에 Extension 구현 상태, UX 개선, local-daemon 기본 방향을 반영
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `node --check backend\theseus-core-server\vscode-extension\media\main.js` 성공
+- `npx.cmd vsce package --no-dependencies` 성공
+- `python -m unittest tests.test_local_daemon tests.test_llm_client_config` 성공
+- `python -m py_compile backend\theseus-core-server\theseus_engine\cli_runner.py` 성공
+
+---
+
+### 🔧 Session 47 — ProjectClient 서버 연동 레이어 + Hybrid 아키텍처 문서화 (2026-05-08)
+
+#### 신규: `theseus_engine/client/project_client.py`
+
+에이전트를 사용자 PC에서 실행하면서 백엔드 서버에서 설정을 받아오는 클라이언트 레이어.
+`THESEUS_SERVER_URL` 환경변수가 설정된 경우에만 활성화 (Hybrid 모드).
+미설정 시 모든 메서드 no-op → standalone 완전 하위 호환.
+
+- `CustomToolSpec` / `ProjectConfig` 데이터 클래스
+- `TheseusProjectClient.fetch_project_config()` — `/api/agent/project-config` GET
+- `TheseusProjectClient.install_custom_tools()` — 커스텀 툴 코드를 `custom_tools/{project_id}/`에 저장
+- `TheseusProjectClient.sync_history()` — 턴 완료 후 대화 이력을 서버에 POST
+- `TheseusProjectClient.report_usage()` — 토큰 사용량을 `/internal/billing/usage`에 POST
+- `init_project_session()` 편의 함수 — fetch + install 한 번에 처리
+- `get_project_client()` 전역 인스턴스 반환
+
+#### `theseus_engine/client/__init__.py` (신규)
+
+client 패키지 init 파일.
+
+#### `theseus_cli.py` 통합
+
+- `OPENHARNESS_MODEL` → `THESEUS_MODEL` 수정 (`.env.example` 일치)
+- `init_project_session()` 호출: `THESEUS_SERVER_URL` 설정 시 서버에서 `user_level`, `actor_role`, `tool_permissions` 로드
+- 턴 완료 후 `sync_history()` + `report_usage()` 호출 (서버 연동 시)
+- 신규 환경변수: `THESEUS_PROJECT_ID`, `THESEUS_SESSION_TOKEN`
+
+#### `theseus_engine/tui/tui_main.py` 통합
+
+- `get_project_client` / `init_project_session` import 추가
+- `on_mount()`: 서버 연동 시 프로젝트 설정 로드 → `user_level`, `actor_role`, `tool_permissions` 업데이트
+- `_agent_worker()` 완료 후 `sync_history()` + `report_usage()` 비동기 호출
+- `_session_id`, `_session_token` 인스턴스 변수 추가
+
+#### 문서 업데이트
+
+- `docs/architecture/multi-user-server.md`
+  - Hybrid 아키텍처 섹션 추가 (아키텍처 다이어그램, 환경변수 표, ProjectClient 코드 예시)
+  - 배포 모드 비교 표 → Standalone / Hybrid / Server 3열로 확장
+
+- `docs/analysis/spec-gap-analysis.md`
+  - Section 8 추가: Hybrid 아키텍처 — 명세의 사각지대
+  - 요약 표에 Hybrid 배포 지원 행 추가
+
+- `docs/analysis/backend-separation-analysis.md`
+  - "Hybrid 배포에서의 분리 구조" 섹션 추가
+  - Core/ProjectClient/백엔드 역할 다이어그램
+
+---
+
+### 🔧 Session 46 — 멀티유저 서버 필수 수정 2건 + 문서화 (2026-05-08)
+
+#### 코드 수정
+
+**C-1: `core/engine_builder.py`** — `cwd` 파라미터화 (workspace 격리)
+- `Path.cwd()` 하드코딩 제거 → `cwd: Optional[Path] = None` 파라미터 추가
+- `resolved_cwd = cwd if cwd is not None else Path.cwd()` — standalone 하위 호환 유지
+- `ScopedMemory`, `QueryEngine` 모두 `resolved_cwd` 사용
+- 서버 모드: `setup_engine(cwd=Path("/workspaces/{project_id}"))` 로 프로젝트별 격리
+
+**C-2: `core/engine_builder.py`** — `CostTracker` / `SessionStats` 요청 스코프 격리
+- `CostTracker.reset()` / `get_or_create()` 전역 싱글톤 사용 제거
+- 항상 새 인스턴스 생성: `tracker = CostTracker()`, `stats = SessionStats()`
+- `reset_stats=True` 시에만 전역 싱글톤 동기화 (standalone CLI `/cost`, `/stats` 명령 호환)
+- `tool_metadata`에 `session_stats` 인스턴스 추가
+
+#### 문서 추가
+
+- `docs/architecture/multi-user-server.md` — 멀티유저 서버 아키텍처 설계 문서
+- `docs/analysis/spec-gap-analysis.md` — 명세 vs theseus_engine 갭 분석
+- `docs/analysis/db-save-timing-analysis.md` — DB 저장 시점 문제점 분석
+- `docs/analysis/backend-separation-analysis.md` — LLM Agent / 백엔드 / DB 분리 관점 분석
+
+---
+
+### 🔧 Session 45 — PlanDraftedEvent + standalone PLAN 전환 수정 (2026-05-08)
+
+#### Core — `engine/stream_events.py`
+
+**P-1: `extract_plan_json()` 헬퍼 추가**
+- PLAN DRAFTING 단계에서 LLM 응답 내 ` ```json ... ``` ` 블록을 추출하는 함수
+- `_PLAN_JSON_RE` 정규식 + `json.loads()` 파싱, 실패 시 `None` 반환
+
+**P-2: `PlanDraftedEvent` StreamEvent 추가**
+- LLM이 계획 JSON을 생성 완료했을 때 Core가 발행하는 이벤트
+- `raw_markdown: str` (전체 응답), `structured_plan: dict` (파싱된 JSON) 포함
+- standalone: `TheseusStateMachine` → `WAIT_FOR_REVIEW` 전이 트리거
+- server(src): DB 저장 + SSE 전송 트리거
+
+#### Core — `engine/query_engine.py`
+
+**P-3: `QueryContext.is_plan_drafting` 플래그 추가**
+- `True`일 때 `AssistantTurnComplete` 직후 JSON 감지 → `PlanDraftedEvent` yield
+- 기본값 `False` — 기존 동작 영향 없음
+
+**P-4: `QueryEngine.set_plan_drafting()` 메서드 추가**
+- 호출자(TUI, src)가 PLAN DRAFTING 단계를 엔진에 동기화하는 진입점
+- `_make_context()`에서 `is_plan_drafting` 자동 반영
+
+#### Standalone — `tui/tui_main.py`
+
+**S-1: `theseus_cli.parsers` 외부 의존성 제거**
+- `_handle_plan_turn()` 내 `from theseus_cli.parsers import handle_plan_draft` 의존
+- `ModuleNotFoundError` 시 PLAN 단계 전환 전체 스킵되는 버그
+- `_on_plan_drafted(event: PlanDraftedEvent)` 메서드로 교체: Core 이벤트만으로 전환 처리
+- `_handle_plan_executing_turn()` 분리: EXECUTING/VERIFYING 완료 키워드 감지 전담
+
+**S-2: 데드코드 `except MaxTurnsExceeded` 제거**
+- `submit_message()`가 이미 `ErrorEvent(error_type="max_turns_exceeded")`로 변환하므로 예외 전파 없음
+- `ErrorEvent.error_type == "max_turns_exceeded"` 분기로 교체 — 상태 저장 + 전환 로직 유지
+
+**S-3: `set_plan_drafting()` 턴마다 동기화**
+- 매 루프 시작 시 `engine.set_plan_drafting(sm.is_plan_drafting)` 호출
+- 모드 전환 직후에도 JSON 감지 활성화 상태가 올바르게 반영됨
+
+**S-4: 불필요한 `MaxTurnsExceeded` import 제거**
+
+---
+
+### 🔧 Session 44 — Kafka 연동 준비 Core 수정 4건 (2026-05-08)
+
+#### 버그 수정
+
+**B-1: `core/engine_builder.py:59`** — `OPENHARNESS_MODEL` 환경변수 잔재 제거
+- `.env.example`은 `THESEUS_MODEL`로 수정했으나 실제 코드가 구버전 변수를 읽어 모델 설정이 무시되는 버그
+- `os.getenv("OPENHARNESS_MODEL", ...)` → `os.getenv("THESEUS_MODEL", "gpt-4o")`
+
+#### Kafka 연동 준비
+
+**K-1: `engine/stream_events.py`** — `ErrorEvent` 타입 분류 추가
+- `recoverable: bool` 단독으로는 src에서 재시도 전략 판단 불가 → 문자열 파싱 의존성 발생
+- `ErrorType` Literal 타입 정의: `llm_api_error` / `tool_execution_error` / `security_blocked` / `context_overflow` / `max_turns_exceeded` / `unknown`
+- `ErrorEvent.error_type: ErrorType = "unknown"` 필드 추가
+- `query_engine.py` 내 모든 `ErrorEvent` yield 지점에 적절한 `error_type` 값 부여
+- `MaxTurnsExceeded` 예외를 `submit_message()`에서 catch → `ErrorEvent(error_type="max_turns_exceeded")` yield로 전환 (예외 전파 방지)
+- `submit_message()` 반환 타입 `AsyncIterator` → `AsyncGenerator` 교정
+
+**K-2: `tools/core/base_tools.py`** — `ToolExecutionContext`에 추적 ID 추가
+- Tool 실행 중 로깅·트레이싱 시 `run_id` / `tool_draft_id` 미보존 → 장애 추적 불가
+- `run_id: str | None = None`, `tool_draft_id: str | None = None` 필드 추가
+
+**K-3: `core/engine_builder.py`** — `setup_engine()`에 추적 ID 주입 경로 추가
+- `run_id`, `tool_draft_id` 파라미터 추가 (기본값 None — 하위 호환 유지)
+- `tool_metadata`에 보존 → `query_engine.py` `_execute_tool_call()`에서 `ToolExecutionContext`에 자동 주입
+
+---
+
+### 🔐 Session 43 — 2차 분석 결과 수정 17건 + .env.example 정비 (2026-05-08)
+
+#### High — 보안·성능
+
+**H-2: `tools/core/worktree_tools.py`** — async 함수 내 `subprocess.run()` → `asyncio.create_subprocess_exec`
+- `_git_output()` async 함수로 전환, `_run_git()` 헬퍼 추가
+- `EnterWorktreeTool`, `ExitWorktreeTool` 모두 비동기 git 호출로 교체
+
+**H-3: `tools/core/lsp_tool.py`** — `workspace_symbol` 동기 블로킹 → executor 오프로드
+- `rglob + read_text + jedi.Script()` 전체를 `loop.run_in_executor(None, ...)` 로 감싸기
+
+**H-4: `memory/scoped_memory.py`** — 경로 탈출 검증 추가
+- `_safe_path()` 메서드 신설: `Path.resolve()` 후 `is_relative_to(target_dir)` 검사
+- `write()`, `read()`, `delete()` 모두 `_safe_path()` 경유로 통일
+- `../../.bashrc` 형태 입력 시 `ValueError` 발생
+
+#### Medium — 런타임 안정성·구조
+
+**M-1: `core/tool_retriever.py`** — `asyncio.Lock` 이벤트 루프 불일치 방어
+- `_get_index_lock()` 내에서 `asyncio.get_running_loop()` 로 현재 루프 확인
+- 루프 불일치 시 Lock 재생성 (테스트 환경 `asyncio.run()` 반복 호출 대응)
+
+**M-2: `tui/tui_main.py`** — `theseus_cli` import 안전 처리
+- `from theseus_cli.parsers import handle_plan_draft` → `try/except ModuleNotFoundError` 감싸기
+- 미사용 `extract_plan_json` import 제거
+
+**M-3: `tui/tui_main.py`** — `os.listdir` 예외 처리
+- `os.listdir(CUSTOM_TOOLS_DIR)` → `try/except OSError: custom = set()` 추가
+
+**M-4: `validators/query_validator.py`** — WHERE 절 판별 로직 수정 + LLM stub 경고
+- `_SQL_NO_WHERE_PATTERN` 부정 전방탐색 오류(false positive) 제거
+- `_SQL_WHERE_PATTERN`으로 전체 문자열 WHERE 존재 여부를 별도 확인
+- `@classmethod` + `@theseus_traceable` 데코레이터 순서 교정
+- LLM stub `log.info` → `log.warning` 승격
+
+**M-5: `core/context_compressor.py`** — `chat_completion()` 미지원 클라이언트 방어
+- `hasattr(api_client, "chat_completion")` 검사 추가
+- 미지원 시 `AttributeError` 발생 → 기존 `except` 블록에서 구조적 요약으로 폴백
+
+**M-6: `skills/registry.py`** — `get_skills_dir` / `ensure_skills_dir` 분리
+- `get_skills_dir()`: 조회 전용, `mkdir` 부작용 제거
+- `ensure_skills_dir()`: 쓰기 전용, `mkdir` 수행
+- `skill_tools.py` `SkillSaveTool`에서 `ensure_skills_dir()` 사용으로 교체
+
+**M-7: `core/tool_retriever.py`** — 임베딩 shape 동적 획득
+- `np.empty((0, 384))` 하드코딩 제거
+- `model.get_sentence_embedding_dimension()` 으로 런타임에 차원 획득 (폴백 384)
+
+**M-8: `wrappers/llm_clients/anthropic_client.py`** — retry 루프 후 방어 코드
+- `last_error is None` 이면서 루프 완료 시 silent 종료 → `RequestFailure` 명시적 raise
+
+#### Low — 코드 품질
+
+**L-1: `validators/suggestion_validator.py`** — stub 경고 명시
+- `log.info` → `log.warning`, stub 상태·미동작 사실 명시
+
+**L-3: `mcp/client.py`** — MCP 서버 직렬 → 병렬 연결
+- `for` 루프 → `asyncio.gather(*[_connect_one(...) for ...], return_exceptions=True)`
+
+**L-5: `tui/tui_main.py`** — `sys.path` 조건부 삽입
+- 이미 포함된 경우 중복 추가 방지 (`if str(PROJECT_ROOT) not in sys.path`)
+
+**L-6: `tools/core/knowledge_tools.py`** — `rag.search()` executor 오프로드
+- 동기 `rag.search()` → `loop.run_in_executor(None, lambda: ...)` 비동기 래핑
+
+**L-7: `tools/core/glob_tool.py`** — `rglob` 이중 재귀 제거
+- `rglob(pattern)` / `glob(pattern)` 분기 제거 → 항상 `search_root.glob(arguments.pattern)`
+
+---
+
+#### `.env.example` 정비
+
+- `OPENHARNESS_MODEL` → `THESEUS_MODEL` 교체 (구버전 명시 주석)
+- 섹션 7 신규 항목 추가:
+  - `THESEUS_RUNTIME_MODE` (standalone/server)
+  - `THESEUS_USE_LLM_VALIDATOR` (현재 stub 주의 문구 포함)
+  - `THESEUS_DATA_DIR` (tool_artifacts 저장 경로)
+  - `THESEUS_DEBUG_DUMP` (기본 false — 디버그 덤프 온/오프)
+  - `THESEUS_DEBUG_DUMP_DIR` (덤프 저장 경로 오버라이드)
+
+---
+
+### 🔐 Session 42 — 보안·안정성·성능 개선 11건 (2026-05-08)
+
+#### High — 보안
+
+**수정 1: `tools/core/agent_tool.py` — 셸 인젝션 방지 + `engine.query()` → `submit_message()`**
+- `arguments.prompt`를 `python -c "..."` 인라인에 직접 삽입 → `$()`, 백슬래시 등 메타문자로 임의 명령 실행 가능
+- 수정: 프롬프트를 임시 JSON 파일로 저장 후 파일 경로만 스크립트에 전달 (메타문자 이스케이프 불필요)
+- 추가: `engine.query()` 존재하지 않는 메서드 → `engine.submit_message()` async for 루프로 교체
+- `OPENHARNESS_MODEL` 환경변수 → `THESEUS_MODEL`로 통일
+
+**수정 2: `tools/core/base_tools.py:30` — `ToolResult` frozen 제거**
+- `frozen=True` dataclass에 `metadata: dict` 사용 → 생성 후 `result.metadata["key"] = value` 불가 (`FrozenInstanceError`)
+- 수정: `@dataclass(frozen=True)` → `@dataclass`
+
+**수정 3: `models/rbac.py:84` — Windows 경로 민감 패턴 지원**
+- `SENSITIVE_PATH_PATTERNS`가 Unix 슬래시만 지원 → Windows 환경에서 `C:\Users\..\.ssh\id_rsa` 패턴 탐지 실패
+- 수정: `file_path.replace("\\", "/")` 로 경로 정규화 후 `fnmatch` 적용
+
+**수정 4: `wrappers/hooks/theseus_hook_executor.py:333` — 감사 LLM 실패 시 fail-closed**
+- LLM 감사 오류 시 `return None` → 자동 통과(fail-open)
+- 수정: 오류 발생 시 `HookResult(blocked=True)` 반환으로 fail-closed 정책 적용
+
+---
+
+#### High — 미완성
+
+**수정 5: `validators/execution_validator.py:212` — LLM 검증기 stub 경고 명시**
+- `THESEUS_USE_LLM_VALIDATOR=true` 설정해도 실제로는 Regex 폴백
+- 수정: `log.info` → `log.warning`으로 승격, stub 상태·폴백 사실을 명시적으로 경고
+
+**수정 6: `validators/execution_validator.py:108` — `@classmethod` + `@theseus_traceable` 데코레이터 순서**
+- `@classmethod`가 바깥, `@theseus_traceable`이 안쪽 → `cls` 바인딩 오류 가능
+- 수정: `@theseus_traceable` → `@classmethod` 순서로 변경
+
+---
+
+#### Medium — 런타임 안정성
+
+**수정 7: `engine/query_engine.py:503` — `run_query` 반환 타입 힌트 수정**
+- `AsyncIterator` → `AsyncGenerator[..., None]` (실제 타입과 일치)
+- `typing.AsyncGenerator` import 추가
+
+**수정 8: `tasks/manager.py:185` — 싱글톤 레이스 컨디션 방지**
+- `get_task_manager()` 전역 변수 초기화에 락 없음 → 멀티 스레드 환경에서 중복 생성 가능
+- 수정: double-checked locking (`threading.Lock`) 적용
+
+---
+
+#### Medium — 성능
+
+**수정 9: `rag/service.py:250` — 동기 파일 I/O 주의 문서 추가**
+- async 컨텍스트에서 동기 `open()` 호출 시 이벤트 루프 블로킹
+- 수정: 즉각 비동기 전환 대신 호출자 가이드 docstring 추가 (RAG 서비스 전체 구조 변경은 별도 마일스톤)
+
+**수정 10: `tools/core/grep_tool.py:44` — 파일 스캔 executor 오프로드**
+- `search_path.glob("**/*")` 전체 트리 + `read_text()` 동기 수행 → 이벤트 루프 블로킹
+- 수정: `_sync_grep()` 내부 함수로 분리 후 `loop.run_in_executor(None, _sync_grep)` 비동기 실행
+- glob을 generator로 변경하여 전체 파일 목록 메모리 적재 제거
+
+**수정 11: `models/state.py:169` — git subprocess 호출 캐싱**
+- 매 시스템 프롬프트 생성 시 `subprocess.run(git ...)` 동기 호출 → 이벤트 루프 블로킹
+- 수정: `_get_git_branch(cwd)` 캐시 함수 추가, cwd 단위로 결과 메모이제이션 (`_git_branch_cache: dict`)
+
+---
+
+#### Low — 코드 품질
+
+**수정 12: `tools/core/file_write_tool.py:25` — 클래스 속성 순서 정리**
+- `permission_level = 2`가 `is_read_only()` 메서드 뒤에 선언
+- 수정: 클래스 속성을 메서드 위로 이동
+
+---
+
+### 🔧 Session 41 — 버그 수정: 보안·안정성 5건 (2026-05-08)
+
+#### 수정 1 (High) — `theseus_engine/tools/core/tool_factory.py:746`
+
+- **원인**: 서버 모드 create_tool 성공 후 `tool_registry.get_tool(name)` 호출 → `ToolRegistry`에 `get_tool()` 미존재, `AttributeError` 발생
+- **수정**: `get_tool(arguments.tool_name)` → `get(arguments.tool_name)` (실제 메서드명으로 변경)
+
+---
+
+#### 수정 2 (High) — `theseus_engine/tools/core/bash_tool.py:47`
+
+- **원인**: `cwd` override를 `Path(arguments.cwd).expanduser()` 만으로 처리, 워크스페이스 외부 경로(`/`, `C:/` 등) 검증 없음
+- **수정**: `_check_path_security(cwd, context.cwd)` 호출 추가, workspace 밖 cwd 지정 시 `SecurityViolation` 반환
+- **의존 추가**: `from theseus_engine.tools.core.file_utils import _check_path_security`
+
+---
+
+#### 수정 3 (Medium) — `theseus_engine/tools/core/todo_write_tool.py:42`
+
+- **원인 1**: `Path(context.cwd) / arguments.path` 만 사용, `../` 또는 절대경로 입력 시 workspace 외부 파일 쓰기 가능
+- **원인 2**: `permission_level = 1` — 쓰기 도구인데 읽기 수준 권한
+- **수정 1**: `_resolve_path` + `_check_path_security` 적용
+- **수정 2**: `permission_level = 1` → `permission_level = 2`
+- **의존 추가**: `from theseus_engine.tools.core.file_utils import _resolve_path, _check_path_security`
+
+---
+
+#### 수정 4 (Medium) — `theseus_engine/tools/core/file_edit_tool.py:49`
+
+- **원인**: `content = _strip_markdown_links(content)` 로 기존 파일 전체를 마크다운 링크 제거 변환 → 주석·문자열 안의 `[text](url)` 형태 내용 손상 가능
+- **수정**: `content` 전체 변환 제거, `old_str` / `new_str` 입력값만 정규화 (파일 원본은 보존)
+
+---
+
+#### 수정 5 (Low) — `theseus_engine/core/engine_builder.py:108`
+
+- **원인**: `rag_failed == False` (RAG 성공) 분기의 `else` 블록에 "관련 도구를 찾지 못했습니다" 반대 의미 로그 출력
+- **수정**: `"✅ RAG 도구 선택 성공 ({similarity_added}개 유사도 매칭)"` 으로 정정
+
+---
+
+#### 기타 — `theseus_engine/engine/query_engine.py:128`
+
+- `_tool_artifact_dir()` 기본 경로 `Path.home() / ".openharness" / "data"` → `Path.home() / ".theseus" / "data"` (OH 잔재 제거)
+
+---
+
 ### 🏗️ Session 40 — 프로젝트별 역할 기반 툴 가시성 (RuntimeMode + PermissionProvider) (2026-05-08)
 
 #### 목표
@@ -621,42 +1161,6 @@ OpenHarness 컴포넌트가 유기적으로 참조되어 Theseus 엔진이 bypas
 
 ---
 
-### 🐛 Session 31 — CHANGELOG 감사 및 불일치 전면 수정 (2026-05-07)
-
-#### 신규 버그 수정
-
-- **`bash_tool.py` — Windows 따옴표 손상 버그 수정 (🚨 Critical)**:
-    - Windows에서 `asyncio.create_subprocess_exec("cmd.exe", "/c", command)`를 사용할 때 Python의 `list2cmdline`이 command 문자열을 추가 인용하면서 cmd.exe가 따옴표를 잘못 처리, Python `-c` 인자 앞에 `"`가 붙어 `SyntaxError: unterminated string literal`이 발생하던 버그 수정.
-    - Windows/Linux 구분 없이 `asyncio.create_subprocess_shell`로 통일. `IS_WINDOWS` 상수 및 `platform` import 제거.
-    - 이 버그로 인해 `python -c "..."` 형태의 모든 bash 명령이 Windows에서 실패하고, 에이전트가 동일 명령을 무한 반복하는 루프의 근본 원인이었음.
-
-- **`engine_builder.py` — EXECUTING 단계에서 `create_tool` RAG 제외 문제 수정 (🔴 High)**:
-    - RAG Top-K가 `create_tool`을 쿼리와 무관하다고 판단해 `current_registry`에서 제외하면, `build_filtered_registry`에서 `exclude_tools=set()`(EXECUTING이므로 제외 없음)을 전달해도 이미 없는 도구는 포함되지 않는 구조적 누락 수정.
-    - `is_plan_executing=True`일 때 `current_registry`에 `create_tool`이 없으면 `full_registry`에서 꺼내 강제 삽입하는 로직 추가.
-
-- **`theseus_cli.py` — PLAN DRAFTING REINFORCEMENT 과잉 강제 수정 (🟠 Medium)**:
-    - Session 28에서 도입된 `"Output ONLY the JSON block... No conversational prose allowed."` 주입이 질문·대화 입력에도 적용되어, 에이전트가 단순 질문을 JSON 플랜으로 만들어버리는 문제 수정.
-    - `"REMINDER: If this is a question, answer it directly. If this is an implementation request, output a JSON plan."` 으로 완화하여 입력 의도에 따라 응답 방식을 선택하도록 개선.
-
-#### CHANGELOG 감사 결과 반영 — 기존 미수정 불일치 항목
-
-- **`theseus_cli.py` — `error_sig` 실제 에러 내용 기반으로 수정 (🟠 Medium)**:
-    - 기존: `error_sig = resume_prompt[:80]` — tool error 시 항상 고정 문자열(`"A tool execution error occurred..."`)을 시그니처로 사용하여 에러가 달라져도 동일하게 처리됨.
-    - 수정: `tool_error_occurred=True`일 때 `error_sig = accumulated_text[-200:][:80]` — LLM이 출력한 실제 에러 텍스트로 시그니처 생성. 에러 내용이 다르면 다른 시그니처로 판별하여 반복 에러 감지 정확도 향상.
-
-- **`context.py`, `theseus_cli.py` — 세션 전체 자동 재개 절대 상한 추가 (🔴 High)**:
-    - 문제: `auto_resume_count`가 5 초과 시 `WAIT_FOR_REVIEW`로 강등되지만, 사용자 재승인(`approve`) 후 `auto_resume_count`가 리셋되어 다시 5턴 반복 가능. 세션 전체에서 bash 무한루프가 30턴을 꽉 채우는 원인.
-    - `CLIContext`에 `session_resume_total: int = 0`, `MAX_SESSION_RESUMES: int = 20` 추가.
-    - `auto_resume_count`는 재개 승인 시 리셋하되 `session_resume_total`은 세션 전체에서 유지. 20회 초과 시 재승인 없이 최종 차단.
-    - 자동 재개 3개 블록(정상 resume, 턴 리밋 예외, 일반 예외) 모두 `session_resume_total` 카운팅 적용.
-    - WAIT_FOR_REVIEW → EXECUTING 재진입 시 `auto_resume_count`, `repeated_error_count`, `last_error_sig` 리셋 명시.
-
-- **`commands.py` — `/coordinator` 모드 전환 시 `pending_mode_notification` 누락 수정 (🟡 Low)**:
-    - `/agent`, `/ask`, `/plan` 전환에는 모드 전환 알림이 주입되었으나 `/coordinator`에는 누락되어 히스토리 컨텍스트 오염 방지 기능이 미적용된 문제 수정.
-    - `"[System: Mode switched to COORDINATOR. Decompose the task into parallel sub-agents. All prior mode restrictions are lifted.]"` 알림 추가.
-
----
-
 ### 🚀 Session 30 (2026-05-07)
 - **`state.py` 프롬프트 감사 및 불일치 전면 수정**:
     - **검증(Verifying) 완료 키워드 명시**: `_PLAN_VERIFYING_PROMPT`에 "Verification complete." 출력 지시를 추가하여, 검증 완료 후 에이전트가 "사용자 결정 대기" 상태로 무한 정지하던 버그의 근본 원인을 해결했습니다.
@@ -1063,16 +1567,10 @@ Antigravity(Google DeepMind) Planning Mode 프롬프트 분석을 기반으로 T
     - **HITL 승인 로직 강화 (`theseus_hook_executor.py`)**: `TheseusHookExecutor._check_hitl` 메서드가 `permission_prompt` 콜백에 `tool_name`과 `prompt_msg` 두 개의 인자를 정상적으로 전달하도록 수정하여 `theseus_cli.py`의 `ask_permission` 인터페이스와의 정합성을 맞췄습니다.
     - **유연한 응답 처리**: 승인 콜백이 불리언(`bool`) 값을 반환할 경우(OpenHarness 표준)와 문자열(`str`)을 반환할 경우(TUI/CLI input)를 모두 지원하도록 개선하여 다양한 인터페이스 환경에서의 호환성을 확보하였습니다.
     - **방어적 프로그래밍 적용**: 모든 콜백 호출부에 `callable()` 체크 및 `try...except` 예외 처리를 추가하여 보안 훅 실행 중 에러가 발생하더라도 전체 시스템이 크래시되지 않고 안전하게 차단(Safe-fail)되도록 개선하였습니다.
-
-### 🚀 Session 23 (2026-05-04)
-- **'bool' object is not callable 오류 해결**:
-*   **'bool' object is not callable 런타임 오류 해결**:
-    *   `engine_builder.py`에서 `permission_prompt_func`가 `None`일 때 불리언 값이 할당되어 `QueryEngine`에서 호출 시 에러가 발생하던 문제를 수정하였습니다.
-    *   `TheseusHookExecutor`가 `permission_prompt` 콜백을 주입받아 보안 훅 실행 시 올바르게 사용자 승인을 요청할 수 있도록 구조를 개선하였습니다.
-*   **vLLM 도구 호출 호환성 확보**:
-    *   `--enable-auto-tool-choice` 및 `--tool-call-parser gemma4` 설정을 통해 vLLM 환경에서의 안정적인 도구 사용을 지원합니다.
-*   **관측성 및 보안 훅 안정화**:
-    *   `THESEUS_ENABLE_AGENT_HOOK=true` 설정 시 파일 시스템 작업에 대한 보안 감사(Security Audit)가 정상적으로 작동함을 확인하였습니다.
+- **vLLM 도구 호출 호환성 확보**:
+    - `--enable-auto-tool-choice` 및 `--tool-call-parser gemma4` 설정을 통해 vLLM 환경에서의 안정적인 도구 사용을 지원합니다.
+- **관측성 및 보안 훅 안정화**:
+    - `THESEUS_ENABLE_AGENT_HOOK=true` 설정 시 파일 시스템 작업에 대한 보안 감사(Security Audit)가 정상적으로 작동함을 확인하였습니다.
 
 ### 🚀 Session 22 (2026-05-04)
 - **CLI 슬래시 명령어 확장 — /cost · /stats · /coordinator · /help**:
@@ -1330,11 +1828,11 @@ sm.set_coordinator_phase(CoordinatorPhase.VERIFY)      → 최종 검증 단계
     *   파괴적 툴 3종에 `is_destructive = True` 추가: `BashTool`, `WriteFileTool`, `EditFileTool`.
     *   읽기 전용 툴 3종에 `is_read_only = True` / `is_destructive = False` 추가: `ReadFileTool`, `GlobTool`, `GrepTool`.
     *   `ToolSearchTool`에도 `is_read_only = True`, `is_destructive = False` 명시.
-    *   **Security Pipeline Fixes**:
-    *   **AgentHook Refinement**: Removed `read_file` from the security auditor's scope (AgentHook) to prevent false-positive blocks that replaced file content with `{"ok": true}`.
-    *   **Markdown Robustness**: Added a heuristic unblocker in `TheseusHookExecutor` to handle LLM auditors returning Markdown-wrapped JSON, preventing unexpected security blocks.
-    *   **Tool Result Serialization**: Fixed `number_sorter.py` to use `json.dumps()`, resolving Pydantic validation errors in the `ToolResult` model.
-    *   **Interactive HITL**: Integrated a "warn-then-override" mechanism for sensitive tools.
+    *   **보안 파이프라인 버그 수정 (Security Pipeline Fixes)**:
+    *   **AgentHook 범위 조정**: `read_file` 툴을 보안 감사에서 제외하여 파일 내용이 `{"ok": true}`로 오염되는 문제를 해결.
+    *   **마크다운 강건성 향상**: LLM 감사가 마크다운 블록으로 래핑된 JSON을 반환할 때 이를 파싱할 수 있도록 `TheseusHookExecutor`에 휴리스틱을 추가하여 오탐지 차단을 방지.
+    *   **툴 결과 직렬화**: `number_sorter.py`가 `json.dumps()`를 사용하도록 수정하여 `ToolResult` 모델의 Pydantic 검증 오류 해결.
+    *   **대화형 HITL**: 민감한 도구를 위해 "경고 후 무시(warn-then-override)" 메커니즘을 통합.
     *   `TheseusHookExecutor`에 `_check_hitl()` 비동기 메서드 추가: `is_destructive=True` 툴 실행 전 `permission_prompt` 콜백을 호출하여 사용자 승인 요청.
     *   응답 `y`/`yes`/`1` → 1회 허용, `a`/`always` → 세션 내 `_always_allow` 캐시에 등록(재확인 면제), 그 외 → `HookResult(blocked=True)`로 차단.
     *   `permission_prompt` 콜백 미제공(비대화형 환경) 시 자동 허용하여 기존 자동화 파이프라인과 하위 호환 유지.
@@ -1375,8 +1873,6 @@ sm.set_coordinator_phase(CoordinatorPhase.VERIFY)      → 최종 검증 단계
 
 ## [Released]
 
-
-## [Released]
 ### 🚀 Session 16 (2026-04-29)
 - **Adaptive K — 쿼리 복잡도 기반 동적 슬롯 조정 (`tool_retriever.py`)**:
     - `compute_adaptive_k(query, base_k)` 함수 신규 구현. 정규식으로 다단계 신호(`먼저`, `그런 다음`, `마지막으로` 등)와 복잡도 키워드(`분석`, `리팩터링`, `전체` 등)를 감지하여 k를 동적 조정.

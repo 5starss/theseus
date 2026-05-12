@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+import yaml
 from pydantic import BaseModel, Field
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 
-from theseus_engine.skills.registry import load_skill_registry, get_skills_dir
+from theseus_engine.skills.registry import load_skill_registry, ensure_skills_dir
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ class SkillSaveInput(BaseModel):
     name: str = Field(description="Short name of the skill (e.g. 'react-setup')")
     description: str = Field(description="Brief description of what this skill does")
     content: str = Field(description="The full methodology or recipe in Markdown format")
+    triggers: list[str] = Field(
+        default_factory=list,
+        description="Optional phrases that should activate this skill automatically",
+    )
 
 
 class SkillSaveTool(BaseTool):
@@ -56,7 +60,7 @@ class SkillSaveTool(BaseTool):
     async def execute(
         self, arguments: SkillSaveInput, context: ToolExecutionContext
     ) -> ToolResult:
-        skills_dir = get_skills_dir(context.cwd)
+        skills_dir = ensure_skills_dir(context.cwd)  # 쓰기 시에만 디렉터리 생성
         # Normalize folder name
         folder_name = arguments.name.lower().replace(" ", "-")
         skill_folder = skills_dir / folder_name
@@ -64,11 +68,20 @@ class SkillSaveTool(BaseTool):
         
         skill_file = skill_folder / "SKILL.md"
         
-        # Prepare content with YAML frontmatter
+        metadata = {
+            "name": arguments.name,
+            "description": arguments.description,
+        }
+        if arguments.triggers:
+            metadata["triggers"] = arguments.triggers
+        frontmatter = yaml.safe_dump(
+            metadata,
+            allow_unicode=True,
+            sort_keys=False,
+        ).strip()
         markdown_content = (
             f"---\n"
-            f"name: {arguments.name}\n"
-            f"description: {arguments.description}\n"
+            f"{frontmatter}\n"
             f"---\n\n"
             f"{arguments.content}"
         )

@@ -46,8 +46,8 @@ class McpClientManager:
         self._stacks: Dict[str, AsyncExitStack] = {}
 
     async def connect_all(self) -> None:
-        """Connect all configured MCP servers."""
-        for name, config in self._server_configs.items():
+        """Connect all configured MCP servers (병렬 연결)."""
+        async def _connect_one(name: str, config) -> None:
             if isinstance(config, McpStdioServerConfig):
                 await self._connect_stdio(name, config)
             elif isinstance(config, McpHttpServerConfig):
@@ -60,6 +60,11 @@ class McpClientManager:
                     transport=transport,
                     detail=f"Unsupported MCP transport: {transport}",
                 )
+
+        await asyncio.gather(
+            *[_connect_one(name, cfg) for name, cfg in self._server_configs.items()],
+            return_exceptions=True,
+        )
 
     async def close(self) -> None:
         """Close all active MCP sessions."""

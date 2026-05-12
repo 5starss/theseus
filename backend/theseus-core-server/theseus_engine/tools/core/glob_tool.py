@@ -34,8 +34,9 @@ class GlobTool(BaseTool):
             return ToolResult(output=security_err, is_error=True)
 
         try:
-            # Use Path.glob for native python globbing
-            matches = list(search_root.rglob(arguments.pattern) if "**" in arguments.pattern else search_root.glob(arguments.pattern))
+            # Path.glob()은 패턴에 **가 포함되면 재귀 탐색을 자체 지원하므로
+            # rglob()을 별도로 사용할 필요 없음 (rglob("**/*.py")는 이중 재귀 발생)
+            matches = list(search_root.glob(arguments.pattern))
             
             # Filter directories and convert to relative paths
             files = [str(p.relative_to(context.cwd)) for p in matches if p.is_file()]

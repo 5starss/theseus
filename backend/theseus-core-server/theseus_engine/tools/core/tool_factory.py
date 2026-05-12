@@ -743,7 +743,7 @@ class ToolCreatorTool(BaseTool):
             )
 
             if result.status == "created" and context.metadata.get("active_registry") is not None:
-                instance = context.metadata["tool_registry"].get_tool(arguments.tool_name)
+                instance = context.metadata["tool_registry"].get(arguments.tool_name)
                 if instance:
                     user_rbac = context.metadata.get("user_rbac_level", 1)
                     tool_lv = getattr(instance, "permission_level", 1)
@@ -852,6 +852,13 @@ class ToolCreatorTool(BaseTool):
 
         # 5b. 생성 직후 정규화 (스키마 일관성 보장)
         normalize_tool_meta(meta_path, tool_class, safe_tool_name)
+        result_metadata = {
+            "tool_name": tool_class.name,
+            "module_path": file_path,
+            "metadata_path": meta_path,
+            "permission_level": getattr(tool_class, "permission_level", arguments.permission_level),
+            "status": "created",
+        }
 
         # 6. 런타임 ToolRegistry 및 RBAC에 즉시 등록
         registry = context.metadata.get("tool_registry")
@@ -883,7 +890,8 @@ class ToolCreatorTool(BaseTool):
                         f"Metadata: {meta_path}\n"
                         f"Permission level: {level}\n"
                         f"⚡ This tool is immediately available in the current session."
-                    )
+                    ),
+                    metadata=result_metadata,
                 )
             except Exception as e:
                 log.error("[ToolAudit] Legacy tool runtime registration failed: %s", e)
@@ -892,7 +900,8 @@ class ToolCreatorTool(BaseTool):
                         f"✅ Tool file & metadata saved, but runtime registration failed: {e}\n"
                         f"File: {file_path}\n"
                         f"The tool will be auto-loaded on the next session start."
-                    )
+                    ),
+                    metadata={**result_metadata, "status": "created_registration_failed"},
                 )
 
         log.info("[ToolAudit] Legacy tool creation finished without registry access: %s", tool_class.name)
@@ -904,5 +913,6 @@ class ToolCreatorTool(BaseTool):
                 f"Permission level: {level}\n"
                 f"⚠️ Could not access runtime registry for auto-registration. "
                 f"The tool will be auto-loaded on the next session start."
-            )
+            ),
+            metadata={**result_metadata, "status": "created_not_registered"},
         )

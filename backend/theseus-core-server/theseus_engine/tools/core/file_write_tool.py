@@ -21,10 +21,10 @@ class WriteFileTool(BaseTool):
     description = "Create a new file or completely overwrite an existing one."
     is_destructive = True  # 기존 파일 덮어쓰기 가능
     input_model = WriteFileInput
+    permission_level = 2
 
     def is_read_only(self, arguments) -> bool:
         return False
-    permission_level = 2
 
     async def execute(self, arguments: WriteFileInput, context: ToolExecutionContext) -> ToolResult:
         path = _resolve_path(context.cwd, arguments.path)

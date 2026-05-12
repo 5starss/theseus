@@ -10,6 +10,7 @@ Provides IDE-like capabilities:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Literal, Optional
@@ -17,6 +18,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.file_utils import _check_path_security, _resolve_path
 
 log = logging.getLogger(__name__)
 
@@ -112,9 +114,16 @@ class LspTool(BaseTool):
 
         try:
             if arguments.operation == "workspace_symbol":
-                return self._workspace_symbol(jedi, root, arguments.query or "")
+                # rglob + read_text + jedi 분석은 동기 블로킹 — executor로 오프로드
+                loop = asyncio.get_event_loop()
+                return await loop.run_in_executor(
+                    None, self._workspace_symbol, jedi, root, arguments.query or ""
+                )
 
-            file_path = _resolve(root, arguments.file_path)
+            file_path = _resolve_path(root, arguments.file_path or "")
+            security_err = _check_path_security(file_path, root)
+            if security_err:
+                return ToolResult(output=security_err, is_error=True)
             if not file_path.exists():
                 return ToolResult(output=f"File not found: {file_path}", is_error=True)
             if file_path.suffix != ".py":
@@ -229,15 +238,6 @@ class LspTool(BaseTool):
 
 
 # ── helpers ──────────────────────────────────────────────────────
-
-def _resolve(base: Path, candidate: str | None) -> Path:
-    if candidate is None:
-        return base
-    path = Path(candidate).expanduser()
-    if not path.is_absolute():
-        path = base / path
-    return path.resolve()
-
 
 def _rel_path(path: Path, root: Path) -> str:
     try:

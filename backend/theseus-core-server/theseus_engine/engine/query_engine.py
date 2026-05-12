@@ -19,7 +19,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncGenerator, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from theseus_engine.models.messages import (
@@ -38,18 +38,37 @@ from theseus_engine.wrappers.llm_clients.api_types import (
     UsageSnapshot,
 )
 from theseus_engine.engine.stream_events import (
+    AgentLoopStatus,
     AssistantTextDelta,
     AssistantTurnComplete,
     ErrorEvent,
+    PlanDraftedEvent,
     StatusEvent,
     StreamEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
+    extract_plan_json,
 )
-from theseus_engine.tools.core.base_tools import ToolExecutionContext, ToolRegistry
+from theseus_engine.skills.injection import (
+    SkillInjectionConfig,
+    apply_skill_injection,
+)
+from theseus_engine.tools.core.base_tools import (
+    ToolExecutionContext,
+    ToolRegistry,
+    ToolResult,
+)
 from theseus_engine.wrappers.hooks.theseus_hook_executor import HookEvent
 
 log = logging.getLogger(__name__)
+
+_DIFF_SNAPSHOT_MAX_BYTES = 1_000_000
+
+
+@dataclass(frozen=True)
+class ExecutedToolCall:
+    result: ToolResultBlock
+    metadata: dict[str, object]
 
 PermissionPrompt = Callable[[str, str], Awaitable[bool]]
 AskUserPrompt = Callable[[str], Awaitable[str]]
@@ -370,6 +389,8 @@ class QueryContext:
     ask_user_prompt: AskUserPrompt | None = None
     hook_executor: Any | None = None  # TheseusHookExecutor (duck-typing)
     tool_metadata: dict[str, object] | None = None
+    is_plan_drafting: bool = False
+    """PLAN 모드 DRAFTING 단계 여부. True일 때 JSON 감지 시 PlanDraftedEvent를 yield."""
 
 
 # ── Tool 실행 ─────────────────────────────────────────────────
@@ -379,39 +400,27 @@ async def _execute_tool_call(
     tool_name: str,
     tool_use_id: str,
     tool_input: dict[str, object],
-) -> ToolResultBlock:
-    # Pre-tool hook
-    if context.hook_executor is not None:
-        pre = await context.hook_executor.execute(
-            HookEvent.PRE_TOOL_USE,
-            {"tool_name": tool_name, "tool_input": tool_input,
-             "event": HookEvent.PRE_TOOL_USE.value},
-        )
-        if pre.blocked:
-            return ToolResultBlock(
+) -> ExecutedToolCall:
+    def _result(content: str, is_error: bool = False, metadata: dict[str, object] | None = None) -> ExecutedToolCall:
+        return ExecutedToolCall(
+            result=ToolResultBlock(
                 tool_use_id=tool_use_id,
-                content=pre.reason or f"pre_tool_use hook blocked {tool_name}",
-                is_error=True,
-            )
+                content=content,
+                is_error=is_error,
+            ),
+            metadata=metadata or {},
+        )
 
     tool = context.tool_registry.get(tool_name)
     if tool is None:
         log.warning("unknown tool: %s", tool_name)
-        return ToolResultBlock(
-            tool_use_id=tool_use_id,
-            content=f"Unknown tool: {tool_name}",
-            is_error=True,
-        )
+        return _result(f"Unknown tool: {tool_name}", True)
 
     try:
         parsed_input = tool.input_model.model_validate(tool_input)
     except Exception as exc:
         log.warning("invalid input for %s: %s", tool_name, exc)
-        return ToolResultBlock(
-            tool_use_id=tool_use_id,
-            content=f"Invalid input for {tool_name}: {exc}",
-            is_error=True,
-        )
+        return _result(f"Invalid input for {tool_name}: {exc}", True)
 
     # Permission check
     _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
@@ -433,32 +442,56 @@ async def _execute_tool_call(
                 )
             confirmed = await context.permission_prompt(tool_name, decision.reason)
             if not confirmed:
-                return ToolResultBlock(
-                    tool_use_id=tool_use_id,
-                    content=decision.reason or f"Permission denied for {tool_name}",
-                    is_error=True,
-                )
+                return _result(decision.reason or f"Permission denied for {tool_name}", True)
         else:
-            return ToolResultBlock(
-                tool_use_id=tool_use_id,
-                content=decision.reason or f"Permission denied for {tool_name}",
-                is_error=True,
-            )
+            return _result(decision.reason or f"Permission denied for {tool_name}", True)
+
+    # Pre-tool hook. Expensive audit/HITL work runs only after cheap RBAC.
+    if context.hook_executor is not None:
+        pre = await context.hook_executor.execute(
+            HookEvent.PRE_TOOL_USE,
+            {"tool_name": tool_name, "tool_input": tool_input,
+             "event": HookEvent.PRE_TOOL_USE.value},
+        )
+        if pre.blocked:
+            return _result(pre.reason or f"pre_tool_use hook blocked {tool_name}", True)
 
     # 실행
-    t0 = time.monotonic()
-    result = await tool.execute(
-        parsed_input,
-        ToolExecutionContext(
-            cwd=context.cwd,
-            metadata={
-                "tool_registry": context.tool_registry,
-                "ask_user_prompt": context.ask_user_prompt,
-                **(context.tool_metadata or {}),
-            },
-            hook_executor=context.hook_executor,
-        ),
+    pre_change_metadata = _capture_file_change_snapshot(
+        context.cwd,
+        tool_name,
+        _file_path,
     )
+    t0 = time.monotonic()
+    try:
+        result = await tool.execute(
+            parsed_input,
+            ToolExecutionContext(
+                cwd=context.cwd,
+                metadata={
+                    "tool_registry": context.tool_registry,
+                    "ask_user_prompt": context.ask_user_prompt,
+                    **(context.tool_metadata or {}),
+                },
+                hook_executor=context.hook_executor,
+                run_id=(context.tool_metadata or {}).get("run_id"),
+                tool_draft_id=(context.tool_metadata or {}).get("tool_draft_id"),
+            ),
+        )
+    except Exception as exc:
+        log.warning(
+            "tool failed: name=%s id=%s error=%s",
+            tool_name,
+            tool_use_id,
+            exc,
+        )
+        result = ToolResult(
+            output=(
+                f"도구 실행 실패: {tool_name}: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            is_error=True,
+        )
     elapsed = time.monotonic() - t0
     log.debug("executed %s in %.2fs err=%s output_len=%d",
               tool_name, elapsed, result.is_error, len(result.output or ""))
@@ -474,6 +507,30 @@ async def _execute_tool_call(
         content=inline_output,
         is_error=result.is_error,
     )
+    event_metadata: dict[str, object] = dict(result.metadata or {})
+    if pre_change_metadata:
+        event_metadata.update(pre_change_metadata)
+
+    # Post-tool hook
+    if context.hook_executor is not None:
+        payload = {
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "tool_output": tool_result.content,
+            "tool_result": tool_result,
+            "is_error": tool_result.is_error,
+            "tool_is_error": tool_result.is_error,
+            "event": HookEvent.POST_TOOL_USE.value,
+        }
+        await context.hook_executor.execute(HookEvent.POST_TOOL_USE, payload)
+        final_output = payload.get("tool_output", tool_result.content)
+        if final_output != tool_result.content:
+            tool_result = ToolResultBlock(
+                tool_use_id=tool_use_id,
+                content=str(final_output),
+                is_error=tool_result.is_error,
+            )
+
     _record_tool_carryover(
         context.tool_metadata,
         tool_name=tool_name,
@@ -482,17 +539,62 @@ async def _execute_tool_call(
         is_error=tool_result.is_error,
         resolved_file_path=_file_path,
     )
+    return ExecutedToolCall(result=tool_result, metadata=event_metadata)
 
-    # Post-tool hook
-    if context.hook_executor is not None:
-        await context.hook_executor.execute(
-            HookEvent.POST_TOOL_USE,
-            {"tool_name": tool_name, "tool_input": tool_input,
-             "tool_output": tool_result.content,
-             "tool_is_error": tool_result.is_error,
-             "event": HookEvent.POST_TOOL_USE.value},
-        )
-    return tool_result
+
+def _capture_file_change_snapshot(
+    cwd: Path,
+    tool_name: str,
+    resolved_file_path: str | None,
+) -> dict[str, object]:
+    if tool_name not in {"write_file", "edit_file"} or not resolved_file_path:
+        return {}
+
+    path = Path(resolved_file_path)
+    changed_file: dict[str, object] = {
+        "path": str(path),
+        "relative_path": _relative_to_cwd(cwd, path),
+        "existed_before": path.exists(),
+    }
+    if not path.exists():
+        changed_file["old_content"] = ""
+        return {"changed_file": changed_file}
+
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return {
+            "changed_file": changed_file,
+            "changed_file_skipped_reason": f"stat_failed: {exc}",
+        }
+
+    if size > _DIFF_SNAPSHOT_MAX_BYTES:
+        return {
+            "changed_file": changed_file,
+            "changed_file_skipped_reason": "file_too_large",
+        }
+
+    try:
+        changed_file["old_content"] = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return {
+            "changed_file": changed_file,
+            "changed_file_skipped_reason": "non_utf8_file",
+        }
+    except OSError as exc:
+        return {
+            "changed_file": changed_file,
+            "changed_file_skipped_reason": f"read_failed: {exc}",
+        }
+
+    return {"changed_file": changed_file}
+
+
+def _relative_to_cwd(cwd: Path, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(cwd.resolve()))
+    except ValueError:
+        return str(path)
 
 
 # ── run_query 루프 ────────────────────────────────────────────
@@ -500,7 +602,7 @@ async def _execute_tool_call(
 async def run_query(
     context: QueryContext,
     messages: list[ConversationMessage],
-) -> AsyncIterator[tuple[StreamEvent, UsageSnapshot | None]]:
+) -> AsyncGenerator[tuple[StreamEvent, UsageSnapshot | None], None]:
     """Tool-aware 대화 루프.
 
     모델이 도구 요청을 멈출 때까지 실행하며 StreamEvent를 yield합니다.
@@ -520,6 +622,11 @@ async def run_query(
     turn_count = 0
     while context.max_turns is None or turn_count < context.max_turns:
         turn_count += 1
+        yield AgentLoopStatus(
+            phase="model_start",
+            turn=turn_count,
+            message=f"Model turn {turn_count} started.",
+        ), None
 
         if effective_max_tokens != context.max_tokens and not reported_token_clamp:
             reported_token_clamp = True
@@ -530,11 +637,18 @@ async def run_query(
                 )
             ), None
 
+        max_compact_messages = (
+            context.auto_compact_threshold_tokens
+            or DEFAULT_AUTO_COMPACT_MESSAGES
+        )
+        max_compact_messages = max(1, int(max_compact_messages))
+
         # Auto-compact 체크
-        if needs_compression(messages):
+        if needs_compression(messages, max_messages=max_compact_messages):
             yield StatusEvent(message="Auto-compacting conversation memory…"), None
             messages, _ = await maybe_compress(
                 messages,
+                max_messages=max_compact_messages,
                 api_client=context.api_client,
                 model=context.model,
             )
@@ -589,10 +703,16 @@ async def run_query(
             error_msg = str(exc)
             if any(kw in error_msg.lower() for kw in ("connect", "timeout", "network")):
                 yield ErrorEvent(
-                    message=f"Network error: {error_msg}. Check your internet connection."
+                    message=f"Network error: {error_msg}. Check your internet connection.",
+                    recoverable=True,
+                    error_type="llm_api_error",
                 ), None
             else:
-                yield ErrorEvent(message=f"API error: {error_msg}"), None
+                yield ErrorEvent(
+                    message=f"API error: {error_msg}",
+                    recoverable=True,
+                    error_type="llm_api_error",
+                ), None
             return
 
         if final_message is None:
@@ -600,36 +720,113 @@ async def run_query(
 
         if final_message.role == "assistant" and final_message.is_effectively_empty():
             log.warning("dropping empty assistant message")
+            yield AgentLoopStatus(
+                phase="error",
+                turn=turn_count,
+                message="Model returned an empty assistant message.",
+                is_error=True,
+            ), usage
             yield ErrorEvent(
-                message="Model returned an empty assistant message. Turn ignored."
+                message="Model returned an empty assistant message. Turn ignored.",
+                recoverable=False,
+                error_type="llm_api_error",
             ), usage
             return
 
         messages.append(final_message)
+        tool_calls = final_message.tool_uses
+        yield AgentLoopStatus(
+            phase="model_complete",
+            turn=turn_count,
+            message=(
+                f"Model turn {turn_count} completed with {len(tool_calls)} tool call(s)."
+            ),
+            tool_count=len(tool_calls),
+        ), usage
         yield AssistantTurnComplete(message=final_message, usage=usage), usage
 
-        if not final_message.tool_uses:
+        # PLAN DRAFTING 단계에서 JSON 블록 감지 → PlanDraftedEvent 발행
+        if context.is_plan_drafting:
+            full_text = "".join(
+                b.text for b in final_message.content
+                if hasattr(b, "text") and isinstance(b.text, str)
+            )
+            plan_json = extract_plan_json(full_text)
+            if plan_json is not None:
+                yield PlanDraftedEvent(
+                    raw_markdown=full_text,
+                    structured_plan=plan_json,
+                ), None
+
+        if not tool_calls:
             if context.hook_executor is not None:
                 await context.hook_executor.execute(
                     HookEvent.STOP,
                     {"event": HookEvent.STOP.value, "stop_reason": "tool_uses_empty"},
                 )
+            yield AgentLoopStatus(
+                phase="complete",
+                turn=turn_count,
+                message="Agent loop completed without pending tool calls.",
+                tool_count=0,
+            ), usage
             return
 
         # Tool 실행
-        tool_calls = final_message.tool_uses
+        yield AgentLoopStatus(
+            phase="waiting",
+            turn=turn_count,
+            message=f"Executing {len(tool_calls)} tool call(s).",
+            tool_count=len(tool_calls),
+        ), None
 
         if len(tool_calls) == 1:
             tc = tool_calls[0]
-            yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
-            result = await _execute_tool_call(context, tc.name, tc.id, tc.input)
+            yield AgentLoopStatus(
+                phase="tool_start",
+                turn=turn_count,
+                tool_name=tc.name,
+                tool_use_id=tc.id,
+                message=f"Tool started: {tc.name}",
+            ), None
+            yield ToolExecutionStarted(
+                tool_name=tc.name,
+                tool_input=tc.input,
+                tool_use_id=tc.id,
+            ), None
+            executed = await _execute_tool_call(context, tc.name, tc.id, tc.input)
+            result = executed.result
+            yield AgentLoopStatus(
+                phase="tool_complete",
+                turn=turn_count,
+                tool_name=tc.name,
+                tool_use_id=tc.id,
+                message=f"Tool completed: {tc.name}",
+                is_error=result.is_error,
+            ), None
             yield ToolExecutionCompleted(
-                tool_name=tc.name, output=result.content, is_error=result.is_error,
+                tool_name=tc.name,
+                output=result.content,
+                is_error=result.is_error,
+                tool_use_id=tc.id,
+                tool_input=tc.input,
+                metadata=executed.metadata,
             ), None
             tool_results = [result]
         else:
             for tc in tool_calls:
-                yield ToolExecutionStarted(tool_name=tc.name, tool_input=tc.input), None
+                yield AgentLoopStatus(
+                    phase="tool_start",
+                    turn=turn_count,
+                    tool_name=tc.name,
+                    tool_use_id=tc.id,
+                    message=f"Tool started: {tc.name}",
+                ), None
+                yield ToolExecutionStarted(
+                    tool_name=tc.name,
+                    tool_input=tc.input,
+                    tool_use_id=tc.id,
+                ), None
 
             raw_results = await asyncio.gather(
                 *[_execute_tool_call(context, tc.name, tc.id, tc.input)
@@ -637,24 +834,49 @@ async def run_query(
                 return_exceptions=True,
             )
             tool_results = []
-            for tc, result in zip(tool_calls, raw_results):
-                if isinstance(result, BaseException):
-                    log.exception("tool raised: name=%s id=%s", tc.name, tc.id, exc_info=result)
-                    result = ToolResultBlock(
-                        tool_use_id=tc.id,
-                        content=f"Tool {tc.name} failed: {type(result).__name__}: {result}",
-                        is_error=True,
+            executed_results: list[ExecutedToolCall] = []
+            for tc, executed in zip(tool_calls, raw_results):
+                if isinstance(executed, BaseException):
+                    log.exception("tool raised: name=%s id=%s", tc.name, tc.id, exc_info=executed)
+                    executed = ExecutedToolCall(
+                        result=ToolResultBlock(
+                            tool_use_id=tc.id,
+                            content=f"Tool {tc.name} failed: {type(executed).__name__}: {executed}",
+                            is_error=True,
+                        ),
+                        metadata={},
                     )
-                tool_results.append(result)
+                executed_results.append(executed)
+                tool_results.append(executed.result)
 
-            for tc, result in zip(tool_calls, tool_results):
+            for tc, executed in zip(tool_calls, executed_results):
+                result = executed.result
+                yield AgentLoopStatus(
+                    phase="tool_complete",
+                    turn=turn_count,
+                    tool_name=tc.name,
+                    tool_use_id=tc.id,
+                    message=f"Tool completed: {tc.name}",
+                    is_error=result.is_error,
+                ), None
                 yield ToolExecutionCompleted(
-                    tool_name=tc.name, output=result.content, is_error=result.is_error,
+                    tool_name=tc.name,
+                    output=result.content,
+                    is_error=result.is_error,
+                    tool_use_id=tc.id,
+                    tool_input=tc.input,
+                    metadata=executed.metadata,
                 ), None
 
         messages.append(ConversationMessage(role="user", content=tool_results))
 
     if context.max_turns is not None:
+        yield AgentLoopStatus(
+            phase="error",
+            turn=turn_count,
+            message=f"Agent loop exceeded max turns: {context.max_turns}.",
+            is_error=True,
+        ), None
         raise MaxTurnsExceeded(context.max_turns)
     raise RuntimeError("Query loop exited without completing")
 
@@ -684,6 +906,7 @@ class QueryEngine:
         ask_user_prompt: AskUserPrompt | None = None,
         hook_executor: Any | None = None,
         tool_metadata: dict[str, object] | None = None,
+        skill_injection_config: SkillInjectionConfig | None = None,
     ) -> None:
         self._api_client = api_client
         self._tool_registry = tool_registry
@@ -699,7 +922,10 @@ class QueryEngine:
         self._ask_user_prompt = ask_user_prompt
         self._hook_executor = hook_executor
         self._tool_metadata: dict[str, object] = tool_metadata or {}
+        self._skill_injection_config = skill_injection_config
         self._messages: list[ConversationMessage] = []
+        self._total_usage = UsageSnapshot()
+        self._is_plan_drafting: bool = False
 
     # ── Properties ───────────────────────────────────────────
 
@@ -727,6 +953,13 @@ class QueryEngine:
     def tool_metadata(self) -> dict[str, object]:
         return self._tool_metadata
 
+    @property
+    def total_usage(self) -> UsageSnapshot:
+        return UsageSnapshot(
+            input_tokens=self._total_usage.input_tokens,
+            output_tokens=self._total_usage.output_tokens,
+        )
+
     # ── Mutators ─────────────────────────────────────────────
 
     def clear(self) -> None:
@@ -747,6 +980,14 @@ class QueryEngine:
     def set_permission_checker(self, checker: Any) -> None:
         self._permission_checker = checker
 
+    def set_plan_drafting(self, value: bool) -> None:
+        """PLAN DRAFTING 단계 여부를 설정합니다.
+
+        True로 설정하면 다음 submit_message()부터 LLM 응답에서
+        JSON 블록을 감지하여 PlanDraftedEvent를 yield합니다.
+        """
+        self._is_plan_drafting = value
+
     def load_messages(self, messages: list[ConversationMessage]) -> None:
         self._messages = list(messages)
 
@@ -766,14 +1007,14 @@ class QueryEngine:
 
     # ── Core ─────────────────────────────────────────────────
 
-    def _make_context(self) -> QueryContext:
+    def _make_context(self, *, system_prompt: str | None = None) -> QueryContext:
         return QueryContext(
             api_client=self._api_client,
             tool_registry=self._tool_registry,
             permission_checker=self._permission_checker,
             cwd=self._cwd,
             model=self._model,
-            system_prompt=self._system_prompt,
+            system_prompt=system_prompt or self._system_prompt,
             max_tokens=self._max_tokens,
             context_window_tokens=self._context_window_tokens,
             auto_compact_threshold_tokens=self._auto_compact_threshold_tokens,
@@ -782,11 +1023,45 @@ class QueryEngine:
             ask_user_prompt=self._ask_user_prompt,
             hook_executor=self._hook_executor,
             tool_metadata=self._tool_metadata,
+            is_plan_drafting=self._is_plan_drafting,
         )
+
+    def _build_effective_system_prompt(self, user_prompt: str) -> str:
+        if self._skill_injection_config is None:
+            self._tool_metadata["active_skills"] = []
+            return self._system_prompt
+        if not user_prompt.strip():
+            self._tool_metadata["active_skills"] = []
+            return self._system_prompt
+
+        mode = self._tool_metadata.get("agent_mode")
+        try:
+            effective_prompt, selected = apply_skill_injection(
+                system_prompt=self._system_prompt,
+                cwd=self._cwd,
+                user_prompt=user_prompt,
+                mode=str(mode) if mode is not None else None,
+                config=self._skill_injection_config,
+            )
+        except Exception as exc:
+            log.warning("[SkillInjection] failed: %s", exc)
+            self._tool_metadata["active_skills"] = []
+            return self._system_prompt
+
+        self._tool_metadata["active_skills"] = [
+            item.to_metadata() for item in selected
+        ]
+        return effective_prompt
+
+    def _record_usage(self, usage: UsageSnapshot | None) -> None:
+        if usage is None:
+            return
+        self._total_usage.input_tokens += usage.input_tokens
+        self._total_usage.output_tokens += usage.output_tokens
 
     async def submit_message(
         self, prompt: str | ConversationMessage
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         user_message = (
             prompt
             if isinstance(prompt, ConversationMessage)
@@ -804,13 +1079,38 @@ class QueryEngine:
                  "prompt": user_message.text},
             )
 
-        context = self._make_context()
+        effective_system_prompt = self._build_effective_system_prompt(user_message.text)
+        active_skills = self._tool_metadata.get("active_skills")
+        if isinstance(active_skills, list) and active_skills:
+            skill_names = [
+                (
+                    str(item.get("name") or item.get("path") or "skill")
+                    if isinstance(item, dict)
+                    else str(item)
+                )
+                for item in active_skills
+            ]
+            if skill_names:
+                yield StatusEvent(
+                    message=f"Active skills: {', '.join(skill_names)}",
+                    metadata={"active_skills": active_skills},
+                )
+
+        context = self._make_context(system_prompt=effective_system_prompt)
         query_messages = list(self._messages)
 
-        async for event, usage in run_query(context, query_messages):
-            if isinstance(event, AssistantTurnComplete):
-                self._messages = list(query_messages)
-            yield event
+        try:
+            async for event, usage in run_query(context, query_messages):
+                if isinstance(event, AssistantTurnComplete):
+                    self._record_usage(usage)
+                    self._messages = list(query_messages)
+                yield event
+        except MaxTurnsExceeded as exc:
+            yield ErrorEvent(
+                message=str(exc),
+                recoverable=False,
+                error_type="max_turns_exceeded",
+            )
 
     async def continue_pending(
         self, *, max_turns: int | None = None
@@ -818,5 +1118,7 @@ class QueryEngine:
         context = self._make_context()
         if max_turns is not None:
             context.max_turns = max_turns
-        async for event, _usage in run_query(context, self._messages):
+        async for event, usage in run_query(context, self._messages):
+            if isinstance(event, AssistantTurnComplete):
+                self._record_usage(usage)
             yield event

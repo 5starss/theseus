@@ -265,8 +265,20 @@ class ToolRetriever:
         self._is_ready = True
 
     def _get_index_lock(self) -> asyncio.Lock:
-        """이벤트 루프 컨텍스트 안에서 Lock을 지연 초기화합니다."""
-        if self._index_lock is None:
+        """이벤트 루프 컨텍스트 안에서 Lock을 지연 초기화합니다.
+
+        asyncio.Lock은 생성 시점의 이벤트 루프에 바인딩됩니다.
+        루프가 바뀌면(테스트 환경 등) 기존 락을 버리고 새로 생성합니다.
+        """
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._index_lock is None or (
+            current_loop is not None
+            and getattr(self._index_lock, "_loop", None) is not current_loop
+        ):
             self._index_lock = asyncio.Lock()
         return self._index_lock
 
@@ -406,7 +418,13 @@ class ToolRetriever:
             if not texts:
                 log.warning("[ToolRetriever] 등록된 도구가 없습니다.")
                 self._tool_names = []
-                self._tool_embeddings = np.empty((0, 384))
+                # 임베딩 차원을 모델에서 동적으로 획득 (하드코딩 384 제거)
+                dim = (
+                    self._model.get_sentence_embedding_dimension()
+                    if hasattr(self._model, "get_sentence_embedding_dimension")
+                    else 384
+                )
+                self._tool_embeddings = np.empty((0, dim))
                 return
 
             embeddings = await asyncio.to_thread(
