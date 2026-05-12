@@ -7,6 +7,7 @@ import com.theseus.api.domain.project.dto.request.ProjectMemberCreateRequest;
 import com.theseus.api.domain.project.dto.request.ProjectMemberUpdateRequest;
 import com.theseus.api.domain.project.dto.response.ProjectMemberResponse;
 import com.theseus.api.domain.project.entity.Project;
+import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
@@ -80,6 +81,7 @@ public class ProjectMemberService {
 			throw BusinessException.of(ErrorCode.DUPLICATE_PROJECT_MEMBER);
 		}
 
+		validateAccessLevel(request.getProjectRole(), request.getAccessLevel());
 		ProjectMember projectMember = projectMemberRepository.save(request.toEntity(project, targetUser, user));
 
 		return ProjectMemberResponse.createOf(projectMember, isProjectAdminUser(projectMember));
@@ -101,6 +103,7 @@ public class ProjectMemberService {
 		ProjectMember projectMember = getProjectMemberEntity(project, projectMemberId);
 
 		validateProjectAdminUserUpdate(projectMember, request);
+		validateAccessLevel(resolveNextProjectRole(projectMember, request), request.getAccessLevel());
 		projectMember.update(
 			request.getProjectRole(),
 			request.getAccessLevel(),
@@ -177,6 +180,22 @@ public class ProjectMemberService {
 		if (!ProjectRole.ADMIN.equals(nextRole) || !ProjectMemberStatus.IN_PROGRESS.equals(nextStatus)) {
 			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_MEMBER_REQUIRED);
 		}
+	}
+
+	private void validateAccessLevel(ProjectRole projectRole, Integer accessLevel) {
+		if (ProjectRole.ADMIN.equals(projectRole)) {
+			return;
+		}
+		if (accessLevel != null && !ProjectAccessLevelPolicy.isMemberAccessLevel(accessLevel)) {
+			throw BusinessException.of(ErrorCode.INVALID_PROJECT_MEMBER_ACCESS_LEVEL);
+		}
+	}
+
+	private ProjectRole resolveNextProjectRole(ProjectMember projectMember, ProjectMemberUpdateRequest request) {
+		if (request.getProjectRole() == null) {
+			return projectMember.getProjectRole();
+		}
+		return request.getProjectRole();
 	}
 
 	private void validateActiveUser(User user) {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -9,6 +9,13 @@ import { ShieldAlert } from 'lucide-react';
 import { memberApi } from '@/features/projects/api/member';
 import type { ProjectMemberResponse } from '@/features/projects/api';
 import type { ProjectMemberUpdateRequest } from '@/features/projects/types/member';
+
+const DEFAULT_MEMBER_ACCESS_LEVEL = 1;
+const MAX_MEMBER_ACCESS_LEVEL = 99;
+const ADMIN_ACCESS_LEVEL = 100;
+
+const clampMemberAccessLevel = (value: number) =>
+  Math.min(MAX_MEMBER_ACCESS_LEVEL, Math.max(DEFAULT_MEMBER_ACCESS_LEVEL, value));
 
 interface EditMemberModalProps {
   projectId: string;
@@ -28,13 +35,41 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
   const [editStatus, setEditStatus] = useState<'IN_PROGRESS' | 'COMPLETED'>(selectedMember?.status ?? 'IN_PROGRESS');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (!selectedMember) return;
+    setEditRole(selectedMember.projectRole);
+    setEditAccessLevel(
+      selectedMember.projectRole === 'ADMIN'
+        ? ADMIN_ACCESS_LEVEL
+        : clampMemberAccessLevel(selectedMember.accessLevel ?? DEFAULT_MEMBER_ACCESS_LEVEL)
+    );
+    setEditCanCreate(selectedMember.canCreateTool ?? false);
+    setEditCanUse(selectedMember.canUseTool ?? true);
+    setEditCanUpdate(selectedMember.canUpdateTool ?? false);
+    setEditCanDelete(selectedMember.canDeleteTool ?? false);
+    setEditStatus(selectedMember.status ?? 'IN_PROGRESS');
+  }, [selectedMember]);
+
+  const handleRoleChange = (role: 'ADMIN' | 'MANAGER' | 'MEMBER') => {
+    setEditRole(role);
+    if (role === 'ADMIN') {
+      setEditAccessLevel(ADMIN_ACCESS_LEVEL);
+      return;
+    }
+    if (editRole === 'ADMIN') {
+      setEditAccessLevel(DEFAULT_MEMBER_ACCESS_LEVEL);
+      return;
+    }
+    setEditAccessLevel(clampMemberAccessLevel(editAccessLevel));
+  };
+
   const handleEditMember = async () => {
     if (!selectedMember) return;
     setIsSubmitting(true);
     try {
       const data: ProjectMemberUpdateRequest = {
         projectRole: editRole,
-        accessLevel: editAccessLevel,
+        accessLevel: editRole === 'ADMIN' ? ADMIN_ACCESS_LEVEL : clampMemberAccessLevel(editAccessLevel),
         canCreateTool: editCanCreate,
         canUseTool: editCanUse,
         canUpdateTool: editCanUpdate,
@@ -80,7 +115,7 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
                   ADMIN
                 </div>
               ) : (
-                <Select value={editRole} onValueChange={(v: 'MEMBER' | 'MANAGER' | 'ADMIN') => setEditRole(v)}>
+                <Select value={editRole} onValueChange={(v: 'MEMBER' | 'MANAGER' | 'ADMIN') => handleRoleChange(v)}>
                   <SelectTrigger className="bg-slate-950 border-slate-800 text-white">
                     <SelectValue />
                   </SelectTrigger>
@@ -95,12 +130,14 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
               <Label className="text-slate-300 uppercase text-[10px] tracking-wider">레벨 (Access Level)</Label>
               <input
                 type="number"
-                min={1}
-                max={99}
-                value={editAccessLevel}
-                onChange={(e) => setEditAccessLevel(Number(e.target.value))}
+                min={DEFAULT_MEMBER_ACCESS_LEVEL}
+                max={MAX_MEMBER_ACCESS_LEVEL}
+                value={editRole === 'ADMIN' ? ADMIN_ACCESS_LEVEL : editAccessLevel}
+                disabled={editRole === 'ADMIN' || selectedMember?.projectRole === 'ADMIN'}
+                onChange={(e) => setEditAccessLevel(clampMemberAccessLevel(Number(e.target.value)))}
                 className="bg-slate-950 border-slate-800 text-white h-10 rounded-md px-3 text-sm w-full focus:ring-1 focus:ring-blue-400 outline-none"
               />
+              <p className="text-[11px] text-slate-500">Member/Manager: 1-99, Admin: 100</p>
             </div>
           </div>
 
