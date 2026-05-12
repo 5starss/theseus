@@ -12,6 +12,7 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: theseus-local-kafka:29092
       SPRING_DATA_REDIS_HOST: theseus-local-redis
       SPRING_DATA_REDIS_PORT: 6379
+      THESEUS_CORE_BASE_URL: http://theseus-core-server:8086
     ports:
       - "8080:8080"
     depends_on:

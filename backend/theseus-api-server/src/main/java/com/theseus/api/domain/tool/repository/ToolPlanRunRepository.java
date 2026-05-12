@@ -8,6 +8,7 @@ import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -35,7 +36,8 @@ public interface ToolPlanRunRepository extends JpaRepository<ToolPlanRun, Long> 
 	""")
 	List<ToolPlanRun> findTimedOutRunsForUpdate(
 		@Param("statuses") List<ToolPlanRunStatus> statuses,
-		@Param("cutoff") LocalDateTime cutoff
+		@Param("cutoff") LocalDateTime cutoff,
+		Pageable pageable
 	);
 
 	Optional<ToolPlanRun> findByRunIdAndProjectAndChatSession(String runId, Project project, ChatSession chatSession);

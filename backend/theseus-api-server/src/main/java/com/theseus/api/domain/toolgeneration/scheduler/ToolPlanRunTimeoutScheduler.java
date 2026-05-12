@@ -23,7 +23,14 @@ public class ToolPlanRunTimeoutScheduler {
 		fixedDelayString = "${theseus.tool-generation.run-timeout-check-delay-millis:60000}"
 	)
 	public void failTimedOutRuns() {
-		int failedCount = toolPlanRunRecoveryService.failTimedOutRuns(properties.runTimeout());
+		if (!properties.isRunTimeoutSchedulerEnabled()) {
+			return;
+		}
+
+		int failedCount = toolPlanRunRecoveryService.failTimedOutRuns(
+			properties.runTimeout(),
+			properties.runTimeoutBatchSize()
+		);
 		if (failedCount > 0) {
 			log.warn(">>>> ToolPlanRun timeout recovery completed. failedCount={}", failedCount);
 		}

@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
+import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import { ToolPlanMode } from '../../types/chat';
@@ -39,6 +40,7 @@ export function ChatArea() {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { connectSSE } = useToolGenerationSSE();
+  const { connectChatStream } = useChatStreamSSE();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -59,21 +61,25 @@ export function ChatArea() {
     });
   };
 
-  const appendAssistantPlaceholder = () => {
+  const appendAssistantPlaceholder = (messageType: ChatMessage['messageType'] = 'TOOL_PLAN_RESPONSE') => {
     addMessage({
       messageId: crypto.randomUUID(),
       senderType: 'ASSISTANT',
-      messageType: 'TOOL_PLAN_RESPONSE',
+      messageType,
       contentType: 'MARKDOWN',
       content: '',
       createdAt: new Date().toISOString()
     });
   };
 
-  const sendAskMessage = async (userMessage: string) => {
+  const sendChatStreamMessage = (userMessage: string, streamMode: Extract<ToolPlanModeType, 'ASK' | 'AGENT'>) => {
     appendUserMessage(userMessage);
-    await chatApi.createMessage(projectId!, sessionId!, userMessage);
-    toast.info('ASK 메시지를 저장했습니다. AI 응답 스트림은 후속 연동 대상입니다.');
+    appendAssistantPlaceholder('CHAT');
+    setIsGenerating(true);
+    setDraftPhase(null);
+    setPlanStatus(null);
+    setCurrentPlan(null);
+    connectChatStream(projectId!, sessionId!, streamMode, userMessage);
   };
 
   const sendPlanMessage = async (userMessage: string) => {
@@ -103,12 +109,12 @@ export function ChatArea() {
 
     try {
       if (mode === ToolPlanMode.ASK) {
-        await sendAskMessage(userMessage);
+        sendChatStreamMessage(userMessage, ToolPlanMode.ASK);
         return;
       }
 
       if (mode === ToolPlanMode.AGENT) {
-        toast.info('AGENT 모드는 Tool 실행 계약 확정 후 연결됩니다.');
+        sendChatStreamMessage(userMessage, ToolPlanMode.AGENT);
         return;
       }
 
@@ -181,7 +187,7 @@ export function ChatArea() {
             {messages.map((msg, idx) => {
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && idx === messages.length - 1;
-              if (isLastAssistant && isGenerating) return null;
+              if (isLastAssistant && isGenerating && mode === ToolPlanMode.PLAN) return null;
 
               return (
                 <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
@@ -197,7 +203,7 @@ export function ChatArea() {
             })}
 
             {/* 별도의 생성 로그 UI (말풍선과 별개) */}
-            {isGenerating && (
+            {isGenerating && mode === ToolPlanMode.PLAN && (
               <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="w-full max-w-[85%] bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
                   <div className="bg-blue-500/10 px-4 py-2 border-b border-blue-500/10 flex items-center justify-between">
@@ -244,7 +250,7 @@ export function ChatArea() {
             <button
               key={option.value}
               type="button"
-              disabled={isGenerating || isClosed || option.value === ToolPlanMode.AGENT}
+              disabled={isGenerating || isClosed}
               onClick={() => setMode(option.value)}
               className={`px-3 py-2 rounded border text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === option.value
                 ? 'bg-blue-400 border-blue-400 text-slate-950'
@@ -272,7 +278,9 @@ export function ChatArea() {
                   ? '종료된 세션입니다. 새로운 세션을 시작해 주세요.'
                   : mode === ToolPlanMode.ASK
                     ? '일반 질문을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
-                    : 'Tool PLAN 요청 또는 피드백을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
+                    : mode === ToolPlanMode.AGENT
+                      ? 'Agent에게 승인된 Tool 사용 작업을 지시하세요. (Enter 전송, Shift+Enter 줄바꿈)'
+                      : 'Tool PLAN 요청 또는 피드백을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
             }
           />
           <button

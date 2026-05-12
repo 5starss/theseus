@@ -200,7 +200,9 @@ def get_query_engine(
     tool_permissions = dict(inferred_permissions)
     tool_permissions.update(build_context.project_tool_permissions)
 
-    if build_context.project_id:
+    if build_context.mode == AgentMode.ASK:
+        loaded_tools = []
+    elif build_context.project_id:
         loaded_tools = load_custom_tools_for_project(
             full_registry,
             project_id=build_context.project_id,
@@ -215,14 +217,17 @@ def get_query_engine(
             build_context.session_id,
         )
 
-    active_registry = build_filtered_registry(
-        full_registry,
-        tool_permissions,
-        build_context.user_level,
-        exclude_tools=_resolve_excluded_tools(build_context.mode),
-    )
+    if build_context.mode == AgentMode.ASK:
+        active_registry = ToolRegistry()
+    else:
+        active_registry = build_filtered_registry(
+            full_registry,
+            tool_permissions,
+            build_context.user_level,
+            exclude_tools=_resolve_excluded_tools(build_context.mode),
+        )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
-    if not allowed_tools:
+    if not allowed_tools and build_context.mode != AgentMode.ASK:
         raise EngineInitializationError(
             "No tools are available for the current server session."
         )
@@ -267,6 +272,7 @@ def get_query_engine(
             "user_id": build_context.actor_user_id,
             "chat_session_id": build_context.chat_session_id,
             "plan_id": build_context.plan_id,
+            "agent_mode": build_context.mode.value,
         },
     )
 
