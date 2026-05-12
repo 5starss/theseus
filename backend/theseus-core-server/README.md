@@ -5,7 +5,7 @@
 > `docs/analysis/src-theseus-engine-alignment-review.md`,
 > `docs/prompt/prompt_architecture_map.md`
 >
-> 최종 반영 기준: 2026-05-12, Session 68
+> 최종 반영 기준: 2026-05-12, Session 70
 
 ## 1. 개요
 
@@ -312,6 +312,10 @@ theseus-core-server/
   billing outbox를 통해 내부망으로 사용량을 전달합니다.
 - local daemon은 `127.0.0.1` bind와 bearer token 인증을 전제로 합니다.
 - `.theseus/runner.json`은 런타임 상태 파일이므로 커밋 대상이 아닙니다.
+- LangSmith tracing은 `LANGCHAIN_API_KEY`와 `THESEUS_TRACING_ENABLED=true`가
+  모두 설정된 경우에만 활성화됩니다. 단, `LANGCHAIN_TRACING_V2=false`가
+  설정되면 Theseus tracing wrapper는 우선적으로 bypass되며, decorator 적용
+  실패 시에도 core import를 막지 않고 원본 호출로 폴백합니다.
 - 생성된 custom tool과 shell 실행은 프로덕션에서 sandbox 또는 원격 실행
   격리를 거쳐야 합니다.
 - `BashTool`, `write_file`, `edit_file` 같은 상태 변경 도구는 RBAC,

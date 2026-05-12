@@ -4,6 +4,55 @@
 
 ## [Unreleased]
 
+### 🔧 Session 70 — LangSmith tracing bypass 변수 정합성 반영 (2026-05-12)
+
+#### `theseus_engine/observability/tracer.py`
+
+- `LANGCHAIN_TRACING_V2=false`를 Theseus tracing wrapper의 명시적 bypass 조건으로 추가
+- 기존 활성 조건(`LANGCHAIN_API_KEY` 존재 + `THESEUS_TRACING_ENABLED=true`)은 유지하되, `LANGCHAIN_TRACING_V2=false`가 설정되면 LangSmith `traceable()` / `tracing_context()` 경로에 진입하지 않도록 정리
+
+#### `tests/test_observability_tracer.py`
+
+- `LANGCHAIN_TRACING_V2=false`가 설정되면 `is_tracing_enabled()`가 `False`를 반환하고 `@theseus_traceable`이 원본 함수를 그대로 반환하는지 검증
+- `LANGCHAIN_TRACING_V2` 미설정 환경에서는 기존 opt-in 조건이 유지되는지 검증
+
+#### `README.md`
+
+- LangSmith tracing 운영 설명에 `LANGCHAIN_TRACING_V2=false` 우선 bypass 규칙을 추가
+
+#### 검증
+
+- `python -m unittest tests.test_observability_tracer` 성공
+- `python -m py_compile theseus_engine\observability\tracer.py tests\test_observability_tracer.py` 성공
+- `git diff --check` 성공
+
+---
+
+### 🐛 Session 69 — LangSmith tracing classmethod import 오류 수정 (2026-05-12)
+
+#### `theseus_engine/observability/tracer.py`
+
+- `THESEUS_TRACING_ENABLED=true`와 `LANGCHAIN_API_KEY`가 함께 설정된 환경에서 `@theseus_traceable`이 `@classmethod` / `@staticmethod` 바깥에 적용되어도 LangSmith가 descriptor 객체를 직접 감싸지 않도록 수정
+- descriptor의 `__func__`를 LangSmith `traceable()`에 전달한 뒤 원래 descriptor 타입으로 복원해 validator 메서드 호출 방식을 유지
+- LangSmith decorator 적용 중 예외가 발생하면 core 앱 import가 중단되지 않도록 경고 로그 후 원본 호출로 폴백
+
+#### `tests/test_observability_tracer.py`
+
+- fake `langsmith.traceable()`로 `inspect.signature()` 호출을 재현해 `classmethod` / `staticmethod` 조합이 import 단계에서 실패하지 않는지 검증
+
+#### `README.md`
+
+- LangSmith tracing decorator 적용 실패 시 원본 호출로 폴백한다는 운영 동작을 명시
+
+#### 검증
+
+- `python -m unittest tests.test_observability_tracer` 성공
+- `python -m py_compile theseus_engine\observability\tracer.py theseus_engine\validators\execution_validator.py theseus_engine\validators\query_validator.py` 성공
+- `THESEUS_TRACING_ENABLED=true` 조건에서 `ExecutionValidator.validate()` / `QueryValidator.validate()` import 및 호출 성공
+- `git diff --check` 성공
+
+---
+
 ### 🧰 Session 68 — VSCode Extension 간편 설치 스크립트 추가 (2026-05-12)
 
 #### `scripts/install-vscode-extension.ps1`, `scripts/install-vscode-extension.sh`
