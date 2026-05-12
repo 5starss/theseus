@@ -228,7 +228,7 @@ assert 'checkpoint_callback' in plan_signature.parameters, plan_signature
 print('src.main import ok')
 print('ExecutionValidator.validate', inspect.signature(ExecutionValidator.validate))
 print('QueryValidator.validate', inspect.signature(QueryValidator.validate))
-print('SuggestionValidator.validate', inspect.signature(SuggestionValidator.validate))
+print('SuggestionValidator.review', inspect.signature(SuggestionValidator.review))
 print('ToolPlanPlanner.plan', plan_signature)
 print('required settings ok', required_settings)
 PY
