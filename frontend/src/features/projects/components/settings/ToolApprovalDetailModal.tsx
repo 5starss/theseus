@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { X, Code, FileText, Clock, User, GitBranch } from 'lucide-react';
 import { toolApi } from '@/features/tools/api';
+import { chatApi } from '@/features/projects/api/chat';
 import type { ToolDetailResponse } from '@/features/tools/types';
 import type { ToolApprovalResponse } from '@/features/projects/types/approval';
+import type { ToolPlanDetailResponse } from '@/features/projects/types/chat';
 
 interface ToolApprovalDetailModalProps {
   projectId: string;
@@ -17,15 +19,45 @@ export function ToolApprovalDetailModal({
   onClose,
   onActionClick
 }: ToolApprovalDetailModalProps) {
-  const [detail, setDetail] = useState<ToolDetailResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(Boolean(approvalItem.toolId));
+  const canLoadPlanDetail = Boolean(approvalItem.toolPlanId && approvalItem.chatSessionId);
+  const [toolDetail, setToolDetail] = useState<ToolDetailResponse | null>(null);
+  const [toolPlanDetail, setToolPlanDetail] = useState<ToolPlanDetailResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(Boolean(approvalItem.toolId || canLoadPlanDetail));
 
   useEffect(() => {
     let isMounted = true;
 
     const fetchDetail = async () => {
+      setToolDetail(null);
+      setToolPlanDetail(null);
+
+      if (approvalItem.toolPlanId) {
+        if (!approvalItem.chatSessionId) {
+          setIsLoading(false);
+          return;
+        }
+
+        setIsLoading(true);
+        try {
+          const data = await chatApi.getToolPlanDetail(
+            projectId,
+            String(approvalItem.chatSessionId),
+            String(approvalItem.toolPlanId)
+          );
+          if (isMounted) {
+            setToolPlanDetail(data);
+          }
+        } catch (error) {
+          console.error('Failed to fetch tool plan detail for approval', error);
+        } finally {
+          if (isMounted) {
+            setIsLoading(false);
+          }
+        }
+        return;
+      }
+
       if (!approvalItem.toolId) {
-        setDetail(null);
         setIsLoading(false);
         return;
       }
@@ -35,7 +67,7 @@ export function ToolApprovalDetailModal({
         if (!approvalItem.toolId) return;
         const data = await toolApi.getTool(projectId, approvalItem.toolId);
         if (isMounted) {
-          setDetail(data);
+          setToolDetail(data);
         }
       } catch (error) {
         console.error('Failed to fetch tool detail for approval', error);
@@ -45,19 +77,15 @@ export function ToolApprovalDetailModal({
         }
       }
     };
-    if (approvalItem.toolPlanId) {
-      setIsLoading(false);
-    } else {
-      fetchDetail();
-    }
+    fetchDetail();
     
     return () => { isMounted = false; };
-  }, [projectId, approvalItem.toolId, approvalItem.toolPlanId]);
+  }, [projectId, approvalItem.chatSessionId, approvalItem.toolId, approvalItem.toolPlanId]);
 
   const approvalTitle = approvalItem.displayName
     || approvalItem.fileName
     || `ToolPlan #${approvalItem.toolPlanId ?? '-'}`;
-  const planStatus = approvalItem.toolPlanStatus || approvalItem.toolStatus || '-';
+  const planStatus = toolPlanDetail?.status || approvalItem.toolPlanStatus || approvalItem.toolStatus || '-';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -68,7 +96,7 @@ export function ToolApprovalDetailModal({
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-bold text-slate-100">{approvalTitle}</h2>
             <span className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
-              {approvalItem.draftPhase || planStatus}
+              {planStatus}
             </span>
           </div>
           <button
@@ -127,15 +155,28 @@ export function ToolApprovalDetailModal({
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <FileText className="w-5 h-5 text-blue-400" />
-                    <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider">Tool Plan Description</h3>
+                    <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider">Tool Plan</h3>
                   </div>
-                  <div className="bg-[#1e1e1e] p-6 rounded-lg border border-slate-800 text-center">
-                    <p className="text-slate-400 text-sm mb-2">이 승인 요청은 <strong>도구 설계안(Tool Plan)</strong>에 대한 것입니다.</p>
-                    <p className="text-slate-500 text-xs">설계안 상세 내용 확인 및 도구 생성 진행은 <br/>요청된 프로젝트의 대화 세션 내에서 확인해 주세요.</p>
-                    <div className="mt-4 p-3 bg-slate-900/50 rounded border border-slate-800 font-mono text-[10px] text-slate-500">
-                      Artifact Preview: {detail?.codeSnapshot || '실제 Tool 코드는 build 완료 후 생성됩니다.'}
+                  {toolPlanDetail ? (
+                    <div className="space-y-4">
+                      {toolPlanDetail.requestedPrompt && (
+                        <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">
+                          <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Request</div>
+                          <p className="text-sm text-slate-300 whitespace-pre-wrap">{toolPlanDetail.requestedPrompt}</p>
+                        </div>
+                      )}
+                      <div className="bg-[#1e1e1e] rounded-lg border border-slate-800 overflow-hidden">
+                        <pre className="p-4 max-h-[50vh] overflow-auto text-sm font-mono text-slate-300 whitespace-pre-wrap scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+                          <code>{toolPlanDetail.rawMarkdown || 'ToolPlan 원문이 비어 있습니다.'}</code>
+                        </pre>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-[#1e1e1e] p-6 rounded-lg border border-slate-800 text-center">
+                      <p className="text-slate-400 text-sm mb-2">ToolPlan 상세 정보를 불러올 수 없습니다.</p>
+                      <p className="text-slate-500 text-xs">승인 요청 응답의 chatSessionId와 toolPlanId를 확인해 주세요.</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div>
@@ -145,7 +186,7 @@ export function ToolApprovalDetailModal({
                   </div>
                   <div className="bg-[#1e1e1e] rounded-lg border border-slate-800 overflow-hidden">
                     <pre className="p-4 max-h-[50vh] overflow-auto text-sm font-mono text-slate-300 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
-                      <code>{detail ? (detail.codeSnapshot || '# 파이썬 코드 정보를 불러올 수 없습니다.') : '# 파이썬 코드 정보를 불러올 수 없습니다.'}</code>
+                      <code>{toolDetail ? (toolDetail.codeSnapshot || '# 파이썬 코드 정보를 불러올 수 없습니다.') : '# 파이썬 코드 정보를 불러올 수 없습니다.'}</code>
                     </pre>
                   </div>
                 </div>

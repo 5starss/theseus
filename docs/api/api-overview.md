@@ -53,14 +53,14 @@
 | Chat Message | 채팅 메시지 목록 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/messages` |
 | ToolPlan | PLAN 생성 요청 | `POST` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/generate` |
 | ToolPlan | PLAN 재생성 요청 | `PATCH` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/{toolPlanId}/regenerate` |
-| ToolPlan | PLAN 상세 조회 | `GET` | `/api/v1/projects/{projectId}/tool-plans/{toolPlanId}` |
+| ToolPlan | PLAN 상세 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plans/{toolPlanId}` |
 | ToolPlanRun | PLAN 진행 SSE 구독 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plan-runs/{runId}/events` |
 | ToolPlanRun | PLAN 진행 상태 조회 | `GET` | `/api/v1/projects/{projectId}/sessions/{sessionId}/tool-plan-runs/{runId}/state` |
 | ToolApproval | ToolPlan 승인 요청 | `POST` | `/api/v1/projects/{projectId}/tool-plans/{toolPlanId}/approval-requests` |
-| ToolApproval | 승인 요청 목록 조회 | `GET` | `/api/v1/projects/{projectId}/tool-plan-approvals?approvalStatus=PENDING&page=0&size=20` |
-| ToolApproval | 승인 요청 상세 조회 | `GET` | `/api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}` |
-| ToolApproval | ToolPlan 승인 | `PATCH` | `/api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/approve` |
-| ToolApproval | ToolPlan 반려 | `PATCH` | `/api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/reject` |
+| ToolApproval | 승인 요청 목록 조회 | `GET` | `/api/v1/projects/{projectId}/tool-approvals?approvalStatus=PENDING&page=0&size=20` |
+| ToolApproval | 승인 요청 상세 조회 | `GET` | `/api/v1/projects/{projectId}/tool-approvals/{approvalId}` |
+| ToolApproval | ToolPlan 승인 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{approvalId}/approve` |
+| ToolApproval | ToolPlan 반려 | `PATCH` | `/api/v1/projects/{projectId}/tool-approvals/{approvalId}/reject` |
 | Tool | Tool 목록 조회 | `GET` | `/api/v1/projects/{projectId}/tools?scope=accessible&status=ACTIVE&page=0&size=20` |
 | Tool | Tool 상세 조회 | `GET` | `/api/v1/projects/{projectId}/tools/{toolId}` |
 | Tool | Tool 실행 | `POST` | `/api/v1/projects/{projectId}/tools/{toolId}/execute` |

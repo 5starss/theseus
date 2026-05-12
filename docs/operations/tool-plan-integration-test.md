@@ -296,7 +296,7 @@ POST /api/v1/projects/{projectId}/tool-plans/{toolPlanId}/approval-requests
 승인 처리:
 
 ```http
-PATCH /api/v1/projects/{projectId}/tool-plan-approvals/{approvalId}/approve
+PATCH /api/v1/projects/{projectId}/tool-approvals/{approvalId}/approve
 ```
 
 기대 흐름:

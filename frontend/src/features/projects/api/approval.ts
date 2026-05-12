@@ -11,6 +11,7 @@ const generateMockApprovals = (projectId: number): ToolApprovalResponse[] => [
   {
     toolApprovalId: 101,
     projectId,
+    chatSessionId: 301,
     toolId: null,
     toolPlanId: 201,
     planGroupId: 31,
@@ -29,12 +30,12 @@ const generateMockApprovals = (projectId: number): ToolApprovalResponse[] => [
     requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
     reviewedAt: null,
     toolStatus: null,
-    draftPhase: null,
     toolPlanStatus: 'PENDING'
   },
   {
     toolApprovalId: 102,
     projectId,
+    chatSessionId: 302,
     toolId: null,
     toolPlanId: 202,
     planGroupId: 32,
@@ -53,7 +54,6 @@ const generateMockApprovals = (projectId: number): ToolApprovalResponse[] => [
     requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
     reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
     toolStatus: null,
-    draftPhase: null,
     toolPlanStatus: 'APPROVED'
   }
 ];
