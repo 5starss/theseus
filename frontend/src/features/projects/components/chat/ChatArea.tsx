@@ -27,11 +27,8 @@ export function ChatArea() {
     addMessage,
     isGenerating,
     setIsGenerating,
-    currentToolPlanId,
-    draftPhase,
     title,
     isClosed,
-    planVersion,
     setMode,
     setCurrentRunId,
     setDraftPhase,
@@ -87,25 +84,11 @@ export function ChatArea() {
     setPlanStatus('REQUESTED');
     setCurrentPlan(null);
 
-    const regeneratableToolPlanId = (draftPhase === 'REVIEW' || draftPhase === 'REJECTED')
-      ? currentToolPlanId
-      : null;
-    const result = regeneratableToolPlanId
-      ? await chatApi.regenerateToolPlan(
-        projectId!,
-        sessionId!,
-        regeneratableToolPlanId,
-        {
-          basePlanVersion: planVersion,
-          feedbackItems: [{ blockId: 'general-feedback', comment: userMessage }],
-          mode: ToolPlanMode.PLAN
-        }
-      )
-      : await chatApi.generateToolPlan(
-        projectId!,
-        sessionId!,
-        { userMessage, mode: ToolPlanMode.PLAN }
-      );
+    const result = await chatApi.generateToolPlan(
+      projectId!,
+      sessionId!,
+      { userMessage, mode: ToolPlanMode.PLAN }
+    );
 
     setCurrentRunId(result.runId);
     setPlanStatus(result.status);
@@ -198,11 +181,10 @@ export function ChatArea() {
               type="button"
               disabled={isGenerating || isClosed || option.value === ToolPlanMode.AGENT}
               onClick={() => setMode(option.value)}
-              className={`px-3 py-2 rounded border text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                mode === option.value
+              className={`px-3 py-2 rounded border text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === option.value
                   ? 'bg-blue-400 border-blue-400 text-slate-950'
                   : 'bg-[#0d1c2d] border-slate-700 text-slate-400 hover:text-blue-200 hover:border-blue-400/50'
-              }`}
+                }`}
               title={option.description}
             >
               {option.label}
