@@ -79,7 +79,7 @@ class ToolPlanKafkaConsumer:
 
 
 async def start_tool_plan_consumer() -> ToolPlanKafkaConsumer | None:
-    if not settings.CORE_KAFKA_CONSUMER_ENABLED:
+    if not settings.CORE_KAFKA_CONSUMER_ENABLED or not settings.CORE_TOOL_PLAN_CONSUMER_ENABLED:
         logger.info("ToolPlan Kafka consumer is disabled.")
         return None
 

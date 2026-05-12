@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     # Kafka Settings
     CORE_KAFKA_CONSUMER_ENABLED: bool = False
     CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED: bool = True
+    CORE_TOOL_PLAN_CONSUMER_ENABLED: bool = False
     CORE_KAFKA_BOOTSTRAP_SERVERS: str = "localhost:19092"
     CORE_KAFKA_CONSUMER_GROUP_ID: str = "theseus-core-tool-generation"
     CORE_KAFKA_TOOL_PLAN_CONSUMER_GROUP_ID: str = "theseus-core-tool-plan"

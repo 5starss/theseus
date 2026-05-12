@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from src.builder.system_prompt import build_theseus_system_prompt
+from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
     GeneratedPlanBlock,
     GeneratedToolPlan,
@@ -16,14 +17,8 @@ from src.tool_plan.schemas import (
     ToolPlanResult,
     ToolPlanSkippedResult,
 )
-from theseus_engine.models.messages import ConversationMessage
 from theseus_engine.models.state import AgentMode, PlanPhase
-from theseus_engine.wrappers.llm_clients.api_types import (
-    ApiMessageCompleteEvent,
-    ApiMessageRequest,
-    ApiTextDeltaEvent,
-    SupportsStreamingMessages,
-)
+from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
@@ -50,9 +45,16 @@ class ToolPlanPlanner:
         *,
         progress_callback: ProgressCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
+        checkpoint: dict | None = None,
+        checkpoint_callback: CheckpointCallback | None = None,
     ) -> ToolPlanResult | ToolPlanSkippedResult:
         await self._emit_progress(progress_callback, "INTENT_CHECKING", 10)
-        generated = await self._generate(event, chunk_callback=chunk_callback)
+        generated = await self._generate(
+            event,
+            chunk_callback=chunk_callback,
+            checkpoint=checkpoint,
+            checkpoint_callback=checkpoint_callback,
+        )
 
         if generated.intent == "SKIP":
             message = generated.skip_message or (
@@ -90,26 +92,24 @@ class ToolPlanPlanner:
         event: ToolPlanRequestEvent,
         *,
         chunk_callback: ChunkCallback | None,
+        checkpoint: dict | None = None,
+        checkpoint_callback: CheckpointCallback | None = None,
     ) -> GeneratedToolPlan:
         prompt = self._build_prompt(event)
-        request = ApiMessageRequest(
-            model=self.model_name,
-            messages=[ConversationMessage.from_user_text(prompt)],
+        agent_loop = ToolPlanAgentLoop(
+            llm_client=self.llm_client,
+            model_name=self.model_name,
+        )
+        loop_result = await agent_loop.run(
+            initial_prompt=prompt,
             system_prompt=self._build_system_prompt(event),
-            max_tokens=4096,
-            tools=[],
+            checkpoint=checkpoint,
+            checkpoint_callback=checkpoint_callback,
+            chunk_callback=chunk_callback,
         )
 
-        final_text = ""
-        async for llm_event in self.llm_client.stream_message(request):
-            if isinstance(llm_event, ApiTextDeltaEvent):
-                final_text += llm_event.text
-                await self._emit_chunk(chunk_callback, llm_event.text)
-            elif isinstance(llm_event, ApiMessageCompleteEvent):
-                final_text = llm_event.message.text or final_text
-
         try:
-            payload = json.loads(self._extract_json_object(final_text))
+            payload = json.loads(self._extract_json_object(loop_result.final_text))
             return GeneratedToolPlan.model_validate(payload)
         except Exception as exc:
             raise ToolPlanPlannerError(f"Invalid ToolPlan LLM output: {exc}") from exc

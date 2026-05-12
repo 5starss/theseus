@@ -173,6 +173,9 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# Local/backend tests are excluded from Git tracking in this project workflow.
+tests/
+
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 # OS

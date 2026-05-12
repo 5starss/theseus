@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+### 🐛 Session 71 — ToolPlan checkpoint planner 계약 복구 (2026-05-12)
+
+#### `src/tool_plan/planner.py`
+
+- `ToolPlanProcessor`가 전달하는 `checkpoint` / `checkpoint_callback` 인자를 `ToolPlanPlanner.plan()` 시그니처에 반영
+- ToolPlan 생성 경로를 `ToolPlanAgentLoop`로 연결해 processor의 Core run checkpoint 저장/복원 계약과 planner 실행 경로를 일치시킴
+
+#### `src/config.py`, `src/tool_plan/consumer.py`
+
+- `CORE_TOOL_PLAN_CONSUMER_ENABLED=false` 기본값을 추가해 신규 `tool-plan` topic consumer를 명시 opt-in으로 전환
+- Kafka consumer가 켜진 환경에서도 legacy `tool_generation` adapter가 기본 Tool 생성 경로가 되도록 startup 조건을 분리
+
+#### `tests/test_tool_plan_worker.py`
+
+- Fake planner 시그니처를 실제 planner 계약과 맞추고 checkpoint 전달/저장 회귀 테스트 추가
+- 실제 planner가 agent loop checkpoint callback을 호출하는지 검증
+
+#### `README.md`, `docs/prompt/prompt_architecture_map.md`, `.env.example`
+
+- `tool_generation` 기본 운영 조합과 신규 `tool-plan` consumer opt-in 전환 기준을 문서화
+
+#### 검증
+
+- `python -m py_compile src\tool_plan\processor.py src\tool_plan\planner.py src\tool_plan\agent_loop.py tests\test_tool_plan_worker.py` 성공
+
+---
+
 ### 🔧 Session 70 — LangSmith tracing bypass 변수 정합성 반영 (2026-05-12)
 
 #### `theseus_engine/observability/tracer.py`
