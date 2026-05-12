@@ -5,7 +5,7 @@
 > `docs/analysis/src-theseus-engine-alignment-review.md`,
 > `docs/prompt/prompt_architecture_map.md`
 >
-> 최종 반영 기준: 2026-05-12, Session 70
+> 최종 반영 기준: 2026-05-12, Session 71
 
 ## 1. 개요
 
@@ -172,7 +172,8 @@ Copy-Item .env.example .env
 | `SPRING_BOOT_*` | Spring Boot 인증, 권한, history, billing 내부 API |
 | `POSTGRES_*` | Core DB와 pgvector 설정 |
 | `CORE_KAFKA_CONSUMER_ENABLED` | Kafka consumer 활성화 여부 |
-| `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED` | legacy tool generation adapter 활성화 여부 |
+| `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED` | legacy tool generation adapter 활성화 여부. 기본 tool 생성 경로입니다. |
+| `CORE_TOOL_PLAN_CONSUMER_ENABLED` | 신규 `tool-plan` topic consumer 활성화 여부. API Server가 `tool-plan` topic으로 전환된 뒤 opt-in으로 켭니다. |
 | `SANDBOX_*` | Docker sandbox 이미지, 리소스 제한, startup check |
 | `LANGCHAIN_*` | LangSmith tracing |
 | `THESEUS_DYNAMIC_TOOL_RETRIEVAL` | 질의별 top-k tool retrieval 활성화 |
