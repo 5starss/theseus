@@ -53,6 +53,7 @@ interface ChatSessionState {
   setActiveTab: (tab: 'plan' | 'result') => void;
   setIsBuilding: (isBuilding: boolean) => void;
   addMessage: (msg: ChatMessage) => void;
+  completeAssistantPlaceholder: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
   setCurrentPlan: (plan: StructuredPlan | null) => void;
   setDraftPhase: (phase: DraftPhase) => void;
@@ -141,6 +142,25 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+
+  completeAssistantPlaceholder: (msg) => set((state) => {
+    const messages = [...state.messages];
+    const lastMessage = messages[messages.length - 1];
+    if (
+      lastMessage?.senderType === 'ASSISTANT'
+      && lastMessage.messageType === 'TOOL_PLAN_RESPONSE'
+      && !lastMessage.content
+    ) {
+      messages[messages.length - 1] = {
+        ...lastMessage,
+        ...msg,
+        messageId: lastMessage.messageId,
+      };
+      return { messages };
+    }
+
+    return { messages: [...messages, msg] };
+  }),
 
   updateLastMessageContent: (chunk) => set((state) => {
     const messages = [...state.messages];

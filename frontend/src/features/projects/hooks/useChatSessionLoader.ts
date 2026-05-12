@@ -34,11 +34,14 @@ function phaseFromStatus(status?: string | null): DraftPhase {
     case 'BUILT':
       return 'BUILT';
     case 'FAILED':
-    case 'SKIPPED':
       return 'FAILED';
     default:
       return null;
   }
+}
+
+function planStatusFrom(status?: string | null) {
+  return status === 'SKIPPED' ? null : status || null;
 }
 
 function isRunningPlan(currentPlan: CurrentPlanRecovery | null): currentPlan is CurrentPlanRecovery & { runId: string } {
@@ -138,7 +141,7 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
           toolPlanGroupId: currentPlan?.toolPlanGroupId ? String(currentPlan.toolPlanGroupId) : null,
           toolPlanId: currentPlan?.toolPlanId ? String(currentPlan.toolPlanId) : null,
           runId: currentPlan?.runId || null,
-          planStatus: currentPlan?.status || null,
+          planStatus: planStatusFrom(currentPlan?.status),
           createdTool: details.createdTool,
           toolResult: details.createdTool ? { ...details.createdTool } : null,
           title: details.title || 'Chat session',
