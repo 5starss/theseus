@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { CheckCircle, FileCode, Layout, RotateCcw } from 'lucide-react';
+import { CheckCircle, FileCode, Layout, RotateCcw, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
@@ -74,7 +74,7 @@ export function InspectorPanel() {
       senderType: 'USER',
       messageType: 'TOOL_FEEDBACK',
       contentType: 'TEXT',
-      content: `PLAN 수정 요청을 보냈습니다.\n${feedbackItems.map(item => `- [${item.blockId}] ${item.comment}`).join('\n')}`,
+      content: `PLAN 수정 요청:\n${feedbackItems.map(item => `- ${item.comment}`).join('\n')}`,
       createdAt: new Date().toISOString()
     });
 
@@ -229,26 +229,46 @@ export function InspectorPanel() {
         <div className="pt-6 shrink-0 flex gap-3">
           {activeTab === 'plan' ? (
             <>
-              <button
-                disabled={!isReviewable || isGenerating || isBuilding || isClosed}
-                onClick={handleRequestFeedbackClick}
-                className={`flex-1 border py-3 rounded text-sm transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2
-                  ${commentMode
-                    ? 'bg-blue-500 text-white border-blue-500 hover:bg-blue-600'
-                    : 'border-slate-500 text-blue-100 hover:bg-slate-800'
-                  }`}
-              >
-                {commentMode ? '수정 요청 보내기' : '수정 요청'}
-                {!commentMode && <RotateCcw className="w-4 h-4" />}
-              </button>
-              <button
-                onClick={handleApprovalRequest}
-                disabled={!isReviewable || commentMode || isApproving || isGenerating || isClosed}
-                className="flex-1 bg-blue-400 hover:bg-blue-500 text-[#00315d] font-bold py-3 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {isApproving ? '요청 중' : '생성 승인 요청'}
-                {!isApproving && <CheckCircle className="w-4 h-4" />}
-              </button>
+              {commentMode ? (
+                <button
+                  onClick={() => {
+                    setCommentMode(false);
+                    clearDraftComments();
+                  }}
+                  className="flex-1 border border-slate-500 text-slate-300 hover:bg-slate-800 py-3 rounded text-sm transition-colors font-medium flex items-center justify-center gap-2"
+                >
+                  취소
+                  <X className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  disabled={!isReviewable || isGenerating || isBuilding || isClosed}
+                  onClick={handleRequestFeedbackClick}
+                  className="flex-1 border border-slate-500 text-blue-100 hover:bg-slate-800 py-3 rounded text-sm transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  수정 요청
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )}
+
+              {commentMode ? (
+                <button
+                  disabled={!isReviewable || isGenerating || isBuilding || isClosed}
+                  onClick={handleRequestFeedbackClick}
+                  className="flex-1 bg-blue-500 text-white border-blue-500 hover:bg-blue-600 py-3 rounded text-sm transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  수정 요청 보내기
+                </button>
+              ) : (
+                <button
+                  onClick={handleApprovalRequest}
+                  disabled={!isReviewable || isApproving || isGenerating || isClosed}
+                  className="flex-1 bg-blue-400 hover:bg-blue-500 text-[#00315d] font-bold py-3 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isApproving ? '요청 중' : '생성 승인 요청'}
+                  {!isApproving && <CheckCircle className="w-4 h-4" />}
+                </button>
+              )}
             </>
           ) : (
             <button
