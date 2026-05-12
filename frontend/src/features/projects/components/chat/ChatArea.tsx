@@ -9,7 +9,7 @@ import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import { ToolPlanMode } from '../../types/chat';
-import type { ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+import type { ChatMessage, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 
 const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
   { value: ToolPlanMode.ASK, label: 'ASK', description: '일반 대화' },
@@ -127,6 +127,36 @@ export function ChatArea() {
     }
   };
 
+  const renderMessageContent = (msg: ChatMessage) => {
+    if (msg.senderType === 'ASSISTANT') {
+      return <MarkdownViewer content={msg.content} />;
+    }
+
+    // TOOL_FEEDBACK 타입이거나 내용이 JSON 형태인 경우 파싱 시도
+    if (msg.messageType === 'TOOL_FEEDBACK' || msg.content.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed.feedbackItems && Array.isArray(parsed.feedbackItems)) {
+          return (
+            <div className="space-y-1">
+              <div className="font-bold text-blue-300 mb-1 text-xs uppercase tracking-tight">PLAN 수정 요청</div>
+              {parsed.feedbackItems.map((item: { comment: string }, i: number) => (
+                <div key={i} className="flex gap-2 text-[14px]">
+                  <span className="text-blue-400/60 mt-1">•</span>
+                  <span>{item.comment}</span>
+                </div>
+              ))}
+            </div>
+          );
+        }
+      } catch {
+        // JSON 파싱 실패 시 일반 텍스트로 렌더링
+      }
+    }
+
+    return <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>;
+  };
+
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:40px_40px] opacity-20 pointer-events-none" />
@@ -160,11 +190,7 @@ export function ChatArea() {
                     : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM' ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
                       : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
                     }`}>
-                    {msg.senderType === 'ASSISTANT' ? (
-                      <MarkdownViewer content={msg.content} />
-                    ) : (
-                      <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>
-                    )}
+                    {renderMessageContent(msg)}
                   </div>
                 </div>
               );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -27,28 +27,17 @@ interface EditMemberModalProps {
 
 export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, selectedMember }: EditMemberModalProps) {
   const [editRole, setEditRole] = useState<'ADMIN' | 'MANAGER' | 'MEMBER'>(selectedMember?.projectRole ?? 'MEMBER');
-  const [editAccessLevel, setEditAccessLevel] = useState(selectedMember?.accessLevel ?? 1);
+  const [editAccessLevel, setEditAccessLevel] = useState(
+    selectedMember?.projectRole === 'ADMIN'
+      ? ADMIN_ACCESS_LEVEL
+      : clampMemberAccessLevel(selectedMember?.accessLevel ?? DEFAULT_MEMBER_ACCESS_LEVEL)
+  );
   const [editCanCreate, setEditCanCreate] = useState(selectedMember?.canCreateTool ?? false);
   const [editCanUse, setEditCanUse] = useState(selectedMember?.canUseTool ?? true);
   const [editCanUpdate, setEditCanUpdate] = useState(selectedMember?.canUpdateTool ?? false);
   const [editCanDelete, setEditCanDelete] = useState(selectedMember?.canDeleteTool ?? false);
   const [editStatus, setEditStatus] = useState<'IN_PROGRESS' | 'COMPLETED'>(selectedMember?.status ?? 'IN_PROGRESS');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!selectedMember) return;
-    setEditRole(selectedMember.projectRole);
-    setEditAccessLevel(
-      selectedMember.projectRole === 'ADMIN'
-        ? ADMIN_ACCESS_LEVEL
-        : clampMemberAccessLevel(selectedMember.accessLevel ?? DEFAULT_MEMBER_ACCESS_LEVEL)
-    );
-    setEditCanCreate(selectedMember.canCreateTool ?? false);
-    setEditCanUse(selectedMember.canUseTool ?? true);
-    setEditCanUpdate(selectedMember.canUpdateTool ?? false);
-    setEditCanDelete(selectedMember.canDeleteTool ?? false);
-    setEditStatus(selectedMember.status ?? 'IN_PROGRESS');
-  }, [selectedMember]);
 
   const handleRoleChange = (role: 'ADMIN' | 'MANAGER' | 'MEMBER') => {
     setEditRole(role);
