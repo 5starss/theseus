@@ -8,6 +8,9 @@ interface MarkdownViewerProps {
 }
 
 export function MarkdownViewer({ content }: MarkdownViewerProps) {
+  // blockId: [id] 형태의 내부 마커를 렌더링 전에 제거합니다.
+  const filteredContent = content.replace(/blockId:\s*[\w-]+\s*/gi, '');
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -47,7 +50,7 @@ export function MarkdownViewer({ content }: MarkdownViewerProps) {
         blockquote: ({ children }) => <blockquote className="border-l-4 border-blue-500/50 pl-4 py-2 my-4 bg-blue-500/5 rounded-r italic text-slate-400">{children}</blockquote>
       }}
     >
-      {content}
+      {filteredContent}
     </ReactMarkdown>
   );
 }

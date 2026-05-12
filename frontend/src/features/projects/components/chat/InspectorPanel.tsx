@@ -15,7 +15,7 @@ export function InspectorPanel() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
 
   const {
-    currentPlan, toolResult, activeTab, isBuilding, progressInfo,
+    currentPlan, toolResult, activeTab, isBuilding,
     draftPhase, commentMode, draftComments, currentToolPlanId, planVersion,
     isGenerating, isClosed, createdTool,
   } = useChatSessionStore(useShallow(state => ({
@@ -23,7 +23,6 @@ export function InspectorPanel() {
     toolResult: state.toolResult,
     activeTab: state.activeTab,
     isBuilding: state.isBuilding,
-    progressInfo: state.progressInfo,
     draftPhase: state.draftPhase,
     commentMode: state.commentMode,
     draftComments: state.draftComments,
@@ -159,30 +158,6 @@ export function InspectorPanel() {
             </TabsTrigger>
           </TabsList>
         </div>
-
-        {(isGenerating || isBuilding) && (
-          <div className="bg-[#0d1c2d] border border-blue-500/30 rounded-lg p-4 mb-6 shrink-0 animate-pulse">
-            <div className="flex justify-between items-end mb-3">
-              <div>
-                <div className="text-[10px] text-blue-400/70 tracking-wider mb-1 uppercase">
-                  {isBuilding ? 'Building Tool' : 'Generating Plan'}
-                </div>
-                <div className="text-sm text-blue-100 font-medium">
-                  {progressInfo?.step || (isBuilding ? 'Tool 생성 중' : 'PLAN 생성 중')}
-                </div>
-              </div>
-              <div className="text-xl text-blue-400 font-medium font-mono">
-                {progressInfo ? `${progressInfo.percent}%` : '0%'}
-              </div>
-            </div>
-            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.8)] transition-all duration-300"
-                style={{ width: `${progressInfo?.percent || 0}%` }}
-              />
-            </div>
-          </div>
-        )}
 
         <div className="flex-1 overflow-hidden min-h-0 relative">
           <TabsContent value="plan" className="h-full m-0 overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
