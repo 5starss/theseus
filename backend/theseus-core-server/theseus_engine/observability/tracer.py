@@ -9,6 +9,9 @@ API 키가 등록되어 있지 않거나 환경변수/config로 enable 설정을
     LANGCHAIN_API_KEY=<your_langsmith_api_key>
     LANGCHAIN_PROJECT=Theseus-Core-Server  (선택)
     THESEUS_TRACING_ENABLED=true           (명시적 활성화)
+
+강제 bypass:
+    LANGCHAIN_TRACING_V2=false
 """
 
 from __future__ import annotations
@@ -21,7 +24,8 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 
 log = logging.getLogger(__name__)
 
-F = TypeVar("F", bound=Callable[..., Any])
+F = TypeVar("F")
+FALSE_VALUES = {"0", "false", "no", "off"}
 
 # ------------------------------------------------------------------
 # 활성화 판단 로직
@@ -33,7 +37,8 @@ _tracing_enabled: Optional[bool] = None
 def is_tracing_enabled() -> bool:
     """트레이싱 활성화 여부를 판단합니다.
 
-    다음 두 조건을 **모두** 충족해야 활성화됩니다:
+    `LANGCHAIN_TRACING_V2=false`가 설정되면 우선적으로 bypass됩니다.
+    그 외에는 다음 두 조건을 **모두** 충족해야 활성화됩니다:
     1. `LANGCHAIN_API_KEY` 환경변수가 비어있지 않을 것.
     2. `THESEUS_TRACING_ENABLED` 환경변수가 `true`일 것
        (기본값: false → 명시적 opt-in).
@@ -46,13 +51,20 @@ def is_tracing_enabled() -> bool:
     if _tracing_enabled is not None:
         return _tracing_enabled
 
+    langchain_tracing_v2 = os.getenv("LANGCHAIN_TRACING_V2")
+    tracing_v2_disabled = (
+        langchain_tracing_v2 is not None
+        and langchain_tracing_v2.strip().lower() in FALSE_VALUES
+    )
     api_key = os.getenv("LANGCHAIN_API_KEY", "").strip()
     explicit_enable = (
         os.getenv("THESEUS_TRACING_ENABLED", "false")
         .lower() == "true"
     )
 
-    _tracing_enabled = bool(api_key) and explicit_enable
+    _tracing_enabled = (
+        not tracing_v2_disabled and bool(api_key) and explicit_enable
+    )
 
     if _tracing_enabled:
         log.info(
@@ -65,7 +77,8 @@ def is_tracing_enabled() -> bool:
     else:
         log.debug(
             "[Theseus Tracer] LangSmith 트레이싱 비활성화. "
-            "(LANGCHAIN_API_KEY 미설정 또는 "
+            "(LANGCHAIN_TRACING_V2=false, "
+            "LANGCHAIN_API_KEY 미설정 또는 "
             "THESEUS_TRACING_ENABLED!=true)"
         )
 
@@ -120,21 +133,44 @@ def theseus_traceable(
             )
             return func
 
-        trace_name = name or func.__name__
+        descriptor_type: type[classmethod] | type[staticmethod] | None = None
+        target: Any = func
+        if isinstance(func, classmethod):
+            descriptor_type = classmethod
+            target = func.__func__
+        elif isinstance(func, staticmethod):
+            descriptor_type = staticmethod
+            target = func.__func__
+
+        trace_name = name or getattr(
+            target, "__name__", target.__class__.__name__
+        )
         trace_tags = list(tags or [])
         trace_metadata = dict(metadata or {})
 
-        traced_func = traceable(
-            run_type=run_type,
-            name=trace_name,
-            tags=trace_tags,
-            metadata=trace_metadata,
-        )(func)
+        try:
+            traced_func = traceable(
+                run_type=run_type,
+                name=trace_name,
+                tags=trace_tags,
+                metadata=trace_metadata,
+            )(target)
+        except Exception as e:
+            log.warning(
+                "[Theseus Tracer] LangSmith traceable 적용 실패: %s. "
+                "트레이싱 없이 원본 호출을 유지합니다.",
+                e,
+            )
+            return func
 
-        @functools.wraps(func)
+        @functools.wraps(target)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             return traced_func(*args, **kwargs)
 
+        if descriptor_type is classmethod:
+            return classmethod(wrapper)  # type: ignore[return-value]
+        if descriptor_type is staticmethod:
+            return staticmethod(wrapper)  # type: ignore[return-value]
         return wrapper  # type: ignore[return-value]
 
     return decorator
