@@ -8,6 +8,7 @@ from src.builder.worker import setup_scheduler
 from src.config import settings
 from src.db.postgres import init_db
 from src.routes import health, plan, sandbox, stream
+from src.sandbox.base import SandboxUnavailableError
 from src.sandbox.docker_executor import DockerExecutor, SandboxStartupCheckError
 from src.tool_build.consumer import start_tool_build_consumer
 from src.tool_plan.consumer import start_tool_plan_consumer
@@ -32,7 +33,7 @@ async def lifespan(app: FastAPI):
             )
             logger.info("Sandbox connectivity verified. image=%s status=%s host=%s",
                         sandbox_info["image"], sandbox_info["imageStatus"], sandbox_info["dockerHost"])
-        except SandboxStartupCheckError as exc:
+        except (SandboxStartupCheckError, SandboxUnavailableError) as exc:
             if settings.SANDBOX_STARTUP_STRICT:
                 raise
             logger.warning("Sandbox startup check failed: %s", exc)
