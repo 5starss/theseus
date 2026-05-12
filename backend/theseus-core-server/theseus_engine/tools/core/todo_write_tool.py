@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.file_utils import _resolve_path, _check_path_security
 
 log = logging.getLogger(__name__)
 
@@ -34,12 +35,15 @@ class TodoWriteTool(BaseTool):
         "in a markdown checklist file (default: TODO.md)."
     )
     input_model = TodoWriteInput
-    permission_level = 1
+    permission_level = 2  # 파일 쓰기 도구 — read(1)보다 높은 권한 필요
 
     async def execute(
         self, arguments: TodoWriteInput, context: ToolExecutionContext
     ) -> ToolResult:
-        path = Path(context.cwd) / arguments.path
+        path = _resolve_path(context.cwd, arguments.path)
+        security_err = _check_path_security(path, context.cwd)
+        if security_err:
+            return ToolResult(output=security_err, is_error=True)
         existing = (
             path.read_text(encoding="utf-8") if path.exists() else "# TODO\n"
         )

@@ -18,6 +18,74 @@ python theseus_cli.py
 
 ---
 
+## VS Code Extension 설치 방법
+
+Theseus는 VS Code 사이드바 확장으로도 실행할 수 있습니다.
+
+### VSIX 파일로 설치
+
+프로젝트 루트(`S14P31A308`)에서 아래 명령어를 실행합니다.
+
+```bash
+code --install-extension backend/theseus-core-server/vscode-extension/theseus-vscode-0.0.1.vsix
+```
+
+Antigravity에 설치할 때도 같은 방식으로 실행합니다.
+
+```bash
+antigravity --install-extension backend/theseus-core-server/vscode-extension/theseus-vscode-0.0.1.vsix
+```
+
+이미 `backend/theseus-core-server/vscode-extension` 폴더 안에 있다면 VSIX 파일만 지정합니다.
+
+```bash
+code --install-extension ./theseus-vscode-0.0.2.vsix
+antigravity --install-extension ./theseus-vscode-0.0.2.vsix
+```
+
+설치 후 VS Code를 다시 로드하면 Activity Bar에 **Theseus** 아이콘이 표시됩니다.
+아이콘을 클릭한 뒤 Chat 뷰에서 **Start** 버튼을 누르거나 Command Palette에서 `Theseus: Start Agent`를 실행합니다.
+
+### 개발 중 직접 실행
+
+확장 코드를 수정한 뒤에는 먼저 컴파일합니다.
+
+```bash
+cd backend/theseus-core-server/vscode-extension
+npm run compile
+```
+
+그 다음 VS Code에서 `backend/theseus-core-server/vscode-extension` 폴더를 열고 `F5`를 눌러 Extension Development Host를 실행합니다.
+
+> Windows PowerShell에서 `npm.ps1` 실행 정책 오류가 나면 `npm.cmd run compile`을 사용합니다.
+
+### 확장 코드 수정 후 VSIX 다시 만들기
+
+확장 코드를 수정한 뒤 설치용 VSIX 파일을 다시 만들려면 확장 폴더에서 컴파일 후 패키징합니다.
+
+```bash
+cd backend/theseus-core-server/vscode-extension
+npm run compile
+npx @vscode/vsce package
+```
+
+PowerShell에서 `npm.ps1` 실행 정책 오류가 나면 아래처럼 실행합니다.
+
+```powershell
+npm.cmd run compile
+npx.cmd @vscode/vsce package
+```
+
+생성되는 파일명은 `package.json`의 `name`과 `version`을 따릅니다. 예를 들어 `version`이 `0.0.2`이면 `theseus-vscode-0.0.2.vsix`가 생성됩니다.
+기존 설치본 위에 다시 설치할 때는 `package.json`의 `version`을 올린 뒤 패키징하고, 생성된 VSIX를 다시 설치합니다.
+
+```bash
+code --install-extension ./theseus-vscode-0.0.1.vsix --force
+antigravity --install-extension ./theseus-vscode-0.0.1.vsix --force
+```
+
+---
+
 ## 주요 명령어
 
 ### 모드 전환

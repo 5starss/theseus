@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import platform
 import uuid
 from dataclasses import dataclass, field
@@ -17,6 +18,18 @@ from typing import Dict, Optional
 log = logging.getLogger(__name__)
 
 IS_WINDOWS = platform.system() == "Windows"
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        return default
+
+
+MAX_TASKS = _env_int("THESEUS_TASK_MAX_TASKS", 100)
+MAX_OUTPUT_BYTES = _env_int("THESEUS_TASK_OUTPUT_MAX_BYTES", 1_000_000)
 
 
 @dataclass
@@ -57,6 +70,10 @@ class TheseusTaskManager:
         cwd: "str | None" = None,
     ) -> TaskInfo:
         """셸 명령을 백그라운드로 실행합니다."""
+        self._prune_terminal_tasks(reserve_slot=True)
+        if len(self._tasks) >= MAX_TASKS:
+            raise ValueError("백그라운드 태스크 개수 한도를 초과했습니다.")
+
         task_id = uuid.uuid4().hex[:8]
         cwd_str = str(cwd) if cwd else "."
 
@@ -102,10 +119,15 @@ class TheseusTaskManager:
                 if not chunk:
                     break
                 task._output_buffer.extend(chunk)
+                overflow = len(task._output_buffer) - MAX_OUTPUT_BYTES
+                if overflow > 0:
+                    del task._output_buffer[:overflow]
+                    task.metadata["output_truncated"] = True
             await proc.wait()
             task.status = (
                 "completed" if proc.returncode == 0 else "failed"
             )
+            self._prune_terminal_tasks()
         except Exception as e:
             log.warning("Task %s watcher error: %s", task.id, e)
             task.status = "failed"
@@ -179,15 +201,33 @@ class TheseusTaskManager:
             task.metadata["status_note"] = status_note
         return task
 
+    def _prune_terminal_tasks(self, *, reserve_slot: bool = False) -> None:
+        overflow = len(self._tasks) - MAX_TASKS + (1 if reserve_slot else 0)
+        if overflow <= 0:
+            return
+        removable = [
+            task_id for task_id, task in self._tasks.items()
+            if task.status in {"completed", "failed", "stopped"}
+        ]
+        for task_id in removable[:overflow]:
+            self._tasks.pop(task_id, None)
+
 
 # ── Singleton ────────────────────────────────────────────────────
 
 _manager: Optional[TheseusTaskManager] = None
+_manager_lock = __import__("threading").Lock()
 
 
 def get_task_manager() -> TheseusTaskManager:
-    """전역 태스크 매니저 싱글톤을 반환합니다."""
+    """전역 태스크 매니저 싱글톤을 반환합니다.
+
+    멀티 스레드(FastAPI worker 등) 환경의 레이스 컨디션 방지를 위해
+    threading.Lock으로 초기화를 보호합니다.
+    """
     global _manager
     if _manager is None:
-        _manager = TheseusTaskManager()
+        with _manager_lock:
+            if _manager is None:
+                _manager = TheseusTaskManager()
     return _manager

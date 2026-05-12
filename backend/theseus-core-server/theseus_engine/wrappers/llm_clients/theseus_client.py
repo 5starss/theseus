@@ -20,6 +20,7 @@ from theseus_engine.wrappers.llm_clients.api_types import (
     SupportsStreamingMessages,
     ApiTextDeltaEvent,
     ApiMessageCompleteEvent,
+    AuthenticationFailure,
     UsageSnapshot,
 )
 from theseus_engine.wrappers.llm_clients.anthropic_client import TheseusAnthropicClient
@@ -42,12 +43,23 @@ from theseus_engine.wrappers.llm_clients.gemini_compat import (
 from theseus_engine.engine.model_router import get_model_router
 
 # --- DEBUG: Payload Dump Configuration ---
-# THESEUS_DEBUG_DUMP_DIR 환경변수로 오버라이드 가능, 기본값은 ~/.theseus/debug_dumps
+# ── Debug Dump 설정 ──────────────────────────────────────────────
+# THESEUS_DEBUG_DUMP=true  → 덤프 활성화 (기본: 비활성)
+# THESEUS_DEBUG_DUMP_DIR   → 저장 경로 오버라이드 (기본: ~/.theseus/debug_dumps)
+_DEBUG_DUMP_ENABLED: bool = os.getenv("THESEUS_DEBUG_DUMP", "false").lower() == "true"
 DEBUG_DUMP_DIR = Path(
     os.getenv("THESEUS_DEBUG_DUMP_DIR", Path.home() / ".theseus" / "debug_dumps")
 )
 
+
 def _dump_debug_payload(name: str, data: Any) -> None:
+    """페이로드를 JSON 파일로 덤프합니다.
+
+    THESEUS_DEBUG_DUMP=true 일 때만 실행됩니다.
+    저장 경로: THESEUS_DEBUG_DUMP_DIR (기본 ~/.theseus/debug_dumps)
+    """
+    if not _DEBUG_DUMP_ENABLED:
+        return
     try:
         DEBUG_DUMP_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -64,6 +76,47 @@ def _dump_debug_payload(name: str, data: Any) -> None:
     except Exception as e:
         print(f"\n[DEBUG] Failed to dump {name}: {e}\n", file=sys.stderr)
 # -----------------------------------------
+
+
+def _required_api_key(provider: str, *env_names: str) -> str:
+    placeholders: list[str] = []
+    for env_name in env_names:
+        value = os.getenv(env_name)
+        if not value or not value.strip():
+            continue
+        candidate = value.strip()
+        if _looks_like_placeholder_api_key(candidate):
+            placeholders.append(env_name)
+            continue
+        return candidate
+    expected = " or ".join(env_names)
+    suffix = (
+        f" Ignored placeholder values in {', '.join(placeholders)}."
+        if placeholders
+        else ""
+    )
+    raise AuthenticationFailure(
+        f"{provider} API key is not configured. Set {expected} before starting Theseus."
+        f"{suffix}"
+    )
+
+
+def _looks_like_placeholder_api_key(value: str) -> bool:
+    normalized = value.strip().strip("\"'").lower()
+    if normalized in {"", "test", "your-api-key", "your_api_key", "changeme"}:
+        return True
+    return any(
+        marker in normalized
+        for marker in (
+            "your-openai-api-key",
+            "your-anthropic-api-key",
+            "your-gemini-api-key",
+            "your-deepseek-api-key",
+            "api-key-here",
+            "sk-your-",
+            "aizasy-your-",
+        )
+    )
 
 
 class TheseusGeminiClient(TheseusOpenAICompatClient):
@@ -231,12 +284,12 @@ class TheseusLLMClient(SupportsStreamingMessages):
 
         # 1. Anthropic (Claude)
         if model_lower.startswith("anthropic/") or "claude" in model_lower:
-            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            api_key = _required_api_key("Anthropic", "ANTHROPIC_API_KEY")
             return TheseusAnthropicClient(api_key=api_key)
 
         # 2. Google (Gemini)
         elif model_lower.startswith("google/") or "gemini" in model_lower:
-            api_key = os.getenv("GEMINI_API_KEY", "")
+            api_key = _required_api_key("Gemini", "GEMINI_API_KEY", "GOOGLE_API_KEY")
             base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
             return TheseusGeminiClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
@@ -244,7 +297,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
 
         # 3. DeepSeek
         elif model_lower.startswith("deepseek/") or "deepseek" in model_lower:
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
+            api_key = _required_api_key("DeepSeek", "DEEPSEEK_API_KEY")
             base_url = "https://api.deepseek.com/v1"
             return TheseusOpenAICompatClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
@@ -267,7 +320,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
 
         # 6. Default (OpenAI: gpt-4o, o1, etc.)
         else:
-            api_key = os.getenv("OPENAI_API_KEY", "")
+            api_key = _required_api_key("OpenAI", "OPENAI_API_KEY")
             base_url = os.getenv("OPENAI_BASE_URL", None)
             return TheseusOpenAICompatClient(
                 api_key=api_key, base_url=base_url, timeout=120.0,
@@ -359,3 +412,43 @@ class TheseusLLMClient(SupportsStreamingMessages):
         # 라우팅으로 변경된 백엔드 원복
         if self._model_router.enabled:
             self._backend = self._initialize_backend(self.model_name)
+
+    async def generate(
+        self,
+        messages: list[dict[str, str]] | list[ConversationMessage],
+        system_prompt: str = "",
+        max_tokens: int = 4096,
+        tools: list[Any] | None = None,
+        model: str | None = None,
+    ) -> ConversationMessage:
+        """Single-turn generation wrapper around stream_message.
+
+        Useful for internal audits, classification, or any non-streaming logic.
+        """
+        # Convert dict messages to ConversationMessage if needed
+        converted_messages: list[ConversationMessage] = []
+        for m in messages:
+            if isinstance(m, dict):
+                converted_messages.append(
+                    ConversationMessage(role=m["role"], content=[TextBlock(text=m["content"])])
+                )
+            else:
+                converted_messages.append(m)
+
+        request = ApiMessageRequest(
+            model=model or self.model_name,
+            messages=converted_messages,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            tools=tools,
+        )
+
+        final_message: ConversationMessage | None = None
+        async for event in self.stream_message(request):
+            if isinstance(event, ApiMessageCompleteEvent):
+                final_message = event.message
+
+        if not final_message:
+            raise RuntimeError("LLM failed to generate a complete response.")
+
+        return final_message

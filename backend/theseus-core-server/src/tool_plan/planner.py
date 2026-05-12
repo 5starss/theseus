@@ -6,8 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
-from src.tool_plan.agent_loop import EmptyToolRegistry, ToolPlanAgentLoop
-from src.tool_plan.prompts import TOOL_PLAN_SYSTEM_PROMPT, build_generate_prompt, build_regenerate_prompt
+from src.builder.system_prompt import build_theseus_system_prompt
 from src.tool_plan.schemas import (
     GeneratedPlanBlock,
     GeneratedToolPlan,
@@ -17,7 +16,12 @@ from src.tool_plan.schemas import (
     ToolPlanResult,
     ToolPlanSkippedResult,
 )
+from theseus_engine.models.messages import ConversationMessage
+from theseus_engine.models.state import AgentMode, PlanPhase
 from theseus_engine.wrappers.llm_clients.api_types import (
+    ApiMessageCompleteEvent,
+    ApiMessageRequest,
+    ApiTextDeltaEvent,
     SupportsStreamingMessages,
 )
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
@@ -36,11 +40,9 @@ class ToolPlanPlanner:
         *,
         llm_client: SupportsStreamingMessages | None = None,
         model_name: str | None = None,
-        tool_registry=None,
     ) -> None:
         self.model_name = model_name or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
-        self.tool_registry = tool_registry or EmptyToolRegistry()
 
     async def plan(
         self,
@@ -48,16 +50,9 @@ class ToolPlanPlanner:
         *,
         progress_callback: ProgressCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
-        checkpoint: dict | None = None,
-        checkpoint_callback: Callable[[dict], Awaitable[None] | None] | None = None,
     ) -> ToolPlanResult | ToolPlanSkippedResult:
         await self._emit_progress(progress_callback, "INTENT_CHECKING", 10)
-        generated = await self._generate(
-            event,
-            checkpoint=checkpoint,
-            checkpoint_callback=checkpoint_callback,
-            chunk_callback=chunk_callback,
-        )
+        generated = await self._generate(event, chunk_callback=chunk_callback)
 
         if generated.intent == "SKIP":
             message = generated.skip_message or (
@@ -94,27 +89,27 @@ class ToolPlanPlanner:
         self,
         event: ToolPlanRequestEvent,
         *,
-        checkpoint: dict | None,
-        checkpoint_callback: Callable[[dict], Awaitable[None] | None] | None,
         chunk_callback: ChunkCallback | None,
     ) -> GeneratedToolPlan:
         prompt = self._build_prompt(event)
-        agent_loop = ToolPlanAgentLoop(
-            llm_client=self.llm_client,
-            model_name=self.model_name,
-            tool_registry=self.tool_registry,
+        request = ApiMessageRequest(
+            model=self.model_name,
+            messages=[ConversationMessage.from_user_text(prompt)],
+            system_prompt=self._build_system_prompt(event),
+            max_tokens=4096,
+            tools=[],
         )
 
-        result = await agent_loop.run(
-            initial_prompt=prompt,
-            system_prompt=TOOL_PLAN_SYSTEM_PROMPT,
-            checkpoint=checkpoint,
-            checkpoint_callback=checkpoint_callback,
-            chunk_callback=chunk_callback,
-        )
+        final_text = ""
+        async for llm_event in self.llm_client.stream_message(request):
+            if isinstance(llm_event, ApiTextDeltaEvent):
+                final_text += llm_event.text
+                await self._emit_chunk(chunk_callback, llm_event.text)
+            elif isinstance(llm_event, ApiMessageCompleteEvent):
+                final_text = llm_event.message.text or final_text
 
         try:
-            payload = json.loads(self._extract_json_object(result.final_text))
+            payload = json.loads(self._extract_json_object(final_text))
             return GeneratedToolPlan.model_validate(payload)
         except Exception as exc:
             raise ToolPlanPlannerError(f"Invalid ToolPlan LLM output: {exc}") from exc
@@ -122,13 +117,103 @@ class ToolPlanPlanner:
     def _build_prompt(self, event: ToolPlanRequestEvent) -> str:
         history = [item.model_dump(mode="json", by_alias=True) for item in event.history]
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
-            return build_regenerate_prompt(
+            return self._build_regenerate_message(
                 base_plan_version=event.base_plan_version,
                 base_plan=event.base_plan.model_dump(mode="json", by_alias=True),
-                feedback_items=[item.model_dump(mode="json", by_alias=True) for item in event.feedback_items],
+                feedback_items=[
+                    item.model_dump(mode="json", by_alias=True)
+                    for item in event.feedback_items
+                ],
                 history=history,
             )
-        return build_generate_prompt(prompt=event.prompt, history=history)
+        return self._build_generate_message(prompt=event.prompt, history=history)
+
+    def _build_system_prompt(self, event: ToolPlanRequestEvent) -> str:
+        phase = (
+            PlanPhase.WAIT_FOR_REVIEW
+            if isinstance(event, ToolPlanRegenerationRequestedEvent)
+            else PlanPhase.DRAFTING
+        )
+        return build_theseus_system_prompt(mode=AgentMode.PLAN, plan_phase=phase)
+
+    @staticmethod
+    def _build_generate_message(*, prompt: str, history: list[dict]) -> str:
+        return (
+            "Task-specific output contract for this ToolPlan worker request.\n"
+            "Follow the Theseus mode rules from the system prompt. For response shape, "
+            "use this contract exactly.\n\n"
+            "Decide whether the user is asking for a concrete ToolPlan candidate.\n"
+            "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n\n"
+            "If the prompt is not a ToolPlan request, return:\n"
+            '{\n  "intent": "SKIP",\n  "skipMessage": '
+            '"Ask for the missing tool goal, inputs, outputs, or execution conditions."\n}\n\n'
+            "If it is a valid ToolPlan request, return:\n"
+            "{\n"
+            '  "intent": "TOOL_PLAN",\n'
+            '  "title": "Short tool title",\n'
+            '  "summary": "One paragraph summary.",\n'
+            '  "blocks": [\n'
+            "    {\n"
+            '      "blockId": "kebab-case-semantic-id",\n'
+            '      "title": "Block title",\n'
+            '      "content": "Stable user-facing plan content.",\n'
+            '      "order": 1\n'
+            "    }\n"
+            "  ],\n"
+            '  "inputs": [],\n'
+            '  "outputs": [],\n'
+            '  "constraints": []\n'
+            "}\n\n"
+            "BlockId rules:\n"
+            "- Use stable kebab-case semantic ids.\n"
+            "- Keep the same blockId when regenerating a block with the same meaning.\n"
+            "- Create a new blockId only for a new meaning.\n"
+            "- Exclude deleted blocks.\n"
+            "- For split/merged blocks, keep the most representative existing blockId for one block only.\n\n"
+            "Generate a ToolPlan candidate from this PLAN mode user request.\n\n"
+            f"User prompt:\n{prompt}\n\n"
+            f"Conversation history snapshot:\n{history}\n\n"
+            "Judge intent first. Return only the JSON object described above."
+        )
+
+    @staticmethod
+    def _build_regenerate_message(
+        *,
+        base_plan_version: int,
+        base_plan: dict,
+        feedback_items: list[dict],
+        history: list[dict],
+    ) -> str:
+        return (
+            "Task-specific output contract for this ToolPlan worker regeneration request.\n"
+            "Follow the Theseus review rules from the system prompt. For response shape, "
+            "use the ToolPlan JSON contract below exactly.\n\n"
+            "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n"
+            "The JSON object must use this schema:\n"
+            "{\n"
+            '  "intent": "TOOL_PLAN",\n'
+            '  "title": "Short tool title",\n'
+            '  "summary": "One paragraph summary.",\n'
+            '  "blocks": [\n'
+            "    {\n"
+            '      "blockId": "kebab-case-semantic-id",\n'
+            '      "title": "Block title",\n'
+            '      "content": "Stable user-facing plan content.",\n'
+            '      "order": 1\n'
+            "    }\n"
+            "  ],\n"
+            '  "inputs": [],\n'
+            '  "outputs": [],\n'
+            '  "constraints": []\n'
+            "}\n\n"
+            "Regenerate the full ToolPlan candidate from the existing plan and block feedback.\n\n"
+            f"Base plan version: {base_plan_version}\n\n"
+            f"Base plan:\n{base_plan}\n\n"
+            f"Feedback items:\n{feedback_items}\n\n"
+            f"Conversation history snapshot:\n{history}\n\n"
+            "Return the full updated plan, not a patch. Preserve stable blockIds for unchanged meanings. "
+            "Return only the JSON object described above."
+        )
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:
         if isinstance(event, ToolPlanRegenerationRequestedEvent):

@@ -20,7 +20,9 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+# 패키지로 설치되지 않은 개발 환경에서만 sys.path에 추가
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from textual import on, events
 from textual.app import App, ComposeResult
@@ -33,12 +35,19 @@ from theseus_engine.core.engine_builder import (
     get_tracing_tags,
     get_tracing_metadata,
 )
-from theseus_engine.engine.query_engine import MaxTurnsExceeded
+from theseus_engine.core.plan_flow import (
+    PLAN_CONTINUE_PROMPT,
+    PLAN_TOOL_ERROR_PROMPT,
+    PLAN_VERIFICATION_PROMPT,
+    contains_execution_complete,
+    contains_verification_complete,
+)
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
     CompactProgressEvent,
     ErrorEvent,
+    PlanDraftedEvent,
     StatusEvent,
     ToolExecutionCompleted,
     ToolExecutionStarted,
@@ -59,6 +68,7 @@ from theseus_engine.tui.modals import SecurityApprovalModal
 from theseus_engine.tui.runtime import TheseusBundle
 from theseus_engine.tui.ui_components import THESEUS_TUI_CSS
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
+from theseus_engine.client.project_client import get_project_client, init_project_session
 
 # ──────────────────────────────────────────────────────────────────
 # CSS
@@ -164,6 +174,8 @@ class TheseusTUI(App):
         }
         self.user_level = 5
         self.actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
+        self._session_id: str = ""
+        self._session_token: str = os.getenv("THESEUS_SESSION_TOKEN", "")
 
     # ── 레이아웃 ────────────────────────────────────────────────
 
@@ -188,6 +200,20 @@ class TheseusTUI(App):
     # ── 초기화 ──────────────────────────────────────────────────
 
     async def on_mount(self) -> None:
+        # ── 서버 연동 시 프로젝트 설정 로드 ───────────────────────────
+        _proj_client = get_project_client()
+        if _proj_client.is_enabled:
+            _project_id = os.getenv("THESEUS_PROJECT_ID", "local")
+            try:
+                proj_cfg = await init_project_session(_project_id, token=self._session_token)
+                self.user_level = proj_cfg.user_level
+                self.actor_role = proj_cfg.actor_role
+                if proj_cfg.tool_permissions:
+                    self.project_tool_permissions.update(proj_cfg.tool_permissions)
+                self._session_id = proj_cfg.session_id
+            except Exception as _e:
+                self._append_line(f"system> [yellow]프로젝트 설정 로드 실패 — standalone 기본값 사용: {_e}[/yellow]")
+
         engine, full_registry = await setup_engine(
             sm=self.theseus_sm,
             user_level=self.user_level,
@@ -315,7 +341,14 @@ class TheseusTUI(App):
             accumulated_text = ""
             tool_called      = False
             tool_error       = False
+            plan_drafted     = False
+            transitioned_to_verifying = False
+            verification_complete = False
 
+            # PLAN DRAFTING 여부를 엔진에 동기화 — JSON 감지 활성화
+            self._bundle.engine.set_plan_drafting(
+                self.theseus_sm.is_plan_drafting
+            )
             self._bundle.engine.set_system_prompt(
                 self.theseus_sm.get_system_prompt()
             )
@@ -335,46 +368,61 @@ class TheseusTUI(App):
                         elif isinstance(event, ToolExecutionCompleted):
                             if event.is_error:
                                 tool_error = True
-
-            except MaxTurnsExceeded as exc:
-                await self._print_system(
-                    f"⚠️  최대 턴({exc.max_turns}) 도달 — 상태를 저장하고 WAIT_FOR_REVIEW로 전환합니다."
-                )
-                if self.theseus_sm.mode == AgentMode.PLAN:
-                    save_plan_state("default", {
-                        "phase": "Executing",
-                        "plan_json": self.theseus_sm.plan,
-                        "last_error": f"MaxTurnsExceeded({exc.max_turns})",
-                    })
-                    self.theseus_sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
-                    self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-                break
+                        elif isinstance(event, PlanDraftedEvent):
+                            # Core가 JSON을 감지 → standalone 상태 전이 처리
+                            plan_drafted = True
+                            self._on_plan_drafted(event)
+                        elif isinstance(event, ErrorEvent):
+                            if event.error_type == "max_turns_exceeded":
+                                await self._print_system(
+                                    f"⚠️  최대 턴 도달 — 상태를 저장하고 WAIT_FOR_REVIEW로 전환합니다."
+                                )
+                                if self.theseus_sm.mode == AgentMode.PLAN:
+                                    save_plan_state("default", {
+                                        "phase": "Executing",
+                                        "plan_json": self.theseus_sm.plan,
+                                        "last_error": event.message,
+                                    })
+                                    self.theseus_sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+                                    self._bundle.engine.set_system_prompt(
+                                        self.theseus_sm.get_system_prompt()
+                                    )
 
             except Exception as exc:
                 await self._print_system(f"[bold red]ENGINE ERROR:[/bold red] {exc}")
                 break
 
-            # ── PLAN 단계 전환 ────────────────────────────────
-            if self.theseus_sm.mode == AgentMode.PLAN:
-                self._handle_plan_turn(accumulated_text)
+            # ── PLAN 단계 전환 (PlanDraftedEvent로 처리 안 된 나머지) ──
+            if self.theseus_sm.mode == AgentMode.PLAN and not plan_drafted:
+                transitioned_to_verifying = self._handle_plan_executing_turn(
+                    accumulated_text
+                )
+                verification_complete = self._handle_plan_verifying_turn(
+                    accumulated_text
+                )
 
             # ── Auto-Resume 판단 ──────────────────────────────
             should_resume = False
-            resume_prompt = "Continue. Execute the next step immediately."
+            resume_prompt = PLAN_CONTINUE_PROMPT
 
             if (
                 self.theseus_sm.mode == AgentMode.PLAN
                 and self.theseus_sm.plan_phase in (PlanPhase.EXECUTING, PlanPhase.VERIFYING)
             ):
-                if tool_error:
+                if transitioned_to_verifying:
                     should_resume = True
-                    resume_prompt = "A tool error occurred. Analyze and retry."
+                    resume_prompt = PLAN_VERIFICATION_PROMPT
+                elif verification_complete:
+                    should_resume = False
+                elif tool_error:
+                    should_resume = True
+                    resume_prompt = PLAN_TOOL_ERROR_PROMPT
                 elif not tool_called:
                     should_resume = True
 
             elif self.theseus_sm.mode == AgentMode.AGENT and tool_error:
                 should_resume = True
-                resume_prompt = "A tool error occurred. Analyze the root cause and retry."
+                resume_prompt = PLAN_TOOL_ERROR_PROMPT
 
             if should_resume and auto_resume_count < max_auto_resume:
                 auto_resume_count += 1
@@ -385,29 +433,68 @@ class TheseusTUI(App):
             break
 
         save_session_history(self.current_session, self._bundle.engine._messages)
+        # ── 서버 연동: 이력 및 사용량 동기화 ─────────────────────────
+        _proj_client = get_project_client()
+        if _proj_client.is_enabled and self._session_id:
+            try:
+                from theseus_engine.engine.cost_tracker import CostTracker
+                await _proj_client.sync_history(
+                    self._session_id, list(self._bundle.engine._messages), token=self._session_token
+                )
+                _cost = CostTracker.get_or_create()
+                await _proj_client.report_usage(
+                    self._session_id,
+                    {"inputTokens": _cost.total_input_tokens, "outputTokens": _cost.total_output_tokens},
+                    token=self._session_token,
+                )
+            except Exception as _sync_err:
+                await self._print_system(f"[dim yellow]서버 동기화 실패: {_sync_err}[/dim yellow]")
         self._set_current_response("")
         self._refresh_sidebars()
 
     # ── PLAN 단계 전환 헬퍼 ─────────────────────────────────────
 
-    def _handle_plan_turn(self, text: str) -> None:
-        """PLAN 모드 단계별 상태 전환 처리."""
-        from theseus_cli.parsers import extract_plan_json, handle_plan_draft
+    def _on_plan_drafted(self, event: PlanDraftedEvent) -> None:
+        """Core가 PlanDraftedEvent를 발행했을 때 standalone 상태 전이를 처리합니다.
 
+        theseus_cli 외부 의존 없이 Core 이벤트만으로 DRAFTING → WAIT_FOR_REVIEW 전환.
+        """
+        assert self._bundle is not None
+        self.theseus_sm.plan = event.raw_markdown
+        self.theseus_sm.plan_document = event.structured_plan
+        self.theseus_sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
+        self._bundle.engine.set_plan_drafting(False)
+        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
+        self._append_line(
+            "system> 📋 계획이 생성되었습니다. "
+            "[bold]approve[/bold] 입력 시 실행 단계로 전환합니다."
+        )
+        self._refresh_sidebars(force=True)
+
+    def _handle_plan_executing_turn(self, text: str) -> bool:
+        """PLAN EXECUTING / VERIFYING 단계에서 완료 키워드를 감지해 단계를 전환합니다."""
         phase = self.theseus_sm.plan_phase
-        if phase == PlanPhase.DRAFTING:
-            drafted = handle_plan_draft(self.theseus_sm, text)
-            if drafted:
-                self._bundle.engine.set_system_prompt(  # type: ignore[union-attr]
+        if phase == PlanPhase.EXECUTING:
+            if contains_execution_complete(text):
+                self.theseus_sm.set_plan_phase(PlanPhase.VERIFYING)
+                self._bundle.engine.set_system_prompt(
                     self.theseus_sm.get_system_prompt()
                 )
+                self._append_line("system> ✅ 실행 완료 — 자동 검증을 시작합니다.")
                 self._refresh_sidebars(force=True)
-        elif phase == PlanPhase.EXECUTING:
-            lower = text.lower()
-            if any(kw in lower for kw in ("plan complete", "all steps complete", "execution complete")):
-                self.theseus_sm.set_plan_phase(PlanPhase.VERIFYING)
-                self._append_line("system> ✅ 실행 완료 — Verifying 단계로 전환합니다.")
-                self._refresh_sidebars(force=True)
+                return True
+        return False
+
+    def _handle_plan_verifying_turn(self, text: str) -> bool:
+        """PLAN VERIFYING 단계에서 검증 완료 키워드를 감지합니다."""
+        if (
+            self.theseus_sm.plan_phase == PlanPhase.VERIFYING
+            and contains_verification_complete(text)
+        ):
+            self._append_line("system> ✅ PLAN 검증 완료.")
+            self._refresh_sidebars(force=True)
+            return True
+        return False
 
     # ── 슬래시 커맨드 핸들러 ────────────────────────────────────
 
@@ -805,8 +892,14 @@ def _format_tools_table(registry) -> str:
     import os
     from theseus_engine.tools.core.tool_factory import CUSTOM_TOOLS_DIR
 
-    custom = {f[:-3] for f in os.listdir(CUSTOM_TOOLS_DIR) if f.endswith(".py") and not f.startswith("_")} \
-        if os.path.isdir(CUSTOM_TOOLS_DIR) else set()
+    try:
+        custom = (
+            {f[:-3] for f in os.listdir(CUSTOM_TOOLS_DIR) if f.endswith(".py") and not f.startswith("_")}
+            if os.path.isdir(CUSTOM_TOOLS_DIR)
+            else set()
+        )
+    except OSError:
+        custom = set()
 
     tools = registry.list_tools() if registry else []
     if not tools:
@@ -864,5 +957,5 @@ if __name__ == "__main__":
     except ImportError:
         pass
 
-    model_name = os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or "gpt-4o"
     TheseusTUI(model=model_name).run()

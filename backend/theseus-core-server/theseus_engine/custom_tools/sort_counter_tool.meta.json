@@ -1,0 +1,21 @@
+{
+  "toolName": "sort_counter_tool",
+  "moduleName": "sort_counter_tool",
+  "projectId": "local",
+  "chatSessionId": null,
+  "creatorUserId": "cli_user",
+  "planId": null,
+  "fileName": "sort_counter_tool.py",
+  "createdAt": "2026-05-12T13:00:00.000000+00:00",
+  "updatedAt": "2026-05-12T13:00:00.000000+00:00",
+  "permissionLevel": 1,
+  "status": "active",
+  "isActive": true,
+  "validationResult": {
+    "success": true,
+    "status": "validated",
+    "message": "ToolValidator validation passed.",
+    "checkedAt": "2026-05-12T13:00:00.000000+00:00"
+  },
+  "runtimeMode": "standalone"
+}

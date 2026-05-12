@@ -51,31 +51,40 @@ class ScopedMemory:
         rel = self._SCOPE_DIRS[scope]
         return self._cwd / rel
 
-    def write(self, scope: MemoryScope, filename: str, content: str) -> Path:
-        """지정 스코프에 메모리 파일을 씁니다."""
-        target_dir = self._resolve_dir(scope)
-        target_dir.mkdir(parents=True, exist_ok=True)
+    def _safe_path(self, scope: MemoryScope, filename: str) -> Path:
+        """스코프 디렉터리 내 안전한 경로를 반환합니다.
+
+        경로 탈출 공격(../etc/passwd 등)을 방지합니다.
+        """
         if not filename.endswith(".md"):
             filename += ".md"
-        path = target_dir / filename
+        target_dir = self._resolve_dir(scope).resolve()
+        resolved = (target_dir / filename).resolve()
+        if not resolved.is_relative_to(target_dir):
+            raise ValueError(
+                f"[Memory] 경로 탈출 감지: '{filename}' → '{resolved}' "
+                f"(허용 범위: '{target_dir}')"
+            )
+        return resolved
+
+    def write(self, scope: MemoryScope, filename: str, content: str) -> Path:
+        """지정 스코프에 메모리 파일을 씁니다."""
+        path = self._safe_path(scope, filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         log.info("[Memory] wrote %s/%s (%d chars)", scope.value, filename, len(content))
         return path
 
     def read(self, scope: MemoryScope, filename: str) -> Optional[str]:
         """지정 스코프에서 메모리 파일을 읽습니다. 없으면 None 반환."""
-        if not filename.endswith(".md"):
-            filename += ".md"
-        path = self._resolve_dir(scope) / filename
+        path = self._safe_path(scope, filename)
         if not path.exists():
             return None
         return path.read_text(encoding="utf-8")
 
     def delete(self, scope: MemoryScope, filename: str) -> bool:
         """지정 스코프의 메모리 파일을 삭제합니다. 성공 여부 반환."""
-        if not filename.endswith(".md"):
-            filename += ".md"
-        path = self._resolve_dir(scope) / filename
+        path = self._safe_path(scope, filename)
         if path.exists():
             path.unlink()
             log.info("[Memory] deleted %s/%s", scope.value, filename)

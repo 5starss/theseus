@@ -246,6 +246,12 @@ class RAGService:
 
         Returns:
             생성된 문서 ID 리스트.
+
+        Note:
+            동기 메서드이지만 async 컨텍스트에서 호출되는 경우
+            이벤트 루프 블로킹을 방지하기 위해 호출자가
+            ``loop.run_in_executor(None, service.ingest_file, ...)``
+            로 래핑하는 것을 권장합니다.
         """
         with open(file_path, "r", encoding=encoding) as f:
             content = f.read()

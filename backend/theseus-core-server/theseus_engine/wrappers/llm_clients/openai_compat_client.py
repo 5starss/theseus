@@ -369,6 +369,8 @@ class TheseusOpenAICompatClient:
     def _translate_error(exc: Exception) -> TheseusApiError:
         status = getattr(exc, "status_code", None)
         msg = str(exc)
+        if "API_KEY_INVALID" in msg or "API key not valid" in msg:
+            return AuthenticationFailure(msg)
         if status in (401, 403):
             return AuthenticationFailure(msg)
         if status == 429:

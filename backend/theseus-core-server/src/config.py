@@ -43,9 +43,14 @@ class Settings(BaseSettings):
 
     # Kafka Settings
     CORE_KAFKA_CONSUMER_ENABLED: bool = False
+    CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED: bool = True
     CORE_KAFKA_BOOTSTRAP_SERVERS: str = "localhost:19092"
+    CORE_KAFKA_CONSUMER_GROUP_ID: str = "theseus-core-tool-generation"
     CORE_KAFKA_TOOL_PLAN_CONSUMER_GROUP_ID: str = "theseus-core-tool-plan"
     CORE_KAFKA_TOOL_BUILD_CONSUMER_GROUP_ID: str = "theseus-core-tool-build"
+    KAFKA_TOPIC_TOOL_GENERATION_REQUEST: str = "theseus.tool-generation.request"
+    KAFKA_TOPIC_TOOL_REGENERATION_REQUEST: str = "theseus.tool-regeneration.request"
+    KAFKA_TOPIC_TOOL_GENERATION_EVENT: str = "theseus.tool-generation.event"
     KAFKA_TOPIC_TOOL_PLAN_REQUEST: str = "theseus.tool-plan.request"
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
@@ -54,7 +59,6 @@ class Settings(BaseSettings):
     CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
     CORE_RUN_LEASE_TTL_SECONDS: int = 60
     CORE_RUN_EVENT_REPUBLISH_BATCH_SIZE: int = 50
-    CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 8
     
     # Database Settings (PostgreSQL + pgvector)
     CORE_POSTGRES_HOST: str = "localhost"

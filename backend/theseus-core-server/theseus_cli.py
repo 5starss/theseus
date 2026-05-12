@@ -34,6 +34,7 @@ from theseus_engine.models.sessions import (
 )
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
+from theseus_engine.client.project_client import init_project_session, get_project_client
 from theseus_cli.context import CLIContext
 from theseus_cli.ui import print_help, display_plan
 from theseus_cli.parsers import extract_plan_json, parse_plan_feedback, build_feedback_prompt, handle_plan_draft
@@ -47,6 +48,8 @@ async def run_cli():
     print("=" * 50)
 
     sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
+
+    # ── 프로젝트 설정 (standalone 기본값 → 서버 연동 시 덮어씀) ──────
     user_level = 5
     actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
     project_tool_permissions = {
@@ -55,9 +58,26 @@ async def run_cli():
         "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
         "search_knowledge_base": 1, "ingest_document": 2,
     }
+    _project_id = os.getenv("THESEUS_PROJECT_ID", "local")
+    _session_token = os.getenv("THESEUS_SESSION_TOKEN", "")
+    _session_id = ""
 
-    model_name = os.getenv("OPENHARNESS_MODEL", "google/gemini-3.1-pro-preview-customtools")
-    os.environ["OPENHARNESS_MODEL"] = model_name
+    proj_client = get_project_client()
+    if proj_client.is_enabled:
+        print("[*] 서버 연동 활성화 — 프로젝트 설정을 가져오는 중...")
+        try:
+            proj_cfg = await init_project_session(_project_id, token=_session_token)
+            user_level = proj_cfg.user_level
+            actor_role = proj_cfg.actor_role
+            if proj_cfg.tool_permissions:
+                project_tool_permissions.update(proj_cfg.tool_permissions)
+            _session_id = proj_cfg.session_id
+            print(f"[*] 프로젝트 설정 로드 완료 (role={actor_role}, level={user_level})")
+        except Exception as _e:
+            print(f"[!] 프로젝트 설정 로드 실패 — standalone 기본값 사용: {_e}")
+
+    model_name = os.getenv("THESEUS_MODEL", "google/gemini-3.1-pro-preview-customtools")
+    os.environ["THESEUS_MODEL"] = model_name
 
     async def ask_permission(tool_name: str, prompt_msg: str) -> str:
         print(prompt_msg, end="", flush=True)
@@ -328,6 +348,14 @@ async def run_cli():
                     continue
 
             await save_session_history("default", ctx.engine.messages)
+            if proj_client.is_enabled and _session_id:
+                await proj_client.sync_history(_session_id, list(ctx.engine.messages), token=_session_token)
+                _cost = CostTracker.get_or_create()
+                await proj_client.report_usage(
+                    _session_id,
+                    {"inputTokens": _cost.total_input_tokens, "outputTokens": _cost.total_output_tokens},
+                    token=_session_token,
+                )
 
         except KeyboardInterrupt:
             break

@@ -20,15 +20,24 @@ from theseus_engine.wrappers.hooks.theseus_hook_executor import (
     TheseusHookExecutor,
 )
 from theseus_engine.observability.tracer import is_tracing_enabled
-from theseus_engine.observability.stats import SessionStats
+from theseus_engine.observability.stats import SessionStats  # noqa: F401 (reset_stats 경로에서 사용)
 from theseus_engine.engine.cost_tracker import CostTracker
 from theseus_engine.memory.scoped_memory import ScopedMemory
 from theseus_engine.core.tool_retriever import ToolRetriever, build_retrieved_registry
+from theseus_engine.skills.injection import SkillInjectionConfig
 
 # 동적 도구 활성화 여부 (기본값 True)
 THESEUS_DYNAMIC_TOOL_RETRIEVAL = (
     os.getenv("THESEUS_DYNAMIC_TOOL_RETRIEVAL", "true").lower() == "true"
 )
+
+
+def _resolve_skill_injection_enabled(value: Optional[bool]) -> bool:
+    if value is not None:
+        return bool(value)
+    raw = os.getenv("THESEUS_SKILL_AUTO_INJECTION", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
 
 async def setup_engine(
     sm: TheseusStateMachine,
@@ -45,18 +54,34 @@ async def setup_engine(
     history_messages: Optional[list] = None,
     api_client: Optional[TheseusLLMClient] = None,
     enable_dynamic_tools: bool = THESEUS_DYNAMIC_TOOL_RETRIEVAL,
+    enable_skill_injection: Optional[bool] = None,
     reset_stats: bool = False,
+    # ── Kafka 실행 추적 ID (선택) ─────────────────────────
+    run_id: Optional[str] = None,
+    tool_draft_id: Optional[str] = None,
+    # ── 워크스페이스 경로 (멀티유저 서버 모드) ─────────────
+    cwd: Optional[Path] = None,
 ):
-    if reset_stats:
-        SessionStats.reset()
-        CostTracker.reset()
-    tracker = CostTracker.get_or_create()
+    # ── 워크스페이스 경로 결정 ─────────────────────────────
+    # cwd 파라미터 우선, 없으면 프로세스 현재 디렉토리 (standalone 호환)
+    resolved_cwd = cwd if cwd is not None else Path.cwd()
 
-    scoped_memory = ScopedMemory(cwd=Path.cwd())
+    # ── 통계/비용 추적기: 요청 스코프 인스턴스 ─────────────
+    # 싱글톤 reset()을 사용하면 동시 요청 간 통계가 뒤섞이므로
+    # 항상 새 인스턴스를 생성한다. standalone CLI/TUI는 reset_stats=True
+    # 로 호출하던 것을 그대로 유지하되 전역 싱글톤은 건드리지 않는다.
+    tracker = CostTracker()
+    stats = SessionStats()
+    if reset_stats:
+        # standalone 모드: 전역 싱글톤도 동기화 (CLI /cost, /stats 명령용)
+        CostTracker._instance = tracker
+        SessionStats._instance = stats
+
+    scoped_memory = ScopedMemory(cwd=resolved_cwd)
     scoped_memory.ensure_gitignore()
     memory_context = scoped_memory.read_context()
 
-    model_name = os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or "gpt-4o"
     if api_client is None:
         api_client = TheseusLLMClient(model_name)
 
@@ -105,7 +130,7 @@ async def setup_engine(
             if rag_failed:
                 print("⚠️ RAG 유사도 선택 실패 (필수 도구만 반환) → ToolSearchTool 활성화")
             else:
-                print("⚠️ 관련 도구를 찾지 못했습니다. 전체 레지스트리를 사용합니다.")
+                print(f"✅ RAG 도구 선택 성공 ({similarity_added}개 유사도 매칭)")
         except Exception as _e:
             import logging as _logging
             _logging.getLogger(__name__).warning(
@@ -170,7 +195,7 @@ async def setup_engine(
         tool_registry=active_registry,
         permission_checker=permission_checker,
         hook_executor=hook_executor,
-        cwd=Path.cwd(),
+        cwd=resolved_cwd,
         model=model_name,
         system_prompt=(
             sm.get_system_prompt()
@@ -178,16 +203,24 @@ async def setup_engine(
         ),
         max_turns=30,
         permission_prompt=permission_prompt_func if callable(permission_prompt_func) else None,
+        skill_injection_config=SkillInjectionConfig(
+            enabled=_resolve_skill_injection_enabled(enable_skill_injection),
+        ),
         tool_metadata={
             "tool_registry": full_registry,
             "tool_permissions": project_tool_permissions,
             "active_registry": active_registry,
             "cost_tracker": tracker,
+            "session_stats": stats,
             "scoped_memory": scoped_memory,
             "user_rbac_level": user_level,
             "agent_mode": sm.mode.value if hasattr(sm, "mode") else "normal",
             "project_id": project_id,
             "actor_role": actor_role,
+            "active_skills": [],
+            # Kafka 실행 추적 ID — ToolExecutionContext.run_id/tool_draft_id로 전달됨
+            "run_id": run_id,
+            "tool_draft_id": tool_draft_id,
         }
     )
 

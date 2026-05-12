@@ -94,7 +94,7 @@ class TheseusHookExecutor:
     _AUDIT_PROMPT = (
         "You are a security auditor. Does this file modification look safe, "
         "non-destructive, and not malicious? "
-        "Return strict JSON: {\"ok\": true} or {\"ok\": false, \"reason\": \"...\"}. "
+        "Return strict JSON: {{\"ok\": true}} or {{\"ok\": false, \"reason\": \"...\"}}. "
         "IMPORTANT: DO NOT use markdown backticks or any other formatting. "
         "Output raw JSON only. Arguments: {arguments}"
     )
@@ -301,22 +301,18 @@ class TheseusHookExecutor:
             args_str = _json.dumps(tool_input, ensure_ascii=False)[:2000]
             prompt = self._AUDIT_PROMPT.format(arguments=args_str)
 
-            response = await self._llm_client.generate(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=64,
-            )
-
-            # response가 문자열이거나 객체일 수 있음 — 텍스트 추출
-            if isinstance(response, str):
-                raw = response
-            else:
-                raw = getattr(response, "content", None) or str(response)
+            response = await self._call_audit_model(prompt)
+            raw = self._extract_audit_text(response)
 
             # Markdown 펜스 제거
             import re as _re
             raw = _re.sub(r'```(?:json)?\n?|\n?```', '', raw).strip()
 
             parsed = _json.loads(raw)
+            if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+                parsed = parsed[0]
+            if not isinstance(parsed, dict):
+                raise ValueError(f"Audit LLM returned non-object JSON: {type(parsed).__name__}")
             if parsed.get("ok") is True:
                 log.info("[AuditLLM] %s → 안전 확인", tool_name)
                 return None
@@ -331,8 +327,81 @@ class TheseusHookExecutor:
             )
 
         except Exception as e:
-            log.debug("[AuditLLM] 감사 LLM 호출 실패 (통과 처리): %s", e)
-            return None
+            log.warning(
+                "[AuditLLM] 감사 LLM 호출 실패 — fail-closed 정책으로 차단 처리: %s", e
+            )
+            return HookResult(
+                hook_type="theseus_audit_llm",
+                success=False,
+                blocked=True,
+                reason=f"감사 LLM 호출 실패로 안전을 위해 실행을 차단했습니다: {e}",
+            )
+
+    async def _call_audit_model(self, prompt: str) -> Any:
+        """Call either legacy generate() clients or the native stream API."""
+        generate = getattr(self._llm_client, "generate", None)
+        if callable(generate):
+            return await generate(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=64,
+            )
+
+        stream_message = getattr(self._llm_client, "stream_message", None)
+        if not callable(stream_message):
+            raise TypeError("Audit LLM client has neither generate() nor stream_message().")
+
+        from theseus_engine.models.messages import ConversationMessage, TextBlock
+        from theseus_engine.wrappers.llm_clients.api_types import (
+            ApiMessageCompleteEvent,
+            ApiMessageRequest,
+            ApiTextDeltaEvent,
+        )
+
+        model_name = getattr(self._llm_client, "model_name", "audit")
+        request = ApiMessageRequest(
+            model=model_name,
+            messages=[
+                ConversationMessage(
+                    role="user",
+                    content=[TextBlock(text=prompt)],
+                )
+            ],
+            max_tokens=64,
+            tools=[],
+        )
+        chunks: list[str] = []
+        final_message: Any | None = None
+        async for event in stream_message(request):
+            if isinstance(event, ApiTextDeltaEvent):
+                chunks.append(event.text)
+            elif isinstance(event, ApiMessageCompleteEvent):
+                final_message = event.message
+        if final_message is not None:
+            return final_message
+        return "".join(chunks)
+
+    def _extract_audit_text(self, value: Any) -> str:
+        """Normalize provider-specific audit responses into text."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, list):
+            return "".join(self._extract_audit_text(item) for item in value)
+        if isinstance(value, dict):
+            if "text" in value:
+                return self._extract_audit_text(value["text"])
+            if "content" in value:
+                return self._extract_audit_text(value["content"])
+            return ""
+
+        content = getattr(value, "content", None)
+        if content is not None:
+            return self._extract_audit_text(content)
+        text = getattr(value, "text", None)
+        if text is not None:
+            return self._extract_audit_text(text)
+        return str(value)
 
     def _show_diff_preview(
         self,

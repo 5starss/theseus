@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import re
 import logging
@@ -40,7 +41,7 @@ class EnterWorktreeTool(BaseTool):
     async def execute(
         self, arguments: EnterWorktreeInput, context: ToolExecutionContext
     ) -> ToolResult:
-        top_level = _git_output(context.cwd, "rev-parse", "--show-toplevel")
+        top_level = await _git_output(context.cwd, "rev-parse", "--show-toplevel")
         if top_level is None:
             return ToolResult(
                 output="Not a Git repository or Git command failed.",
@@ -58,17 +59,9 @@ class EnterWorktreeTool(BaseTool):
             cmd.extend(["-b", arguments.branch, str(worktree_path), arguments.base_ref])
         else:
             cmd.extend([str(worktree_path), arguments.branch])
-            
-        result = subprocess.run(
-            cmd,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        
-        output = (result.stdout or result.stderr).strip() or f"Created worktree {worktree_path}"
-        if result.returncode != 0:
+
+        returncode, output = await _run_git(cmd, cwd=repo_root)
+        if returncode != 0:
             return ToolResult(output=f"Worktree creation failed: {output}", is_error=True)
             
         return ToolResult(
@@ -102,35 +95,36 @@ class ExitWorktreeTool(BaseTool):
         if not path.is_absolute():
             path = (context.cwd / path).resolve()
             
-        result = subprocess.run(
+        returncode, output = await _run_git(
             ["git", "worktree", "remove", "--force", str(path)],
             cwd=context.cwd,
-            capture_output=True,
-            text=True,
-            check=False,
         )
-        
-        output = (result.stdout or result.stderr).strip() or f"Removed worktree {path}"
-        if result.returncode != 0:
+        if returncode != 0:
             return ToolResult(output=f"Worktree removal failed: {output}", is_error=True)
             
         return ToolResult(output=f"✅ Worktree removed: {path}")
 
 
-def _git_output(cwd: Path, *args: str) -> str | None:
+async def _run_git(cmd: list[str], cwd: Path) -> tuple[int, str]:
+    """git 명령을 비동기로 실행하여 (returncode, output) 반환."""
     try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=False,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        if result.returncode != 0:
-            return None
-        return (result.stdout or "").strip()
-    except Exception:
-        return None
+        stdout, stderr = await proc.communicate()
+        output = (stdout or stderr).decode("utf-8", errors="replace").strip()
+        return proc.returncode or 0, output or str(cmd[-1])
+    except Exception as exc:
+        return 1, str(exc)
+
+
+async def _git_output(cwd: Path, *args: str) -> str | None:
+    """git 명령 결과 문자열 반환, 실패 시 None."""
+    returncode, output = await _run_git(["git", *args], cwd=cwd)
+    return output if returncode == 0 else None
 
 
 def _resolve_worktree_path(repo_root: Path, branch: str, path: str | None) -> Path:

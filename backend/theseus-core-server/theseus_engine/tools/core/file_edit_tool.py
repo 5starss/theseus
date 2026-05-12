@@ -42,11 +42,11 @@ class EditFileTool(BaseTool):
             content = path.read_text(encoding="utf-8")
             old_str = arguments.old_str
             new_str = arguments.new_str
-            # 코드 파일의 경우 old_str/new_str의 마크다운 링크 제거 후 매칭
+            # 코드 파일의 경우 old_str/new_str 입력만 마크다운 링크 제거 후 매칭
+            # content 전체를 변환하면 주석·문자열 안의 링크까지 손상되므로 입력값만 정규화
             if path.suffix in (".py", ".ts", ".js", ".tsx", ".jsx", ".sh"):
                 old_str = _strip_markdown_links(old_str)
                 new_str = _strip_markdown_links(new_str)
-                content = _strip_markdown_links(content)
             if old_str not in content:
                 return ToolResult(output=f"Error: The provided 'old_str' was not found in {arguments.path}. Ensure exact match including whitespace.", is_error=True)
 

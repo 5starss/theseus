@@ -51,9 +51,11 @@ class SuggestionValidator:
             향후 TheseusLLMClient와 연동하여 실제 리뷰를
             수행할 예정입니다.
         """
-        log.info(
-            "[Suggestion] 코드 품질 리뷰 요청 "
-            "(코드 길이: %d자)", len(code),
+        log.warning(
+            "[Suggestion] 코드 품질 리뷰 요청 (코드 길이: %d자) — "
+            "현재 LLM 검증기가 미구현(Stub) 상태입니다. "
+            "TheseusLLMClient 연동 전까지 실제 리뷰가 수행되지 않습니다.",
+            len(code),
         )
 
         # TODO: TheseusLLMClient를 통해 실제 LLM 호출 구현

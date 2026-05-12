@@ -105,12 +105,12 @@ class ExecutionValidator:
     LLM 기반 심층 분석 모드로 전환됩니다.
     """
 
-    @classmethod
     @theseus_traceable(
         run_type="tool",
         name="validate_execution",
         tags=["validator", "execution"],
     )
+    @classmethod
     def validate(
         cls,
         tool_name: str,
@@ -218,13 +218,16 @@ class ExecutionValidator:
         """LLM을 활용한 심층 안전성 분석.
 
         Note:
-            이 메서드는 현재 뼈대(Stub)만 구현되어 있습니다.
-            향후 TheseusLLMClient와 연동하여 실제 LLM 호출로
-            대체할 예정입니다.
+            이 메서드는 현재 미구현(Stub) 상태입니다.
+            THESEUS_USE_LLM_VALIDATOR=true 로 활성화해도
+            실제 LLM 호출 없이 Regex 검증으로 폴백합니다.
+            이 사실을 시작 로그에 명시적으로 경고합니다.
         """
-        log.info(
-            "[LLM Validator] 도구 '%s'에 대한 "
-            "LLM 기반 Execution 검증 요청 (미구현, Regex로 폴백)",
+        log.warning(
+            "[LLM Validator] THESEUS_USE_LLM_VALIDATOR=true 이지만 "
+            "LLM 검증기가 아직 구현되지 않았습니다. "
+            "도구 '%s'에 대해 Regex 검증으로 폴백합니다. "
+            "실제 LLM 기반 검증이 필요하면 _validate_with_llm을 구현하세요.",
             tool_name,
         )
         # TODO: TheseusLLMClient를 통해 실제 LLM 호출 구현

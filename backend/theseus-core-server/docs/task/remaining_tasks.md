@@ -91,6 +91,24 @@ TUI 및 CLI 인터페이스에서 B2B 에이전트 서비스로서의 완성도�
 * **🟢 5.2. 프로세스 자원 관리 고도화 — 완료**:
     * `BashTool`: `except asyncio.CancelledError` 블록 추가 → 취소 시 `_terminate(process, force=True)` 호출 후 re-raise. 좀비 프로세스 방지.
 
+* **🟢 5.2-b. Engine 실행 안정성 및 로컬 런타임 retention — 완료**:
+    * `QueryEngine` tool 실행 순서를 RBAC/permission 우선으로 조정해 권한 없는 호출이 PRE hook, 감사 LLM, HITL 비용을 발생시키지 않도록 정리.
+    * 단일 tool 예외를 recoverable `ToolExecutionCompleted(is_error=True)`로 변환하고, POST hook 출력 보정이 다음 LLM 입력에 반영되도록 수정.
+    * `lsp` tool에 공용 workspace path 보안 검사를 적용해 workspace 밖 파일 접근 차단.
+    * local daemon 동시 run 거부(`409`)와 run/event/task output retention 상한 추가.
+    * 서버 라우트 및 builder 계층(`src/**`) 변경 없이 `theseus_engine` 내부와 테스트만 수정.
+
+* **🟢 5.2-c. PLAN 자동 검증 턴 연결 — 완료**:
+    * PLAN EXECUTING 완료 신호 감지 시 VERIFYING으로 전환한 뒤 자동으로 검증 턴을 이어서 실행.
+    * `Verification complete.` / `검증 완료` 신호를 감지하면 추가 auto-resume 없이 검증 결과를 최종 응답으로 반환.
+    * `runner_runtime`과 TUI가 같은 `plan_flow` 헬퍼를 사용하도록 정리.
+    * 서버 라우트 및 builder 계층(`src/**`) 변경 없음.
+
+* **🟢 5.2-d. VSCode Extension 권한 승인 프롬프트 복구 — 완료**:
+    * local daemon과 stdio runner가 `PermissionRequest` 후 사용자 응답을 기다리도록 수정.
+    * Extension이 VSCode 모달로 `허용`/`거부`를 받고 daemon HTTP 또는 stdio JSON Lines로 `PermissionResponse`를 전달.
+    * 재연결/replay 상황에서 동일 권한 요청이 중복 처리되지 않도록 `request_id` 기반 중복 방지 적용.
+
 * **5.3. 컨벤션 전수 리팩토링**:
     * 모든 모듈의 docstring을 **Google Style**로 통일 (Args, Returns 블록 누락분 보충).
     * `__init__` 메서드 및 헬퍼 함수의 반환 타입 힌트(`-> None` 등) 전수 조사 및 수정.
@@ -179,4 +197,7 @@ TUI 및 CLI 인터페이스에서 B2B 에이전트 서비스로서의 완성도�
     - `agent_tool.py` 서브 에이전트 즉시 크래시 (🚨 Critical).
     - `theseus_hook_executor.py` 레지스트리 순회 중 변경 방지 (⚠️ High).
     - `theseus_cli.py` 세션 종료 시 비용 로그 미저장 (📌 Medium).
+- **🟢 7.7. Theseus Agent Audit & Loop 안정화 (완료, 2026-05-11)**:
+    - `TheseusLLMClient`에 `generate` 메서드를 추가하여 `AuditLLM` 호출 시 발생하는 `AttributeError` 해결.
+    - VSCode Extension UI 개선을 통해 툴 실행 가시성 및 루프 상태 확인 편의성 확보.
 

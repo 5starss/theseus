@@ -42,12 +42,8 @@ _SQL_DML_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# WHERE 절 없는 UPDATE/DELETE (대량 변경 위험)
-_SQL_NO_WHERE_PATTERN = re.compile(
-    r"\b(UPDATE\s+\w+\s+SET\s+.+(?!WHERE)"
-    r"|DELETE\s+FROM\s+\w+\s*(?:;|$))",
-    re.IGNORECASE | re.DOTALL,
-)
+# WHERE 절 존재 여부 확인 (UPDATE/DELETE와 별도로 검사)
+_SQL_WHERE_PATTERN = re.compile(r"\bWHERE\b", re.IGNORECASE)
 
 # SQL 인젝션 의심 패턴
 _SQL_INJECTION_PATTERN = re.compile(
@@ -67,12 +63,12 @@ class QueryValidator:
     LLM 기반 심층 분석 모드로 전환됩니다.
     """
 
-    @classmethod
     @theseus_traceable(
         run_type="tool",
         name="validate_query",
         tags=["validator", "query"],
     )
+    @classmethod
     def validate(
         cls,
         tool_name: str,
@@ -127,8 +123,9 @@ class QueryValidator:
             )
 
         if _SQL_DML_PATTERN.search(serialized):
-            # DML은 경고만 (차단하지 않음)
-            if _SQL_NO_WHERE_PATTERN.search(serialized):
+            # UPDATE/DELETE에 WHERE 절이 없으면 대량 변경 위험 경고
+            # 주의: _SQL_WHERE_PATTERN으로 전체 문자열에서 WHERE 존재 여부를 별도 확인
+            if not _SQL_WHERE_PATTERN.search(serialized):
                 warnings.append(
                     f"[Query] Tool '{tool_name}' arguments contain "
                     f"UPDATE/DELETE without a WHERE clause detected. "
@@ -165,9 +162,10 @@ class QueryValidator:
             향후 TheseusLLMClient와 연동하여 실제 LLM 호출로
             대체할 예정입니다.
         """
-        log.info(
-            "[LLM Validator] 도구 '%s'에 대한 "
-            "LLM 기반 Query 검증 요청 (미구현, Regex로 폴백)",
+        log.warning(
+            "[LLM Validator] THESEUS_USE_LLM_VALIDATOR=true 이지만 "
+            "Query LLM 검증기가 아직 구현되지 않았습니다. "
+            "도구 '%s'에 대해 Regex 검증으로 폴백합니다.",
             tool_name,
         )
         return cls._validate_with_regex(

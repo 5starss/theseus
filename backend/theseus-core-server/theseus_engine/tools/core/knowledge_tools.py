@@ -1,5 +1,6 @@
 """Theseus Knowledge Base Tools: RAG-based search and ingestion."""
 
+import asyncio
 import logging
 from pydantic import BaseModel, Field
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
@@ -32,7 +33,11 @@ class SearchKnowledgeBaseTool(BaseTool):
             return ToolResult(output="Knowledge base unavailable: psycopg2 not installed. Run: pip install psycopg2-binary", is_error=True)
         try:
             rag = get_rag_service()
-            results = rag.search(arguments.query, top_k=arguments.top_k)
+            # rag.search()는 동기 함수 — 이벤트 루프 차단 방지를 위해 executor 사용
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None, lambda: rag.search(arguments.query, top_k=arguments.top_k)
+            )
             
             if not results:
                 return ToolResult(output="No relevant documents found in the knowledge base.")

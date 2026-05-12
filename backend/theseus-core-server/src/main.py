@@ -11,6 +11,7 @@ from src.routes import health, plan, sandbox, stream
 from src.sandbox.base import SandboxUnavailableError
 from src.sandbox.docker_executor import DockerExecutor, SandboxStartupCheckError
 from src.tool_build.consumer import start_tool_build_consumer
+from src.tool_generation.consumer import start_tool_generation_consumer
 from src.tool_plan.consumer import start_tool_plan_consumer
 import logging
 
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
 
     scheduler = setup_scheduler()
     app.state.billing_scheduler = scheduler
+    app.state.tool_generation_consumer = None
     app.state.tool_plan_consumer = None
     app.state.tool_build_consumer = None
 
@@ -52,6 +54,11 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.warning("Billing outbox scheduler is unavailable in this environment.")
+
+    try:
+        app.state.tool_generation_consumer = await start_tool_generation_consumer()
+    except Exception as exc:
+        logger.error("Legacy ToolGeneration Kafka consumer startup failed: %s", exc, exc_info=True)
 
     try:
         app.state.tool_plan_consumer = await start_tool_plan_consumer()
@@ -70,6 +77,8 @@ async def lifespan(app: FastAPI):
             await app.state.tool_build_consumer.stop()
         if app.state.tool_plan_consumer is not None:
             await app.state.tool_plan_consumer.stop()
+        if app.state.tool_generation_consumer is not None:
+            await app.state.tool_generation_consumer.stop()
         if scheduler is not None and scheduler.running:
             scheduler.shutdown(wait=False)
             logger.info("Billing outbox scheduler stopped.")

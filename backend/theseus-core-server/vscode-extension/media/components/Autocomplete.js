@@ -1,0 +1,142 @@
+const SLASH_COMMANDS = [
+  '/session list',
+  '/session new',
+  '/clear',
+  '/cost',
+  '/stats',
+  '/tools',
+  '/tools custom',
+  '/validate',
+  '/help',
+  '/quit',
+];
+
+export function getWordBefore(text, pos) {
+  const before = text.slice(0, pos);
+  const match = before.match(/@"[^"]*$/) || before.match(/[/@]\S*$/);
+  return match ? match[0] : '';
+}
+
+export function mentionValue(file) {
+  return /\s/.test(file) ? `@"${file}"` : '@' + file;
+}
+
+export function createAutocompleteController({
+  promptEl,
+  listEl,
+  resizeTextarea,
+  onMentionSearch,
+}) {
+  let items = [];
+  let index = -1;
+  let mode = null;
+
+  function show(nextItems) {
+    if (!nextItems.length) {
+      close();
+      return;
+    }
+    items = nextItems;
+    index = -1;
+    listEl.innerHTML = '';
+    nextItems.forEach(item => {
+      const li = document.createElement('li');
+      li.textContent = item;
+      li.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        apply(item);
+      });
+      listEl.appendChild(li);
+    });
+    listEl.hidden = false;
+  }
+
+  function close() {
+    items = [];
+    index = -1;
+    mode = null;
+    listEl.hidden = true;
+    listEl.innerHTML = '';
+  }
+
+  function move(dir) {
+    const listItems = listEl.querySelectorAll('li');
+    if (!listItems.length) return;
+    if (index >= 0) listItems[index].classList.remove('active');
+    index = Math.max(0, Math.min(items.length - 1, index + dir));
+    listItems[index].classList.add('active');
+    listItems[index].scrollIntoView({ block: 'nearest' });
+  }
+
+  function apply(value) {
+    const val = promptEl.value;
+    const pos = promptEl.selectionStart;
+    const before = val.slice(0, pos);
+    const after = val.slice(pos);
+    const replaced = before.replace(/@"[^"]*$|[/@]\S*$/, value + ' ');
+    promptEl.value = replaced + after;
+    promptEl.selectionStart = promptEl.selectionEnd = replaced.length;
+    close();
+    promptEl.focus();
+    resizeTextarea();
+  }
+
+  function handleInput() {
+    resizeTextarea();
+    const val = promptEl.value;
+    const pos = promptEl.selectionStart;
+    const word = getWordBefore(val, pos);
+
+    if (word.startsWith('/') && word.length >= 1) {
+      mode = 'slash';
+      const q = word.slice(1).toLowerCase();
+      show(SLASH_COMMANDS.filter(c => c.includes(q)));
+      return;
+    }
+    if (word.startsWith('@') && word.length >= 1) {
+      mode = 'at';
+      onMentionSearch(word.slice(1));
+      return;
+    }
+    close();
+  }
+
+  function handleKeydown(event) {
+    if (!items.length) return false;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      move(1);
+      return true;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      move(-1);
+      return true;
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      apply(items[index >= 0 ? index : 0]);
+      return true;
+    }
+    if (event.key === 'Enter' && index >= 0) {
+      event.preventDefault();
+      apply(items[index]);
+      return true;
+    }
+    if (event.key === 'Escape') {
+      close();
+      return true;
+    }
+    return false;
+  }
+
+  return {
+    show,
+    close,
+    handleInput,
+    handleKeydown,
+    mentionValue,
+    get mode() { return mode; },
+    get items() { return [...items]; },
+  };
+}
