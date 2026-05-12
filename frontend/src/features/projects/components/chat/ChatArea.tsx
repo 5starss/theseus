@@ -8,7 +8,6 @@ import { chatApi } from '../../api/chat';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
-import { TypingIndicator } from '@/components/ui/TypingIndicator';
 import { ToolPlanMode } from '../../types/chat';
 import type { ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 
@@ -27,6 +26,7 @@ export function ChatArea() {
     addMessage,
     isGenerating,
     setIsGenerating,
+    progressInfo,
     title,
     isClosed,
     setMode,
@@ -46,7 +46,7 @@ export function ChatArea() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isGenerating]);
+  }, [messages, isGenerating, progressInfo]);
 
   const appendUserMessage = (content: string) => {
     addMessage({
@@ -148,22 +148,61 @@ export function ChatArea() {
       <div className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
         {messages.length > 0 ? (
           <div className="space-y-6">
-            {messages.map(msg => (
-              <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[70%] p-4 rounded-lg overflow-x-auto ${msg.senderType === 'USER'
-                  ? 'bg-[#3e495d] text-[#aeb9d0]'
-                  : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM'
-                    ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
-                    : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
-                  }`}>
-                  {msg.senderType === 'ASSISTANT' ? (
-                    msg.content ? <MarkdownViewer content={msg.content} /> : (isGenerating ? <TypingIndicator /> : '')
-                  ) : (
-                    <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>
-                  )}
+            {messages.map((msg, idx) => {
+              // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
+              const isLastAssistant = msg.senderType === 'ASSISTANT' && idx === messages.length - 1;
+              if (isLastAssistant && isGenerating) return null;
+
+              return (
+                <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[70%] p-4 rounded-lg overflow-x-auto ${msg.senderType === 'USER'
+                    ? 'bg-slate-700 text-slate-100 shadow-md'
+                    : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM' ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
+                      : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
+                    }`}>
+                    {msg.senderType === 'ASSISTANT' ? (
+                      <MarkdownViewer content={msg.content} />
+                    ) : (
+                      <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 별도의 생성 로그 UI (말풍선과 별개) */}
+            {isGenerating && (
+              <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="w-full max-w-[85%] bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
+                  <div className="bg-blue-500/10 px-4 py-2 border-b border-blue-500/10 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:0.2s]" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:0.4s]" />
+                      </div>
+                      <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em]">
+                        {progressInfo?.step || 'Agent Processing'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {progressInfo?.message && (
+                      <div className="text-sm text-blue-100/90 font-medium leading-relaxed">
+                        {progressInfo.message}
+                      </div>
+                    )}
+                    <div className="bg-[#050c18] rounded-lg p-3 border border-slate-800/50">
+                      <div className="font-mono text-[11px] leading-relaxed text-slate-400 break-all max-h-[150px] overflow-y-auto scrollbar-none">
+                        <span className="text-blue-500/50 mr-2">$</span>
+                        {(messages[messages.length - 1]?.content || 'Initializing stream...').replace(/blockId:\s*[\w-]+\s*/gi, '')}
+                        <span className="inline-block w-1.5 h-3.5 bg-blue-500/50 ml-1 animate-pulse" />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            ))}
+            )}
             <div ref={messagesEndRef} />
           </div>
         ) : (
@@ -182,8 +221,8 @@ export function ChatArea() {
               disabled={isGenerating || isClosed || option.value === ToolPlanMode.AGENT}
               onClick={() => setMode(option.value)}
               className={`px-3 py-2 rounded border text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${mode === option.value
-                  ? 'bg-blue-400 border-blue-400 text-slate-950'
-                  : 'bg-[#0d1c2d] border-slate-700 text-slate-400 hover:text-blue-200 hover:border-blue-400/50'
+                ? 'bg-blue-400 border-blue-400 text-slate-950'
+                : 'bg-[#0d1c2d] border-slate-700 text-slate-400 hover:text-blue-200 hover:border-blue-400/50'
                 }`}
               title={option.description}
             >
