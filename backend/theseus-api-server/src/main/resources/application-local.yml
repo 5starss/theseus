@@ -41,6 +41,8 @@ spring:
         spring.json.use.type.headers: false
 
 theseus:
+  core:
+    base-url: ${THESEUS_CORE_BASE_URL:http://localhost:8086}
   kafka:
     topics:
       tool-plan-request: ${KAFKA_TOPIC_TOOL_PLAN_REQUEST:theseus.tool-plan.request}

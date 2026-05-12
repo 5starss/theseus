@@ -25,6 +25,10 @@ from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+SUPPORTED_CHAT_STREAM_MODES = {
+    "ASK": AgentMode.ASK,
+    "AGENT": AgentMode.AGENT,
+}
 
 
 def sse_event(event_type: str, data: dict) -> str:
@@ -39,6 +43,20 @@ def _truncate_tool_output(output: object, max_length: int = 500) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length] + "..."
+
+
+def _resolve_stream_mode(mode: str, plan_id: str | None) -> AgentMode:
+    if plan_id:
+        return AgentMode.PLAN
+
+    normalized_mode = mode.strip().upper()
+    if normalized_mode in SUPPORTED_CHAT_STREAM_MODES:
+        return SUPPORTED_CHAT_STREAM_MODES[normalized_mode]
+
+    raise HTTPException(
+        status_code=422,
+        detail="Stream mode must be ASK or AGENT.",
+    )
 
 
 async def stream_agent_response(
@@ -59,6 +77,7 @@ async def stream_agent_response(
             "user_id": session.user_id,
             "project_id": session.project_id,
             "chat_session_id": chat_session_id,
+            "mode": engine_context.mode.name,
         },
     )
 
@@ -67,9 +86,10 @@ async def stream_agent_response(
         usage_data.model_name = assembly.model_name
 
         logger.info(
-            "Starting Theseus stream for user=%s project=%s tools=%s",
+            "Starting Theseus stream for user=%s project=%s mode=%s tools=%s",
             session.user_id,
             session.project_id,
+            engine_context.mode.name,
             ",".join(assembly.allowed_tools),
         )
 
@@ -150,6 +170,7 @@ async def stream_agent_response(
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
     chat_session_id: int = Query(..., ge=1),
+    mode: str = Query("AGENT"),
     plan_id: str | None = Query(None),
     session: SessionContext = Depends(get_sse_session_context),
     db: Session = Depends(get_db),
@@ -160,14 +181,18 @@ async def stream_endpoint(
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
-    project_tool_permissions = await get_project_tool_permissions(
-        project_id=session.project_id,
-        user_id=session.user_id,
-    )
-
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
-    mode = AgentMode.AGENT
+    agent_mode = _resolve_stream_mode(mode, plan_id)
+
+    if agent_mode == AgentMode.ASK:
+        project_tool_permissions = {}
+    else:
+        project_tool_permissions = await get_project_tool_permissions(
+            project_id=session.project_id,
+            user_id=session.user_id,
+        )
+
     if plan_id:
         bound_plan = validate_executing_plan_binding(
             db,
@@ -175,12 +200,11 @@ async def stream_endpoint(
             project_id=str(session.project_id),
             chat_session_id=chat_session_id,
         )
-        mode = AgentMode.PLAN
 
     engine_context = EngineBuildContext(
         user_level=session.permission_level,
         project_tool_permissions=project_tool_permissions,
-        mode=mode,
+        mode=agent_mode,
         approval_policy="reject",
         history_messages=history_messages,
         session_id=str(chat_session_id),

@@ -51,6 +51,7 @@ public enum ErrorCode {
     CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT-001", "채팅 세션을 찾을 수 없습니다."),
     CLOSED_CHAT_SESSION(HttpStatus.CONFLICT, "CHAT-002", "종료된 채팅 세션에는 메시지를 등록할 수 없습니다."),
     TOOL_CHAT_SESSION_MISMATCH(HttpStatus.BAD_REQUEST, "CHAT-003", "Tool이 해당 채팅 세션에 속하지 않습니다."),
+    CHAT_STREAM_MODE_INVALID(HttpStatus.BAD_REQUEST, "CHAT-004", "ASK 또는 AGENT 모드에서만 채팅 스트림을 요청할 수 있습니다."),
 
     // Tool
     TOOL_NOT_FOUND(HttpStatus.NOT_FOUND, "TOOL-001", "Tool을 찾을 수 없습니다."),
