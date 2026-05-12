@@ -9,6 +9,7 @@ import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.service.ChatMessageService;
+import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanGroup;
@@ -173,7 +174,7 @@ public class ToolBuildEventService {
 			.displayName(resolveDisplayName(artifact, fileName))
 			.displayDescription(artifact.getDisplayDescription())
 			.status(ToolStatus.APPROVED)
-			.toolGrade(artifact.getPermissionLevel())
+			.toolGrade(ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL)
 			.moduleName(artifact.getModuleName())
 			.artifactPath(artifact.getArtifactPath())
 			.codeSnapshot(artifact.getCodeSnapshot())

@@ -17,6 +17,7 @@ import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.chat.service.ChatMessageService;
 import com.theseus.api.domain.project.entity.Project;
+import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.tool.entity.Tool;
@@ -110,7 +111,7 @@ class ToolBuildEventServiceTest {
 		assertThat(savedTool.getDisplayName()).isEqualTo("Incident Recovery");
 		assertThat(savedTool.getDisplayDescription()).isEqualTo("Builds recovery guide.");
 		assertThat(savedTool.getStatus()).isEqualTo(ToolStatus.APPROVED);
-		assertThat(savedTool.getToolGrade()).isEqualTo(2);
+		assertThat(savedTool.getToolGrade()).isEqualTo(ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL);
 		assertThat(savedTool.getModuleName()).isEqualTo("incident_recovery");
 		assertThat(savedTool.getArtifactPath()).isEqualTo("projects/10/incident_recovery.py");
 		assertThat(savedTool.getCodeSnapshot()).isEqualTo("print('ok')");

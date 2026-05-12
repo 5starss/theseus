@@ -15,6 +15,12 @@ import { approvalApi } from '@/features/projects/api/approval';
 import type { ToolApprovalResponse } from '@/features/projects/types/approval';
 import { ToolApprovalDetailModal } from './ToolApprovalDetailModal';
 
+const DEFAULT_TOOL_GRADE = 1;
+const MAX_PUBLIC_TOOL_GRADE = 99;
+
+const clampPublicToolGrade = (value: number) =>
+  Math.min(MAX_PUBLIC_TOOL_GRADE, Math.max(DEFAULT_TOOL_GRADE, value));
+
 interface ToolApprovalManagementProps {
   projectId: string;
 }
@@ -35,7 +41,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   const [actionType, setActionType] = useState<'APPROVE' | 'REJECT'>('APPROVE');
 
   // Form states
-  const [toolGrade, setToolGrade] = useState<number>(1);
+  const [toolGrade, setToolGrade] = useState<number>(DEFAULT_TOOL_GRADE);
   const [reviewFeedback, setReviewFeedback] = useState('');
 
   const refetch = () => setFetchTrigger(n => n + 1);
@@ -67,7 +73,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   const openActionModal = (approval: ToolApprovalResponse, type: 'APPROVE' | 'REJECT') => {
     setSelectedApproval(approval);
     setActionType(type);
-    setToolGrade(1);
+    setToolGrade(DEFAULT_TOOL_GRADE);
     setReviewFeedback('');
     setIsActionOpen(true);
   };
@@ -259,12 +265,13 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                   <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">도구 등급 (Tool Grade)</Label>
                   <Input
                     type="number"
-                    min={1}
-                    max={99}
+                    min={DEFAULT_TOOL_GRADE}
+                    max={MAX_PUBLIC_TOOL_GRADE}
                     value={toolGrade}
-                    onChange={(e) => setToolGrade(Number(e.target.value))}
+                    onChange={(e) => setToolGrade(clampPublicToolGrade(Number(e.target.value)))}
                     className="bg-slate-950 border-slate-800 text-white"
                   />
+                  <p className="text-[11px] text-slate-500">Public range: 1-99</p>
                 </div>
               )}
 

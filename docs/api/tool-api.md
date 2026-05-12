@@ -11,6 +11,10 @@
 - 실제 Tool은 승인된 ToolPlan을 기반으로 Core Server가 코드/파일 산출물 생성을 완료한 뒤 생성된다.
 - AI 생성 중 progress/chunk는 Redis와 SSE로만 전달하고 `chat_messages`에는 저장하지 않는다.
 - completed/skipped/failed는 DB commit 이후 Redis/SSE로 전달한다.
+- 프로젝트 `ADMIN`은 `accessLevel = 100`으로 고정한다.
+- 일반 멤버 공개 범위는 `accessLevel/toolGrade = 1~99`다.
+- 신규 build 완료 Tool은 Core artifact의 permission level과 관계없이 기본 `toolGrade = 100`으로 생성한다.
+- Plan 승인은 build 허가이고, Tool 공개는 Admin 검토 후 `toolGrade`를 낮추는 절차다.
 
 ## 상태 값
 
@@ -64,7 +68,7 @@ Authorization: Bearer {accessToken}
         "moduleName": "incident_recovery_guide",
         "artifactPath": "projects/1/incident_recovery_guide.py",
         "status": "APPROVED",
-        "toolGrade": 2,
+        "toolGrade": 100,
         "createdAt": "2026-05-08T10:00:00",
         "updatedAt": "2026-05-08T10:10:00"
       }
@@ -92,6 +96,7 @@ Authorization: Bearer {accessToken}
 - `project_members.can_use_tool = true`
 - `tools.status = APPROVED`
 - `tools.tool_grade IS NULL` 또는 `project_members.access_level >= tools.tool_grade`
+- build 직후 Tool은 기본 `toolGrade = 100`이며, Admin 검토 후 `1~99`로 조정하면 일반 멤버에게 공개된다.
 
 ### Response Body
 
@@ -113,7 +118,7 @@ Authorization: Bearer {accessToken}
     "codeSnapshot": "...",
     "metadataJson": "{\"runtime\":\"python\"}",
     "status": "APPROVED",
-    "toolGrade": 2,
+    "toolGrade": 100,
     "createdAt": "2026-05-08T10:00:00",
     "updatedAt": "2026-05-08T10:10:00"
   }
@@ -374,6 +379,7 @@ Authorization: Bearer {accessToken}
 - API Server가 `TOOL_BUILD_REQUESTED` Kafka 이벤트를 발행한다.
 - Core Server가 실제 코드/파일을 생성한다.
 - Core Server가 `TOOL_BUILD_COMPLETED` 이벤트를 발행하면 API Server가 `tools` row를 생성한다.
+- 생성된 Tool은 기본 `toolGrade = 100`으로 저장되어 프로젝트 Admin만 먼저 접근할 수 있다.
 
 ## ToolPlan 반려
 

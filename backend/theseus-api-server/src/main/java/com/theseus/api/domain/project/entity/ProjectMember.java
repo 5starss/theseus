@@ -94,13 +94,16 @@ public class ProjectMember {
 		this.project = project;
 		this.user = user;
 		this.projectRole = projectRole == null ? ProjectRole.MEMBER : projectRole;
-		this.accessLevel = accessLevel == null ? 1 : accessLevel;
+		this.accessLevel = ProjectAccessLevelPolicy.resolveAccessLevel(this.projectRole, accessLevel);
 		this.canCreateTool = canCreateTool != null && canCreateTool;
 		this.canUseTool = canUseTool == null || canUseTool;
 		this.canUpdateTool = canUpdateTool != null && canUpdateTool;
 		this.canDeleteTool = canDeleteTool != null && canDeleteTool;
 		this.status = status == null ? ProjectMemberStatus.IN_PROGRESS : status;
 		this.createdByUser = createdByUser;
+		if (ProjectRole.ADMIN.equals(this.projectRole)) {
+			grantAllToolPermissions();
+		}
 	}
 
 	public void update(
@@ -112,10 +115,16 @@ public class ProjectMember {
 		Boolean canDeleteTool,
 		ProjectMemberStatus status
 	) {
+		ProjectRole previousRole = this.projectRole;
+		ProjectRole nextRole = projectRole == null ? this.projectRole : projectRole;
 		if (projectRole != null) {
 			this.projectRole = projectRole;
 		}
-		if (accessLevel != null) {
+		if (ProjectRole.ADMIN.equals(nextRole)) {
+			this.accessLevel = ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL;
+		} else if (ProjectRole.ADMIN.equals(previousRole)) {
+			this.accessLevel = ProjectAccessLevelPolicy.DEFAULT_MEMBER_ACCESS_LEVEL;
+		} else if (accessLevel != null) {
 			this.accessLevel = accessLevel;
 		}
 		if (canCreateTool != null) {
@@ -133,11 +142,19 @@ public class ProjectMember {
 		if (status != null) {
 			this.status = status;
 		}
+		if (ProjectRole.ADMIN.equals(this.projectRole)) {
+			grantAllToolPermissions();
+		}
 	}
 
 	public void assignProjectAdminRole() {
 		projectRole = ProjectRole.ADMIN;
+		accessLevel = ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL;
 		status = ProjectMemberStatus.IN_PROGRESS;
+		grantAllToolPermissions();
+	}
+
+	private void grantAllToolPermissions() {
 		canCreateTool = true;
 		canUseTool = true;
 		canUpdateTool = true;

@@ -9,6 +9,7 @@ import com.theseus.api.domain.project.dto.response.MyProjectResponse;
 import com.theseus.api.domain.project.dto.response.ProjectResponse;
 import com.theseus.api.domain.project.dto.response.ProjectSummaryResponse;
 import com.theseus.api.domain.project.entity.Project;
+import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
@@ -144,7 +145,7 @@ public class ProjectService {
 			.project(project)
 			.user(projectAdminUser)
 			.projectRole(ProjectRole.ADMIN)
-			.accessLevel(1)
+			.accessLevel(ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL)
 			.canCreateTool(true)
 			.canUseTool(true)
 			.canUpdateTool(true)

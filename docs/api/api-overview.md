@@ -10,6 +10,9 @@
 - 프로젝트 대표 담당자(PM)는 `projects.project_admin_user_id`로 판단한다.
 - PM은 활성 사용자이며 해당 프로젝트의 `ADMIN`, `진행중` 멤버여야 한다.
 - Tool 접근 가능 여부는 `project_members.access_level >= tools.tool_grade`로 판단한다.
+- 프로젝트 `ADMIN`은 `access_level = 100`으로 고정한다.
+- 일반 `MEMBER` / `MANAGER`에게 부여 가능한 `access_level` 범위는 `1~99`다.
+- 신규 build 완료 Tool은 기본 `tool_grade = 100`으로 생성되어 프로젝트 `ADMIN`만 먼저 검토할 수 있다.
 - 응답은 프로젝트 공통 응답 포맷을 사용한다.
 
 ## ToolPlan 기준
@@ -104,6 +107,7 @@
 - Tool 목록에는 실제 build가 완료된 `tools`만 표시한다.
 - 승인 전 PLAN 후보, 승인 대기 PLAN, build 중 PLAN은 Tool 목록에 표시하지 않는다.
 - Tool 접근 가능 여부는 `project_members.access_level >= tools.tool_grade`로 판단한다.
+- `tool_grade = 100`은 프로젝트 `ADMIN` 전용 Tool이며, `1~99`는 일반 멤버 공개 범위다.
 
 ## ToolPlanRun / SSE
 

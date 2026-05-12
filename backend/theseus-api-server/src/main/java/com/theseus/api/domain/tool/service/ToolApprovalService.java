@@ -10,6 +10,7 @@ import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.service.ChatMessageService;
 import com.theseus.api.domain.project.entity.Project;
+import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
@@ -415,7 +416,7 @@ public class ToolApprovalService {
 	}
 
 	private void validateToolGrade(ToolApprovalApproveRequest request) {
-		if (request.getToolGrade() == null || request.getToolGrade() < 1) {
+		if (!ProjectAccessLevelPolicy.isMemberAccessLevel(request.getToolGrade())) {
 			throw BusinessException.of(ErrorCode.INVALID_INPUT_VALUE);
 		}
 	}

@@ -8,6 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { memberApi } from '@/features/projects/api/member';
 import type { ProjectMemberCreateRequest } from '@/features/projects/types/member';
 
+const DEFAULT_MEMBER_ACCESS_LEVEL = 1;
+const MAX_MEMBER_ACCESS_LEVEL = 99;
+const ADMIN_ACCESS_LEVEL = 100;
+
+const clampMemberAccessLevel = (value: number) =>
+  Math.min(MAX_MEMBER_ACCESS_LEVEL, Math.max(DEFAULT_MEMBER_ACCESS_LEVEL, value));
+
 interface AddMemberModalProps {
   projectId: string;
   isOpen: boolean;
@@ -18,6 +25,7 @@ interface AddMemberModalProps {
 export function AddMemberModal({ projectId, isOpen, onOpenChange, onSuccess }: AddMemberModalProps) {
   const [newEmployeeNumber, setNewEmployeeNumber] = useState('');
   const [newRole, setNewRole] = useState<'ADMIN' | 'MANAGER' | 'MEMBER'>('MEMBER');
+  const [newAccessLevel, setNewAccessLevel] = useState(DEFAULT_MEMBER_ACCESS_LEVEL);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleAddMember = async () => {
@@ -26,7 +34,7 @@ export function AddMemberModal({ projectId, isOpen, onOpenChange, onSuccess }: A
       const data: ProjectMemberCreateRequest = {
         employeeNumber: newEmployeeNumber,
         projectRole: newRole,
-        accessLevel: 1,
+        accessLevel: newRole === 'ADMIN' ? ADMIN_ACCESS_LEVEL : clampMemberAccessLevel(newAccessLevel),
         canCreateTool: newRole === 'ADMIN' || newRole === 'MANAGER',
         canUseTool: true,
         canUpdateTool: newRole === 'ADMIN' || newRole === 'MANAGER',
@@ -36,6 +44,7 @@ export function AddMemberModal({ projectId, isOpen, onOpenChange, onSuccess }: A
       onOpenChange(false);
       setNewEmployeeNumber('');
       setNewRole('MEMBER');
+      setNewAccessLevel(DEFAULT_MEMBER_ACCESS_LEVEL);
       onSuccess();
     } catch (err: unknown) {
       console.error('Add member failed', err);
@@ -77,6 +86,20 @@ export function AddMemberModal({ projectId, isOpen, onOpenChange, onSuccess }: A
                 <SelectItem value="MANAGER">Manager</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="accessLevel" className="text-slate-300 uppercase text-[10px] tracking-wider">Access Level</Label>
+            <Input
+              id="accessLevel"
+              type="number"
+              min={DEFAULT_MEMBER_ACCESS_LEVEL}
+              max={MAX_MEMBER_ACCESS_LEVEL}
+              value={newRole === 'ADMIN' ? ADMIN_ACCESS_LEVEL : newAccessLevel}
+              disabled={newRole === 'ADMIN'}
+              onChange={(e) => setNewAccessLevel(clampMemberAccessLevel(Number(e.target.value)))}
+              className="bg-slate-950 border-slate-800 text-white"
+            />
+            <p className="text-[11px] text-slate-500">Member/Manager: 1-99, Admin: 100</p>
           </div>
         </div>
         <DialogFooter>

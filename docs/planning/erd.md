@@ -37,6 +37,17 @@
 
 프로젝트 하나에 `ADMIN` 멤버는 여러 명 존재할 수 있다. 단, Super Admin이 지정하고 수정하는 대표 담당자(PM)는 `projects.project_admin_user_id` 한 명이다.
 
+### Project accessLevel 정책
+
+| 범위 | 의미 |
+| --- | --- |
+| `accessLevel = 100` | 프로젝트 `ADMIN` 전용 권한 레벨 |
+| `accessLevel = 1~99` | 일반 `MEMBER` / `MANAGER`에게 부여 가능한 권한 레벨 |
+
+프로젝트 생성 시 PM은 `project_members.project_role = ADMIN`, `access_level = 100`, Tool 생성/사용/수정/삭제 권한 `true`로 등록된다.
+기존 멤버가 프로젝트 `ADMIN`으로 보정되면 `access_level = 100`으로 함께 보정한다.
+`ADMIN`에서 제외되어 일반 멤버 역할로 변경되는 경우 `access_level = 1`로 초기화한다.
+
 ## ToolPlan / Tool
 
 PLAN 모드 요청은 Tool 생성 요청이 아니라 Tool PLAN 후보 생성 요청이다.
@@ -52,6 +63,16 @@ PLAN 요청
 ```
 
 `tools`는 실제 코드, 파일, 모듈, 실행 메타데이터가 준비된 산출물만 저장한다. 승인 전 PLAN 후보와 진행 중 상태는 `tools`에 저장하지 않는다.
+
+### Tool grade 정책
+
+| 범위 | 의미 |
+| --- | --- |
+| `toolGrade = 100` | 프로젝트 `ADMIN` 전용 Tool |
+| `toolGrade = 1~99` | 일반 멤버 공개 가능 범위 |
+
+Core Server의 `TOOL_BUILD_COMPLETED` 이벤트로 생성되는 신규 Tool은 기본 `toolGrade = 100`으로 저장한다.
+Plan 승인은 Tool build 허가이고, Tool 공개는 프로젝트 `ADMIN`이 생성된 Tool을 검토한 뒤 `toolGrade`를 `1~99` 범위로 조정하는 절차다.
 
 ### 전환 단계 기준
 

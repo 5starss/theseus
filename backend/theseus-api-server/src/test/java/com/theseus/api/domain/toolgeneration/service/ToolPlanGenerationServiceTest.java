@@ -602,7 +602,7 @@ class ToolPlanGenerationServiceTest {
 		ProjectMember projectMember = ProjectMember.builder()
 			.project(project)
 			.user(user)
-			.projectRole(ProjectRole.ADMIN)
+			.projectRole(canCreateTool ? ProjectRole.ADMIN : ProjectRole.MEMBER)
 			.canCreateTool(canCreateTool)
 			.canUseTool(true)
 			.status(status)
