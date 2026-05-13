@@ -9,6 +9,7 @@ export type TheseusSessionMetadata = {
   workspaceCwd: string;
   pythonExec: string;
   serverUrl: string;
+  initialSession?: string;
   runtimeMode?: RunnerRuntimeMode;
   daemonHost?: string;
   daemonPort?: number;
@@ -24,6 +25,7 @@ export type DaemonRunnerState = {
   mode?: string;
   model?: string;
   sessionId?: string;
+  session?: string;
   workspaceHash?: string;
   workspaceCwd?: string;
   coreRoot?: string;
@@ -59,6 +61,7 @@ export type RunnerStartConfig = {
   workspaceCwd: string;
   pythonExec: string;
   serverUrl: string;
+  initialSession?: string;
   signal?: AbortSignal;
 };
 

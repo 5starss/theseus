@@ -89,6 +89,8 @@ export class DaemonRunnerClient implements RunnerClient {
         config.workspaceCwd,
         '--core-root',
         config.coreRoot,
+        '--session',
+        config.initialSession || 'default',
       ],
       {
         cwd: config.workspaceCwd,

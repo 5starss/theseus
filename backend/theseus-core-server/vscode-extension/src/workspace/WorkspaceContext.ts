@@ -160,6 +160,7 @@ function shouldAttachActiveCursorContext(text: string): boolean {
   if (!normalized) return false;
   return [
     /현재\s*(열린|보고\s*있는|켜진)?\s*(파일|문서|코드|탭|창)/,
+    /(현재|지금)?\s*(ide|vscode|에디터)?\s*(에\s*)?(떠\s*있는|열려\s*있는|보고\s*있는|켜져\s*있는)\s*(파일|문서|코드|탭|창)/,
     /(이|해당)\s*(파일|문서|코드|부분)/,
     /(여기|이거|이 부분)\s*(봐|분석|수정|고쳐|설명|리뷰|확인)?/,
     /\b(this|current|active|opened)\s+(file|document|code|editor|tab)\b/,

@@ -87,6 +87,7 @@ async def run_json_mode(args: argparse.Namespace) -> int:
         model=model_name,
         user_level=args.user_level,
         cwd=Path.cwd(),
+        initial_session=args.session or "default",
         permission_prompt=permission_prompt,
     )
     for event in await runtime.initialize():
@@ -108,6 +109,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--json-mode", action="store_true", help="emit StreamEvents as JSON Lines")
     parser.add_argument("--model", default="google/gemini-3.1-pro-preview-customtools")
     parser.add_argument("--user-level", type=int, default=5)
+    parser.add_argument("--session", default="default")
     return parser.parse_args(argv)
 
 

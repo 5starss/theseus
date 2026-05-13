@@ -3,7 +3,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { resolveReadableUri, saveAssetToWorkspace } from '../assets/AssetStore';
-import { listLocalSessionSummaries } from '../session/LocalSessionStore';
+import {
+  createLocalSession,
+  deleteLocalSession,
+  exportLocalSession,
+  listLocalSessionSummaries,
+  renameLocalSession,
+  switchLocalSession,
+  type LocalSessionActionResult,
+} from '../session/LocalSessionStore';
 import { TheseusSessionManager } from '../session/SessionManager';
 import {
   asHostToWebviewMessage,
@@ -256,6 +264,59 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     this.messageQueue.post({ type: 'runnerEvent', event });
   }
 
+  private localSessionWorkspace(): string | undefined {
+    const status = this.sessionManager.status;
+    return typeof status.workspaceCwd === 'string' ? status.workspaceCwd : getWorkspaceCwd();
+  }
+
+  private currentSessionName(): string {
+    const status = this.sessionManager.status;
+    return typeof status.session === 'string' && status.session ? status.session : 'default';
+  }
+
+  private postLocalSessionSnapshot(snapshot: LocalSessionActionResult): void {
+    this.sessionManager.setPreferredSession(snapshot.current);
+    this.postRunnerEvent({
+      type: 'SessionListEvent',
+      source: 'local',
+      current: snapshot.current,
+      sessions: snapshot.sessions,
+    });
+    this.postRunnerEvent({
+      type: 'SessionChangedEvent',
+      source: 'local',
+      current: snapshot.current,
+      history: snapshot.history,
+      planState: snapshot.planState,
+    });
+  }
+
+  private postLocalSessionError(error: unknown): void {
+    this.postRunnerEvent({
+      type: 'RunnerDiagnostic',
+      code: 'session_error',
+      message: error instanceof Error ? error.message : String(error),
+      state: this.sessionManager.currentState,
+    });
+  }
+
+  private canRouteSessionCommandToRunner(): boolean {
+    return this.sessionManager.hasProcess && ['ready', 'waiting_input'].includes(this.sessionManager.currentState);
+  }
+
+  private canHandleSessionLocally(): boolean {
+    return !this.sessionManager.hasProcess || ['stopped', 'error', 'exited', 'stale'].includes(this.sessionManager.currentState);
+  }
+
+  private postSessionBusyNotice(): void {
+    this.postRunnerEvent({
+      type: 'RunnerDiagnostic',
+      code: 'session_busy',
+      message: 'Session changes are available after the current run finishes or the runner is stopped.',
+      state: this.sessionManager.currentState,
+    });
+  }
+
   refreshActiveCursor(): void {
     const cursor = getActiveCursorContext();
     this.messageQueue.post({
@@ -464,9 +525,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'getSessions':
           {
-            const status = this.sessionManager.status;
-            const current = typeof status.session === 'string' ? status.session : 'default';
-            const workspaceCwd = typeof status.workspaceCwd === 'string' ? status.workspaceCwd : getWorkspaceCwd();
+            const current = this.currentSessionName();
+            const workspaceCwd = this.localSessionWorkspace();
             this.postRunnerEvent({
               type: 'SessionListEvent',
               source: 'local',
@@ -476,24 +536,82 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'newSession':
-          this.sessionManager.send(
-            `/session new ${JSON.stringify(typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName())}`,
-          );
+          {
+            const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName();
+            if (this.canRouteSessionCommandToRunner()) {
+              this.sessionManager.send(`/session new ${JSON.stringify(name)}`);
+            } else if (this.canHandleSessionLocally()) {
+              try {
+                this.postLocalSessionSnapshot(createLocalSession(this.localSessionWorkspace(), name));
+              } catch (err) {
+                this.postLocalSessionError(err);
+              }
+            } else {
+              this.postSessionBusyNotice();
+            }
+          }
           break;
         case 'switchSession':
-          if (typeof msg.name === 'string') this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
+          if (typeof msg.name === 'string') {
+            if (this.canRouteSessionCommandToRunner()) {
+              this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
+            } else if (this.canHandleSessionLocally()) {
+              try {
+                this.postLocalSessionSnapshot(switchLocalSession(this.localSessionWorkspace(), msg.name));
+              } catch (err) {
+                this.postLocalSessionError(err);
+              }
+            } else {
+              this.postSessionBusyNotice();
+            }
+          }
           break;
         case 'deleteSession':
-          if (typeof msg.name === 'string') this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
+          if (typeof msg.name === 'string') {
+            if (this.canRouteSessionCommandToRunner()) {
+              this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
+            } else if (this.canHandleSessionLocally()) {
+              try {
+                this.postLocalSessionSnapshot(deleteLocalSession(this.localSessionWorkspace(), msg.name, this.currentSessionName()));
+              } catch (err) {
+                this.postLocalSessionError(err);
+              }
+            } else {
+              this.postSessionBusyNotice();
+            }
+          }
           break;
         case 'renameSession':
           if (typeof msg.oldName === 'string' && typeof msg.newName === 'string') {
-            this.sessionManager.send(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
+            if (this.canRouteSessionCommandToRunner()) {
+              this.sessionManager.send(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
+            } else if (this.canHandleSessionLocally()) {
+              try {
+                this.postLocalSessionSnapshot(renameLocalSession(this.localSessionWorkspace(), msg.oldName, msg.newName, this.currentSessionName()));
+              } catch (err) {
+                this.postLocalSessionError(err);
+              }
+            } else {
+              this.postSessionBusyNotice();
+            }
           }
           break;
         case 'exportSession':
           if (typeof msg.name === 'string' && typeof msg.format === 'string') {
-            this.sessionManager.send(`/session export ${JSON.stringify(msg.name)} ${msg.format}`);
+            if (this.canRouteSessionCommandToRunner()) {
+              this.sessionManager.send(`/session export ${JSON.stringify(msg.name)} ${msg.format}`);
+            } else if (this.canHandleSessionLocally()) {
+              try {
+                this.postRunnerEvent({
+                  type: 'SessionExportedEvent',
+                  ...exportLocalSession(this.localSessionWorkspace(), msg.name, msg.format),
+                });
+              } catch (err) {
+                this.postLocalSessionError(err);
+              }
+            } else {
+              this.postSessionBusyNotice();
+            }
           }
           break;
         case 'reviewPlan':
