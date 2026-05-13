@@ -123,6 +123,7 @@ class ToolBuilder:
             creator_user_id=str(event.approved_by_project_member_id),
             chat_session_id=event.chat_session_id,
             plan_id=str(event.tool_plan_id),
+            run_id=event.run_id,
         )
 
         try:
@@ -221,6 +222,11 @@ class ToolBuilder:
             "- Implement async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult.\n"
             "- Return ToolResult(output=<string or JSON-serializable value>) on success.\n"
             "- Return ToolResult(output=<clear error>, is_error=True) on handled failures.\n"
+            "- If embedding Python code inside a Python string, use triple single quotes for the outer "
+            "string when the inner code contains triple double quote docstrings.\n"
+            "- Do not nest unescaped triple double quotes inside another triple double quoted string.\n"
+            "- Prefer separate helper functions, constants, or JSON data over generating nested Python "
+            "source strings when possible.\n"
             "- Do not perform network calls unless the approved plan explicitly requires them.\n"
             "- Do not read or write arbitrary local files.\n"
             "- For Remote Workspace work, import run_remote_command from src.remote_workspace.runtime.\n"
@@ -260,6 +266,8 @@ class ToolBuilder:
             "Previous generated JSON spec:\n"
             f"{previous_spec}\n\n"
             "Return a corrected complete JSON object using the same schema. "
+            "If the failure was a SyntaxError from nested triple-quoted strings, switch the outer "
+            "embedded Python string to triple single quotes or remove the nested code string. "
             "Preserve the approved plan intent. Prefer keeping the same toolName unless "
             "the name itself caused the failure. Return only JSON."
         )

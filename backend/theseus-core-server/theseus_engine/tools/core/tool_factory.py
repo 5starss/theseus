@@ -722,6 +722,11 @@ class ToolCreatorTool(BaseTool):
         "Executing phase, (2) the user's approved plan explicitly requires "
         "a new capability, and (3) no existing tool can accomplish the task. "
         "HOW TO USE: Produce a complete, self-contained, Pythonic module. "
+        "When embedding Python code as a string, use triple single quotes for the "
+        "outer string if the inner code contains triple double quote docstrings. "
+        "Do not nest unescaped triple double quotes inside another triple double "
+        "quoted string. Prefer helper functions, constants, or JSON data over "
+        "nested Python source strings when possible. "
         "Always declare an 'example_queries' class attribute listing 3-5 short "
         "user utterances (mix Korean/English) that should trigger this tool — "
         "this dramatically improves the RAG retriever's ability to surface it. "
@@ -761,6 +766,7 @@ class ToolCreatorTool(BaseTool):
                     creator_user_id=str(user_id),
                     chat_session_id=int(chat_session_id),
                     plan_id=str(plan_id),
+                    run_id=context.run_id,
                 ),
                 registry=context.metadata.get("tool_registry"),
                 tool_permissions=context.metadata.get("tool_permissions"),

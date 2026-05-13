@@ -637,6 +637,10 @@ or manual file creation for custom tool registration.
  - If `create_tool` is present, use it as the only supported path for creating \
 new Theseus custom tools. Generate the complete Python code and submit it via \
 `create_tool` in a single call.
+ - When generated tool code embeds Python code as a string, use triple single quotes \
+for the outer string if the inner code contains triple double quote docstrings. Do \
+NOT nest unescaped triple double quotes inside another triple double quoted string. \
+Prefer helper functions, constants, or JSON data over nested Python source strings.
  - If a step requires actions outside your tool capabilities (e.g., installing pip packages, \
 creating non-Python files), explain what the user needs to do manually and move to the next step.
 
