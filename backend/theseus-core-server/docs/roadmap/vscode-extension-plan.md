@@ -214,6 +214,7 @@ TUI 고도화 없이 Extension 개발을 바로 시작할 수 있다.
 
 - [x] `ToolExecutionStarted` / `ToolExecutionCompleted` 이벤트 패널 분리 표시
 - [x] 툴 이름, 입력 인자, 출력 결과 접이식 패널 (실행 중 → 완료로 동일 항목 업데이트)
+- [x] 질문 단위 Activity 아코디언으로 해당 user turn의 tool 실행 이력 묶기
 - [x] 에러 발생 툴 강조 표시
 - [x] Enter = 전송 / Shift+Enter = 줄바꿈 (채팅 컨벤션)
 - [x] 대화 기록 유지 (`vscode.getState()` — WebView 재열림 시 자동 복원)
@@ -236,11 +237,13 @@ TUI 고도화 없이 Extension 개발을 바로 시작할 수 있다.
 
 ### Phase 3 — 편집기 연동 (2~3주)
 
-- [x] 현재 열린 파일 경로 자동 컨텍스트 주입 (툴바 표시 + activeFileChanged 이벤트)
+- [x] 현재 열린 파일 경로 상태 표시와 조건부 컨텍스트 주입 (툴바 표시 + activeFileChanged 이벤트)
+  - active file은 기본적으로 상태 표시만 하고, 사용자가 “현재 파일/이 파일/여기”처럼 현재 편집기 컨텍스트를 명시할 때만 `IDE 보조 컨텍스트`로 추가
+  - 사용자가 `@file`을 명시한 입력에는 자동 active file을 추가하지 않아 명시적 context 선택을 우선
 - [x] 선택한 코드 블록 에이전트에 전달 (`우클릭 → Ask Theseus` / `Explain Selection`)
 - [x] 에이전트가 수정한 파일 → VSCode Diff 뷰 표시
 - [x] PLAN 모드 태스크 체크리스트 사이드바 연동
-- [x] 현재 커서 위치 파일/라인 컨텍스트 자동 포함
+- [x] 현재 커서 위치 파일/라인 컨텍스트 조건부 포함
 
 **완료 기준**: 코드 작업 중 에디터를 벗어나지 않고 에이전트 활용 가능
 
@@ -291,15 +294,21 @@ TUI 고도화 없이 Extension 개발을 바로 시작할 수 있다.
 
 #### 세션 UX
 - [x] 세션 목록 패널 (`/session list` 결과를 사이드바 드롭다운으로)
+- [x] 원클릭 새 세션 생성과 세션별 삭제 버튼
+- [x] 우측 상단 세션 메뉴에서 새 세션명 직접 입력 생성과 compact `x` 삭제 버튼 제공
+- [x] 세션 목록 아코디언 + `+` 버튼으로 untitled session 생성, 첫 질문 기반 title metadata 저장
 - [x] 세션 이름 변경 UI
 - [ ] 세션별 토큰 사용량 요약 표시
 - [x] 세션 내보내기 (Markdown / JSON)
 - [x] 로컬 SessionProvider 구현 완료 (`source: "local"` 이벤트, 서버 provider 확장 가능)
+- [x] 세션별 PLAN 상태 분리 (`.theseus_sessions/<session>.json`의 `plan_state` 저장/복원)
 
 #### PLAN 모드 UX
 - [x] PLAN Drafting 단계: 태스크 체크리스트 별도 패널 표시
 - [ ] PLAN Executing 단계: 현재 실행 중인 스텝 강조
 - [x] 승인/거부 버튼 인라인 표시 (WAIT_FOR_REVIEW 상태)
+- [x] 승인 버튼/짧은 자연어 승인 후 다음 입력 없이 PLAN Executing 바로 시작
+- [x] 진행 중인 PLAN 빠른 취소/삭제 액션 (`Cancel`, `Delete`, `/plan cancel`, `/plan delete`)
 - [x] 계획 JSON 구조화 표시 (트리 뷰)
 
 #### 접근성 / 품질
@@ -463,6 +472,30 @@ TUI 고도화 없이 Extension 개발을 바로 시작할 수 있다.
   - `media/components/SessionMenu.js`: session list/action render와 New/Rename/Export action wiring 분리
   - `media/components/Composer.js`: mention insertion, pasted/dropped image save bridge 분리
   - `media/components/RunnerStatus.js`: loop-status render, AgentLoopStatus label formatting, RunnerStatus state transition helper 분리
+- [x] PLAN 리뷰 패널/Custom Tools/Slash UI 안정화
+  - `승인`, `진행해`, `approve`, `reject`, `취소`처럼 짧은 자연어 PLAN 리뷰 결정을 runtime review action으로 정규화
+  - `PlanReviewEvent` 승인/거부/완료 수신 시 WebView 저장 plan을 정리해 WAIT_FOR_REVIEW가 아닌 상태의 승인/거부 버튼이 남지 않도록 수정
+  - `WAIT_FOR_REVIEW`가 아닌 상태로 도착한 stale 승인/거부 요청은 `PlanReviewEvent(action=not_reviewable)`로 정규화하고, WebView는 기존 오류 문구를 표시하지 않고 PLAN 패널만 정리
+  - Custom Tools 패널은 헤더만 남기고 접을 수 있으며 접힘 상태는 WebView state에 저장
+  - daemon startup에서 runner runtime을 미리 초기화하고 상태 재동기화 때 Custom Tools 목록을 refresh
+  - `/plan approve` / `/plan reject`는 mode slash 차단에 걸리지 않으며 `/help`, `/tools`, `/session`, `/session list`는 runner 없이도 로컬 처리
+  - `/cost`, `/stats`, `/validate` 같은 runner slash command에는 active file cursor context를 주입하지 않아 slash command 그대로 전달
+  - plan header, custom tools permission controls, composer footer가 좁은 사이드바에서 wrap되도록 CSS min-width/grid/flex 규칙 보강
+  - PLAN state를 session별로 저장하고 cancel/delete 액션으로 stale PLAN 패널과 runner `plan_state`를 함께 정리
+  - PLAN approve는 review event 이후 같은 runner submit 루프에서 실행 프롬프트로 이어지고, session menu는 새 세션/삭제를 버튼으로 처리
+  - tool 실행 이력은 전역 나열 대신 마지막 사용자 질문 아래의 Activity 아코디언으로 묶고, 실행/완료/실패 상태와 diff action을 같은 group에서 갱신
+- [x] P0~P2 UX/UI 개선
+  - `RunnerStatusBar` 역할을 `media/components/RunnerStatus.js`로 확장해 runner 상태 문구, 마지막 diagnostic tooltip, Start/Reconnect/Restart/Logs/Tools/Health 액션을 toolbar에 통합
+  - PLAN panel을 stepper 기반 흐름(`Draft → Review → Execute → Verify → Done`)으로 바꾸고 review 상태에서만 승인/거부를 노출, 완료 plan은 접힌 요약으로 전환
+  - `metadata.changed_file.old_content` 기반 Diff Snapshot 변경 검토 패널을 추가하고 Extension Host에서 파일 단위 revert를 처리
+  - composer context bar에서 session, active file, `@` mention context를 pill로 보여주며 removable context는 다음 전송에서 제외
+  - Custom Tools manager에 검색, 상태 필터, 정렬, details 기반 상세 보기와 좁은 sidebar 대응 layout을 추가
+  - `/` 자동완성을 command palette 형태로 바꾸고 각 command의 설명과 실행 조건을 표시
+  - agent busy 상태에서도 WebView가 메시지를 보류하지 않고 즉시 Extension Host로 전달하며, 실행 직렬화는 SessionManager/daemon 계층에 맡김
+  - Problems context menu command(`Theseus: Explain Problem`, `Theseus: Fix Problem`)를 추가해 diagnostic context를 prompt에 주입
+  - WebView protocol에 `getHealth`, `revertChangedFile`, `explainProblem`, `fixProblem`, `healthStatus`, `changeReviewUpdated` 계약을 추가
+  - Health panel에서 corePath/pythonPath/serverUrl/workspacePath, runner lifecycle, daemon pid/port, last diagnostic을 확인하고 Settings/Logs/Restart/Refresh 액션을 제공
+  - WebView shell을 명시적 grid area로 고정해 health/change/plan panel이 숨겨져도 composer가 항상 하단 row에 남도록 보정
 - [x] Extension Host `ChatViewProvider` 분리
   - `src/providers/ChatViewProvider.ts`: WebviewViewProvider, WebView message routing, WebviewMessageQueue, diff open bridge 분리
   - `extension.ts`: activate/deactivate, command registration, custom tool watcher wiring, start/stop/log command 중심으로 축소
@@ -499,7 +532,7 @@ TUI 고도화 없이 Extension 개발을 바로 시작할 수 있다.
 | `media/main.js` | ES Modules로 전환했고 state/autocomplete/message/plan/custom tools/tool panel/composer/session menu/runner status는 분리 완료. host event switch와 일부 orchestration은 남아 있음 | event handler가 아직 길어 신규 event 추가 시 추적 난이도 증가 |
 | HTML 생성 | `ChatViewHtml.ts`로 1차 분리 완료 | 추후 `media/index.html` 또는 template asset로 더 분리 가능 |
 | postMessage protocol | `KnownRunnerEvent` union과 runtime guard 1차 추가, WebView protocol normalize도 event shape 검증 | daemon replay/cancel/permission approval 같은 신규 event payload는 추가 세분화 필요 |
-| CSS | 비교적 양호하나 컴포넌트 경계와 1:1로 대응하지 않음 | UI 모듈화 후 스타일 소유권 불명확 |
+| CSS | PLAN panel/composer/custom tools의 좁은 폭 wrapping은 1차 보강됐으나 컴포넌트 경계와 1:1로 대응하지 않음 | UI 모듈화 후 스타일 소유권 불명확 |
 
 ### Extension Host 분리안
 

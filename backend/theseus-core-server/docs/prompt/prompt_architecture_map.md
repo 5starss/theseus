@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2025-05-07 — Plan VERIFYING 단계 추가, DRAFTING 읽기 도구 허용, REVIEW 반복 승인 루프 적용
+> **최종 업데이트**: 2026-05-13 — Extension user-message template 영어화
 
 ---
 
@@ -16,9 +16,20 @@
 
 | 프롬프트 상수 | 역할 | 설명 |
 |---|---|---|
-| `_BASE_SYSTEM_PROMPT` | 글로벌 규칙 | 테세우스의 정체성, 페르소나, 환경 정보, 작업/도구/코드 규칙, RBAC 인지, 검증 파이프라인 인지, 에러 루프 방지, 컨텍스트 관리. **모든** 모드에 공통 적용됩니다. |
+| `_BASE_SYSTEM_PROMPT` | 글로벌 규칙 | 테세우스의 정체성, 작업/코드 규칙, 보안 기본값, 에러 루프 방지, 컨텍스트 관리. **모든** 모드에 공통 적용됩니다. Tool/RBAC/검증/web/create_tool 세부 지침은 capability 섹션에서 조건부 주입합니다. |
 | `_get_environment_section()` | 런타임 환경 | OS, 아키텍처, 셸, CWD, Python 버전, Git 브랜치 등을 동적으로 감지하여 프롬프트에 주입합니다. |
+| `PromptCapabilities` | 조건부 capability | 현재 tool schema, mode/phase, runtime reminder를 바탕으로 어떤 capability 프롬프트를 붙일지 결정합니다. |
 | `MODE_DESCRIPTIONS` | 표시 레이블 | TUI 사이드바에 표시되는 사람이 읽을 수 있는 모드 설명. |
+
+#### 1.1.1 Capability 프롬프트
+
+| 프롬프트 상수 | 주입 조건 | 역할 |
+|---|---|---|
+| `_TOOL_USE_CAPABILITY_PROMPT` | 현재 schema에 하나 이상의 tool이 있을 때 | 존재하는 tool만 호출하고 전용 tool을 우선하도록 안내 |
+| `_RBAC_CAPABILITY_PROMPT` | tool capability가 있을 때 | 권한 필터링 사실과 권한 밖 요청 대응 지침 |
+| `_VALIDATION_CAPABILITY_PROMPT` | tool capability가 있을 때 | validator block 결과를 읽고 수정 후 재시도하는 지침 |
+| `_WEB_RESEARCH_CAPABILITY_PROMPT` | `web_search`, `web_fetch`, `deep_research` 중 하나가 있을 때 | 외부 명세 확인이 필요한 작업의 web research 기준 |
+| `_CREATE_TOOL_CAPABILITY_PROMPT` | `create_tool`이 현재 schema에 있을 때 | Theseus custom tool 생성 코드 규약과 2턴 호출 규칙 |
 
 #### 1.2 모드별 프롬프트
 
@@ -36,6 +47,8 @@
 | `_PLAN_EXECUTING_PROMPT_TEMPLATE` | Executing | 승인된 계획 실행 | Tier/action_plan 기반 실행 순서 결정. 즉시 도구 호출 강제. `create_tool` 2턴 규칙. 진행 상황 보고(`[Progress] task-N complete (N/total)`). 예상외 복잡도 발견 시 중단 의무. |
 | `_PLAN_VERIFYING_PROMPT` | Verifying | 실행 결과 검증 | 테스트 실행, 변경 파일 리뷰, 회귀 확인, 계획 완료율 확인. 구조화된 검증 결과 출력 (Tests/Changes/Issues/Plan completion). 사소한 수정만 허용, 근본적 문제 시 Drafting 회귀 권고. |
 
+PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 유지합니다. local runner는 해당 marker를 감지하면 `PlanPhaseTransitionRequested` 구조화 이벤트를 함께 발행해 editor/daemon 클라이언트가 assistant prose를 직접 파싱하지 않도록 합니다.
+
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
 
 | 프롬프트 상수 | 단계 | 역할 | 주요 규칙 |
@@ -52,8 +65,25 @@
 `TheseusStateMachine.get_system_prompt()` 메서드가 현재 모드/단계에 따라 프롬프트를 동적으로 조합합니다:
 
 ```
-최종 프롬프트 = _BASE_SYSTEM_PROMPT + _get_environment_section() + 모드별 프롬프트
+최종 프롬프트 =
+  _BASE_SYSTEM_PROMPT
+  + _get_environment_section()
+  + 모드별 프롬프트
+  + 현재 tool schema 기반 capability 프롬프트
+  + runtime reminder
 ```
+
+### 2.1 VSCode Extension user-message template 주입
+
+VSCode Extension은 별도 system prompt를 소유하지 않습니다. 시스템 프롬프트는 `state.py`의 `TheseusStateMachine.get_system_prompt()`가 canonical source of truth입니다. Extension이 LLM 입력에 추가하는 문자열은 모두 user message template 또는 보조 컨텍스트이며, 기본 문구는 영어로 유지합니다.
+
+| 위치 | 주입 경로 | 역할 | 언어 원칙 |
+|---|---|---|---|
+| `vscode-extension/src/workspace/WorkspaceContext.ts::injectCursorContext()` | `send` / `sendWithMode` 직전 | 사용자가 현재 편집기 컨텍스트를 명시할 때만 active editor file을 `IDE auxiliary context`로 첨부 | English |
+| `vscode-extension/src/extension.ts::diagnosticPrompt()` | `Theseus: Explain Problem`, `Theseus: Fix Problem` | VSCode Problems diagnostic의 file/line/message/code/source와 explain/fix 요청을 입력창에 삽입 | English |
+| `vscode-extension/src/extension.ts::theseus.explainSelected` | 선택 코드 설명 command | 선택한 코드 블록과 `Explain this code.` 요청을 입력창에 삽입 | English |
+
+이 template들은 `state.py`의 communication-language rule보다 낮은 우선순위의 user message입니다. 사용자가 추가로 한국어 지시를 붙이면 `state.py`의 언어 정책에 따라 답변 언어가 조정될 수 있습니다.
 
 ### 상태 전환 흐름
 
@@ -129,7 +159,7 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 
 | 함수 | 역할 | 설명 |
 |---|---|---|
-| `build_theseus_system_prompt()` | 서버 요청용 시스템 프롬프트 조립 | `AgentMode`, `PlanPhase`, `CoordinatorPhase`, 승인 plan payload를 받아 `state.py`의 기존 프롬프트를 반환합니다. |
+| `build_theseus_system_prompt()` | 서버 요청용 시스템 프롬프트 조립 | `AgentMode`, `PlanPhase`, `CoordinatorPhase`, 승인 plan payload, 현재 활성 tool 이름을 받아 `state.py`의 canonical 프롬프트를 반환합니다. |
 
 ### 적용 경로
 

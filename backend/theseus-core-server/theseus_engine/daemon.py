@@ -177,8 +177,12 @@ class DaemonState:
         permission_token = self._permission_run.set(run)
         try:
             if mode:
-                async for event in self.runtime.submit(json.dumps({"type": "setMode", "mode": mode})):
-                    await self._append(run, event)
+                if hasattr(self.runtime, "set_mode"):
+                    for event in self.runtime.set_mode(mode, announce=False):
+                        await self._append(run, event)
+                else:
+                    async for event in self.runtime.submit(json.dumps({"type": "setMode", "mode": mode})):
+                        await self._append(run, event)
             async for event in self.runtime.submit(run.text):
                 await self._append(run, event)
                 if run.interrupt_requested:
@@ -309,6 +313,10 @@ def _auth_dependency(state: DaemonState):
 def create_app(state: DaemonState) -> FastAPI:
     app = FastAPI(title="Theseus Local Daemon")
     require_auth = _auth_dependency(state)
+
+    @app.on_event("startup")
+    async def startup() -> None:
+        await state.initialize()
 
     @app.get("/health", dependencies=[Depends(require_auth)])
     async def health() -> dict[str, Any]:

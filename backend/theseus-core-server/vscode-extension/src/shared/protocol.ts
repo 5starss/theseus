@@ -92,6 +92,7 @@ export type PermissionRequestEvent = RunnerBaseEvent<'PermissionRequest'> & {
 
 export type SessionSummary = {
   name: string;
+  title?: string;
   current?: boolean;
   source?: string;
   [key: string]: unknown;
@@ -118,15 +119,30 @@ export type KnownRunnerEvent =
   | PermissionRequestEvent
   | (RunnerBaseEvent<'filesResult'> & { files?: string[] })
   | (RunnerBaseEvent<'PlanDraftedEvent'> & { structured_plan?: JsonObject })
-  | (RunnerBaseEvent<'PlanReviewEvent'> & { action?: string })
+  | (RunnerBaseEvent<'PlanPhaseTransitionRequested'> & {
+      from_phase?: string;
+      to_phase?: string;
+      reason?: string;
+      source?: string;
+      trigger?: string;
+    })
+  | (RunnerBaseEvent<'PlanReviewEvent'> & {
+      action?: string;
+      phase?: string;
+      totalTasks?: number;
+      completedTasks?: number;
+      remainingTasks?: number;
+    })
   | (RunnerBaseEvent<'SessionListEvent'> & { current?: string; sessions?: SessionSummary[] })
-  | (RunnerBaseEvent<'SessionChangedEvent'> & { current?: string; history?: unknown[] })
+  | (RunnerBaseEvent<'SessionChangedEvent'> & { current?: string; history?: unknown[]; planState?: JsonObject | null })
   | (RunnerBaseEvent<'SessionExportedEvent'> & { name?: string; format?: string; content?: string })
   | (RunnerBaseEvent<'workspaceInfo'> & { name?: string; path?: string })
   | (RunnerBaseEvent<'activeFileChanged'> & { file?: string; line?: number })
   | (RunnerBaseEvent<'customToolsLoaded'> & { tools?: unknown[] })
   | (RunnerBaseEvent<'customToolsChanged'> & { action?: string; file?: string; validation?: unknown })
   | (RunnerBaseEvent<'customToolValidation'> & { success?: boolean })
+  | (RunnerBaseEvent<'healthStatus'> & { settings?: JsonObject; runner?: JsonObject; checks?: unknown[] })
+  | (RunnerBaseEvent<'changeReviewUpdated'> & { id?: string; path?: string; success?: boolean })
   | (RunnerBaseEvent<'assetSaved'> & { path?: string })
   | RunnerBaseEvent<'assetSaveFailed'>
   | (RunnerBaseEvent<'settingsChanged'> & { restartRequired?: boolean })
@@ -159,18 +175,23 @@ type EmptyWebviewCommand = {
     | 'stop'
     | 'interruptSession'
     | 'stopGen'
+    | 'showLogs'
+    | 'openSettings'
     | 'getWorkspaceName'
     | 'getActiveFile'
-    | 'getCustomTools';
+    | 'getCustomTools'
+    | 'getHealth'
+    | 'explainProblem'
+    | 'fixProblem';
 };
 
 export type WebviewToHostMessage =
   | EmptyWebviewCommand
   | { type: 'visibilityChanged'; visible?: boolean }
-  | { type: 'send' | 'sendInput'; text?: string }
+  | { type: 'send' | 'sendInput'; text?: string; skipCursorContext?: boolean }
   | { type: 'setMode'; mode?: string }
-  | { type: 'sendWithMode'; mode?: string; text?: string }
-  | { type: 'newSession' | 'switchSession'; name?: string }
+  | { type: 'sendWithMode'; mode?: string; text?: string; skipCursorContext?: boolean }
+  | { type: 'newSession' | 'switchSession' | 'deleteSession'; name?: string }
   | { type: 'renameSession'; oldName?: string; newName?: string }
   | { type: 'exportSession'; name?: string; format?: string }
   | { type: 'reviewPlan'; action?: string }
@@ -178,6 +199,7 @@ export type WebviewToHostMessage =
   | { type: 'getFiles'; query?: string }
   | { type: 'updateToolPermission'; metadataPath?: string; permissionLevel?: unknown }
   | { type: 'savePastedImage'; name?: string; data?: unknown }
+  | { type: 'revertChangedFile'; id?: string; path?: string; oldContent?: string }
   | { type: 'openFile'; path?: string }
   | { type: 'openGeneratedTool' | 'openDiff'; event?: RunnerEvent };
 
@@ -194,6 +216,7 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'getSessions',
   'newSession',
   'switchSession',
+  'deleteSession',
   'renameSession',
   'exportSession',
   'reviewPlan',
@@ -204,12 +227,18 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'stop',
   'interruptSession',
   'stopGen',
+  'showLogs',
+  'openSettings',
   'getFiles',
   'getWorkspaceName',
   'getActiveFile',
   'getCustomTools',
+  'getHealth',
+  'explainProblem',
+  'fixProblem',
   'updateToolPermission',
   'savePastedImage',
+  'revertChangedFile',
   'openFile',
   'openGeneratedTool',
   'openDiff',
@@ -246,6 +275,7 @@ const KNOWN_RUNNER_EVENT_TYPES = new Set([
   'PermissionRequest',
   'filesResult',
   'PlanDraftedEvent',
+  'PlanPhaseTransitionRequested',
   'PlanReviewEvent',
   'SessionListEvent',
   'SessionChangedEvent',
@@ -255,6 +285,8 @@ const KNOWN_RUNNER_EVENT_TYPES = new Set([
   'customToolsLoaded',
   'customToolsChanged',
   'customToolValidation',
+  'healthStatus',
+  'changeReviewUpdated',
   'assetSaved',
   'assetSaveFailed',
   'settingsChanged',
@@ -317,7 +349,9 @@ function isKnownRunnerEventShape(value: JsonObject, type: string): boolean {
     case 'SessionListEvent':
       return isMissing(value.sessions) || Array.isArray(value.sessions);
     case 'SessionChangedEvent':
-      return optionalString(value.current) && (isMissing(value.history) || Array.isArray(value.history));
+      return optionalString(value.current)
+        && (isMissing(value.history) || Array.isArray(value.history))
+        && (isMissing(value.planState) || value.planState === null || isObject(value.planState));
     case 'SessionExportedEvent':
       return optionalString(value.name) && optionalString(value.format) && optionalString(value.content);
     case 'workspaceInfo':
@@ -328,6 +362,10 @@ function isKnownRunnerEventShape(value: JsonObject, type: string): boolean {
       return value.tools === undefined || Array.isArray(value.tools);
     case 'customToolValidation':
       return optionalBoolean(value.success) && optionalString(value.message);
+    case 'healthStatus':
+      return true;
+    case 'changeReviewUpdated':
+      return optionalString(value.id) && optionalBoolean(value.success) && optionalString(value.message);
     case 'assetSaved':
       return optionalString(value.path);
     case 'assetSaveFailed':

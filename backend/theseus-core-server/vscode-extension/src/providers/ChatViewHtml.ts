@@ -23,10 +23,12 @@ export function renderChatViewHtml(webview: vscode.Webview, extensionUri: vscode
 
     <!-- ── 툴바 ── -->
     <div class="toolbar">
-      <button id="start"         title="Start agent">▶</button>
-      <button id="stop"          title="Stop agent">■</button>
+      <div id="runner-status-bar" class="runner-status-bar">
+        <span id="loop-status" class="loop-status idle" title="Agent loop status">idle</span>
+        <span id="runner-status-detail" class="runner-status-detail" title="Runner status">Stopped</span>
+        <div id="runner-actions" class="runner-actions"></div>
+      </div>
       <button id="clear-history" title="Clear chat">🗑</button>
-      <span id="loop-status" class="loop-status idle" title="Agent loop status">idle</span>
       <span id="workspace-label" class="workspace-label" title="Active workspace"></span>
       <span id="active-file-label" class="active-file-label" title=""></span>
       <div class="popup-anchor session-anchor" id="session-anchor">
@@ -34,6 +36,9 @@ export function renderChatViewHtml(webview: vscode.Webview, extensionUri: vscode
         <div id="session-menu" class="session-menu" hidden></div>
       </div>
     </div>
+
+    <section id="health-panel" class="health-panel" hidden></section>
+    <section id="change-review-panel" class="change-review-panel" hidden></section>
 
     <!-- ── 메시지 영역 ── -->
     <section id="plan-panel" class="plan-panel" hidden></section>
@@ -49,6 +54,7 @@ export function renderChatViewHtml(webview: vscode.Webview, extensionUri: vscode
     <div class="composer-wrap">
       <!-- 자동완성 드롭다운 -->
       <ul id="autocomplete-list" hidden></ul>
+      <div id="context-bar" class="context-bar" hidden></div>
 
       <form id="composer">
         <div class="composer-box">

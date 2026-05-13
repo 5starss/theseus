@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from src.builder.system_prompt import build_theseus_system_prompt
+from src.config import resolve_model_name
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
     GeneratedPlanBlock,
@@ -36,7 +36,7 @@ class ToolPlanPlanner:
         llm_client: SupportsStreamingMessages | None = None,
         model_name: str | None = None,
     ) -> None:
-        self.model_name = model_name or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+        self.model_name = resolve_model_name(model_name)
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
 
     async def plan(
@@ -134,7 +134,14 @@ class ToolPlanPlanner:
             if isinstance(event, ToolPlanRegenerationRequestedEvent)
             else PlanPhase.DRAFTING
         )
-        return build_theseus_system_prompt(mode=AgentMode.PLAN, plan_phase=phase)
+        return build_theseus_system_prompt(
+            mode=AgentMode.PLAN,
+            plan_phase=phase,
+            available_tools=[],
+            runtime_reminders=[
+                "This ToolPlan worker receives an empty tool schema. Do not call tools; return only the task-specific JSON contract from the user message.",
+            ],
+        )
 
     @staticmethod
     def _build_generate_message(*, prompt: str, history: list[dict]) -> str:

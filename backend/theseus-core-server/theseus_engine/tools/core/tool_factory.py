@@ -1,7 +1,7 @@
 """Theseus Meta-Tooling: Custom tool creation, validation, and dynamic loading module.
 
 This module provides three core capabilities:
-1. ToolValidator: Syntax and OpenHarness specification compliance validation
+1. ToolValidator: Syntax and Theseus tool specification compliance validation
 2. load_custom_tools: Auto-scan and register tools from the custom_tools/ directory
 3. ToolCreatorTool: LLM-callable meta-tool to create new tools and inject them into the registry
 """
@@ -32,8 +32,29 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 DEFAULT_PERMISSION_LEVEL = 1
 
 
+def _custom_tool_dirs(extra_dirs: Optional[List[str | os.PathLike[str]]] = None) -> List[str]:
+    """Return custom tool directories in load order, de-duplicated."""
+    dirs: List[str] = []
+    seen: Set[str] = set()
+    raw_dirs: List[str | os.PathLike[str]] = [CUSTOM_TOOLS_DIR]
+    env_dir = os.getenv("THESEUS_CUSTOM_TOOLS_DIR", "").strip()
+    if env_dir:
+        raw_dirs.extend(part.strip() for part in env_dir.split(os.pathsep) if part.strip())
+    if extra_dirs:
+        raw_dirs.extend(extra_dirs)
+
+    for raw in raw_dirs:
+        path = os.path.abspath(os.fspath(raw))
+        key = os.path.normcase(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        dirs.append(path)
+    return dirs
+
+
 def _sanitize_generated_code(code: str) -> str:
-    """LLM이 생성한 코드에서 파이썬 파싱을 망가뜨리는 오염 패턴을 제거합니다.
+    r"""LLM이 생성한 코드에서 파이썬 파싱을 망가뜨리는 오염 패턴을 제거합니다.
 
     주요 처리 항목
     ──────────────
@@ -76,7 +97,7 @@ def _sanitize_generated_code(code: str) -> str:
 
 
 class ToolValidator:
-    """새로 생성된 툴 코드가 OpenHarness 규격에 맞는지 검증하는 유틸리티.
+    """새로 생성된 툴 코드가 Theseus 툴 규격에 맞는지 검증하는 유틸리티.
 
     검증 항목:
     - 파이썬 문법(Syntax) 검사
@@ -89,7 +110,7 @@ class ToolValidator:
 
     @classmethod
     def validate_code(cls, code: str) -> Tuple[bool, str]:
-        """파이썬 코드의 문법과 OpenHarness 구조 규칙을 AST로 검사합니다."""
+        """파이썬 코드의 문법과 Theseus 구조 규칙을 AST로 검사합니다."""
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
@@ -139,7 +160,7 @@ class ToolValidator:
 
         if errors:
             return False, (
-                "OpenHarness specification violations detected:\n"
+                "Theseus tool specification violations detected:\n"
                 + "\n".join(f"  - {e}" for e in errors)
             )
 
@@ -247,7 +268,7 @@ class ToolValidator:
     ) -> None:
         """context.input_model 안티패턴을 감지합니다.
 
-        OpenHarness에서 입력 데이터는 execute의 arguments 인자로
+        Theseus에서 입력 데이터는 execute의 arguments 인자로
         전달되며, context.input_model은 존재하지 않습니다.
         """
         for node in ast.walk(tree):
@@ -333,7 +354,7 @@ class ToolValidator:
 
         tool_class = tool_classes[0]  # 첫 번째 발견된 툴 클래스 사용
 
-        # OpenHarness 필수 속성(name, description, input_model) 검증
+        # Theseus 필수 속성(name, description, input_model) 검증
         if not hasattr(tool_class, "name") or not getattr(tool_class, "name"):
             return False, "Tool class is missing the 'name' attribute or it is empty.", None
         if not hasattr(tool_class, "description") or not getattr(tool_class, "description"):
@@ -458,6 +479,7 @@ def normalize_tool_meta(
 def load_custom_tools(
     registry: ToolRegistry,
     tool_permissions: Optional[Dict[str, int]] = None,
+    extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
 ) -> List[str]:
     """custom_tools/ 폴더 내의 모든 .py 파일을 스캔하여 ToolRegistry에 자동 등록합니다.
 
@@ -474,45 +496,47 @@ def load_custom_tools(
     """
     loaded: List[str] = []
 
-    if not os.path.isdir(CUSTOM_TOOLS_DIR):
-        os.makedirs(CUSTOM_TOOLS_DIR, exist_ok=True)
-        return loaded
-
-    for filename in sorted(os.listdir(CUSTOM_TOOLS_DIR)):
-        if not filename.endswith(".py") or filename.startswith("_"):
+    for custom_tools_dir in _custom_tool_dirs(extra_dirs):
+        if not os.path.isdir(custom_tools_dir):
+            if os.path.normcase(custom_tools_dir) == os.path.normcase(CUSTOM_TOOLS_DIR):
+                os.makedirs(custom_tools_dir, exist_ok=True)
             continue
 
-        module_name = filename[:-3]  # .py 제거
-        file_path = os.path.join(CUSTOM_TOOLS_DIR, filename)
+        for filename in sorted(os.listdir(custom_tools_dir)):
+            if not filename.endswith(".py") or filename.startswith("_"):
+                continue
 
-        is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
-            module_name, file_path
-        )
-        if is_valid and tool_class is not None:
-            try:
-                instance = tool_class()
-                registry.register(instance)
-                loaded.append(tool_class.name)
+            module_name = filename[:-3]  # .py 제거
+            file_path = os.path.join(custom_tools_dir, filename)
 
-                # 툴의 permission_level을 RBAC 맵에 자동 등록
-                level = getattr(
-                    tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL
-                )
-                if tool_permissions is not None:
-                    tool_permissions[tool_class.name] = level
-                    log.info(
-                        "Custom tool loaded: %s (level=%d, file=%s)",
-                        tool_class.name, level, filename,
+            is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
+                module_name, file_path
+            )
+            if is_valid and tool_class is not None:
+                try:
+                    instance = tool_class()
+                    registry.register(instance)
+                    loaded.append(tool_class.name)
+
+                    # 툴의 permission_level을 RBAC 맵에 자동 등록
+                    level = getattr(
+                        tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL
                     )
+                    if tool_permissions is not None:
+                        tool_permissions[tool_class.name] = level
+                        log.info(
+                            "Custom tool loaded: %s (level=%d, file=%s)",
+                            tool_class.name, level, file_path,
+                        )
 
-                # meta.json 정규화 (누락·이름 오류 교정)
-                meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_name}.meta.json")
-                normalize_tool_meta(meta_path, tool_class, module_name)
+                    # meta.json 정규화 (누락·이름 오류 교정)
+                    meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
+                    normalize_tool_meta(meta_path, tool_class, module_name)
 
-            except Exception as e:
-                log.warning("Failed to instantiate tool from %s: %s", filename, e)
-        else:
-            log.warning("Skipped invalid custom tool %s: %s", filename, msg)
+                except Exception as e:
+                    log.warning("Failed to instantiate tool from %s: %s", file_path, e)
+            else:
+                log.warning("Skipped invalid custom tool %s: %s", file_path, msg)
 
     return loaded
 
@@ -664,7 +688,7 @@ class ToolCreatorInput(BaseModel):
     python_code: str = Field(
         description=(
             "A complete, self-contained Python module string that imports "
-            "BaseTool and BaseModel and follows the OpenHarness tool specification. "
+            "BaseTool and BaseModel and follows the Theseus tool specification. "
             "The BaseTool subclass MUST include a 'permission_level' class attribute. "
             "STRONGLY RECOMMENDED: Also include an 'example_queries' class attribute "
             "(list of 3-5 short user utterances in Korean and English) that would "
@@ -690,7 +714,7 @@ class ToolCreatorTool(BaseTool):
 
     name = "create_tool"
     description = (
-        "Create a new Python tool, validate its syntax and Theseus/OpenHarness "
+        "Create a new Python tool, validate its syntax and Theseus tool "
         "compliance, and save it to the custom_tools directory. On success, "
         "the tool is registered in the current session's ToolRegistry and "
         "available from the NEXT turn. "

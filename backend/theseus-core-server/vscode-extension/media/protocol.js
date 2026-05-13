@@ -14,6 +14,7 @@
     'getSessions',
     'newSession',
     'switchSession',
+    'deleteSession',
     'renameSession',
     'exportSession',
     'reviewPlan',
@@ -24,12 +25,18 @@
     'stop',
     'interruptSession',
     'stopGen',
+    'showLogs',
+    'openSettings',
     'getFiles',
     'getWorkspaceName',
     'getActiveFile',
     'getCustomTools',
+    'getHealth',
+    'explainProblem',
+    'fixProblem',
     'updateToolPermission',
     'savePastedImage',
+    'revertChangedFile',
     'openFile',
     'openGeneratedTool',
     'openDiff',
@@ -66,6 +73,7 @@
     'PermissionRequest',
     'filesResult',
     'PlanDraftedEvent',
+    'PlanPhaseTransitionRequested',
     'PlanReviewEvent',
     'SessionListEvent',
     'SessionChangedEvent',
@@ -75,6 +83,8 @@
     'customToolsLoaded',
     'customToolsChanged',
     'customToolValidation',
+    'healthStatus',
+    'changeReviewUpdated',
     'assetSaved',
     'assetSaveFailed',
     'settingsChanged',
@@ -138,10 +148,18 @@
         return optionalString(event.message);
       case 'filesResult':
         return optionalStringArray(event.files);
+      case 'PlanPhaseTransitionRequested':
+        return optionalString(event.from_phase)
+          && optionalString(event.to_phase)
+          && optionalString(event.reason)
+          && optionalString(event.source)
+          && optionalString(event.trigger);
       case 'SessionListEvent':
         return isMissing(event.sessions) || Array.isArray(event.sessions);
       case 'SessionChangedEvent':
-        return optionalString(event.current) && (isMissing(event.history) || Array.isArray(event.history));
+        return optionalString(event.current)
+          && (isMissing(event.history) || Array.isArray(event.history))
+          && (isMissing(event.planState) || event.planState === null || isObject(event.planState));
       case 'SessionExportedEvent':
         return optionalString(event.name) && optionalString(event.format) && optionalString(event.content);
       case 'workspaceInfo':
@@ -152,6 +170,10 @@
         return event.tools === undefined || Array.isArray(event.tools);
       case 'customToolValidation':
         return optionalBoolean(event.success) && optionalString(event.message);
+      case 'healthStatus':
+        return true;
+      case 'changeReviewUpdated':
+        return optionalString(event.id) && optionalBoolean(event.success) && optionalString(event.message);
       case 'assetSaved':
         return optionalString(event.path);
       case 'assetSaveFailed':

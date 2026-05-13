@@ -18,6 +18,8 @@
     "onCommand:theseus.moveToSecondarySidebar",
     "onCommand:theseus.moveToPanel",
     "onCommand:theseus.askSelected",
+    "onCommand:theseus.explainProblem",
+    "onCommand:theseus.fixProblem",
     "onCommand:theseus.explainSelected"
   ],
   "main": "./out/extension.js",
@@ -43,7 +45,7 @@
         "theseus.workspacePath": {
           "type": "string",
           "default": "",
-          "description": "Working directory for the agent (your project root). Defaults to the first VSCode workspace folder."
+          "description": "Working directory for the agent (your project root). Defaults to the first VSCode workspace folder. Do not point this at custom_tools; Theseus loads tools from corePath/theseus_engine/custom_tools and workspace custom_tools."
         }
       }
     },
@@ -73,6 +75,14 @@
         "title": "Ask Theseus"
       },
       {
+        "command": "theseus.explainProblem",
+        "title": "Theseus: Explain Problem"
+      },
+      {
+        "command": "theseus.fixProblem",
+        "title": "Theseus: Fix Problem"
+      },
+      {
         "command": "theseus.explainSelected",
         "title": "Theseus: Explain Selection"
       }
@@ -87,6 +97,26 @@
         {
           "command": "theseus.explainSelected",
           "when": "editorHasSelection",
+          "group": "theseus@2"
+        },
+        {
+          "command": "theseus.explainProblem",
+          "when": "editorTextFocus",
+          "group": "theseus@3"
+        },
+        {
+          "command": "theseus.fixProblem",
+          "when": "editorTextFocus",
+          "group": "theseus@4"
+        }
+      ],
+      "problems/item/context": [
+        {
+          "command": "theseus.explainProblem",
+          "group": "theseus@1"
+        },
+        {
+          "command": "theseus.fixProblem",
           "group": "theseus@2"
         }
       ]
