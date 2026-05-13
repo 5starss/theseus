@@ -5,7 +5,7 @@
 > `docs/analysis/src-theseus-engine-alignment-review.md`,
 > `docs/prompt/prompt_architecture_map.md`
 >
-> 최종 반영 기준: 2026-05-12, Session 71
+> 최종 반영 기준: 2026-05-12, Session 90
 
 ## 1. 개요
 
@@ -65,11 +65,12 @@ DRAFTING -> WAIT_FOR_REVIEW -> EXECUTING -> VERIFYING
 - EXECUTING은 승인된 계획을 실행하고 진행 상태를 보고합니다.
 - VERIFYING은 테스트, 변경 파일 리뷰, 회귀 확인, 계획 완료율 검증을 수행합니다.
 
-Session 66부터 standalone runner와 TUI는 PLAN 실행 완료 신호를 감지하면
-VERIFYING으로 전환한 뒤 자동 검증 턴을 이어서 실행합니다. 검증 응답이
-`Verification complete.` 또는 `검증 완료`를 포함하면 추가 auto-resume 없이
-최종 응답으로 반환합니다. 서버 라우트(`src/**`)와 builder 계층은 이 변경의
-직접 대상이 아닙니다.
+Session 90부터 local runner는 기존 완료 문자열 감지를 유지하면서도
+`PlanPhaseTransitionRequested` 구조화 이벤트를 함께 발행합니다. PLAN 실행
+완료 신호를 감지하면 `VERIFYING`으로 전환한 뒤 자동 검증 턴을 이어서
+실행하고, 검증 응답이 `Verification complete.` 또는 `검증 완료`를 포함하면
+완료 이벤트와 함께 최종 응답으로 반환합니다. 서버 라우트(`src/**`)와 builder
+계층은 이 변경의 직접 대상이 아닙니다.
 
 ### 2.4 메타 툴링과 서버 worker
 
@@ -79,7 +80,8 @@ VERIFYING으로 전환한 뒤 자동 검증 턴을 이어서 실행합니다. �
   호환 adapter 역할을 유지합니다.
 - `src/builder/system_prompt.py`는 서버 worker가 별도 프롬프트를 복제하지
   않고 `theseus_engine.models.state.TheseusStateMachine`의 모드/phase별
-  시스템 프롬프트를 재사용하도록 합니다.
+  시스템 프롬프트를 재사용하면서, 현재 활성 tool schema에 맞는 capability
+  지침만 조건부로 주입하도록 합니다.
 - tool plan/build worker는 PLAN DRAFTING, WAIT_FOR_REVIEW, EXECUTING
   프롬프트를 요청 목적에 맞게 주입합니다.
 
@@ -209,7 +211,12 @@ python -m theseus_engine.cli_runner --json-mode
 
 Extension을 로컬 실행 환경과 함께 설치하려면 스크립트를 사용할 수 있습니다.
 스크립트는 `.venv` 생성, `requirements.txt` 설치, VSIX 설치,
-워크스페이스 `.vscode/settings.json` 병합을 수행합니다.
+IDE별 `settings.json` 병합을 수행합니다.
+VS Code는 기본적으로 워크스페이스 `.vscode/settings.json`, Antigravity는
+사용자 설정 파일 `%APPDATA%\Antigravity\User\settings.json`을 사용합니다.
+VSIX는 기본적으로 로그인 사용자 홈의 IDE 확장 저장소에 설치합니다.
+VS Code는 `%USERPROFILE%\.vscode\extensions`, Antigravity는
+`%USERPROFILE%\.antigravity\extensions`를 사용합니다.
 
 Windows PowerShell에서는 다음을 실행합니다.
 
@@ -217,11 +224,39 @@ Windows PowerShell에서는 다음을 실행합니다.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-vscode-extension.ps1
 ```
 
+PowerShell에서도 현재 터미널/실행 중인 IDE를 기준으로 `code` 또는
+`antigravity` CLI를 자동 선택합니다. 자동 감지가 맞지 않으면 설치 대상을
+명시합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-vscode-extension.ps1 -Ide antigravity
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-vscode-extension.ps1 -Ide vscode
+```
+
+특정 CLI 경로를 직접 지정해야 하면 `-Code`를 사용합니다.
+설정 디렉터리를 워크스페이스 기준으로 직접 지정해야 하면 `-SettingsDir`를
+사용합니다.
+portable/profile 구성으로 확장 저장소가 다르면 `-ExtensionsDir`를 사용합니다.
+
 Git Bash, Linux, macOS에서는 다음을 실행합니다.
 
 ```bash
 bash scripts/install-vscode-extension.sh
 ```
+
+Git Bash에서는 현재 터미널/실행 중인 IDE를 기준으로 `code` 또는
+`antigravity` CLI를 자동 선택합니다. 자동 감지가 맞지 않으면 설치 대상을
+명시합니다.
+
+```bash
+bash scripts/install-vscode-extension.sh --ide antigravity
+bash scripts/install-vscode-extension.sh --ide vscode
+```
+
+특정 CLI 경로를 직접 지정해야 하면 `--code`를 사용합니다.
+설정 디렉터리를 워크스페이스 기준으로 직접 지정해야 하면 `--settings-dir`를
+사용합니다.
+portable/profile 구성으로 확장 저장소가 다르면 `--extensions-dir`를 사용합니다.
 
 기본값은 `theseus-core-server`를 core path로, 저장소 루트를 workspace path로
 사용합니다. 다른 프로젝트를 작업 워크스페이스로 연결하려면

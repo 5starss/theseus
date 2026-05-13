@@ -146,6 +146,22 @@ class PlanDraftedEvent:
     """파싱된 계획 JSON."""
 
 
+@dataclass(frozen=True)
+class PlanPhaseTransitionRequested:
+    """PLAN phase transition requested by a structured runtime signal.
+
+    This event lets local daemon / editor clients follow PLAN progress without
+    parsing assistant prose. The legacy text markers remain supported while the
+    runtime emits this structured event alongside the actual state change.
+    """
+
+    from_phase: str
+    to_phase: str
+    reason: str
+    source: Literal["runtime_marker", "user_action", "session_restore"] = "runtime_marker"
+    trigger: str | None = None
+
+
 StreamEvent = Union[
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -156,4 +172,5 @@ StreamEvent = Union[
     AgentLoopStatus,
     CompactProgressEvent,
     PlanDraftedEvent,
+    PlanPhaseTransitionRequested,
 ]

@@ -21,6 +21,38 @@ def list_sessions() -> List[str]:
     return [p.stem for p in SESSION_DIR.glob("*.json")]
 
 
+def load_session_metadata(session_name: str) -> dict:
+    """Load display metadata for a session."""
+    session_file = get_session_path(session_name)
+    envelope = _read_envelope(session_file)
+    metadata = envelope.get("metadata", {}) if isinstance(envelope, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    title = envelope.get("title") if isinstance(envelope, dict) else None
+    if isinstance(title, str) and title.strip() and not metadata.get("title"):
+        metadata["title"] = title.strip()
+    return metadata
+
+
+def save_session_metadata(session_name: str, metadata: dict) -> None:
+    """Merge display metadata into the session envelope."""
+    session_file = get_session_path(session_name)
+    try:
+        envelope = _read_envelope(session_file)
+        if not envelope:
+            envelope = {"history": []}
+        existing = envelope.get("metadata", {})
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(metadata)
+        envelope["metadata"] = existing
+        if "title" in metadata:
+            envelope["title"] = metadata["title"]
+        _write_envelope(session_file, envelope)
+    except Exception as e:
+        print(f"⚠️ Failed to save session metadata for '{session_name}': {e}")
+
+
 def _serialize_messages(messages: List[ConversationMessage]) -> list:
     """ConversationMessage 리스트를 JSON 직렬화 가능한 dict 리스트로 변환합니다."""
     msg_data = []

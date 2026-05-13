@@ -980,6 +980,13 @@ class QueryEngine:
     def set_permission_checker(self, checker: Any) -> None:
         self._permission_checker = checker
 
+    def set_tool_registry(self, registry: ToolRegistry) -> None:
+        """Replace the active tool registry after mode/phase changes."""
+        self._tool_registry = registry
+        self._tool_metadata["active_registry"] = registry
+        if self._hook_executor is not None and hasattr(self._hook_executor, "_active_registry"):
+            self._hook_executor._active_registry = registry
+
     def set_plan_drafting(self, value: bool) -> None:
         """PLAN DRAFTING 단계 여부를 설정합니다.
 

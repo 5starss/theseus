@@ -66,8 +66,22 @@ export function getActiveCursorContext(): ActiveCursorContext | undefined {
 
 export function injectCursorContext(text: string): string {
   const cursor = getActiveCursorContext();
-  if (!cursor || userAlreadyMentionedFile(text, cursor.file)) return text;
-  return `@${cursor.file}:${cursor.line}\n${text}`;
+  if (
+    !cursor
+    || text.trimStart().startsWith('/')
+    || userMentionedAnyFile(text)
+    || !shouldAttachActiveCursorContext(text)
+  ) {
+    return text;
+  }
+  return [
+    text,
+    '',
+    '---',
+    'IDE auxiliary context:',
+    `- Active editor file: @${cursor.file}:${cursor.line}`,
+    '- This context was attached only because the user referred to the active editor. Ignore it if it is not relevant to the task.',
+  ].join('\n');
 }
 
 export async function findMentionFiles(query: string): Promise<string[]> {
@@ -137,19 +151,20 @@ function normalizeMentionPath(value: string): string {
   return value.replace(/^"/, '').replace(/"$/, '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
 }
 
-function normalizeMentionFile(value: string): string {
-  return normalizeMentionPath(value).replace(/:\d+$/, '');
+function userMentionedAnyFile(text: string): boolean {
+  return /@(?:"[^"]+"|[^\s]+)/.test(text);
 }
 
-function userAlreadyMentionedFile(text: string, file: string): boolean {
-  const target = normalizeMentionFile(file);
-  const matches = text.matchAll(/@(?:"([^"]+)"|([^\s]+))/g);
-  for (const match of matches) {
-    if (normalizeMentionFile(match[1] || match[2] || '') === target) {
-      return true;
-    }
-  }
-  return false;
+function shouldAttachActiveCursorContext(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return false;
+  return [
+    /현재\s*(열린|보고\s*있는|켜진)?\s*(파일|문서|코드|탭|창)/,
+    /(이|해당)\s*(파일|문서|코드|부분)/,
+    /(여기|이거|이 부분)\s*(봐|분석|수정|고쳐|설명|리뷰|확인)?/,
+    /\b(this|current|active|opened)\s+(file|document|code|editor|tab)\b/,
+    /\b(here|this)\s+(code|file|section)\b/,
+  ].some(pattern => pattern.test(normalized));
 }
 
 function escapeGlobSegment(value: string): string {

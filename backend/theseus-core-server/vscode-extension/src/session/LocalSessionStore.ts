@@ -15,5 +15,25 @@ export function listLocalSessionSummaries(
       }
     }
   }
-  return Array.from(names).sort().map(name => ({ name, current: name === currentName, source: 'local' }));
+  return Array.from(names).sort().map(name => ({
+    name,
+    title: readLocalSessionTitle(sessionDir, name),
+    current: name === currentName,
+    source: 'local',
+  }));
+}
+
+function readLocalSessionTitle(sessionDir: string | undefined, name: string): string {
+  if (!sessionDir) return '';
+  const filePath = path.join(sessionDir, `${name}.json`);
+  if (!fs.existsSync(filePath)) return '';
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return '';
+    const metadata = parsed.metadata && typeof parsed.metadata === 'object' ? parsed.metadata : {};
+    const title = typeof metadata.title === 'string' ? metadata.title : parsed.title;
+    return typeof title === 'string' ? title.trim() : '';
+  } catch {
+    return '';
+  }
 }

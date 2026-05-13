@@ -5,6 +5,71 @@ export function setLoopStatus(loopStatusEl, state, text) {
   loopStatusEl.title = text || 'Agent loop status';
 }
 
+export function renderRunnerStatusBar({
+  detailEl,
+  actionsEl,
+  runnerState,
+  loopStatus,
+  onStart,
+  onStop,
+  onReconnect,
+  onRestart,
+  onShowLogs,
+  onRefreshTools,
+  onToggleHealth,
+}) {
+  const lifecycle = runnerState?.lifecycle || runnerState?.state || 'stopped';
+  const running = !!runnerState?.running;
+  const processRunning = !!runnerState?.processRunning;
+  const label = running
+    ? (runnerState?.state === 'busy' ? 'Running' : 'Ready')
+    : processRunning
+      ? (lifecycle === 'stale' || lifecycle === 'starting_stale' ? 'Reconnecting' : 'Starting')
+      : lifecycle === 'error'
+        ? 'Error'
+        : 'Stopped';
+  const detail = [
+    label,
+    loopStatus?.text && loopStatus.text !== 'idle' ? loopStatus.text : '',
+    runnerState?.runtimeMode || '',
+    runnerState?.daemonPort ? `:${runnerState.daemonPort}` : '',
+  ].filter(Boolean).join(' · ');
+
+  if (detailEl) {
+    detailEl.textContent = detail;
+    detailEl.title = [
+      detail,
+      runnerState?.lastDiagnostic?.message ? `Last diagnostic: ${runnerState.lastDiagnostic.message}` : '',
+      runnerState?.workspaceCwd ? `cwd: ${runnerState.workspaceCwd}` : '',
+    ].filter(Boolean).join('\n');
+    detailEl.className = `runner-status-detail ${label.toLowerCase()}`;
+  }
+
+  if (!actionsEl) return;
+  actionsEl.innerHTML = '';
+  const addButton = (labelText, title, handler, className = '') => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = labelText;
+    button.title = title;
+    if (className) button.className = className;
+    button.addEventListener('click', handler);
+    actionsEl.appendChild(button);
+  };
+
+  if (!processRunning && !running) {
+    addButton('Start', 'Start agent', onStart, 'primary');
+  } else if (running) {
+    addButton('Stop', 'Stop agent', onStop);
+  } else {
+    addButton('Reconnect', 'Reconnect to running agent', onReconnect, 'primary');
+    addButton('Restart', 'Restart agent', onRestart);
+  }
+  if (processRunning || lifecycle === 'error') addButton('Logs', 'Show Theseus logs', onShowLogs);
+  addButton('Tools', 'Refresh custom tools', onRefreshTools);
+  addButton('Health', 'Show setup and runner health', onToggleHealth);
+}
+
 export function formatAgentLoopStatus(event) {
   const phase = event.phase || 'idle';
   const turn = event.turn ? `T${event.turn}` : '';

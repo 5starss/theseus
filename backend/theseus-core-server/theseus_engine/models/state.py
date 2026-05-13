@@ -13,9 +13,10 @@ import os
 import sys
 import platform
 import subprocess
+from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Iterable, Optional
 
 
 class AgentMode(Enum):
@@ -99,44 +100,6 @@ check with the user first. Examples of risky actions requiring confirmation:
 
 # Autonomy & Information Gathering
  - You are an autonomous agent. Do NOT pause and ask the user to "wait a moment" or "Shall I proceed?" if you are in the middle of a task. If a task requires multiple steps, you MUST execute the next tool call immediately in the SAME turn.
- - When writing or modifying tools/scripts that interact with external services (e.g., web scrapers, API clients), ALWAYS use `web_search` and `web_fetch` FIRST to verify the current URL structure, DOM elements, or API documentation. Your internal knowledge may be outdated.
- - For comprehensive research requiring multiple web sources, prefer `deep_research` over individual `web_search` + `web_fetch` calls — it handles search, scraping, and parsing in a single turn.
-
-# Using your tools
- - CRITICAL: You may ONLY call tools that appear in your function/tool schema for the current session. \
-Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in your schema, it does not exist.
- - Do NOT use Bash to run commands when a relevant dedicated tool is provided:
-   - Read files: use read_file instead of cat/head/tail
-   - Edit files: use edit_file instead of sed/awk
-   - Write files: use write_file instead of echo/heredoc
-   - Search files: use glob instead of find/ls
-   - Search content: use grep instead of grep/rg
-   - Reserve Bash exclusively for system commands that require shell execution.
- - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
- - Tool creation (`create_tool`) is ONLY available in Plan mode's Executing phase. Do not attempt it in Agent or Ask mode.
- - CRITICAL: NEVER use Markdown link syntax (e.g. `[label](url)`) in file paths, file names, or code content. \
-When specifying a file path or writing code, use plain text only. \
-Example — WRONG: `[sorter.py](http://sorter.py)`, CORRECT: `sorter.py`. \
-Example — WRONG: `[x.is](http://x.is)_integer()`, CORRECT: `x.is_integer()`. \
-This applies to ALL tool arguments (file_path, content, command, etc.) and to any Python/code you generate.
-
-# Theseus RBAC (Role-Based Access Control)
- - Your available tools are filtered by the current user's permission level. \
-You can only see and use tools that the user is authorized to access.
- - If a user requests an action that would require a tool not in your current schema, \
-inform them that their permission level may not include that capability and suggest \
-contacting their administrator for access elevation.
- - Do NOT mention specific permission levels or internal RBAC details to the user.
-
-# Theseus validation pipeline
- - Before every tool execution, the Theseus security pipeline (ExecutionValidator, \
-QueryValidator) automatically scans your tool arguments for dangerous patterns.
- - If a tool call is BLOCKED by the validator, you will receive an error message starting \
-with "[TheseusHook]". When this happens:
-   (1) Read the validator's reason carefully.
-   (2) Modify your tool arguments to remove the flagged pattern.
-   (3) Retry with the corrected arguments.
-   Do NOT retry with the exact same arguments — the validator will block it again.
 
 # Tone and style
  - Be concise. Lead with the answer, not the reasoning. Skip filler, preamble, and greetings.
@@ -152,6 +115,199 @@ with "[TheseusHook]". When this happens:
  - Exception: Code blocks, variable names, terminal commands, file paths, and system-level JSON keys must ALWAYS remain in English regardless of the user's language.
  - When generating structured output (JSON plans, reports), the JSON keys MUST be in English, but the JSON values (descriptions, summaries, explanations) MUST be written in the user's language.\
 """
+
+_TOOL_USE_CAPABILITY_PROMPT = """\
+# Tool Use Capability
+ - CRITICAL: You may ONLY call tools that appear in your function/tool schema for the current session. \
+Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in your schema, it does not exist.
+ - Do NOT use Bash to run commands when a relevant dedicated tool is provided:
+   - Read files: use read_file instead of cat/head/tail
+   - Edit files: use edit_file instead of sed/awk
+   - Write files: use write_file instead of echo/heredoc
+   - Search files: use glob instead of find/ls
+   - Search content: use grep instead of grep/rg
+   - Reserve Bash exclusively for system commands that require shell execution.
+ - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
+ - CRITICAL: NEVER use Markdown link syntax (e.g. `[label](url)`) in file paths, file names, or code content. \
+When specifying a file path or writing code, use plain text only. \
+Example — WRONG: `[sorter.py](http://sorter.py)`, CORRECT: `sorter.py`. \
+Example — WRONG: `[x.is](http://x.is)_integer()`, CORRECT: `x.is_integer()`. \
+This applies to ALL tool arguments (file_path, content, command, etc.) and to any Python/code you generate.\
+"""
+
+_RBAC_CAPABILITY_PROMPT = """\
+# Theseus RBAC
+ - Your available tools are filtered by the current user's permission level. \
+You can only see and use tools that the user is authorized to access.
+ - If a user requests an action that would require a tool not in your current schema, \
+inform them that their permission level may not include that capability and suggest \
+contacting their administrator for access elevation.
+ - Do NOT mention specific permission levels or internal RBAC details to the user.\
+"""
+
+_VALIDATION_CAPABILITY_PROMPT = """\
+# Theseus Validation Pipeline
+ - Before every tool execution, the Theseus security pipeline (ExecutionValidator, \
+QueryValidator) automatically scans your tool arguments for dangerous patterns.
+ - If a tool call is BLOCKED by the validator, you will receive an error message starting \
+with "[TheseusHook]". When this happens:
+   (1) Read the validator's reason carefully.
+   (2) Modify your tool arguments to remove the flagged pattern.
+   (3) Retry with the corrected arguments.
+   Do NOT retry with the exact same arguments — the validator will block it again.\
+"""
+
+_WEB_RESEARCH_CAPABILITY_PROMPT = """\
+# Web Research Capability
+ - When writing or modifying tools/scripts that interact with external services \
+(e.g., web scrapers, API clients), verify the current URL structure, DOM elements, \
+or API contract using available web research tools unless the specification is \
+already present in local files or the user has provided authoritative documentation.
+ - For tasks requiring multiple independent web sources, prefer `deep_research` when \
+it is available because it handles search, scraping, and parsing in a single turn.\
+"""
+
+_CREATE_TOOL_CAPABILITY_PROMPT = """\
+# create_tool Capability
+ - Tool creation (`create_tool`) is ONLY available in Plan mode's Executing phase. Do not attempt it in Agent, Ask, Drafting, Review, or Verifying mode.
+ - When using `create_tool`, you MUST produce a complete, self-contained Python module that:
+   (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
+   (2) imports BaseModel, Field from pydantic
+   (3) defines an input model inheriting BaseModel — the class name MUST be `<ToolClassName>Input` \
+(e.g., WeatherFetcherInput for WeatherFetcherTool)
+   (4) defines a tool class inheriting BaseTool with name, description, input_model, permission_level
+   (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
+   (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
+ - IMPORTANT: Do NOT use ToolResult.from_error() or ToolResult(status=..., data=...) — they don't exist.
+ - You CANNOT create a tool and call it in the SAME turn. Call `create_tool`, wait for \
+the success result, and ONLY THEN call the newly created tool in your next response.\
+"""
+
+
+@dataclass(frozen=True)
+class PromptCapabilities:
+    """현재 prompt turn에 주입할 runtime capability 정보."""
+
+    available_tools: frozenset[str] = field(default_factory=frozenset)
+    runtime_reminders: tuple[str, ...] = ()
+
+    def has_any_tool(self) -> bool:
+        return bool(self.available_tools)
+
+    def has_tool(self, name: str) -> bool:
+        return name in self.available_tools
+
+
+_WEB_RESEARCH_TOOL_NAMES = frozenset({"web_search", "web_fetch", "deep_research"})
+_AGENT_DEFAULT_TOOL_NAMES = frozenset(
+    {
+        "bash",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob",
+        "grep",
+        "web_search",
+        "web_fetch",
+        "deep_research",
+        "tool_search",
+        "search_knowledge_base",
+        "ingest_document",
+    }
+)
+_PLAN_DRAFTING_DEFAULT_TOOL_NAMES = frozenset(
+    {"bash", "read_file", "glob", "grep", "web_search", "web_fetch", "deep_research"}
+)
+_PLAN_REVIEW_DEFAULT_TOOL_NAMES = frozenset({"read_file", "glob", "grep"})
+_PLAN_EXECUTING_DEFAULT_TOOL_NAMES = _AGENT_DEFAULT_TOOL_NAMES | frozenset({"create_tool"})
+_PLAN_VERIFYING_DEFAULT_TOOL_NAMES = _AGENT_DEFAULT_TOOL_NAMES
+_COORDINATOR_DEFAULT_TOOL_NAMES = frozenset(
+    {"agent", "task_output", "read_file", "glob", "grep", "bash"}
+)
+
+
+def _normalize_available_tools(
+    available_tools: Iterable[str] | None,
+) -> frozenset[str] | None:
+    """Tool schema에서 전달된 도구 이름을 prompt capability 집합으로 정규화합니다."""
+    if available_tools is None:
+        return None
+    normalized: set[str] = set()
+    for name in available_tools:
+        value = str(name).strip()
+        if value:
+            normalized.add(value)
+    return frozenset(normalized)
+
+
+def _default_tool_names_for_mode(
+    mode: AgentMode,
+    plan_phase: Optional[PlanPhase],
+    coordinator_phase: Optional[CoordinatorPhase],
+) -> frozenset[str]:
+    """레거시 호출자가 tool schema를 넘기지 않는 경우의 보수적 기본값."""
+    if mode == AgentMode.ASK:
+        return frozenset()
+    if mode == AgentMode.AGENT:
+        return _AGENT_DEFAULT_TOOL_NAMES
+    if mode == AgentMode.PLAN:
+        if plan_phase == PlanPhase.DRAFTING:
+            return _PLAN_DRAFTING_DEFAULT_TOOL_NAMES
+        if plan_phase == PlanPhase.WAIT_FOR_REVIEW:
+            return _PLAN_REVIEW_DEFAULT_TOOL_NAMES
+        if plan_phase == PlanPhase.EXECUTING:
+            return _PLAN_EXECUTING_DEFAULT_TOOL_NAMES
+        if plan_phase == PlanPhase.VERIFYING:
+            return _PLAN_VERIFYING_DEFAULT_TOOL_NAMES
+        return _PLAN_DRAFTING_DEFAULT_TOOL_NAMES
+    if mode == AgentMode.COORDINATOR:
+        return _COORDINATOR_DEFAULT_TOOL_NAMES
+    return frozenset()
+
+
+def _build_prompt_capabilities(
+    *,
+    mode: AgentMode,
+    plan_phase: Optional[PlanPhase],
+    coordinator_phase: Optional[CoordinatorPhase],
+    available_tools: Iterable[str] | None,
+    runtime_reminders: Iterable[str] | None,
+) -> PromptCapabilities:
+    tools = _normalize_available_tools(available_tools)
+    if tools is None:
+        tools = _default_tool_names_for_mode(mode, plan_phase, coordinator_phase)
+
+    reminders = tuple(
+        value
+        for value in (str(item).strip() for item in (runtime_reminders or ()))
+        if value
+    )
+    return PromptCapabilities(available_tools=tools, runtime_reminders=reminders)
+
+
+def _render_capability_sections(capabilities: PromptCapabilities) -> str:
+    sections: list[str] = []
+    if capabilities.has_any_tool():
+        sections.extend(
+            [
+                _TOOL_USE_CAPABILITY_PROMPT,
+                _RBAC_CAPABILITY_PROMPT,
+                _VALIDATION_CAPABILITY_PROMPT,
+            ]
+        )
+    if capabilities.available_tools & _WEB_RESEARCH_TOOL_NAMES:
+        sections.append(_WEB_RESEARCH_CAPABILITY_PROMPT)
+    if capabilities.has_tool("create_tool"):
+        sections.append(_CREATE_TOOL_CAPABILITY_PROMPT)
+    return "\n\n".join(sections)
+
+
+def _render_runtime_reminders(reminders: tuple[str, ...]) -> str:
+    if not reminders:
+        return ""
+    lines = ["# Runtime Reminders"]
+    lines.extend(f" - {item}" for item in reminders)
+    return "\n".join(lines)
 
 
 _git_branch_cache: dict[str, str] = {}  # cwd → branch 캐시 (프로세스 수명 동안 유효)
@@ -183,7 +339,7 @@ def _get_environment_section() -> str:
     os_name = platform.system()
     os_version = platform.release()
     arch = platform.machine()
-    shell = os.environ.get("SHELL", "unknown")
+    shell = os.environ.get("SHELL") or os.environ.get("COMSPEC", "unknown")
     cwd = os.getcwd()
     python_version = platform.python_version()
     python_exec = sys.executable
@@ -242,16 +398,16 @@ Rules:
  - Freely take local, reversible actions (reading files, echoing messages).
  - For hard-to-reverse actions (file deletion, system commands), check with the user first.
  - Do NOT create new tools. You must accomplish the task using ONLY the currently \
-available tools. If a task requires a new tool that does not yet exist, inform the \
-user to switch to Plan mode (`/plan`) where tool creation is supported.
+available tools. If a task requires a new tool that does not yet exist, tell the \
+user to use the mode selector to switch to Plan mode, where tool creation is supported.
  - After completing a task, provide a concise summary of what was done.
 
 # Mode transition guidance
  - If the user's request clearly involves creating a new tool or building a complex \
-multi-step pipeline, proactively suggest switching to Plan mode (`/plan`) for a more \
-structured workflow.
+multi-step pipeline, proactively suggest switching to Plan mode with the visible \
+mode selector for a more structured workflow.
  - If the user asks a pure knowledge question that doesn't need tools, suggest \
-switching to Ask mode (`/ask`) for a faster response.\
+switching to Ask mode with the visible mode selector for a faster response.\
 """
 
 _PLAN_DRAFTING_PROMPT = """\
@@ -262,14 +418,19 @@ codebase, analyze the problem deeply, and produce a structured implementation \
 proposal** before any code is written.
 
 === READ-ONLY RESEARCH PHASE ===
-You MAY use the following read-only tools to investigate the codebase:
- - `read_file` — read file contents
- - `glob` — find files by pattern
- - `grep` — search content across files
- - `bash` — ONLY for read-only commands (ls, find, cat, git log, git diff, tree, etc.)
- - `web_search` — search the web for documentation or references
- - `web_fetch` — fetch content from a URL
- - `deep_research` — comprehensive web research (search + scrape + parse in one turn)
+When your current tool schema includes read-only tools, you MAY use them to \
+investigate the codebase. Possible read-only tools include:
+ - `read_file` — read file contents, when present
+ - `glob` — find files by pattern, when present
+ - `grep` — search content across files, when present
+ - `bash` — when present, ONLY for read-only shell commands with no dedicated tool equivalent \
+(e.g., git log, git diff, git status, tree, test discovery scripts). \
+Do NOT use bash for file reading, searching, or listing when read_file/glob/grep are available.
+ - `web_search` — search the web for documentation or references, when present
+ - `web_fetch` — fetch content from a URL, when present
+ - `deep_research` — comprehensive web research (search + scrape + parse in one turn), when present
+If no read-only tool appears in your current schema, rely on the provided prompt, \
+history, and existing context. Do NOT invent tool calls.
 You are STRICTLY PROHIBITED from any state-changing operations:
  - NO file creation, modification, or deletion (write_file, edit_file, create_tool)
  - NO git commits, pushes, or branch operations
@@ -284,25 +445,37 @@ and potential risks. Classify tasks by impact and effort.
 3. **Plan**: Produce a structured proposal with concrete file paths, solutions, \
 and expected effects based on your research.
 
+=== TOOL CREATION IN DRAFTING ===
+If the user asks you to create a new tool, your task in this phase is to draft an \
+approvable plan for that tool. Do NOT call `create_tool`, `write_file`, or `edit_file` \
+in Drafting. Do NOT ask the user to switch modes; you are already in Plan mode. \
+The runtime will enable `create_tool` automatically only after the user approves \
+the plan and the phase changes to Executing.
+
 === REQUIRED OUTPUT FORMAT ===
 After completing your research, output the plan as a single JSON code block (```json ... ```).
 You MAY include a research summary and analysis BEFORE the JSON block.
 CRITICAL: The JSON keys MUST remain in English, but all JSON values (descriptions, \
 summaries, explanations) MUST be written in the same language the user used in their request.
 
-**JSON Schema** — every field below is REQUIRED unless marked optional:
+**JSON Schema**
+
+Main task required fields: `id`, `parent_id` (null), `tier`, `title`, `problem`, `solution`, \
+`target_files`, `expected_effect`, `description`, `status`
+Sub-task required fields: `id`, `parent_id`, `title`, `description`, `target_files`, `status`
+Optional fields (omit if not applicable): `integration_points`, `sequential_dependencies`
 
 ```json
-{{
+{
   "goal": "One-sentence summary of the final goal",
-  "context": {{
+  "context": {
     "current_state": "Summary of the current state of the relevant codebase",
     "problem_analysis": "Core problem and root cause to be resolved",
     "affected_files": ["List of primary affected file paths"],
     "risks": "Potential risks and caveats"
-  }},
+  },
   "tasks": [
-    {{
+    {
       "id": "task-1",
       "parent_id": null,
       "tier": "T1",
@@ -310,31 +483,30 @@ summaries, explanations) MUST be written in the same language the user used in t
       "problem": "Specific problem this task addresses",
       "solution": "Solution summary (implementation approach, patterns/libraries to use)",
       "target_files": ["File paths to modify or create"],
-      "integration_points": "Integration points with existing code (optional)",
       "expected_effect": "Expected effect (performance, quality, cost improvements)",
       "description": "Engineering spec: target class/function names, key library calls with options, data flow, error handling strategy",
       "status": "pending"
-    }},
-    {{
+    },
+    {
       "id": "task-1-1",
       "parent_id": "task-1",
       "title": "Sub-task title",
       "description": "Engineering spec: exact method/function to modify, inputs/outputs, edge cases to handle",
       "target_files": ["Target files"],
       "status": "pending"
-    }}
+    }
   ],
-  "verification": {{
+  "verification": {
     "test_commands": ["List of test commands to execute"],
     "manual_checks": ["Items to verify manually"],
     "success_criteria": "Criteria for success determination"
-  }},
-  "action_plan": {{
+  },
+  "action_plan": {
     "immediate": ["List of task IDs to start immediately"],
     "sequential_dependencies": "Description of task pairs with sequential dependencies (optional)",
     "estimated_turns": "Estimated number of turns required"
-  }}
-}}
+  }
+}
 ```
 
 === TIER CLASSIFICATION ===
@@ -346,16 +518,17 @@ Classify each main task into one of three tiers:
 === RULES ===
  - Main tasks have `parent_id: null`. Sub-tasks reference their parent's `id`.
  - All `status` values must be `"pending"` in the draft.
- - Aim for 3-6 main tasks, each with 2-4 sub-tasks.
+ - For non-trivial work, aim for 3-6 main tasks, each with 2-4 sub-tasks. For small changes, use fewer tasks and omit sub-tasks rather than inventing artificial structure.
  - Every task MUST include concrete `target_files` based on your research.
  - Main tasks MUST include `problem`, `solution`, and `expected_effect` fields.
  - The `description` field MUST NOT be a vague summary. Specify concrete class/function names, library methods with key arguments, and error handling — detailed enough to code from directly.
  - The JSON must be complete and valid — no truncation, no placeholder values.
  - This plan will be parsed programmatically. The JSON block must be valid.
  - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
-the correct path is `create_tool` (meta-tool), NOT direct modification of OpenHarness \
-source files. In this case `target_files` must list `theseus_engine/custom_tools/<tool_name>.py` \
-only. Do NOT include `OpenHarness/src/` or `openharness/tools/__init__.py` paths.\
+the plan must describe creating a Theseus custom tool during the Executing phase. \
+In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>.py` \
+and the generated `theseus_engine/custom_tools/<tool_name>.meta.json`. Do not use \
+OpenHarness paths or generic source-file fallbacks for new Theseus tools.\
 """
 
 _PLAN_REVIEW_PROMPT = """\
@@ -382,7 +555,7 @@ plan accordingly, and present the revised plan for another review cycle.
 or an equivalent confirmation in the user's language).
  - If the user requests changes, update the plan JSON and present it again.
  - Each revision cycle: show what changed, then present the full updated JSON.
- - You may use read-only tools (read_file, glob, grep) if the user's feedback \
+ - You may use read-only tools (read_file, glob, grep) when they are present if the user's feedback \
 requires additional codebase investigation to revise the plan.
  - Do NOT use any state-changing tools during review.\
 """
@@ -445,32 +618,27 @@ plan using ONLY the tools available in your current tool schema.
 
 # CRITICAL EXECUTION RULES:
  - **ACT IMMEDIATELY. Do NOT describe what you are about to do — just call the tool.**
- - Every response MUST contain at least one tool call until the plan is fully complete.
+ - While executable plan steps remain and no user decision is required, each response \
+   MUST contain the next necessary tool call. Do NOT narrate intent without acting.
+ - Stop and explain (without a tool call) ONLY in these cases: \
+   (a) unexpected complexity requires a plan change, \
+   (b) a required tool is blocked or unavailable, \
+   (c) a step requires manual user action, or \
+   (d) all tasks are complete ("Plan complete.").
  - Never output a message like "I will now call X" or "Next I will do Y" without \
-   actually calling the tool in the SAME response. If you have nothing left to do, \
-   say "Plan complete." — otherwise call the next tool.
+   actually calling the tool in the SAME response.
  - You may ONLY call tools that appear in your function/tool schema. \
 Do NOT invent tool names. If you call a non-existent tool, the system will \
 return an error and waste a turn.
- - Your PRIMARY tool for creating new capabilities is `create_tool`. Use it to generate \
-complete, self-contained Theseus-compatible Python tool modules.
- - You CANNOT create a tool and call it in the SAME turn. Call `create_tool`, wait for \
-the success result, and ONLY THEN call the newly created tool in your next response.
- - For each step that requires creating a file, script, or utility, generate the complete \
-Python code and submit it via `create_tool` in a single call.
+ - If the approved plan requires a new tool but `create_tool` is NOT present in your \
+current tool schema, STOP and report: "create_tool is not available in the current \
+Plan Executing tool schema." Do NOT fall back to `write_file`, `edit_file`, `bash`, \
+or manual file creation for custom tool registration.
+ - If `create_tool` is present, use it as the only supported path for creating \
+new Theseus custom tools. Generate the complete Python code and submit it via \
+`create_tool` in a single call.
  - If a step requires actions outside your tool capabilities (e.g., installing pip packages, \
 creating non-Python files), explain what the user needs to do manually and move to the next step.
-
-# create_tool code requirements:
-  When using `create_tool`, you MUST produce a complete, self-contained Python module that:
-   (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
-  (2) imports BaseModel, Field from pydantic
-  (3) defines an input model inheriting BaseModel — the class name MUST be `<ToolClassName>Input` \
-(e.g., WeatherFetcherInput for WeatherFetcherTool)
-  (4) defines a tool class inheriting BaseTool with name, description, input_model, permission_level
-  (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
-  (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
-  IMPORTANT: Do NOT use ToolResult.from_error() or ToolResult(status=..., data=...) — they don't exist.
 
 # Path rules:
  - When writing tool code, NEVER use relative file paths like open('data.txt').
@@ -497,17 +665,10 @@ retry the same operation.
 # Progress tracking:
  - After completing each main task, report progress briefly: \
 "[Progress] task-N complete (N/total) — <one-line summary>".
- - If you discover unexpected complexity that requires plan changes, STOP execution \
+- If you discover unexpected complexity that requires plan changes, STOP execution \
 and explain the issue. Do NOT silently deviate from the approved plan.
- - When all tasks are complete, output "Plan complete." to trigger the Verifying phase.
-
-# Theseus tool validation feedback
- - When `create_tool` returns an error, the Theseus validator has identified a specific \
-code violation. Read the error message in detail — it will tell you exactly which \
-rule was broken (e.g., wrong execute signature, invalid ToolResult usage, banned \
-module import, incorrect input model naming).
- - Fix ONLY the specific violation mentioned, then retry. Do not rewrite the entire \
-tool from scratch unless multiple fundamental issues are reported.
+- When all tasks are complete, output "Plan complete." to trigger the Verifying phase. \
+The runtime will convert that marker into a structured `PlanPhaseTransitionRequested` event.
 
 <approved_plan>
 {plan}
@@ -522,9 +683,9 @@ are correct, complete, and meet the original requirements**.
 
 === VERIFICATION CHECKLIST ===
 1. **Test execution**: Run relevant tests (unit tests, integration tests) to confirm \
-nothing is broken. Use `bash` to run test commands.
+nothing is broken. Use `bash` to run test commands when it is present.
 2. **Change review**: Re-read the modified files to verify the changes match what was \
-planned. Use `read_file` to inspect the results.
+planned. Use `read_file` to inspect the results when it is present.
 3. **Regression check**: Verify that existing functionality was not broken by the changes. \
 Check imports, type hints, and function signatures.
 4. **Plan completion**: Compare the executed work against the original approved plan. \
@@ -543,8 +704,8 @@ After verification, provide a structured summary:
 - [Any remaining work, known issues, or recommendations]
 
 === RULES ===
- - You MAY use any read-only tools and `bash` for running tests.
- - You MAY use `edit_file` ONLY to fix minor issues discovered during verification \
+ - You MAY use any read-only tools and `bash` for running tests when they are present.
+ - You MAY use `edit_file` ONLY when it is present to fix minor issues discovered during verification \
 (e.g., typos, missing imports, broken tests). Report any such fixes.
  - If verification reveals fundamental design flaws, report them to the user and \
 recommend returning to the Drafting phase rather than attempting ad-hoc fixes.
@@ -553,6 +714,7 @@ recommend returning to the Drafting phase rather than attempting ad-hoc fixes.
 === COMPLETION SIGNAL ===
  - When all verification is complete and there are no critical issues, end your response \
 with "Verification complete." to signal the system to finalize this plan cycle.
+   The runtime will convert that marker into a structured `PlanPhaseTransitionRequested` event.
  - If verification fails with critical issues, do NOT output "Verification complete." — \
 instead, clearly describe the failures and recommend next steps.\
 """
@@ -674,35 +836,52 @@ class TheseusStateMachine:
 
     # ----- System prompt assembly -----
 
-    def get_system_prompt(self) -> str:
+    def get_system_prompt(
+        self,
+        *,
+        available_tools: Iterable[str] | None = None,
+        runtime_reminders: Iterable[str] | None = None,
+    ) -> str:
         """현재 모드/단계에 맞는 완전한 시스템 프롬프트를 조합합니다."""
-        env_section = _get_environment_section()
-        prompt = f"{_BASE_SYSTEM_PROMPT}\n\n{env_section}\n\n"
-
+        mode_prompt = ""
         if self.mode == AgentMode.ASK:
-            prompt += _ASK_PROMPT
+            mode_prompt = _ASK_PROMPT
         elif self.mode == AgentMode.AGENT:
-            prompt += _AGENT_PROMPT
+            mode_prompt = _AGENT_PROMPT
         elif self.mode == AgentMode.PLAN:
             if self.plan_phase == PlanPhase.DRAFTING:
-                prompt += _PLAN_DRAFTING_PROMPT
+                mode_prompt = _PLAN_DRAFTING_PROMPT
             elif self.plan_phase == PlanPhase.WAIT_FOR_REVIEW:
-                prompt += _PLAN_REVIEW_PROMPT
+                mode_prompt = _PLAN_REVIEW_PROMPT
             elif self.plan_phase == PlanPhase.EXECUTING:
-                prompt += _PLAN_EXECUTING_PROMPT_TEMPLATE.format(
+                mode_prompt = _PLAN_EXECUTING_PROMPT_TEMPLATE.format(
                     plan=self.plan
                 )
             elif self.plan_phase == PlanPhase.VERIFYING:
-                prompt += _PLAN_VERIFYING_PROMPT
+                mode_prompt = _PLAN_VERIFYING_PROMPT
         elif self.mode == AgentMode.COORDINATOR:
             phase = self.coordinator_phase or CoordinatorPhase.DECOMPOSE
             if phase == CoordinatorPhase.DECOMPOSE:
-                prompt += _COORDINATOR_DECOMPOSE_PROMPT
+                mode_prompt = _COORDINATOR_DECOMPOSE_PROMPT
             elif phase == CoordinatorPhase.DISPATCH:
-                prompt += _COORDINATOR_DISPATCH_PROMPT
+                mode_prompt = _COORDINATOR_DISPATCH_PROMPT
             elif phase == CoordinatorPhase.SYNTHESIZE:
-                prompt += _COORDINATOR_SYNTHESIZE_PROMPT
+                mode_prompt = _COORDINATOR_SYNTHESIZE_PROMPT
             elif phase == CoordinatorPhase.VERIFY:
-                prompt += _COORDINATOR_VERIFY_PROMPT
+                mode_prompt = _COORDINATOR_VERIFY_PROMPT
 
-        return prompt
+        capabilities = _build_prompt_capabilities(
+            mode=self.mode,
+            plan_phase=self.plan_phase,
+            coordinator_phase=self.coordinator_phase,
+            available_tools=available_tools,
+            runtime_reminders=runtime_reminders,
+        )
+        sections = [
+            _BASE_SYSTEM_PROMPT,
+            _get_environment_section(),
+            mode_prompt,
+            _render_capability_sections(capabilities),
+            _render_runtime_reminders(capabilities.runtime_reminders),
+        ]
+        return "\n\n".join(section for section in sections if section)

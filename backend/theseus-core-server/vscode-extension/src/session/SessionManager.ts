@@ -30,6 +30,11 @@ type TheseusDiagnosticCode =
   | 'daemon_busy'
   | 'event_replay_gap';
 
+type PendingInput = {
+  text: string;
+  mode?: string;
+};
+
 const READY_TIMEOUT_MS = 25000;
 const HEARTBEAT_STALE_MS = 45000;
 const DAEMON_HEARTBEAT_INTERVAL_MS = 5000;
@@ -64,7 +69,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private readonly listeners = new Set<(event: RunnerEvent) => void>();
   private readonly lifecycleHistory: RunnerEvent[] = [];
-  private readonly pendingInput: string[] = [];
+  private readonly pendingInput: PendingInput[] = [];
   private state: TheseusSessionState = 'stopped';
   private sessionId = makeSessionId();
   private lastReadyEvent: RunnerEvent | undefined;
@@ -116,6 +121,7 @@ export class TheseusSessionManager implements vscode.Disposable {
       coreRoot: this.startMetadata?.coreRoot,
       workspaceCwd: this.startMetadata?.workspaceCwd,
       runtimeMode: this.runtimeMode,
+      daemonPid: this.daemon?.pid ?? this.proc?.pid,
       daemonPort: this.daemon?.port,
       session: this.lastReadyEvent?.session,
       lastEventAt: this.lastEventAt,
@@ -301,16 +307,16 @@ export class TheseusSessionManager implements vscode.Disposable {
     this.writeLine(JSON.stringify({ type: 'PermissionResponse', request_id: requestId, approved }));
   }
 
-  send(text: string): void {
+  send(text: string, mode?: string): void {
     const normalized = text.replace(/\r?\n/g, ' ').trim();
     if (!normalized) return;
     if (this.daemon) {
       if (this.state === 'starting' || this.state === 'stale') {
-        this.pendingInput.push(normalized);
+        this.pendingInput.push({ text: normalized, mode });
         this.emit(this.status);
         return;
       }
-      void this.sendDaemon(normalized);
+      void this.sendDaemon(normalized, mode);
       return;
     }
     if (!this.proc) {
@@ -318,10 +324,11 @@ export class TheseusSessionManager implements vscode.Disposable {
       return;
     }
     if (this.state === 'starting' || this.state === 'stale') {
-      this.pendingInput.push(normalized);
+      this.pendingInput.push({ text: normalized, mode });
       this.emit(this.status);
       return;
     }
+    if (mode) this.writeLine(JSON.stringify({ type: 'setMode', mode }));
     this.writeLine(normalized);
     this.setState('busy');
   }
@@ -487,20 +494,20 @@ export class TheseusSessionManager implements vscode.Disposable {
     }
   }
 
-  private async sendDaemon(text: string): Promise<void> {
-    const queued = this.daemonSendQueue.then(() => this.sendDaemonNow(text));
+  private async sendDaemon(text: string, mode?: string): Promise<void> {
+    const queued = this.daemonSendQueue.then(() => this.sendDaemonNow(text, mode));
     this.daemonSendQueue = queued.catch(() => undefined);
     return queued;
   }
 
-  private async sendDaemonNow(text: string): Promise<void> {
+  private async sendDaemonNow(text: string, mode?: string): Promise<void> {
     if (!this.daemon) {
       return;
     }
     let keepBusyState = false;
     try {
       this.setState('busy');
-      const created = await this.daemonClient.request(this.daemon, 'POST', '/runs', { text });
+      const created = await this.daemonClient.request(this.daemon, 'POST', '/runs', mode ? { text, mode } : { text });
       const runId = String(created.runId || '');
       if (!runId) throw new Error('Daemon did not return runId.');
       this.activeRunId = runId;
@@ -841,7 +848,8 @@ export class TheseusSessionManager implements vscode.Disposable {
   private flushPendingInput(): void {
     if (this.daemon) {
       while (this.pendingInput.length) {
-        void this.sendDaemon(this.pendingInput.shift() || '');
+        const pending = this.pendingInput.shift();
+        if (pending) void this.sendDaemon(pending.text, pending.mode);
       }
       if (this.pendingInput.length === 0 && this.state === 'waiting_input') {
         this.setState('ready');
@@ -849,7 +857,10 @@ export class TheseusSessionManager implements vscode.Disposable {
       return;
     }
     while (this.pendingInput.length && this.proc) {
-      this.writeLine(this.pendingInput.shift() || '');
+      const pending = this.pendingInput.shift();
+      if (!pending) continue;
+      if (pending.mode) this.writeLine(JSON.stringify({ type: 'setMode', mode: pending.mode }));
+      this.writeLine(pending.text);
     }
     if (this.pendingInput.length === 0 && this.state === 'waiting_input') {
       this.setState('ready');
@@ -994,6 +1005,11 @@ export class TheseusSessionManager implements vscode.Disposable {
     } else if (event.type === 'RunnerHeartbeat' || event.type === 'StatusEvent') {
       this.lastHeartbeatAt = Date.now();
       if (this.state === 'stale' && this.lastReadyEvent) this.setState('ready');
+    } else if (event.type === 'SessionChangedEvent') {
+      const current = typeof event.current === 'string' ? event.current : undefined;
+      if (current && this.lastReadyEvent) {
+        this.lastReadyEvent = { ...this.lastReadyEvent, session: current };
+      }
     } else if (event.type === 'AssistantTextDelta' || event.type === 'ToolExecutionStarted') {
       if (this.isRunning) this.state = 'busy';
     } else if (event.type === 'AssistantTurnComplete' || event.type === 'PlanDraftedEvent') {

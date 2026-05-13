@@ -1,11 +1,11 @@
 import logging
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
 from src.auth.schemas import SessionContext
 from src.builder.system_prompt import build_theseus_system_prompt
+from src.config import resolve_model_name
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
 from src.tooling import load_custom_tools_for_project
@@ -66,10 +66,6 @@ class EngineAssembly:
     tool_execution_started_type: type
     tool_execution_completed_type: type
     error_event_type: type
-
-
-def _resolve_model_name() -> str:
-    return os.getenv("OPENHARNESS_MODEL", "gpt-4o")
 
 
 def _infer_registry_permissions(full_registry: Any) -> dict[str, int]:
@@ -189,7 +185,7 @@ def get_query_engine(
     if not isinstance(build_context.mode, AgentMode):
         raise EngineInitializationError("Engine mode must be a valid AgentMode.")
 
-    model_name = _resolve_model_name()
+    model_name = resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
     full_registry = ToolRegistry()
@@ -200,9 +196,7 @@ def get_query_engine(
     tool_permissions = dict(inferred_permissions)
     tool_permissions.update(build_context.project_tool_permissions)
 
-    if build_context.mode == AgentMode.ASK:
-        loaded_tools = []
-    elif build_context.project_id:
+    if build_context.project_id:
         loaded_tools = load_custom_tools_for_project(
             full_registry,
             project_id=build_context.project_id,
@@ -217,17 +211,14 @@ def get_query_engine(
             build_context.session_id,
         )
 
-    if build_context.mode == AgentMode.ASK:
-        active_registry = ToolRegistry()
-    else:
-        active_registry = build_filtered_registry(
-            full_registry,
-            tool_permissions,
-            build_context.user_level,
-            exclude_tools=_resolve_excluded_tools(build_context.mode),
-        )
+    active_registry = build_filtered_registry(
+        full_registry,
+        tool_permissions,
+        build_context.user_level,
+        exclude_tools=_resolve_excluded_tools(build_context.mode),
+    )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
-    if not allowed_tools and build_context.mode != AgentMode.ASK:
+    if not allowed_tools:
         raise EngineInitializationError(
             "No tools are available for the current server session."
         )
@@ -236,6 +227,7 @@ def get_query_engine(
         mode=build_context.mode,
         plan_phase=PlanPhase.EXECUTING if build_context.mode == AgentMode.PLAN else None,
         plan_content=build_context.plan_content,
+        available_tools=allowed_tools,
     )
     permission_checker = TheseusPermissionChecker(
         settings=TheseusPermissionSettings(),
@@ -272,7 +264,6 @@ def get_query_engine(
             "user_id": build_context.actor_user_id,
             "chat_session_id": build_context.chat_session_id,
             "plan_id": build_context.plan_id,
-            "agent_mode": build_context.mode.value,
         },
     )
 

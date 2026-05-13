@@ -5,6 +5,16 @@ import {
 } from './components/Composer.js';
 import { renderCustomTools as renderCustomToolsComponent } from './components/CustomTools.js';
 import {
+  createChangeReviewItem,
+  renderChangeReviewPanel as renderChangeReviewPanelComponent,
+} from './components/ChangeReviewPanel.js';
+import {
+  parseMentionPills,
+  removeMentionFromText,
+  renderContextBar as renderContextBarComponent,
+} from './components/ContextBar.js';
+import { renderHealthPanel as renderHealthPanelComponent } from './components/HealthPanel.js';
+import {
   appendRetryBanner,
   createTypingIndicator,
   isTransientSystemText,
@@ -15,10 +25,11 @@ import { renderPlanPanel as renderPlanPanelComponent } from './components/PlanPa
 import {
   applyRunnerStatusEvent,
   formatAgentLoopStatus,
+  renderRunnerStatusBar,
   setLoopStatus as renderLoopStatus,
 } from './components/RunnerStatus.js';
 import { renderSessionMenu as renderSessionMenuComponent } from './components/SessionMenu.js';
-import { createToolPanelController } from './components/ToolPanel.js';
+import { createActivityLogController } from './components/ActivityLog.js';
 import { createInitialState, persistWebviewState } from './state.js';
 
 (function () {
@@ -42,16 +53,19 @@ import { createInitialState, persistWebviewState } from './state.js';
   const messagesEl       = document.getElementById('messages');
   const toolsEl          = document.getElementById('tools');
   const customToolsEl    = document.getElementById('custom-tools');
+  const healthPanelEl    = document.getElementById('health-panel');
+  const changeReviewEl   = document.getElementById('change-review-panel');
   const planPanelEl      = document.getElementById('plan-panel');
   const promptEl         = document.getElementById('prompt');
   const composerEl       = document.getElementById('composer');
-  const startBtn         = document.getElementById('start');
-  const stopBtn          = document.getElementById('stop');
   const acListEl         = document.getElementById('autocomplete-list');
+  const contextBarEl     = document.getElementById('context-bar');
   const sessionEl        = document.getElementById('session-label');
   const sessionMenuEl    = document.getElementById('session-menu');
   const stopGenBtn       = document.getElementById('stop-gen');
   const loopStatusEl     = document.getElementById('loop-status');
+  const runnerDetailEl   = document.getElementById('runner-status-detail');
+  const runnerActionsEl  = document.getElementById('runner-actions');
   const activeFileEl     = document.getElementById('active-file-label');
   const workspaceLabelEl = document.getElementById('workspace-label');
   const modeChipLabel    = document.getElementById('mode-chip-label');
@@ -62,21 +76,45 @@ import { createInitialState, persistWebviewState } from './state.js';
 
   // ── 상수 (const는 선언 전 접근 불가 → 최상단에 위치) ─────────────
   const FOLD_THRESHOLD = 25;
-  const TOOL_VISIBLE_LIMIT = 30;
   const LONG_RUNNING_MS = 30000;
   const MODE_LABELS    = { agent: 'AGENT', ask: 'ASK', plan: 'PLAN' };
   const MODE_SLASH_COMMANDS = new Set(['/agent', '/ask', '/plan', '/coordinator']);
   const MODE_SWITCH_GUIDANCE = '모드 전환은 입력창 아래 모드 선택을 사용하세요.';
+  const LOCAL_HELP_TEXT = [
+    '사용 가능한 명령어:',
+    '/tools         - Custom Tools 패널 새로고침',
+    '/tools custom  - Custom Tools 패널 새로고침',
+    '/session       - 세션 목록 새로고침',
+    '/session list  - 세션 목록 새로고침',
+    '/session delete <name> - 세션 삭제',
+    '/stats, /cost  - 실행 중인 runner 세션 통계',
+    '/validate      - 실행 중인 runner에서 커스텀 도구 검증',
+    '/plan cancel   - 현재 세션 PLAN 취소',
+    '/plan delete   - 현재 세션 PLAN 삭제',
+    '/clear         - 현재 채팅 화면 지우기',
+    '/quit, /exit   - runner 중지',
+  ].join('\n');
 
   // ── State ─────────────────────────────────────────────────────────
   const initialState    = createInitialState(vscode);
   let savedHistory      = initialState.savedHistory;
   let savedPlan         = initialState.savedPlan;
+  let planBySession     = initialState.planBySession;
   let currentMode       = initialState.currentMode;
   let currentSession    = initialState.currentSession;
   let sessions          = initialState.sessions;
   let toolStats         = initialState.toolStats;
+  let customTools       = [];
+  let customToolsCollapsed = initialState.customToolsCollapsed;
+  let customToolsView   = initialState.customToolsView;
+  let sessionListOpen   = initialState.sessionListOpen;
+  let changeReviews     = initialState.changeReviews;
   let activeRunnerMode = 'agent';
+  let latestHealth      = null;
+  let healthPanelVisible = false;
+  let activeFileContext = null;
+  let suppressedActiveFile = '';
+  let lastLoopStatus    = { state: 'idle', text: 'idle' };
 
   let currentAssistantArticle = null;
   let currentAssistantEl      = null;
@@ -111,10 +149,15 @@ import { createInitialState, persistWebviewState } from './state.js';
     persistWebviewState(vscode, {
       savedHistory,
       savedPlan,
+      planBySession,
       currentMode,
       currentSession,
       sessions,
       toolStats,
+      customToolsCollapsed,
+      customToolsView,
+      sessionListOpen,
+      changeReviews,
     });
   }
 
@@ -256,8 +299,30 @@ import { createInitialState, persistWebviewState } from './state.js';
     persistState();
   }
 
+  function persistToolHistory(entry) {
+    if (!entry || entry.type !== 'tool') return;
+    let replaceAt = -1;
+    for (let i = savedHistory.length - 1; i >= 0; i -= 1) {
+      const item = savedHistory[i];
+      if (!item || item.type !== 'tool') continue;
+      if (entry.tool_use_id && item.tool_use_id === entry.tool_use_id) {
+        replaceAt = i;
+        break;
+      }
+      if (!entry.tool_use_id && item.status === 'running' && item.tool_name === entry.tool_name) {
+        replaceAt = i;
+        break;
+      }
+    }
+    if (replaceAt >= 0) savedHistory[replaceAt] = { ...savedHistory[replaceAt], ...entry };
+    else savedHistory.push(entry);
+    persistState();
+  }
+
   function setLoopStatus(state, text) {
+    lastLoopStatus = { state: state || 'idle', text: text || 'idle' };
     renderLoopStatus(loopStatusEl, state, text);
+    renderRunnerStatus();
   }
 
   function requestRunnerStatus() {
@@ -290,6 +355,75 @@ import { createInitialState, persistWebviewState } from './state.js';
       requestRunnerAttach,
       requestRunnerStatus,
     });
+    renderRunnerStatus();
+    renderHealthPanel();
+  }
+
+  function launchOrAttachRunner() {
+    if (runnerState.processRunning) {
+      appendTransientMessage('system', '기존 에이전트 프로세스에 다시 연결합니다.', 'hint');
+      requestRunnerAttach();
+      requestRunnerStatus();
+      return;
+    }
+
+    runnerState = {
+      ...runnerState,
+      running: false,
+      processRunning: true,
+      lifecycle: 'starting',
+      state: 'starting',
+      lastStatusAt: Date.now(),
+      lastDiagnostic: null,
+    };
+    setLoopStatus('running', 'starting');
+    renderRunnerStatus();
+    vscode.postMessage({ type: 'launchSession' });
+    requestRunnerStatus();
+  }
+
+  function restartRunner() {
+    vscode.postMessage({ type: 'stopSession' });
+    setTimeout(() => vscode.postMessage({ type: 'launchSession' }), 350);
+  }
+
+  function renderRunnerStatus() {
+    renderRunnerStatusBar({
+      detailEl: runnerDetailEl,
+      actionsEl: runnerActionsEl,
+      runnerState,
+      loopStatus: lastLoopStatus,
+      onStart: launchOrAttachRunner,
+      onStop: () => vscode.postMessage({ type: 'stopSession' }),
+      onReconnect: () => {
+        requestRunnerAttach();
+        requestRunnerStatus();
+      },
+      onRestart: restartRunner,
+      onShowLogs: () => vscode.postMessage({ type: 'showLogs' }),
+      onRefreshTools: () => vscode.postMessage({ type: 'getCustomTools' }),
+      onToggleHealth: () => {
+        healthPanelVisible = !healthPanelVisible;
+        if (healthPanelVisible) vscode.postMessage({ type: 'getHealth' });
+        renderHealthPanel();
+      },
+    });
+  }
+
+  function renderHealthPanel() {
+    renderHealthPanelComponent({
+      panelEl: healthPanelEl,
+      health: latestHealth,
+      visible: healthPanelVisible,
+      onOpenSettings: () => vscode.postMessage({ type: 'openSettings' }),
+      onRestart: restartRunner,
+      onShowLogs: () => vscode.postMessage({ type: 'showLogs' }),
+      onRefresh: () => vscode.postMessage({ type: 'getHealth' }),
+      onClose: () => {
+        healthPanelVisible = false;
+        renderHealthPanel();
+      },
+    });
   }
 
   function _createTypingIndicator() {
@@ -300,9 +434,132 @@ import { createInitialState, persistWebviewState } from './state.js';
     renderPlanPanelComponent(plan, {
       panelEl: planPanelEl,
       canReview: !!(savedPlan && savedPlan.reviewState === 'wait'),
-      onReview: action => vscode.postMessage({ type: 'reviewPlan', action }),
+      onReview: action => {
+        if (action === 'approve') setGenerating(true);
+        vscode.postMessage({ type: 'reviewPlan', action });
+      },
       onOpenMarkdown: planToOpen => vscode.postMessage({ type: 'openPlanPreview', plan: planToOpen }),
+      onCancel: () => cancelCurrentPlan('cancel'),
+      onDelete: () => cancelCurrentPlan('delete'),
     });
+  }
+
+  function normalizePlanPhase(phase) {
+    const value = String(phase || '').trim().toLowerCase();
+    if (['waitforreview', 'wait_for_review', 'review', 'wait'].includes(value)) return 'wait';
+    if (['execute', 'executing', 'approved'].includes(value)) return 'executing';
+    if (['verify', 'verifying'].includes(value)) return 'verifying';
+    if (['done', 'complete', 'completed'].includes(value)) return 'done';
+    if (['draft', 'drafting', 'rejected'].includes(value)) return 'drafting';
+    if (['cancelled', 'canceled', 'deleted', 'closed', 'stale'].includes(value)) return '';
+    return value || 'drafting';
+  }
+
+  function planFromSessionState(planState) {
+    if (!planState || typeof planState !== 'object') return null;
+    let plan = planState.structured_plan && typeof planState.structured_plan === 'object'
+      ? planState.structured_plan
+      : null;
+    if (!plan && typeof planState.plan_json === 'string' && planState.plan_json.trim()) {
+      try {
+        const parsed = JSON.parse(planState.plan_json);
+        if (parsed && typeof parsed === 'object') plan = parsed;
+      } catch {
+        plan = null;
+      }
+    }
+    if (!plan) return null;
+    const phase = normalizePlanPhase(planState.phase || plan.phase || plan.reviewState);
+    if (!phase) return null;
+    return {
+      ...plan,
+      phase,
+      reviewState: phase,
+      session: currentSession,
+      completedTasks: planState.completedTasks ?? plan.completedTasks,
+      totalTasks: planState.totalTasks ?? plan.totalTasks,
+      remainingTasks: planState.remainingTasks ?? plan.remainingTasks,
+      lastError: planState.last_error || planState.lastError || plan.lastError,
+    };
+  }
+
+  function setSavedPlan(plan, { render = true } = {}) {
+    savedPlan = plan || null;
+    if (savedPlan) {
+      savedPlan.session = currentSession;
+      savedPlan.updatedAt = new Date().toISOString();
+      planBySession[currentSession] = savedPlan;
+    } else {
+      delete planBySession[currentSession];
+    }
+    persistState();
+    if (render) renderPlanPanel(savedPlan);
+  }
+
+  function clearSavedPlan() {
+    setSavedPlan(null);
+  }
+
+  function cancelCurrentPlan(action) {
+    clearSavedPlan();
+    vscode.postMessage({ type: 'interruptSession' });
+    vscode.postMessage({ type: 'reviewPlan', action });
+    appendTransientMessage('system', action === 'delete' ? 'PLAN을 삭제했습니다.' : 'PLAN을 취소했습니다.', 'hint');
+  }
+
+  function beginPlanDraft(text) {
+    const currentState = normalizePlanPhase(savedPlan?.reviewState || savedPlan?.phase);
+    if (['wait', 'executing', 'verifying'].includes(currentState)) return;
+    setSavedPlan({
+      goal: text,
+      phase: 'drafting',
+      reviewState: 'drafting',
+      pendingTitle: text,
+      tasks: [],
+      startedAt: new Date().toISOString(),
+    });
+  }
+
+  function switchSavedPlanForSession(name) {
+    currentSession = name || 'default';
+    savedPlan = planBySession[currentSession] || null;
+    renderPlanPanel(savedPlan);
+  }
+
+  function classifyPlanReviewText(text) {
+    const normalized = text.trim().replace(/^["'`]+|["'`]+$/g, '').toLowerCase()
+      .replace(/[.!?。！？]+$/g, '')
+      .replace(/\s+/g, ' ');
+    const approvals = new Set([
+      'approve', 'approved', 'accept', 'accepted', 'ok', 'okay', 'yes', 'y',
+      'go', 'proceed', 'continue', 'looks good',
+      '승인', '승인해', '승인해줘', '승인합니다', '허가', '허가해',
+      '좋아', '좋습니다', '진행', '진행해', '진행해줘', '계속', '계속해',
+    ]);
+    const rejections = new Set([
+      'reject', 'rejected', 'deny', 'denied', 'cancel', 'no', 'n',
+      '거부', '반려', '취소', '중단', '안돼', '아니', '아니요',
+    ]);
+    if (approvals.has(normalized)) return 'approve';
+    if (rejections.has(normalized)) return 'reject';
+    return null;
+  }
+
+  function submitPlanReviewText(text, action) {
+    if (text !== inputHistory[0]) {
+      inputHistory.unshift(text);
+      if (inputHistory.length > 50) inputHistory.pop();
+    }
+    inputHistoryIdx = -1;
+    const rendered = _appendMessageEl('user', text);
+    toolPanel.startRequest(text, rendered.article);
+    if (action === 'approve') setGenerating(true);
+    vscode.postMessage({ type: 'reviewPlan', action });
+    promptEl.value = '';
+    promptEl.style.height = 'auto';
+    autocomplete.close();
+    closeAllPopups();
+    renderContextBar();
   }
 
   function _clearChat() {
@@ -313,24 +570,90 @@ import { createInitialState, persistWebviewState } from './state.js';
   }
 
   function renderCustomTools(tools) {
+    customTools = Array.isArray(tools) ? tools : [];
     renderCustomToolsComponent(tools, {
       containerEl: customToolsEl,
       toolStats,
+      collapsed: customToolsCollapsed,
+      view: customToolsView,
+      onViewChange: view => {
+        customToolsView = view;
+        persistState();
+        renderCustomTools(customTools);
+      },
+      onToggleCollapsed: collapsed => {
+        customToolsCollapsed = collapsed;
+        persistState();
+        renderCustomTools(customTools);
+      },
       onPermissionChange: (metadataPath, permissionLevel) => {
         vscode.postMessage({ type: 'updateToolPermission', metadataPath, permissionLevel });
       },
     });
   }
 
-  toolPanel = createToolPanelController({
-    containerEl: toolsEl,
-    visibleLimit: TOOL_VISIBLE_LIMIT,
+  function clearPromptAfterCommand() {
+    promptEl.value = '';
+    promptEl.style.height = 'auto';
+    autocomplete.close();
+    closeAllPopups();
+    renderContextBar();
+  }
+
+  function isAgentBusy() {
+    return isGenerating || runnerState.state === 'busy' || runnerState.lifecycle === 'busy';
+  }
+
+  function renderContextBar() {
+    renderContextBarComponent({
+      containerEl: contextBarEl,
+      session: currentSession,
+      activeFile: activeFileContext,
+      activeFileSuppressed: !!(activeFileContext?.file && activeFileContext.file === suppressedActiveFile),
+      promptText: promptEl.value,
+      onRemoveActiveFile: () => {
+        suppressedActiveFile = activeFileContext?.file || '';
+        renderContextBar();
+      },
+      onRemoveMention: value => {
+        promptEl.value = removeMentionFromText(promptEl.value, value);
+        resizeTextarea();
+        renderContextBar();
+      },
+    });
+  }
+
+  function renderChangeReviewPanel() {
+    renderChangeReviewPanelComponent({
+      panelEl: changeReviewEl,
+      items: changeReviews,
+      onOpenDiff: item => vscode.postMessage({ type: 'openDiff', event: item.event }),
+      onOpenFile: item => vscode.postMessage({ type: 'openFile', path: item.path }),
+      onRevert: item => vscode.postMessage({
+        type: 'revertChangedFile',
+        id: item.id,
+        path: item.path,
+        oldContent: item.oldContent,
+      }),
+      onDismiss: item => {
+        changeReviews = changeReviews.filter(entry => entry.id !== item.id);
+        persistState();
+        renderChangeReviewPanel();
+      },
+      onClear: () => {
+        changeReviews = [];
+        persistState();
+        renderChangeReviewPanel();
+      },
+    });
+  }
+
+  if (toolsEl) toolsEl.hidden = true;
+  toolPanel = createActivityLogController({
+    messagesEl,
     longRunningMs: LONG_RUNNING_MS,
     onOpenDiff: event => vscode.postMessage({ type: 'openDiff', event }),
-    onPersistTool: entry => {
-      savedHistory.push(entry);
-      persistState();
-    },
+    onPersistTool: persistToolHistory,
     onStatsUpdate: updateToolStats,
     onOpenGeneratedTool: event => vscode.postMessage({ type: 'openGeneratedTool', event }),
     onRefreshCustomTools: () => vscode.postMessage({ type: 'getCustomTools' }),
@@ -341,11 +664,17 @@ import { createInitialState, persistWebviewState } from './state.js';
   persistState();
   savedHistory.forEach(m => {
     try {
-      if (m.type === 'message') _appendMessageEl(m.role, m.text, m.tone, false);
-      else if (m.type === 'tool') toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false);
+      if (m.type === 'message') {
+        const rendered = _appendMessageEl(m.role, m.text, m.tone, false);
+        if (m.role === 'user') toolPanel.startRequest(m.text, rendered.article);
+      }
+      else if (m.type === 'tool') toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false, m);
     } catch (e) { /* 손상된 히스토리 항목 무시 */ }
   });
   renderPlanPanel(savedPlan);
+  renderRunnerStatus();
+  renderContextBar();
+  renderChangeReviewPanel();
 
   vscode.postMessage({ type: 'init' });
   vscode.postMessage({ type: 'getActiveFile' });
@@ -500,12 +829,25 @@ import { createInitialState, persistWebviewState } from './state.js';
   });
 
   // ── Autocomplete ──────────────────────────────────────────────────
-  promptEl.addEventListener('input', () => autocomplete.handleInput());
+  promptEl.addEventListener('input', () => {
+    autocomplete.handleInput();
+    renderContextBar();
+  });
 
   // ── Session label ─────────────────────────────────────────────────
+  function sessionDisplayName(name) {
+    const session = sessions.find(item => item.name === name);
+    const title = typeof session?.title === 'string' ? session.title.trim() : '';
+    return title || name || 'default';
+  }
+
   function updateSession(name) {
-    currentSession = name || 'default';
-    if (sessionEl) sessionEl.textContent = `${currentSession} ▾`;
+    if (savedPlan) planBySession[currentSession] = savedPlan;
+    switchSavedPlanForSession(name || 'default');
+    if (sessionEl) {
+      sessionEl.textContent = `${sessionDisplayName(currentSession)} ▾`;
+      sessionEl.title = `Session: ${currentSession}`;
+    }
     persistState();
     renderSessionMenu();
   }
@@ -515,9 +857,15 @@ import { createInitialState, persistWebviewState } from './state.js';
       menuEl: sessionMenuEl,
       sessions,
       currentSession,
+      listOpen: sessionListOpen,
+      onListToggle: open => {
+        sessionListOpen = open;
+        persistState();
+      },
       onClose: () => closePopup(sessionMenuEl),
       onSwitch: name => vscode.postMessage({ type: 'switchSession', name }),
       onNew: name => vscode.postMessage({ type: 'newSession', name }),
+      onDelete: name => vscode.postMessage({ type: 'deleteSession', name }),
       onRename: (oldName, newName) => vscode.postMessage({ type: 'renameSession', oldName, newName }),
       onExport: (name, format) => vscode.postMessage({ type: 'exportSession', name, format }),
     });
@@ -546,6 +894,7 @@ import { createInitialState, persistWebviewState } from './state.js';
       currentAssistantEl      = body;
       currentAssistantTxt     = '';
     }
+    renderRunnerStatus();
   }
 
   // ── Submit ────────────────────────────────────────────────────────
@@ -556,22 +905,25 @@ import { createInitialState, persistWebviewState } from './state.js';
     }
     inputHistoryIdx = -1;
 
-    _appendMessageEl('user', text);
+    const rendered = _appendMessageEl('user', text);
+    toolPanel.startRequest(text, rendered.article);
     const isSlashCommand = text.startsWith('/');
     if (!isSlashCommand) setGenerating(true);
+    if (!isSlashCommand && currentMode === 'plan') beginPlanDraft(text);
 
-    if (!isSlashCommand && currentMode !== activeRunnerMode) {
-      vscode.postMessage({ type: 'setMode', mode: currentMode });
-      vscode.postMessage({ type: 'sendInput', text });
+    const skipCursorContext = isSlashCommand || !!(activeFileContext?.file && activeFileContext.file === suppressedActiveFile);
+    if (!isSlashCommand) {
+      vscode.postMessage({ type: 'sendWithMode', mode: currentMode, text, skipCursorContext });
       activeRunnerMode = currentMode;
     } else {
-      vscode.postMessage({ type: 'sendInput', text });
+      vscode.postMessage({ type: 'sendInput', text, skipCursorContext });
     }
 
     promptEl.value = '';
     promptEl.style.height = 'auto';
     autocomplete.close();
     closeAllPopups();
+    renderContextBar();
   }
 
   function submitPrompt() {
@@ -579,27 +931,52 @@ import { createInitialState, persistWebviewState } from './state.js';
     if (!text) return;
 
     const cmdLower = text.toLowerCase();
-    const firstToken = cmdLower.split(/\s+/, 1)[0];
 
     // 로컬 전용 명령어 (runner 없이도 동작)
     if (cmdLower === '/clear') {
       _clearChat();
-      promptEl.value = '';
-      promptEl.style.height = 'auto';
+      clearPromptAfterCommand();
       return;
     }
     if (cmdLower === '/quit' || cmdLower === '/exit') {
       vscode.postMessage({ type: 'stopSession' });
-      promptEl.value = '';
-      promptEl.style.height = 'auto';
+      clearPromptAfterCommand();
       return;
     }
-    if (MODE_SLASH_COMMANDS.has(firstToken)) {
+    if (cmdLower === '/help' || cmdLower === '/?') {
+      _appendMessageEl('system', LOCAL_HELP_TEXT, 'info');
+      clearPromptAfterCommand();
+      return;
+    }
+    if (cmdLower === '/tools' || cmdLower === '/tools custom') {
+      customToolsCollapsed = false;
+      persistState();
+      renderCustomTools(customTools);
+      vscode.postMessage({ type: 'getCustomTools' });
+      _appendMessageEl('system', 'Custom Tools 패널을 새로고침했습니다.', 'info');
+      clearPromptAfterCommand();
+      return;
+    }
+    if (cmdLower === '/plan cancel' || cmdLower === '/plan clear') {
+      cancelCurrentPlan('cancel');
+      clearPromptAfterCommand();
+      return;
+    }
+    if (cmdLower === '/plan delete' || cmdLower === '/plan remove') {
+      cancelCurrentPlan('delete');
+      clearPromptAfterCommand();
+      return;
+    }
+    if (cmdLower === '/session' || cmdLower === '/sessions' || cmdLower === '/session list') {
+      renderSessionMenu();
+      openPopup(sessionMenuEl);
+      vscode.postMessage({ type: 'getSessions' });
+      clearPromptAfterCommand();
+      return;
+    }
+    if (MODE_SLASH_COMMANDS.has(cmdLower)) {
       _appendMessageEl('system', MODE_SWITCH_GUIDANCE, 'hint');
-      promptEl.value = '';
-      promptEl.style.height = 'auto';
-      autocomplete.close();
-      closeAllPopups();
+      clearPromptAfterCommand();
       return;
     }
 
@@ -638,34 +1015,17 @@ import { createInitialState, persistWebviewState } from './state.js';
       return;
     }
 
+    const reviewAction = savedPlan?.reviewState === 'wait' ? classifyPlanReviewText(text) : null;
+    if (reviewAction) {
+      submitPlanReviewText(text, reviewAction);
+      return;
+    }
+
     sendPromptText(text);
   }
 
   // form submit은 항상 preventDefault (JS 크래시 시 폼 기본동작 방지)
   composerEl?.addEventListener('submit', (e) => { e.preventDefault(); submitPrompt(); });
-
-  startBtn?.addEventListener('click', () => {
-    if (runnerState.processRunning) {
-      appendTransientMessage('system', '기존 에이전트 프로세스에 다시 연결합니다.', 'hint');
-      requestRunnerAttach();
-      requestRunnerStatus();
-      return;
-    }
-
-    runnerState = {
-      ...runnerState,
-      running: false,
-      processRunning: true,
-      lifecycle: 'starting',
-      state: 'starting',
-      lastStatusAt: Date.now(),
-      lastDiagnostic: null,
-    };
-    setLoopStatus('running', 'starting');
-    vscode.postMessage({ type: 'launchSession' });
-    requestRunnerStatus();
-  });
-  stopBtn?.addEventListener('click',  () => vscode.postMessage({ type: 'stopSession'  }));
 
   document.getElementById('clear-history')?.addEventListener('click', _clearChat);
 
@@ -740,16 +1100,28 @@ import { createInitialState, persistWebviewState } from './state.js';
         showActiveSkills(event);
         const status = formatAgentLoopStatus(event);
         setLoopStatus(status.state, status.text);
+        if (status.state !== 'idle') {
+          toolPanel.note({
+            key: `loop:${event.tool_use_id || event.phase || 'status'}`,
+            label: status.text,
+            detail: event.message && event.message !== status.text ? event.message : '',
+            state: status.state,
+          });
+        }
         break;
       }
 
       case 'CompactProgressEvent': {
         const status = formatCompactProgress(event);
         setLoopStatus(status.state, status.text);
+        toolPanel.note({
+          key: 'compact',
+          label: status.text,
+          detail: event.trigger ? `(${event.trigger})` : '',
+          state: status.state === 'error' ? 'error' : 'info',
+        });
         if (event.phase === 'compact_failed') {
           appendTransientMessage('system', status.text, 'warn', 5000);
-        } else if (event.message || event.phase === 'compact_start' || event.phase === 'compact_end') {
-          appendTransientMessage('system', status.text, 'info', 2500);
         }
         break;
       }
@@ -762,6 +1134,12 @@ import { createInitialState, persistWebviewState } from './state.js';
       case 'ToolExecutionCompleted': {
         showActiveSkills(event);
         toolPanel.complete(event);
+        const reviewItem = createChangeReviewItem(event);
+        if (reviewItem) {
+          changeReviews = [reviewItem, ...changeReviews].slice(0, 20);
+          persistState();
+          renderChangeReviewPanel();
+        }
         break;
       }
 
@@ -821,6 +1199,10 @@ import { createInitialState, persistWebviewState } from './state.js';
           break;
         }
         setGenerating(false);
+        if (/PLAN 승인\/거부는 WAIT_FOR_REVIEW 상태에서만 가능합니다\./.test(event.message || '')) {
+          clearSavedPlan();
+          break;
+        }
         _appendMessageEl('system', event.message || '', 'info');
         break;
 
@@ -840,17 +1222,48 @@ import { createInitialState, persistWebviewState } from './state.js';
 
       case 'PlanDraftedEvent':
         savedPlan = event.structured_plan || null;
-        if (savedPlan) savedPlan.reviewState = 'wait';
-        persistState();
-        renderPlanPanel(savedPlan);
+        if (savedPlan) {
+          savedPlan.reviewState = 'wait';
+          savedPlan.phase = 'wait';
+        }
+        setSavedPlan(savedPlan);
         _appendMessageEl('system', '📋 Plan drafted — review and approve to execute.', 'info');
         break;
 
-      case 'PlanReviewEvent':
+      case 'PlanPhaseTransitionRequested':
         if (savedPlan) {
-          savedPlan.reviewState = event.action === 'approved' ? 'approved' : 'rejected';
-          persistState();
-          renderPlanPanel(savedPlan);
+          const rawPhase = String(event.to_phase || '').trim();
+          const normalizedPhase = rawPhase.toLowerCase();
+          const nextState = normalizedPhase === 'completed'
+            ? 'done'
+            : normalizedPhase === 'waitforreview'
+              ? 'wait'
+              : normalizedPhase || 'review';
+          savedPlan.reviewState = nextState;
+          savedPlan.phase = rawPhase || nextState;
+          setSavedPlan(savedPlan);
+        }
+        break;
+
+      case 'PlanReviewEvent':
+        if (['not_reviewable', 'closed', 'stale', 'cancelled', 'canceled', 'deleted'].includes(event.action)) {
+          clearSavedPlan();
+          break;
+        }
+        if (savedPlan) {
+          const nextState = event.action === 'completed'
+            ? 'done'
+            : event.action === 'approved'
+              ? 'executing'
+              : event.action === 'rejected'
+                ? 'drafting'
+                : String(event.action || event.phase || 'review').toLowerCase();
+          savedPlan.reviewState = nextState;
+          savedPlan.phase = event.phase || nextState;
+          if (Number.isInteger(event.totalTasks)) savedPlan.totalTasks = event.totalTasks;
+          if (Number.isInteger(event.completedTasks)) savedPlan.completedTasks = event.completedTasks;
+          if (Number.isInteger(event.remainingTasks)) savedPlan.remainingTasks = event.remainingTasks;
+          setSavedPlan(savedPlan);
         }
         break;
 
@@ -863,11 +1276,23 @@ import { createInitialState, persistWebviewState } from './state.js';
         updateSession(event.current || 'default');
         messagesEl.innerHTML = '';
         toolPanel.clear();
+        if (Object.prototype.hasOwnProperty.call(event, 'planState')) {
+          setSavedPlan(planFromSessionState(event.planState));
+        } else {
+          savedPlan = planBySession[currentSession] || null;
+          renderPlanPanel(savedPlan);
+        }
         savedHistory = Array.isArray(event.history) ? event.history : [];
         savedHistory.forEach(m => {
-          if (m.type === 'message') _appendMessageEl(m.role, m.text, m.tone, false);
+          if (m.type === 'message') {
+            const rendered = _appendMessageEl(m.role, m.text, m.tone, false);
+            if (m.role === 'user') toolPanel.startRequest(m.text, rendered.article);
+          } else if (m.type === 'tool') {
+            toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false, m);
+          }
         });
         persistState();
+        renderContextBar();
         break;
 
       case 'SessionExportedEvent': {
@@ -892,6 +1317,9 @@ import { createInitialState, persistWebviewState } from './state.js';
           activeFileEl.textContent = name ? `📄 ${name}${line}` : '';
           activeFileEl.title       = event.file || '';
         }
+        activeFileContext = event.file ? { file: event.file, line: event.line } : null;
+        if (suppressedActiveFile && suppressedActiveFile !== event.file) suppressedActiveFile = '';
+        renderContextBar();
         break;
 
       case 'customToolsLoaded':
@@ -911,6 +1339,19 @@ import { createInitialState, persistWebviewState } from './state.js';
 
       case 'customToolValidation':
         _appendMessageEl('system', event.message || '', event.success ? 'info' : 'warn');
+        break;
+
+      case 'healthStatus':
+        latestHealth = event;
+        healthPanelVisible = true;
+        renderHealthPanel();
+        break;
+
+      case 'changeReviewUpdated':
+        if (event.id) changeReviews = changeReviews.filter(item => item.id !== event.id);
+        persistState();
+        renderChangeReviewPanel();
+        _appendMessageEl('system', event.message || 'Change review updated.', event.success === false ? 'warn' : 'info');
         break;
 
       case 'assetSaved':
