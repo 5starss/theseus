@@ -36,10 +36,16 @@ async def run_tool_sandbox_gate(
             "status": "sandbox_unavailable",
             "logs": "",
             "error": str(exc),
+            "errorType": "sandbox_unavailable",
             "checkedAt": None,
             "executionTimeMs": 0,
             "exitCode": None,
             "timedOut": False,
+            "resourceLimited": False,
+            "metadata": {
+                "errorType": "sandbox_unavailable",
+                "error": str(exc),
+            },
         }
 
     logs = "\n".join(filter(None, [output.stdout, output.stderr])).strip()

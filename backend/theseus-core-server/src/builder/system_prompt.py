@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Iterable
 
 from theseus_engine.models.state import (
     AgentMode,
@@ -17,6 +17,8 @@ def build_theseus_system_prompt(
     plan_phase: PlanPhase | None = None,
     coordinator_phase: CoordinatorPhase | None = None,
     plan_content: Any | None = None,
+    available_tools: Iterable[str] | None = None,
+    runtime_reminders: Iterable[str] | None = None,
 ) -> str:
     """Build the canonical Theseus system prompt for a server-side request."""
 
@@ -29,7 +31,10 @@ def build_theseus_system_prompt(
     if plan_content is not None:
         state_machine.plan = _format_plan_content(plan_content)
 
-    return state_machine.get_system_prompt()
+    return state_machine.get_system_prompt(
+        available_tools=available_tools,
+        runtime_reminders=runtime_reminders,
+    )
 
 
 def _format_plan_content(plan_content: Any) -> str:

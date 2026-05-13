@@ -1,6 +1,8 @@
 import asyncio
+from contextlib import contextmanager
 import json
 import logging
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -41,8 +43,10 @@ class DockerExecutor(ToolRunner):
             client = docker.from_env(environment=self._docker_environment())
             client.ping()
         except DockerException as exc:
+            error_type = self._classify_docker_error(exc)
             raise SandboxUnavailableError(
-                "Docker daemon is unavailable or inaccessible."
+                "Docker daemon is unavailable or inaccessible "
+                f"({error_type}): {exc}"
             ) from exc
 
         self._client = client
@@ -89,10 +93,11 @@ class DockerExecutor(ToolRunner):
     def _execute_sync(self, request: SandboxInput, start_time: float) -> SandboxOutput:
         client = self._get_client()
 
-        with tempfile.TemporaryDirectory(prefix="theseus-sandbox-") as tmpdir:
-            root_dir = Path(tmpdir)
+        with self._sandbox_workspace() as (root_dir, host_root_dir, temp_root_mode):
             input_dir = root_dir / "input"
             output_dir = root_dir / "output"
+            host_input_dir = host_root_dir / "input"
+            host_output_dir = host_root_dir / "output"
             input_dir.mkdir(parents=True, exist_ok=True)
             output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -122,8 +127,11 @@ class DockerExecutor(ToolRunner):
             diagnostics: dict[str, Any] = {
                 "sandboxImage": settings.SANDBOX_IMAGE,
                 "dockerHost": settings.docker_host or "local-default",
+                "tempRootMode": temp_root_mode,
                 "inputDir": str(input_dir.resolve()),
                 "outputDir": str(output_dir.resolve()),
+                "hostInputDir": str(host_input_dir),
+                "hostOutputDir": str(host_output_dir),
             }
 
             try:
@@ -136,8 +144,8 @@ class DockerExecutor(ToolRunner):
                     cpu_period=settings.SANDBOX_CPU_PERIOD,
                     cpu_quota=settings.SANDBOX_CPU_QUOTA,
                     volumes={
-                        str(input_dir.resolve()): {"bind": "/sandbox/input", "mode": "ro"},
-                        str(output_dir.resolve()): {"bind": "/sandbox/output", "mode": "rw"},
+                        str(host_input_dir): {"bind": "/sandbox/input", "mode": "ro"},
+                        str(host_output_dir): {"bind": "/sandbox/output", "mode": "rw"},
                     },
                     working_dir="/sandbox/input",
                     auto_remove=False,
@@ -162,6 +170,8 @@ class DockerExecutor(ToolRunner):
                 stdout, stderr = self._collect_logs(container)
                 diagnostics["containerId"] = container.id
                 diagnostics["containerExitCode"] = exit_code
+                diagnostics["stdout"] = stdout
+                diagnostics["stderr"] = stderr
                 resource_limited = exit_code == 137
                 diagnostics["resourceLimited"] = resource_limited
                 if resource_limited:
@@ -210,13 +220,19 @@ class DockerExecutor(ToolRunner):
                     )
 
                 success = bool(result_payload.get("success"))
+                error_type = None if success else (
+                    "resource_limit" if resource_limited else "sandbox_runner_error"
+                )
+                diagnostics["errorType"] = error_type
+                diagnostics["exitCode"] = exit_code
+                diagnostics["timedOut"] = False
                 return SandboxOutput(
                     success=success,
                     result=result_payload.get("result") if success else None,
                     stdout=stdout,
                     stderr=stderr,
                     error_message=result_payload.get("error_message"),
-                    error_type=None if success else ("resource_limit" if resource_limited else "sandbox_runner_error"),
+                    error_type=error_type,
                     exit_code=exit_code,
                     timed_out=False,
                     resource_limited=resource_limited,
@@ -237,6 +253,41 @@ class DockerExecutor(ToolRunner):
                     except Exception as exc:
                         logger.warning("Failed to cleanup sandbox container: %s", exc)
 
+    @contextmanager
+    def _sandbox_workspace(self):
+        host_root = settings.SANDBOX_HOST_TEMP_ROOT
+        container_root = settings.SANDBOX_CONTAINER_TEMP_ROOT
+        if bool(host_root) != bool(container_root):
+            raise SandboxUnavailableError(
+                "Sandbox shared temp root is partially configured "
+                "(sandbox_temp_root_mismatch): set both SANDBOX_HOST_TEMP_ROOT "
+                "and SANDBOX_CONTAINER_TEMP_ROOT, or set neither."
+            )
+
+        if not host_root or not container_root:
+            with tempfile.TemporaryDirectory(prefix="theseus-sandbox-") as tmpdir:
+                root_dir = Path(tmpdir)
+                yield root_dir, root_dir, "local-temp"
+            return
+
+        container_base = Path(container_root)
+        host_base = Path(host_root)
+        try:
+            container_base.mkdir(parents=True, exist_ok=True)
+            root_dir = Path(
+                tempfile.mkdtemp(prefix="theseus-sandbox-", dir=str(container_base))
+            )
+        except OSError as exc:
+            raise SandboxUnavailableError(
+                "Sandbox shared temp root is not writable "
+                f"(sandbox_temp_root_invalid): {exc}"
+            ) from exc
+
+        try:
+            yield root_dir, host_base / root_dir.name, "shared-temp"
+        finally:
+            shutil.rmtree(root_dir, ignore_errors=True)
+
     def _collect_logs(self, container) -> tuple[str, str]:
         stdout = ""
         stderr = ""
@@ -256,9 +307,16 @@ class DockerExecutor(ToolRunner):
             return "image_not_found"
         if "permission denied" in message:
             return "permission_denied"
+        if "access is denied" in message or "액세스가 거부" in message:
+            return "permission_denied"
         if "mount" in message or "bind source path" in message or "invalid volume" in message:
             return "mount_failure"
-        if "connection aborted" in message or "failed to establish a new connection" in message:
+        if (
+            "connection aborted" in message
+            or "failed to establish a new connection" in message
+            or "error while fetching server api version" in message
+            or "http+docker" in message
+        ):
             return "docker_connection_failed"
         return "docker_error"
 
@@ -275,6 +333,13 @@ class DockerExecutor(ToolRunner):
         resource_limited: bool = False,
         diagnostics: dict[str, Any] | None = None,
     ) -> SandboxOutput:
+        metadata = dict(diagnostics or {})
+        metadata["errorType"] = error_type
+        metadata["exitCode"] = exit_code
+        metadata["timedOut"] = timed_out
+        metadata["resourceLimited"] = resource_limited
+        metadata.setdefault("stdout", stdout)
+        metadata.setdefault("stderr", stderr)
         return SandboxOutput(
             success=False,
             stdout=stdout,
@@ -285,5 +350,5 @@ class DockerExecutor(ToolRunner):
             timed_out=timed_out,
             resource_limited=resource_limited,
             execution_time_ms=int((time.time() - start_time) * 1000),
-            metadata=diagnostics or {},
+            metadata=metadata,
         )

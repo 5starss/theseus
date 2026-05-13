@@ -1,14 +1,21 @@
 const SLASH_COMMANDS = [
-  '/session list',
-  '/session new',
-  '/clear',
-  '/cost',
-  '/stats',
-  '/tools',
-  '/tools custom',
-  '/validate',
-  '/help',
-  '/quit',
+  { value: '/tools', description: 'Refresh and open Custom Tools', scope: 'local' },
+  { value: '/tools custom', description: 'Show custom tool list', scope: 'local' },
+  { value: '/session', description: 'Refresh local sessions', scope: 'local' },
+  { value: '/session list', description: 'Refresh local sessions', scope: 'local' },
+  { value: '/session new', description: 'Create a new session', scope: 'runner required' },
+  { value: '/session delete', description: 'Delete a session by name', scope: 'runner required' },
+  { value: '/clear', description: 'Clear visible chat history', scope: 'local' },
+  { value: '/cost', description: 'Show runner token/cost stats', scope: 'runner required' },
+  { value: '/stats', description: 'Show runner session stats', scope: 'runner required' },
+  { value: '/validate', description: 'Validate custom tools in runner', scope: 'runner required' },
+  { value: '/plan approve', description: 'Approve a pending plan', scope: 'plan review only' },
+  { value: '/plan reject', description: 'Reject a pending plan', scope: 'plan review only' },
+  { value: '/plan cancel', description: 'Cancel the current session plan', scope: 'runner required' },
+  { value: '/plan delete', description: 'Delete the current session plan', scope: 'runner required' },
+  { value: '/help', description: 'Show command help', scope: 'local' },
+  { value: '/quit', description: 'Stop the runner', scope: 'local' },
+  { value: '/exit', description: 'Stop the runner', scope: 'local' },
 ];
 
 export function getWordBefore(text, pos) {
@@ -31,6 +38,10 @@ export function createAutocompleteController({
   let index = -1;
   let mode = null;
 
+  function itemValue(item) {
+    return typeof item === 'string' ? item : item.value;
+  }
+
   function show(nextItems) {
     if (!nextItems.length) {
       close();
@@ -41,10 +52,21 @@ export function createAutocompleteController({
     listEl.innerHTML = '';
     nextItems.forEach(item => {
       const li = document.createElement('li');
-      li.textContent = item;
+      if (typeof item === 'string') {
+        li.textContent = item;
+      } else {
+        li.className = 'command-item';
+        const label = document.createElement('strong');
+        label.textContent = item.value;
+        const detail = document.createElement('span');
+        detail.textContent = item.description || '';
+        const scope = document.createElement('small');
+        scope.textContent = item.scope || '';
+        li.append(label, detail, scope);
+      }
       li.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        apply(item);
+        apply(itemValue(item));
       });
       listEl.appendChild(li);
     });
@@ -90,7 +112,7 @@ export function createAutocompleteController({
     if (word.startsWith('/') && word.length >= 1) {
       mode = 'slash';
       const q = word.slice(1).toLowerCase();
-      show(SLASH_COMMANDS.filter(c => c.includes(q)));
+      show(SLASH_COMMANDS.filter(c => c.value.slice(1).includes(q) || c.description.toLowerCase().includes(q)));
       return;
     }
     if (word.startsWith('@') && word.length >= 1) {
@@ -115,12 +137,12 @@ export function createAutocompleteController({
     }
     if (event.key === 'Tab') {
       event.preventDefault();
-      apply(items[index >= 0 ? index : 0]);
+      apply(itemValue(items[index >= 0 ? index : 0]));
       return true;
     }
     if (event.key === 'Enter' && index >= 0) {
       event.preventDefault();
-      apply(items[index]);
+      apply(itemValue(items[index]));
       return true;
     }
     if (event.key === 'Escape') {

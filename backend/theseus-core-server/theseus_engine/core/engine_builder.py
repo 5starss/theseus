@@ -32,6 +32,21 @@ THESEUS_DYNAMIC_TOOL_RETRIEVAL = (
 )
 
 
+def _workspace_custom_tool_dirs(cwd: Path) -> list[Path]:
+    """Return custom tool dirs owned by the active workspace."""
+    candidates = [cwd / "custom_tools", cwd / "theseus_engine" / "custom_tools"]
+    seen: set[str] = set()
+    result: list[Path] = []
+    for path in candidates:
+        resolved = path.resolve()
+        key = os.path.normcase(str(resolved))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(resolved)
+    return result
+
+
 def _resolve_skill_injection_enabled(value: Optional[bool]) -> bool:
     if value is not None:
         return bool(value)
@@ -98,7 +113,11 @@ async def setup_engine(
             full_registry, project_id, project_tool_permissions,
         )
     else:
-        loaded_tools = load_custom_tools(full_registry, project_tool_permissions)
+        loaded_tools = load_custom_tools(
+            full_registry,
+            project_tool_permissions,
+            extra_dirs=_workspace_custom_tool_dirs(resolved_cwd),
+        )
     if loaded_tools:
         print(f"✅ Loaded {len(loaded_tools)} custom tools.")
 
@@ -178,6 +197,7 @@ async def setup_engine(
         active_registry.register(ToolSearchTool())
         print("🔧 ToolSearchTool이 폴백으로 활성화되었습니다.")
 
+    active_tool_names = tuple(tool.name for tool in active_registry.list_tools())
     if enable_hooks:
         hook_executor = TheseusHookExecutor(
             active_registry=active_registry,
@@ -198,7 +218,7 @@ async def setup_engine(
         cwd=resolved_cwd,
         model=model_name,
         system_prompt=(
-            sm.get_system_prompt()
+            sm.get_system_prompt(available_tools=active_tool_names)
             + ("\n\n" + memory_context if memory_context else "")
         ),
         max_turns=30,

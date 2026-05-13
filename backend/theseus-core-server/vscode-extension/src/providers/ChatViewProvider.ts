@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { resolveReadableUri, saveAssetToWorkspace } from '../assets/AssetStore';
 import { listLocalSessionSummaries } from '../session/LocalSessionStore';
@@ -17,6 +19,8 @@ import {
 import {
   findMentionFiles,
   getActiveCursorContext,
+  getCoreRoot,
+  getCustomToolSearchRoots,
   getWorkspaceCwd,
   injectCursorContext,
 } from '../workspace/WorkspaceContext';
@@ -58,6 +62,28 @@ function scalarText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value, null, 2);
+}
+
+function makeUntitledSessionName(): string {
+  const now = new Date();
+  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
+  return [
+    'session',
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+    pad(now.getMilliseconds(), 3),
+  ].join('');
+}
+
+function isInsidePath(child: string, parent: string): boolean {
+  const resolvedChild = path.resolve(child);
+  const resolvedParent = path.resolve(parent);
+  const relative = path.relative(resolvedParent, resolvedChild);
+  return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function withoutUiState(plan: JsonObject): JsonObject {
@@ -223,6 +249,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     this.sessionManager.reattachIfPossible('post_session_state');
     this.postRunnerEvent(this.sessionManager.status);
     this.messageQueue.post({ type: 'historySnapshot', history: this.sessionManager.historySnapshot });
+    void this.refreshCustomTools();
   }
 
   private postRunnerEvent(event: RunnerEvent): void {
@@ -247,6 +274,148 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       type: 'runnerEvent',
       event: { type: 'customToolsLoaded', tools },
     });
+  }
+
+  private postHealthStatus(): void {
+    const coreRoot = getCoreRoot(this.context) || '';
+    const workspaceCwd = getWorkspaceCwd() || '';
+    const config = vscode.workspace.getConfiguration('theseus');
+    const pythonExec = config.get<string>('pythonPath') || 'python';
+    const serverUrl = config.get<string>('serverUrl') || '';
+    const status = this.sessionManager.status;
+    const customToolRoots = getCustomToolSearchRoots();
+    this.postRunnerEvent({
+      type: 'healthStatus',
+      settings: {
+        corePath: coreRoot,
+        pythonPath: pythonExec,
+        serverUrl,
+        workspacePath: workspaceCwd,
+        coreRoot,
+        workspaceCwd,
+        pythonExec,
+        customToolRoots,
+      },
+      runner: {
+        running: status.running,
+        processRunning: status.processRunning,
+        lifecycle: status.lifecycle,
+        runtimeMode: status.runtimeMode,
+        daemonPid: status.daemonPid,
+        daemonPort: status.daemonPort,
+        sessionId: status.sessionId,
+        lastDiagnostic: status.lastDiagnostic,
+      },
+      checks: [
+        {
+          label: 'Core path',
+          status: coreRoot ? 'ok' : 'error',
+          detail: coreRoot || 'theseus.corePath를 설정하세요.',
+        },
+        {
+          label: 'Workspace',
+          status: workspaceCwd ? 'ok' : 'warn',
+          detail: workspaceCwd || '워크스페이스 폴더를 열거나 theseus.workspacePath를 설정하세요.',
+        },
+        {
+          label: 'Python',
+          status: pythonExec ? 'ok' : 'warn',
+          detail: pythonExec,
+        },
+        {
+          label: 'Runner',
+          status: status.lifecycle === 'error' ? 'error' : status.running ? 'ok' : 'warn',
+          detail: String(status.lifecycle || 'stopped'),
+        },
+        {
+          label: 'Custom tools',
+          status: customToolRoots.length ? 'ok' : 'warn',
+          detail: customToolRoots.length
+            ? customToolRoots.join(' | ')
+            : 'corePath 또는 workspacePath를 확인하세요.',
+        },
+      ],
+    });
+  }
+
+  private withOptionalCursorContext(text: string, skipCursorContext?: boolean): string {
+    if (skipCursorContext || text.trimStart().startsWith('/')) return text;
+    return injectCursorContext(text);
+  }
+
+  private allowedFileRoots(): string[] {
+    const roots = new Set<string>();
+    const workspaceCwd = getWorkspaceCwd();
+    const coreRoot = getCoreRoot(this.context);
+    if (workspaceCwd) roots.add(workspaceCwd);
+    if (coreRoot) roots.add(coreRoot);
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      roots.add(folder.uri.fsPath);
+    }
+    return [...roots].filter(Boolean);
+  }
+
+  private isAllowedFilePath(filePath: string): boolean {
+    if (!path.isAbsolute(filePath)) return true;
+    return this.allowedFileRoots().some(root => isInsidePath(filePath, root));
+  }
+
+  private resolveUserFilePath(filePath: string): vscode.Uri | undefined {
+    if (!filePath) return undefined;
+    if (path.isAbsolute(filePath)) return vscode.Uri.file(filePath);
+    const workspaceRoot = getWorkspaceCwd() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) return undefined;
+    return vscode.Uri.file(path.resolve(workspaceRoot, filePath));
+  }
+
+  private async openUserFile(filePath: string): Promise<void> {
+    const uri = this.resolveUserFilePath(filePath);
+    if (!uri) return;
+    await vscode.window.showTextDocument(uri, { preview: false });
+  }
+
+  private async revertChangedFile(id: string | undefined, filePath: string | undefined, oldContent: string | undefined): Promise<void> {
+    if (!filePath || typeof oldContent !== 'string') {
+      this.postRunnerEvent({
+        type: 'changeReviewUpdated',
+        id,
+        path: filePath,
+        success: false,
+        message: '되돌릴 파일 정보가 부족합니다.',
+      });
+      return;
+    }
+
+    const uri = this.resolveUserFilePath(filePath);
+    if (!uri || !this.isAllowedFilePath(uri.fsPath)) {
+      this.postRunnerEvent({
+        type: 'changeReviewUpdated',
+        id,
+        path: filePath,
+        success: false,
+        message: '워크스페이스 밖의 파일은 되돌릴 수 없습니다.',
+      });
+      return;
+    }
+
+    try {
+      await fs.promises.writeFile(uri.fsPath, oldContent, 'utf8');
+      this.postRunnerEvent({
+        type: 'changeReviewUpdated',
+        id,
+        path: uri.fsPath,
+        success: true,
+        message: `파일을 이전 스냅샷으로 되돌렸습니다: ${vscode.workspace.asRelativePath(uri, false)}`,
+      });
+    } catch (err) {
+      this.postRunnerEvent({
+        type: 'changeReviewUpdated',
+        id,
+        path: uri.fsPath,
+        success: false,
+        message: `파일 되돌리기 실패: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -280,19 +449,21 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'send':
         case 'sendInput':
-          if (typeof msg.text === 'string') this.sessionManager.send(injectCursorContext(msg.text));
+          if (typeof msg.text === 'string') this.sessionManager.send(this.withOptionalCursorContext(msg.text, msg.skipCursorContext));
           break;
         case 'setMode':
           if (typeof msg.mode === 'string') this.sessionManager.setMode(msg.mode);
           break;
         case 'sendWithMode':
-          if (typeof msg.mode === 'string') this.sessionManager.setMode(msg.mode);
-          if (typeof msg.text === 'string') this.sessionManager.send(injectCursorContext(msg.text));
+          if (typeof msg.text === 'string') {
+            this.sessionManager.send(
+              this.withOptionalCursorContext(msg.text, msg.skipCursorContext),
+              typeof msg.mode === 'string' ? msg.mode : undefined,
+            );
+          }
           break;
         case 'getSessions':
-          if (this.sessionManager.isRunning) {
-            this.sessionManager.send('/session list');
-          } else {
+          {
             const status = this.sessionManager.status;
             const current = typeof status.session === 'string' ? status.session : 'default';
             const workspaceCwd = typeof status.workspaceCwd === 'string' ? status.workspaceCwd : getWorkspaceCwd();
@@ -305,10 +476,15 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'newSession':
-          if (typeof msg.name === 'string') this.sessionManager.send(`/session new ${JSON.stringify(msg.name)}`);
+          this.sessionManager.send(
+            `/session new ${JSON.stringify(typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName())}`,
+          );
           break;
         case 'switchSession':
           if (typeof msg.name === 'string') this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
+          break;
+        case 'deleteSession':
+          if (typeof msg.name === 'string') this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
           break;
         case 'renameSession':
           if (typeof msg.oldName === 'string' && typeof msg.newName === 'string') {
@@ -323,6 +499,10 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         case 'reviewPlan':
           if (msg.action === 'approve') this.sessionManager.send('/plan approve');
           if (msg.action === 'reject') this.sessionManager.send('/plan reject');
+          if (msg.action === 'cancel' || msg.action === 'delete') {
+            this.sessionManager.interrupt();
+            this.sessionManager.send(`/plan ${msg.action}`);
+          }
           break;
         case 'openPlanPreview':
           if (msg.plan) await openPlanMarkdownPreview(msg.plan);
@@ -338,6 +518,21 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         case 'interruptSession':
         case 'stopGen':
           this.sessionManager.interrupt();
+          break;
+        case 'showLogs':
+          this.sessionManager.showLogs();
+          break;
+        case 'openSettings':
+          vscode.commands.executeCommand('workbench.action.openSettings', 'theseus');
+          break;
+        case 'getHealth':
+          this.postHealthStatus();
+          break;
+        case 'explainProblem':
+          vscode.commands.executeCommand('theseus.explainProblem');
+          break;
+        case 'fixProblem':
+          vscode.commands.executeCommand('theseus.fixProblem');
           break;
         case 'getFiles': {
           const q = typeof msg.query === 'string' ? msg.query : '';
@@ -382,14 +577,13 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         }
         case 'openFile': {
           if (typeof msg.path === 'string') {
-            const wsFolders = vscode.workspace.workspaceFolders;
-            if (wsFolders?.length) {
-              const uri = vscode.Uri.joinPath(wsFolders[0].uri, msg.path);
-              vscode.window.showTextDocument(uri);
-            }
+            await this.openUserFile(msg.path);
           }
           break;
         }
+        case 'revertChangedFile':
+          await this.revertChangedFile(msg.id, msg.path, msg.oldContent);
+          break;
         case 'openGeneratedTool': {
           const event = msg.event as RunnerEvent | undefined;
           const metadata = event?.metadata || {};
