@@ -7,57 +7,6 @@ import type {
   ToolApprovalResponse
 } from '@/features/projects/types/approval';
 
-const generateMockApprovals = (projectId: number): ToolApprovalResponse[] => [
-  {
-    toolApprovalId: 101,
-    projectId,
-    chatSessionId: 301,
-    toolId: null,
-    toolPlanId: 201,
-    planGroupId: 31,
-    planVersion: 1,
-    fileName: null,
-    displayName: 'Data Pattern Analyzer PLAN',
-    requestNumber: 1,
-    approvalStatus: 'PENDING',
-    requestedByProjectMemberId: 5,
-    requestedByUserId: 12,
-    requestedByUserName: 'Project Member',
-    reviewedByProjectMemberId: null,
-    reviewedByUserId: null,
-    reviewedByUserName: null,
-    reviewFeedback: null,
-    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-    reviewedAt: null,
-    toolStatus: null,
-    toolPlanStatus: 'PENDING'
-  },
-  {
-    toolApprovalId: 102,
-    projectId,
-    chatSessionId: 302,
-    toolId: null,
-    toolPlanId: 202,
-    planGroupId: 32,
-    planVersion: 1,
-    fileName: null,
-    displayName: 'Log Parser PLAN',
-    requestNumber: 1,
-    approvalStatus: 'APPROVED',
-    requestedByProjectMemberId: 6,
-    requestedByUserId: 15,
-    requestedByUserName: 'Project Admin',
-    reviewedByProjectMemberId: 1,
-    reviewedByUserId: 1,
-    reviewedByUserName: 'Reviewer',
-    reviewFeedback: 'Approved.',
-    requestedAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-    reviewedAt: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
-    toolStatus: null,
-    toolPlanStatus: 'APPROVED'
-  }
-];
-
 export const approvalApi = {
   /**
    * ToolPlan 승인 요청 목록을 조회합니다.
@@ -78,26 +27,10 @@ export const approvalApi = {
         `/api/v1/projects/${projectId}/tool-approvals`,
         { params }
       );
-
-      if (!response.data?.result?.content || response.data.result.content.length === 0) {
-        throw new Error('Empty content');
-      }
       return response.data.result;
     } catch (error) {
-      console.warn('Falling back to mock tool approvals.', error);
-
-      const allMocks = generateMockApprovals(Number(projectId));
-      const filteredMocks = approvalStatus && approvalStatus !== 'ALL'
-        ? allMocks.filter((approval) => approval.approvalStatus === approvalStatus)
-        : allMocks;
-
-      return {
-        content: filteredMocks,
-        page,
-        size,
-        totalElements: filteredMocks.length,
-        totalPages: 1
-      } as PageResponse<ToolApprovalResponse>;
+      console.error('Failed to fetch tool approvals:', error);
+      throw error;
     }
   },
 
@@ -116,8 +49,8 @@ export const approvalApi = {
       );
       return response.data.result;
     } catch (error) {
-      console.warn('Failed to approve tool plan via API, simulating success.', error);
-      return new Promise((resolve) => setTimeout(resolve, 1000));
+      console.error(`Failed to approve tool approval ${toolApprovalId}:`, error);
+      throw error;
     }
   },
 
@@ -136,8 +69,8 @@ export const approvalApi = {
       );
       return response.data.result;
     } catch (error) {
-      console.warn('Failed to reject tool plan via API, simulating success.', error);
-      return new Promise((resolve) => setTimeout(resolve, 1000));
+      console.error(`Failed to reject tool approval ${toolApprovalId}:`, error);
+      throw error;
     }
   }
 };

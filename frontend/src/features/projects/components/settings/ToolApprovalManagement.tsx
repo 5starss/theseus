@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,10 +27,20 @@ interface ToolApprovalManagementProps {
 }
 
 export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterStatus = searchParams.get('status') || 'PENDING';
+
+  const setFilterStatus = (status: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('status', status);
+      return next;
+    }, { replace: true });
+  };
+
   const [approvals, setApprovals] = useState<ToolApprovalResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchTrigger, setFetchTrigger] = useState(0);
-  const [filterStatus, setFilterStatus] = useState<string>('PENDING'); // PENDING, APPROVED, REJECTED, ALL
 
   // States for Detail Modal
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -205,7 +216,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
                             <Button
                               size="sm"
                               variant="outline"
-                              className="border-slate-700 text-slate-300 hover:bg-slate-800 hover:text-white font-bold text-[11px]"
+                              className="border-slate-800 bg-slate-900/40 text-slate-400 hover:bg-slate-800 hover:text-slate-100 font-bold text-[11px] transition-all"
                               onClick={() => openDetailModal(approval)}
                             >
                               <Eye className="w-3 h-3 mr-1.5" />
