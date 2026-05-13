@@ -4,6 +4,447 @@
 
 ## [Unreleased]
 
+### 🐛 Session 98 — Extension UX/Context/Session 통합 보정 (2026-05-13)
+
+#### Activity / Tool 표시
+
+- 전역 tools 패널에 tool 실행 이력이 질문과 무관하게 누적되던 UX를 변경해, 마지막 사용자 질문 아래에 `Activity for ...` 아코디언을 만들고 해당 질문에서 발생한 `ToolExecutionStarted/Completed`를 그 안에 묶어 표시
+- `media/components/ActivityLog.js`를 추가해 tool 실행 시작/완료, 장시간 실행 타이머, diff action, `create_tool` 후속 refresh/open 동작을 질문 단위 activity group에서 처리
+- 질문 단위 `ActivityLog`가 실제 tool 이벤트뿐 아니라 `AgentLoopStatus`와 `CompactProgressEvent`도 같은 질문 아래 상태 row로 표시하도록 보강
+- `Auto-compacting conversation memory…` 같은 compact 진행 메시지가 일반 채팅 system message로 남지 않고 activity accordion 내부 상태로 정리되도록 변경
+- 기존 `savedHistory`의 `tool` 항목도 user message 뒤에 복원되면 같은 activity group으로 재구성되도록 보강하고, 실행 시작 이벤트는 UI에서만 running row로 표시하며 완료 이벤트 중심으로 저장해 재열람 시 오래된 `running...` 항목이 남지 않도록 수정
+- 기존 전역 `#tools` 영역은 숨기고, narrow sidebar에서 activity summary가 세로로 접히도록 responsive CSS를 추가
+- activity group border를 focus color 대신 widget border로 조정해 빈 파란 줄처럼 보이는 현상을 완화
+
+#### Context / Prompt 주입
+
+- 현재 IDE에서 열린 파일을 모든 사용자 입력에 자동 보조 컨텍스트로 붙이지 않고, “현재 파일”, “이 파일”, “여기”, “this file”처럼 사용자가 명시적으로 현재 편집기 컨텍스트를 가리킬 때만 주입하도록 변경
+- active file context bar 문구를 `context ...`에서 `active ...`로 바꿔 “자동 포함되는 컨텍스트”가 아니라 현재 열린 파일 상태 표시임을 명확히 함
+- `WorkspaceContext.injectCursorContext()`가 LLM 입력에 붙이는 active editor 보조 컨텍스트 문구를 영어(`IDE auxiliary context`)로 변경
+- `Theseus: Explain Problem` / `Theseus: Fix Problem` / `Theseus: Explain Selection`이 입력창에 삽입하는 요청 문구를 영어로 변경
+- `docs/prompt/prompt_architecture_map.md`에 VSCode Extension user-message template 주입 경로와 영어 기본 원칙을 추가
+
+#### Session UX / metadata
+
+- `.theseus_sessions/<name>.json`에 `metadata.title`/`title`을 저장하고 `SessionListEvent.sessions[]`와 stopped fallback session summary에 title을 포함
+- 이름 없이 `+`로 만든 세션은 내부 alphanumeric id를 사용하고, 첫 사용자 질문에서 핵심 문장을 뽑아 세션 표시 제목으로 저장
+- 세션 메뉴를 session 목록 아코디언 중심으로 바꾸고, summary 옆 `+` 버튼으로 untitled session을 바로 생성하도록 조정
+- session menu accordion open/closed 상태를 WebView state에 저장해 세션 목록 refresh 이후에도 접힘 상태가 유지되도록 보강
+- 세션 목록의 삭제 액션을 텍스트 `Delete` 버튼에서 compact `x` 버튼으로 바꿔 좁은 sidebar에서도 세션 목록과 삭제 액션이 한 줄에 들어가도록 조정
+- `getSessions`가 실행 중 runner에 `/session list`를 보내지 않고 Extension Host의 local session snapshot으로 `SessionListEvent`를 반환하도록 변경
+- `/session`, `/sessions`, `/session list` 입력은 채팅에 “세션 목록” system message를 추가하지 않고 session menu를 열어 새로고침하는 UI 동작으로 처리
+- `SessionChangedEvent.current`를 `SessionManager`의 current runner status에도 반영해 세션 전환 뒤 session label과 fallback summary가 stale `default`로 되돌아가는 문제를 줄임
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `node --check media\main.js media\components\ActivityLog.js media\components\SessionMenu.js media\state.js` 성공
+- `git diff --check` 성공
+
+---
+
+### 🐛 Session 97 — Core Server Sandbox/ToolBuild/설정 안정화 (2026-05-13)
+
+#### `src`
+
+- stream, ToolPlan, ToolBuild의 모델 선택 순서를 `THESEUS_MODEL -> OPENHARNESS_MODEL -> gpt-4o`로 통일
+- `ALLOWED_ORIGINS`를 comma-separated `.env` 문자열로 둘 때 `pydantic-settings`가 validator 전에 JSON 파싱을 시도해 서버 설정 로딩이 실패하던 문제를 보정
+- Docker socket 기반 Core 컨테이너 실행에서 sandbox input/output bind mount 경로가 어긋나지 않도록 `SANDBOX_HOST_TEMP_ROOT`와 `SANDBOX_CONTAINER_TEMP_ROOT` 공유 작업 디렉터리 설정을 추가
+- `result.json` 누락과 Docker 연결 실패 진단에 `errorType`, `exitCode`, stdout/stderr, container id, input/output 경로를 남기도록 sandbox metadata를 보강
+- ToolBuild sandbox 실패 message에 `errorType`, `exitCode`, `timedOut`, `resourceLimited` 요약을 포함
+- Core 전용 `GET /health/details`를 추가해 sandbox, Kafka consumer, DB target 설정과 consumer started 상태를 확인할 수 있게 함
+- sandbox smoke 더미 코드를 `create_tool` 전용 gate runner 계약에 맞는 `BaseTool` subclass 형태로 바꿔 ToolBuild sandbox 경로를 실제로 검증하도록 수정
+
+#### 배포 설정
+
+- local/prod Core compose에 Docker socket과 shared sandbox workdir bind mount/env를 추가
+- `.env.example`에 shared sandbox workdir 설정 예시를 추가하고 Core DB 설정 키를 `CORE_POSTGRES_*`로 정렬
+- 기존 로컬 `.env`의 `POSTGRES_*` 키도 Core DB 설정 alias로 계속 읽도록 호환 처리
+
+#### 검증
+
+- `python -m compileall -q src` 성공
+- `python -m py_compile src\config.py src\sandbox\docker_executor.py src\tooling\sandbox_gate_runner.py scratch\smoke_sandbox.py` 성공
+- `scratch\smoke_sandbox.py` 성공 — Docker `python:3.11-slim` sandbox에서 `result.json` 회수 확인
+- shared temp root `C:\tmp\theseus-sandbox-shared` smoke 성공
+- 깨진 tool code가 `result_missing`이 아니라 `sandbox_runner_error`로 구조화되는 것 확인
+
+---
+
+### 🐛 Session 91 — PLAN 승인 즉시 실행과 세션 버튼 관리 (2026-05-12)
+
+#### `theseus_engine/runner_runtime.py`
+
+- `/plan approve`와 짧은 자연어 승인(`승인`, `진행해`, `approve` 등)이 `PlanReviewEvent`만 반환하고 멈추지 않고, 같은 submit 루프에서 `PLAN_CONTINUE_PROMPT`로 실행 단계를 바로 시작하도록 수정
+- PLAN 승인 상태 메시지를 “실행을 바로 시작합니다”로 보정해 버튼 클릭 후 다음 사용자 입력을 기다리는 것처럼 보이지 않게 함
+- `/session delete <name>` 명령을 추가해 `.theseus_sessions/<name>.json` 단위 세션 삭제를 지원하고, 현재 세션 삭제 시 남은 세션 또는 새 `default` 세션으로 즉시 전환하도록 처리
+
+#### `vscode-extension`
+
+- PLAN `Approve` 버튼과 자연어 승인 경로에서 WebView generating 상태를 즉시 켜서 실행 시작 UX와 runner 동작을 맞춤
+- Session menu에 원클릭 `New Session`과 세션별 `Delete` 버튼을 추가하고, WebView/Extension Host protocol에 `deleteSession` 메시지를 연결
+- `/session delete`를 slash command palette와 local help에 노출
+
+---
+
+### 🔧 Session 90 — PLAN phase transition 구조화 이벤트 추가 (2026-05-12)
+
+#### `theseus_engine/engine/stream_events.py`, `theseus_engine/runner_runtime.py`
+
+- `PlanPhaseTransitionRequested` StreamEvent를 추가해 PLAN 실행/검증 완료 전이를 클라이언트가 문자열 파싱 없이 추적할 수 있게 함
+- 기존 `"Plan complete."`, `"Verification complete."` 문자열 감지는 유지하되, local runner가 감지 시점에 구조화 이벤트를 함께 발행하도록 보강
+- PLAN Executing → Verifying 전이와 Verifying → Completed 전이에 `from_phase`, `to_phase`, `reason`, `trigger` 메타데이터를 포함
+
+#### `vscode-extension`
+
+- WebView protocol allow-list와 TypeScript runner event union에 `PlanPhaseTransitionRequested`를 추가
+- WebView가 transition event를 수신하면 PLAN 패널 phase/reviewState를 즉시 갱신하도록 연결
+
+#### 문서/검증
+
+- `README.md`와 `state.py` prompt 문구에 문자열 marker가 구조화 transition event로 변환되는 흐름을 명시
+- `scratch/test_prompt_assembly.py`에 transition event JSON 직렬화 회귀 검증 추가
+
+---
+
+### 🔧 Session 89 — Theseus prompt capability 조건부 주입 (2026-05-12)
+
+#### `theseus_engine/models/state.py`
+
+- `_BASE_SYSTEM_PROMPT`에서 tool/RBAC/validator/web/create_tool 세부 운영 규칙을 분리하고, `PromptCapabilities` 기반 capability 섹션으로 조건부 주입하도록 변경
+- `get_system_prompt(available_tools=..., runtime_reminders=...)` 인자를 추가해 현재 tool schema에 있는 capability만 시스템 프롬프트에 포함되도록 보정
+- `create_tool` 세부 코드 규약은 실제 schema에 `create_tool`이 있을 때만 주입하고, PLAN Executing 본문에는 schema 부재 시 중단 가드만 유지
+- PLAN Drafting/Review/Verifying의 tool 지침을 “현재 schema에 있을 때” 기준으로 완화해 서버 worker처럼 tools=[]인 경로에서 tool hallucination을 줄임
+
+#### 서버/daemon 프롬프트 연결
+
+- `src/builder/system_prompt.py`가 `available_tools`와 `runtime_reminders`를 canonical `TheseusStateMachine`으로 전달하도록 확장
+- `src/builder/engine.py`와 `theseus_engine/core/engine_builder.py`가 실제 active registry의 tool 이름을 시스템 프롬프트 조립에 전달
+- `theseus_engine/runner_runtime.py`가 mode/PLAN phase 변경 후 active registry를 먼저 동기화하고, 그 tool 이름으로 시스템 프롬프트를 재생성하도록 수정
+- ToolPlan/ToolBuild worker는 실제 tool schema가 비어 있으므로 `available_tools=[]`와 worker-specific runtime reminder로 프롬프트를 조립해 도구 호출 지침을 주입하지 않음
+
+#### 문서/검증
+
+- `docs/prompt/prompt_architecture_map.md`에 capability 조립 파이프라인과 조건부 주입 규칙을 반영
+- `scratch/test_prompt_assembly.py` 신규 추가 — Ask/Agent/PLAN Executing에서 capability 섹션 주입 여부를 snapshot 성격으로 검증
+
+---
+
+### 🐛 Session 88 — VSCode Extension 세션별 PLAN 상태와 취소/삭제 UX (2026-05-12)
+
+#### `vscode-extension/media`
+
+- WebView의 PLAN 상태를 단일 `savedPlan`에서 `planBySession` 기반으로 확장해 세션별 PLAN 패널이 서로 덮어쓰지 않도록 수정
+- Plan mode 입력 직후 `Drafting` placeholder를 표시해 CLI의 Drafting/Review 단계가 extension에서도 보이도록 보강
+- PLAN 패널에 `Cancel`, `Delete` 액션을 추가해 실행/검증 중 멈춘 PLAN도 사용자가 빠르게 닫고 runner 쪽 plan state를 정리할 수 있게 함
+- `/plan cancel`, `/plan delete`를 slash command palette와 local help에 추가
+
+#### `theseus_engine/runner_runtime.py`
+
+- `.theseus_sessions/<session>.json`의 기존 `plan_state` 저장소를 사용해 세션별 PLAN JSON/phase를 저장, 복원, 삭제하도록 연결
+- `/plan cancel`, `/plan delete` 명령을 추가하고 `PlanReviewEvent(action=cancelled|deleted)`를 발행해 WebView가 stale PLAN 패널을 닫을 수 있게 함
+- 세션 전환 시 `SessionChangedEvent.planState`를 함께 보내 extension이 해당 세션의 PLAN 상태를 즉시 복원하도록 보강
+
+#### 검증
+
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\models\sessions.py` 성공
+- `npm.cmd run compile` 성공
+- `node --check media\main.js media\state.js media\protocol.js media\components\PlanPanel.js media\components\Autocomplete.js` 성공
+- fake `EditorRuntime` smoke로 세션별 plan_state 저장/복원 및 delete 시 plan_state 제거 확인
+
+---
+
+### 🐛 Session 87 — PLAN tool 생성 프롬프트와 mode dispatch 정합성 수정 (2026-05-12)
+
+#### `theseus_engine/models/state.py`
+
+- `_PLAN_DRAFTING_PROMPT`의 JSON 스키마 예시에서 이중 중괄호(`{{`, `}}`)를 단일 중괄호(`{`, `}`)로 수정 — 해당 문자열은 `.format()` 없이 직접 concatenate되므로 LLM이 `{{goal}}` 형태의 잘못된 JSON 스키마를 수신하던 문제를 해결
+- Agent mode 프롬프트의 `/plan`, `/ask` 직접 입력 안내를 제거하고, 실제 WebView UX와 맞게 visible mode selector 사용을 안내하도록 수정
+- PLAN Drafting에서 tool 생성 요청을 받으면 `create_tool`/`write_file`/`edit_file`을 호출하지 않고 승인 가능한 JSON plan을 작성하도록 명시
+- PLAN Executing에서 `create_tool`이 tool schema에 없을 경우 수동 파일 생성 fallback을 하지 않고 schema 동기화 오류로 중단하도록 명시
+- 신규 툴 생성 plan의 `target_files`는 Theseus custom tool Python 모듈(`theseus_engine/custom_tools/<tool_name>.py`)과 자동 생성 metadata(`.meta.json`)를 기준으로 안내
+- Windows 환경에서 `SHELL` 환경 변수가 없어 항상 `"unknown"`으로 표시되던 문제를 수정 — `COMSPEC` 폴백 추가
+
+#### `theseus_engine/daemon.py`, `theseus_engine/runner_runtime.py`, `vscode-extension`
+
+- WebView의 비-slash 사용자 입력을 `sendWithMode`로 전달해, 별도 `setMode` run 없이 daemon `RunRequest.mode`에서 해당 입력의 mode를 먼저 적용하도록 수정
+- daemon mode 적용은 사용자 채팅에 `✅ Plan 모드로 전환됐습니다.` 같은 내부 상태 메시지를 끼우지 않도록 silent mode로 처리
+- 같은 mode를 다시 적용할 때 PLAN phase와 draft/review/executing 상태를 초기화하지 않도록 idempotent mode 전환으로 보정
+
+- **Bash 지침 충돌 해소**: Base prompt에서 전용 tool 우선 사용을 강제하지만 `_PLAN_DRAFTING_PROMPT`의 bash 허용 예시에 `ls`, `find`, `cat`이 포함되어 충돌하던 문제를 수정 — bash는 `git log`, `git diff` 등 전용 tool 대체재가 없는 명령에만 허용하도록 명시
+- **Executing tool-call 강제 완화**: "모든 응답에 tool call 필수" 지시가 blocked/HITL/예외 상황에서 loop trap을 유발할 수 있어, 중단 가능한 4가지 예외 조건 `(a) 계획 변경 필요 (b) tool 차단/불가 (c) 수동 작업 필요 (d) 완료`을 명시
+- **`web_search` ALWAYS 완화**: 외부 서비스 관련 작업 시 무조건 웹 검색을 강제하던 지시를 조건부로 변경 — 로컬 파일이나 사용자가 제공한 문서에 명세가 있으면 웹 검색 불필요
+- **main/sub-task required fields 분리**: JSON 스키마 설명에서 main task와 sub-task의 required 필드를 명시적으로 구분 — 모델이 sub-task에 `tier`, `problem` 등을 잘못 채우거나 main task에서 누락하는 문제 방지
+- **JSON 예시에서 `integration_points` 제거**: optional 필드가 예시에 포함되면 모델이 required로 오해하므로, `integration_points`를 예시 밖 설명(`Optional fields`)으로만 안내하도록 이동
+- **소규모 작업 plan 과잉 구조 방지**: "항상 3~6 main tasks, 2~4 sub-tasks" 강제를 완화 — 소규모 변경에서는 불필요한 sub-task를 만들지 않도록 조건부 지침으로 수정
+
+#### 검증
+
+- `python -m py_compile theseus_engine\models\state.py theseus_engine\runner_runtime.py theseus_engine\daemon.py` 성공
+- `npm.cmd run compile` 성공
+- `node --check media\main.js` 성공
+- `git diff --check` 성공
+- fake `EditorRuntime` smoke로 같은 Plan mode 재적용 시 `WAIT_FOR_REVIEW` phase가 유지되고 silent mode 적용이 chat event를 만들지 않는지 확인
+
+---
+
+### 🐛 Session 86 — PLAN 승인 후 create_tool registry 재동기화 (2026-05-12)
+
+#### `theseus_engine/runner_runtime.py`, `theseus_engine/engine/query_engine.py`
+
+- Extension/local daemon에서 runner 초기화 시점의 active tool schema가 이후 PLAN phase 변경을 따라가지 못해, PLAN 승인 후에도 `create_tool`이 `Unknown tool`로 실패하던 문제를 수정
+- `PlanReviewEvent(action=approved)` 처리 시 active registry를 즉시 재구성해 `PLAN EXECUTING` 단계에서만 `create_tool`이 실제 tool schema에 포함되도록 보정
+- PLAN Drafting/Review/Verifying 전환 시에는 다시 `create_tool`을 제외해 기존 정책을 유지
+
+#### `theseus_engine/core/engine_builder.py`, `theseus_engine/tools/core/tool_factory.py`
+
+- standalone custom tool 로딩이 `theseus_engine/custom_tools` 고정 경로에만 묶이지 않도록, active workspace의 `custom_tools/`와 `theseus_engine/custom_tools/`도 함께 탐색
+- `theseus.workspacePath`는 agent 작업 cwd로 유지하고, custom tool 위치를 맞추기 위해 workspacePath를 custom_tools 폴더로 지정할 필요가 없게 함
+
+#### `vscode-extension`
+
+- Health panel에 Extension이 붙은 `corePath`, `workspacePath`, custom tool search roots를 함께 표시
+- `theseus.workspacePath` 설정 설명에 custom_tools 폴더를 직접 지정하지 말라는 안내를 추가
+
+#### 검증
+
+- fake `EditorRuntime`으로 PLAN 승인 전에는 `create_tool`이 제외되고 승인 후 `EXECUTING` 단계에서 포함되며 `VERIFYING` 단계에서 다시 제외되는지 확인
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\engine\query_engine.py theseus_engine\core\engine_builder.py theseus_engine\tools\core\tool_factory.py theseus_engine\tools\core\file_utils.py theseus_engine\tools\core\grep_tool.py theseus_engine\tools\core\glob_tool.py` 성공
+- `node --check media\components\HealthPanel.js` 성공
+
+---
+
+### 🐛 Session 84 — Slash command 종료 alias 정합성 보정 (2026-05-12)
+
+#### `theseus_engine/runner_runtime.py`, `vscode-extension/media`
+
+- VSCode WebView에서는 `/exit`가 runner 종료 명령으로 처리되지만 runner/daemon 경로에서는 unknown slash command로 분류되던 불일치를 수정
+- runner help, WebView `/help`, slash command palette에 `/quit, /exit` 종료 alias를 같은 의미로 노출
+- `/cost`, `/session`, `/plan approve`, `/plan reject` 등 runner-required slash command가 active file context 없이 전달되는 경로를 재검증
+
+#### 검증
+
+- fake `EditorRuntime.handle_slash_command(...)` slash command smoke test 성공
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\daemon.py theseus_engine\cli_runner.py` 성공
+- `node --check media\main.js`, `node --check media\components\Autocomplete.js` 성공
+- `git diff --check` 성공
+
+---
+
+### 🐛 Session 83 — WebView client-side queue 제거 (2026-05-12)
+
+#### `vscode-extension/media`, `vscode-extension/src/providers/ChatViewHtml.ts`
+
+- WebView 내부 `queuedMessages` / `QueuePanel` / `queue-panel` DOM을 제거해 사용자가 보낸 메시지가 WebView 안에 머물지 않고 즉시 Extension Host로 전달되도록 수정
+- agent busy 상태 판단은 표시 상태에만 사용하고, 입력 전송을 WebView에서 보류하지 않도록 변경
+- 실행 직렬화는 기존 `SessionManager`와 daemon transport 계층의 책임으로 유지해, local LLM 서버로 요청이 내려가지 않는 UI-side queue 문제를 제거
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `node --check media\main.js` 성공
+- `git diff --check` 성공
+
+---
+
+### 🐛 Session 82 — Active file context를 보조 컨텍스트로 주입 (2026-05-12)
+
+#### `vscode-extension/src/workspace/WorkspaceContext.ts`
+
+- 자동 active file context를 사용자 입력 맨 앞의 `@file:line`으로 붙이지 않고, 입력 뒤쪽의 `IDE 보조 컨텍스트` 블록으로 주입하도록 변경
+- slash command는 물론 사용자가 이미 `@file`을 명시한 입력에도 자동 active file을 추가하지 않아 사용자 의도가 우선되도록 수정
+- 자동 context 블록에 “파일 자체가 아니라 질문을 중심으로 답하라”는 힌트를 포함해 active file이 대화의 메인 주제로 승격되는 문제를 완화
+
+#### `vscode-extension/media/components/ContextBar.js`
+
+- active file pill 문구를 `active ...`에서 `context ...`로 바꿔 현재 열린 파일이 보조 context임을 더 명확하게 표시
+
+---
+
+### 🐛 Session 81 — `/session` 단독 slash command 로컬 처리 (2026-05-12)
+
+#### `vscode-extension/media`
+
+- `/session` 단독 입력도 `/session list`와 동일하게 WebView 로컬 명령으로 처리해 runner가 꺼져 있거나 active file context가 있어도 LLM 질문으로 넘어가지 않도록 수정
+- slash command palette와 `/help` 출력에 `/session` 항목을 추가
+
+---
+
+### 🐛 Session 80 — Busy 상태 입력 자동 Queue 처리 (2026-05-12)
+
+#### `vscode-extension/media`
+
+- agent가 응답 중일 때 Enter를 누르면 `Queue / Interrupt & Send / Cancel` 선택을 강제하지 않고 메시지를 즉시 대기열에 추가하도록 변경
+- Queue panel은 대기 중인 메시지 수, 삭제 버튼, 선택적 `Interrupt` 보조 액션만 보여주도록 단순화
+- 일반 채팅 전송 흐름을 끊지 않으면서 현재 실행을 끊고 싶을 때만 `Interrupt`를 사용할 수 있게 UX 우선순위를 조정
+
+---
+
+### 🐛 Session 79 — Slash command cursor context 주입 방지 (2026-05-12)
+
+#### `vscode-extension/media/main.js`, `vscode-extension/src/providers/ChatViewProvider.ts`
+
+- `/cost`, `/stats`, `/validate` 같은 runner slash command 전송 시 active file cursor context가 자동 주입되지 않도록 WebView와 Extension Host 양쪽에서 방어
+- active file context pill이 표시된 상태에서도 slash command가 `@file:line`이 붙은 일반 assistant 질문으로 변환되지 않고 runner command로 전달되도록 수정
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `node --check media\main.js` 성공
+- `git diff --check` 성공
+- fake `EditorRuntime.handle_slash_command('/cost')`가 `StatusEvent` / `📊 세션 통계`를 반환하는지 확인
+
+---
+
+### 🐛 Session 78 — VSCode Extension composer 하단 고정 (2026-05-12)
+
+#### `vscode-extension/media/styles.css`
+
+- WebView shell grid에 명시적 `grid-template-areas`를 추가해 health/change/plan panel이 `hidden` 상태여도 messages/tools/custom tools/composer row가 위로 당겨지지 않도록 수정
+- composer 영역을 `composer` grid area와 `align-self: end`로 고정해 Custom Tools 바로 아래에 붙고 하단에 빈 공간이 생기던 문제를 보정
+
+---
+
+### 🐛 Session 77 — PLAN stale review 오류 메시지 억제 (2026-05-12)
+
+#### `theseus_engine/runner_runtime.py`
+
+- `/plan approve` / `/plan reject` 또는 WebView review action이 이미 `WAIT_FOR_REVIEW`가 아닌 runner에 도착하면 오류 `StatusEvent` 대신 `PlanReviewEvent(action=not_reviewable)`을 발행하도록 변경
+- stale PLAN 승인/거부 요청을 사용자 오류로 반복 표시하지 않고 WebView가 저장된 PLAN 리뷰 패널을 닫을 수 있는 상태 이벤트로 정규화
+
+#### `vscode-extension/media/main.js`
+
+- 기존 daemon/구버전 runtime에서 `PLAN 승인/거부는 WAIT_FOR_REVIEW 상태에서만 가능합니다.` 문구가 오더라도 system message로 남기지 않고 저장된 PLAN만 정리
+- `PlanReviewEvent(action=not_reviewable|closed|stale)` 수신 시 PLAN 패널을 즉시 닫아 승인/거부 버튼이 다시 남지 않도록 보강
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py` 성공
+- `node --check media\main.js` 성공
+- `git diff --check` 성공
+- fake `EditorRuntime`로 stale PLAN review가 `PlanReviewEvent(action=not_reviewable)`를 반환하는지 확인
+
+---
+
+### ✨ Session 76 — VSCode Extension P0~P2 UX/UI 개선 (2026-05-12)
+
+#### `vscode-extension/media`
+
+- 상단 runner toolbar를 상태/액션 중심으로 재구성해 `Stopped / Starting / Ready / Running / Reconnecting / Error` 상태와 `Start`, `Reconnect`, `Restart`, `Logs`, `Tools`, `Health` 액션을 한 곳에서 표시
+- PLAN 패널을 `Draft → Review → Execute → Verify → Done` stepper로 바꾸고, 승인/거부 버튼은 review 대기 상태에서만 표시하며 완료 상태는 접힌 요약으로 전환
+- `ToolExecutionCompleted.metadata.changed_file.old_content` 기반 Diff Snapshot 변경 검토 패널을 추가해 파일별 `Diff`, `Open`, `Revert`, `Dismiss` 액션을 제공
+- composer 위에 session/active file/`@` mention context pill을 표시하고, active file 또는 mention context를 다음 전송에서 제거할 수 있게 함
+- Agent 실행 중 새 입력을 보내려 할 때 `Queue`, `Interrupt & Send`, `Cancel` 선택지를 표시하고 queued message를 composer 아래에서 삭제할 수 있게 함
+- Custom Tools 패널에 검색, `All/Active/Inactive/Errors/Recent` 필터, name/permission/last run 정렬, 좁은 폭 요약/상세 펼침 UI를 추가
+- `/` 자동완성을 command palette 형태로 확장해 command 설명과 실행 조건(`local`, `runner required`, `plan review only`)을 함께 표시
+- Health panel과 Change Review panel, Custom Tools, composer가 320~420px sidebar에서도 겹치지 않도록 grid/flex/responsive CSS를 정리
+
+#### `vscode-extension/src`
+
+- WebView protocol에 `getHealth`, `revertChangedFile`, `explainProblem`, `fixProblem`, `showLogs`, `openSettings` 명령과 `healthStatus`, `changeReviewUpdated` host event를 추가
+- Extension Host에서 Diff Snapshot revert를 파일 단위로 처리하고, workspace/core root 밖 absolute path 되돌리기는 차단
+- `Theseus: Explain Problem`, `Theseus: Fix Problem` command와 Problems context menu를 추가해 file/line/message/code/source를 Theseus 입력으로 주입
+- runner status에 local daemon pid를 포함해 이미 실행 중인 daemon attach 상태를 Health panel에서 확인할 수 있게 함
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\daemon.py` 성공
+- `git diff --check` 성공
+- `node --check`로 변경/추가 WebView module 문법 확인 성공
+
+---
+
+### 🧰 Session 75 — PowerShell IDE 자동 감지 설치 보강 (2026-05-12)
+
+#### `scripts/install-vscode-extension.ps1`
+
+- PowerShell 설치 스크립트에 `-Ide auto|vscode|code|antigravity` 옵션을 추가하고, `-Code`가 없으면 터미널 환경/실행 중인 프로세스를 기준으로 VS Code 또는 Antigravity CLI를 자동 선택
+- 기존 `code` 기본값으로 인해 Antigravity에서 실행해도 VS Code 프로필에 VSIX가 설치되던 문제를 줄이고, 자동 감지가 애매한 경우 `-Ide antigravity`로 명시할 수 있게 함
+- IDE target이 Antigravity이면 `%APPDATA%\Antigravity\User\settings.json`, 그 외에는 workspace `.vscode/settings.json`에 설정을 기록하도록 분기하고, `-SettingsDir` override를 추가
+- VSIX 설치 시 IDE target별 기본 확장 저장소를 로그인 사용자 홈 기준 `%USERPROFILE%\.vscode\extensions` 또는 `%USERPROFILE%\.antigravity\extensions`로 명시하고, `-ExtensionsDir` override를 추가
+- workspace `settings.json` 기록을 VSIX 설치보다 먼저 수행해 설치 단계가 실패해도 `theseus.corePath`, `theseus.pythonPath`, `theseus.workspacePath`가 먼저 반영되도록 순서를 조정
+- 설치 완료 출력에 IDE target, `SettingsPath`, `ExtensionsDir`를 포함해 실제 설치 대상과 설정/확장 저장소 위치를 확인할 수 있게 함
+
+#### `README.md`
+
+- PowerShell에서 Antigravity/VS Code 설치 대상을 명시하는 `-Ide` 예시를 Quick Start에 추가
+
+#### 검증
+
+- PowerShell AST parser로 `scripts/install-vscode-extension.ps1` 구문 검증 성공
+
+---
+
+### 🧰 Session 74 — Git Bash IDE 자동 감지 설치 보강 (2026-05-12)
+
+#### `scripts/install-vscode-extension.sh`
+
+- Git Bash 설치 스크립트에 `--ide auto|vscode|antigravity` 옵션을 추가하고, `--code`가 없으면 터미널 환경/실행 중인 프로세스를 기준으로 VS Code 또는 Antigravity CLI를 자동 선택
+- `code` 기본값으로 인해 Antigravity에서 실행해도 VS Code 프로필에 VSIX가 설치되던 문제를 줄이고, 자동 감지가 애매한 경우 `--ide antigravity`로 명시할 수 있게 함
+- IDE target이 Antigravity이면 `%APPDATA%\Antigravity\User\settings.json`, 그 외에는 workspace `.vscode/settings.json`에 설정을 기록하도록 분기하고, `--settings-dir` override를 추가
+- VSIX 설치 시 IDE target별 기본 확장 저장소를 로그인 사용자 홈 기준 `%USERPROFILE%\.vscode\extensions` 또는 `%USERPROFILE%\.antigravity\extensions`로 명시하고, `--extensions-dir` override를 추가
+- workspace `settings.json` 기록을 VSIX 설치보다 먼저 수행해 설치 단계가 실패해도 `theseus.corePath`, `theseus.pythonPath`, `theseus.workspacePath`가 먼저 반영되도록 순서를 조정
+- Git Bash/WSL 계열 경로 변환에서 `cygpath`와 `wslpath`를 순서대로 사용해 IDE 설정에 들어가는 경로를 Windows IDE가 읽기 쉬운 형태로 정규화
+
+#### `README.md`
+
+- Git Bash에서 Antigravity/VS Code 설치 대상을 명시하는 `--ide` 예시를 Quick Start에 추가
+
+#### 검증
+
+- `C:\Program Files\Git\bin\bash.exe -n backend/theseus-core-server/scripts/install-vscode-extension.sh` 성공
+- `C:\Program Files\Git\bin\bash.exe -lc 'cd /c/Users/SSAFY/pjt/agent/S14P31A308 && backend/theseus-core-server/scripts/install-vscode-extension.sh --help'` 성공
+
+---
+
+### 🐛 Session 73 — VSCode Extension PLAN 리뷰/Custom Tools/Slash UI 안정화 (2026-05-12)
+
+#### `theseus_engine/runner_runtime.py`
+
+- PLAN `WAIT_FOR_REVIEW` 상태에서 사용자가 `승인`, `진행해`, `approve`, `reject`, `취소`처럼 짧은 자연어 결정을 입력하면 명시적 `/plan approve|reject`와 같은 리뷰 전이로 처리
+- `PlanReviewEvent`에 task count metadata를 포함하고, PLAN 검증 완료 시 `completed` 리뷰 이벤트를 발행해 WebView가 stale 리뷰 패널을 닫을 수 있게 함
+
+#### `theseus_engine/daemon.py`
+
+- local daemon 시작 시 `EditorRuntime.initialize()`를 startup 단계에서 실행해 첫 대화 입력 전에도 runner 내부 custom tools registry를 준비
+
+#### `vscode-extension/src/providers/ChatViewProvider.ts`
+
+- `init` / `getStatus` / attach 상태 재동기화 때 Custom Tools 목록도 함께 refresh해 이미 실행 중인 daemon에 붙는 경우에도 WebView 목록이 비어 남지 않도록 보강
+
+#### `vscode-extension/media`
+
+- `PlanReviewEvent`의 `approved` / `rejected` / `completed` 수신 시 저장된 plan panel 상태를 즉시 정리해 승인/거부 버튼이 남아 WAIT_FOR_REVIEW 오류를 반복하지 않도록 수정
+- plan panel은 리뷰 대기 중인 plan만 표시하고, 모든 task가 완료 상태인 plan은 자동으로 숨김
+- Custom Tools 패널 헤더에 접기/펼치기 버튼을 추가하고 WebView state에 접힘 상태를 저장해 재렌더링 후에도 유지
+- `/plan approve` / `/plan reject`가 `/plan` 모드 전환 차단에 걸리지 않도록 slash command 판정을 exact match로 변경
+- `/help`, `/tools`, `/tools custom`, `/session list`는 runner가 없어도 WebView/Extension Host에서 즉시 처리
+- 좁은 사이드바 폭에서 plan header actions, custom tool permission controls, composer footer가 잘리지 않도록 flex/grid wrapping과 min-width 처리를 보강
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\daemon.py` 성공
+
+---
+
+### 🐛 Session 72 — ToolPlan agent loop 설정 누락 복구 (2026-05-12)
+
+#### `src/config.py`, `.env.example`
+
+- `ToolPlanAgentLoop`가 참조하는 `CORE_TOOL_PLAN_MAX_AGENT_TURNS=30` 기본값을 `Settings`와 환경 예시에 추가
+- 신규 `tool-plan` consumer 활성화 환경에서 설정 누락으로 PLAN 처리가 `AttributeError`로 실패하던 문제를 복구
+
+#### 검증
+
+- `python -m py_compile src\config.py src\tool_plan\agent_loop.py` 성공
+
+---
+
 ### 🐛 Session 71 — ToolPlan checkpoint planner 계약 복구 (2026-05-12)
 
 #### `src/tool_plan/planner.py`
