@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import uuid
+import ast
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,6 +98,7 @@ class ServerToolCreationRequest:
     creator_user_id: str
     chat_session_id: int
     plan_id: str
+    run_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -139,6 +141,37 @@ def _new_trace_id() -> str:
 
 def _audit_log(event: str, **payload: Any) -> None:
     log.info("[ToolAudit] %s %s", event, json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def _format_syntax_error_context(code: str, lineno: int | None, *, radius: int = 5) -> str:
+    lines = code.splitlines()
+    if not lines:
+        return ""
+    error_line = max((lineno or 1) - 1, 0)
+    start = max(error_line - radius, 0)
+    end = min(error_line + radius + 1, len(lines))
+    return "\n".join(f"{i + 1}: {lines[i]}" for i in range(start, end))
+
+
+def _validate_python_syntax_or_raise(code: str, request: ServerToolCreationRequest) -> None:
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        context = _format_syntax_error_context(code, exc.lineno)
+        log.error(
+            "Syntax validation failed. runId=%s projectId=%s planId=%s toolName=%s line=%s error=%s\n%s",
+            request.run_id,
+            request.project_id,
+            request.plan_id,
+            request.tool_name,
+            exc.lineno,
+            exc.msg,
+            context,
+        )
+        message = f"Syntax Error: line {exc.lineno}: {exc.msg}"
+        if context:
+            message = f"{message}\n{context}"
+        raise ToolCreationError("validation_failed", message, errors=[message]) from exc
 
 
 def normalize_tool_name(tool_name: str) -> str:
@@ -358,6 +391,7 @@ def persist_draft_tool(
     normalized_name = normalize_tool_name(request.tool_name)
     code = inject_permission_level(request.python_code, request.permission_level)
     code = _sanitize_generated_code(code)
+    _validate_python_syntax_or_raise(code, request)
     paths = build_tool_paths(request.project_id, normalized_name, storage_root=storage_root)
     paths.project_dir.mkdir(parents=True, exist_ok=True)
     paths.module_path.write_text(code, encoding="utf-8")
