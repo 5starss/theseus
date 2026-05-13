@@ -58,10 +58,39 @@ def _install_stubs() -> type:
     theseus_tools_module.core = core_module
     theseus_engine_module.tools = theseus_tools_module
 
+    src_module = types.ModuleType("src")
+    remote_workspace_module = types.ModuleType("src.remote_workspace")
+    runtime_module = types.ModuleType("src.remote_workspace.runtime")
+
+    class RemoteWorkspaceRuntimeError(RuntimeError):
+        pass
+
+    def get_remote_workspace_config(context):
+        del context
+        return None
+
+    def require_remote_workspace(context):
+        del context
+        raise RemoteWorkspaceRuntimeError("Remote Workspace is not available in sandbox validation.")
+
+    def run_remote_command(*args, **kwargs):
+        del args, kwargs
+        raise RemoteWorkspaceRuntimeError("Remote Workspace command execution is disabled in sandbox validation.")
+
+    runtime_module.RemoteWorkspaceRuntimeError = RemoteWorkspaceRuntimeError
+    runtime_module.get_remote_workspace_config = get_remote_workspace_config
+    runtime_module.require_remote_workspace = require_remote_workspace
+    runtime_module.run_remote_command = run_remote_command
+    remote_workspace_module.runtime = runtime_module
+    src_module.remote_workspace = remote_workspace_module
+
     sys.modules["theseus_engine"] = theseus_engine_module
     sys.modules["theseus_engine.tools"] = theseus_tools_module
     sys.modules["theseus_engine.tools.core"] = core_module
     sys.modules["theseus_engine.tools.core.base_tools"] = base_module
+    sys.modules["src"] = src_module
+    sys.modules["src.remote_workspace"] = remote_workspace_module
+    sys.modules["src.remote_workspace.runtime"] = runtime_module
     return BaseTool
 
 
