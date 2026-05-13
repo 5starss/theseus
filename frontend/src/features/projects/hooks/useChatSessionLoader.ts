@@ -47,7 +47,7 @@ function planStatusFrom(status?: string | null) {
 function isRunningPlan(currentPlan: CurrentPlanRecovery | null): currentPlan is CurrentPlanRecovery & { runId: string } {
   return Boolean(
     currentPlan?.runId
-      && (currentPlan.status === 'REQUESTED' || currentPlan.status === 'GENERATING')
+      && (currentPlan.status === 'REQUESTED' || currentPlan.status === 'GENERATING' || currentPlan.status === 'BUILDING')
   );
 }
 
@@ -103,11 +103,11 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
 
     if (!mounted) return;
 
-    connectSSE(
-      `/api/v1/projects/${projId}/sessions/${sessId}/tool-plan-runs/${currentPlan.runId}/events`,
-      'PLAN',
-      currentPlan.runId
-    );
+    const flow = currentPlan.status === 'BUILDING' ? 'BUILD' : 'PLAN';
+    const ssePath = `/api/v1/projects/${projId}/sessions/${sessId}/tool-plan-runs/${currentPlan.runId}/events`;
+
+    console.log(`[ChatLoader] Recovering ${flow} SSE connection:`, ssePath);
+    connectSSE(ssePath, flow, currentPlan.runId);
   }, [connectSSE, setIsGenerating, setProgressInfo, updateLastMessageContent]);
 
   useEffect(() => {

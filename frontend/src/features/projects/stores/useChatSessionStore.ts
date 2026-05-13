@@ -127,7 +127,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
     createdTool: createdTool || null,
     toolResult: toolResult || null,
     activeTab: createdTool || toolResult ? 'result' : 'plan',
-    isBuilding: false,
+    isBuilding: phase === 'BUILDING',
     draftVersion: draftVersion || 0,
     planVersion: planVersion || 0,
     title,
@@ -166,9 +166,22 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
     const messages = [...state.messages];
     if (messages.length > 0) {
       const last = messages[messages.length - 1];
-      messages[messages.length - 1] = { ...last, content: last.content + chunk };
+      if (last.senderType === 'ASSISTANT') {
+        messages[messages.length - 1] = { ...last, content: last.content + chunk };
+        return { messages };
+      }
     }
-    return { messages };
+
+    // 어시스턴트 메시지가 없거나 마지막 메시지가 유저/시스템인 경우 새로 생성
+    const newMsg: ChatMessage = {
+      messageId: crypto.randomUUID(),
+      senderType: 'ASSISTANT',
+      messageType: 'TOOL_PLAN_RESPONSE',
+      contentType: 'MARKDOWN',
+      content: chunk,
+      createdAt: new Date().toISOString()
+    };
+    return { messages: [...messages, newMsg] };
   }),
 
   setCurrentPlan: (plan) => set({ currentPlan: plan }),
