@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from src.builder.system_prompt import build_theseus_system_prompt
-from src.config import settings
+from src.config import resolve_model_name, settings
 from src.tool_build.schemas import GeneratedToolSpec, ToolArtifactPayload, ToolBuildRequestedEvent
 from src.tooling.service import (
     CUSTOM_TOOLS_DIR,
@@ -52,7 +51,7 @@ class ToolBuilder:
         model_name: str | None = None,
         storage_root: Path = PROJECT_TOOLS_DIR,
     ) -> None:
-        self.model_name = model_name or os.getenv("OPENHARNESS_MODEL", "gpt-4o")
+        self.model_name = resolve_model_name(model_name)
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
         self.storage_root = storage_root
         self.max_repair_attempts = max(settings.CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS, 0)
@@ -70,6 +69,10 @@ class ToolBuilder:
             mode=AgentMode.PLAN,
             plan_phase=PlanPhase.EXECUTING,
             plan_content=approved_plan,
+            available_tools=[],
+            runtime_reminders=[
+                "This ToolBuild worker receives an empty tool schema. Do not call create_tool or other tools; return only the task-specific JSON contract from the user message.",
+            ],
         )
         spec = await self._generate_tool_spec(
             self._build_tool_message(

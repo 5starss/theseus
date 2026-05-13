@@ -6,12 +6,17 @@ services:
     image: theseus-core-server:local
     container_name: theseus-local-core-server
     command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8086", "--workers", "1"]
+    group_add:
+      - "${DOCKER_GID:-988}"
     env_file:
       - .env.local
     environment:
       AUTH_MODE: spring
       CORE_KAFKA_CONSUMER_ENABLED: true
       SANDBOX_STARTUP_CHECK: false
+      DOCKER_HOST: unix:///var/run/docker.sock
+      SANDBOX_HOST_TEMP_ROOT: /tmp/theseus-sandbox-shared
+      SANDBOX_CONTAINER_TEMP_ROOT: /tmp/theseus-sandbox-shared
       CORE_POSTGRES_HOST: theseus-local-postgres
       CORE_POSTGRES_PORT: 5432
       CORE_POSTGRES_DSN: postgresql://root:root@theseus-local-postgres:5432/theseus_core
@@ -24,6 +29,9 @@ services:
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-local-kafka:29092
     ports:
       - "8086:8086"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/theseus-sandbox-shared:/tmp/theseus-sandbox-shared
     depends_on:
       theseus-local-postgres:
         condition: service_healthy

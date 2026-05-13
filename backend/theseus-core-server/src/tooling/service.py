@@ -305,6 +305,24 @@ def _sandbox_metadata(result: dict[str, Any]) -> dict[str, Any]:
     return {"sandboxResult": result}
 
 
+def _format_sandbox_failure_message(result: dict[str, Any]) -> str:
+    message = result.get("error") or "Sandbox gate failed."
+    metadata = result.get("metadata") or {}
+    error_type = result.get("errorType") or metadata.get("errorType")
+    exit_code = result.get("exitCode")
+    if exit_code is None:
+        exit_code = metadata.get("containerExitCode")
+
+    summary = {
+        "errorType": error_type,
+        "exitCode": exit_code,
+        "timedOut": result.get("timedOut", False),
+        "resourceLimited": result.get("resourceLimited", False),
+    }
+    details = ", ".join(f"{key}={value}" for key, value in summary.items())
+    return f"{message} ({details})"
+
+
 def _is_tool_active_metadata(metadata: dict[str, Any]) -> bool:
     validation = metadata.get("validationResult") or {}
     sandbox = metadata.get("sandboxResult") or {}
@@ -413,10 +431,11 @@ async def run_tool_sandbox_gate_for_artifact(
         metadata_patch=_sandbox_metadata(result),
     )
     if not result["success"]:
+        error_message = _format_sandbox_failure_message(result)
         raise ToolCreationError(
             "sandbox_failed",
-            result.get("error") or "Sandbox gate failed.",
-            errors=[result.get("error") or "Sandbox gate failed."],
+            error_message,
+            errors=[error_message],
         )
     return result
 

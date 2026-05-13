@@ -21,20 +21,73 @@ logger = logging.getLogger(__name__)
 _sandbox_executor = DockerExecutor()
 
 
+def _initial_consumer_status() -> dict[str, dict]:
+    return {
+        "toolGeneration": {
+            "enabled": (
+                settings.CORE_KAFKA_CONSUMER_ENABLED
+                and settings.CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED
+            ),
+            "started": False,
+            "topics": [
+                settings.KAFKA_TOPIC_TOOL_GENERATION_REQUEST,
+                settings.KAFKA_TOPIC_TOOL_REGENERATION_REQUEST,
+            ],
+            "groupId": settings.CORE_KAFKA_CONSUMER_GROUP_ID,
+            "error": None,
+        },
+        "toolPlan": {
+            "enabled": (
+                settings.CORE_KAFKA_CONSUMER_ENABLED
+                and settings.CORE_TOOL_PLAN_CONSUMER_ENABLED
+            ),
+            "started": False,
+            "topic": settings.KAFKA_TOPIC_TOOL_PLAN_REQUEST,
+            "groupId": settings.CORE_KAFKA_TOOL_PLAN_CONSUMER_GROUP_ID,
+            "error": None,
+        },
+        "toolBuild": {
+            "enabled": settings.CORE_KAFKA_CONSUMER_ENABLED,
+            "started": False,
+            "topic": settings.KAFKA_TOPIC_TOOL_BUILD_REQUEST,
+            "groupId": settings.CORE_KAFKA_TOOL_BUILD_CONSUMER_GROUP_ID,
+            "error": None,
+        },
+    }
+
+
+def _mark_consumer_status(app: FastAPI, key: str, *, started: bool, error: Exception | None = None) -> None:
+    status = app.state.core_consumer_status[key]
+    status["started"] = started
+    status["error"] = str(error) if error is not None else None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("Core database schema initialized.")
 
+    app.state.sandbox_startup_status = {
+        "enabled": settings.SANDBOX_STARTUP_CHECK,
+        "checked": False,
+        "ok": None,
+        "error": None,
+    }
     if settings.SANDBOX_STARTUP_CHECK:
         try:
             sandbox_info = await asyncio.to_thread(
                 _sandbox_executor.verify_connectivity,
                 pull_if_missing=settings.SANDBOX_PULL_ON_STARTUP,
             )
+            app.state.sandbox_startup_status.update(
+                {"checked": True, "ok": True, "error": None, "details": sandbox_info}
+            )
             logger.info("Sandbox connectivity verified. image=%s status=%s host=%s",
                         sandbox_info["image"], sandbox_info["imageStatus"], sandbox_info["dockerHost"])
         except (SandboxStartupCheckError, SandboxUnavailableError) as exc:
+            app.state.sandbox_startup_status.update(
+                {"checked": True, "ok": False, "error": str(exc)}
+            )
             if settings.SANDBOX_STARTUP_STRICT:
                 raise
             logger.warning("Sandbox startup check failed: %s", exc)
@@ -44,6 +97,7 @@ async def lifespan(app: FastAPI):
     app.state.tool_generation_consumer = None
     app.state.tool_plan_consumer = None
     app.state.tool_build_consumer = None
+    app.state.core_consumer_status = _initial_consumer_status()
 
     if scheduler is not None:
         scheduler.start()
@@ -57,17 +111,35 @@ async def lifespan(app: FastAPI):
 
     try:
         app.state.tool_generation_consumer = await start_tool_generation_consumer()
+        _mark_consumer_status(
+            app,
+            "toolGeneration",
+            started=app.state.tool_generation_consumer is not None,
+        )
     except Exception as exc:
+        _mark_consumer_status(app, "toolGeneration", started=False, error=exc)
         logger.error("Legacy ToolGeneration Kafka consumer startup failed: %s", exc, exc_info=True)
 
     try:
         app.state.tool_plan_consumer = await start_tool_plan_consumer()
+        _mark_consumer_status(
+            app,
+            "toolPlan",
+            started=app.state.tool_plan_consumer is not None,
+        )
     except Exception as exc:
+        _mark_consumer_status(app, "toolPlan", started=False, error=exc)
         logger.error("ToolPlan Kafka consumer startup failed: %s", exc, exc_info=True)
 
     try:
         app.state.tool_build_consumer = await start_tool_build_consumer()
+        _mark_consumer_status(
+            app,
+            "toolBuild",
+            started=app.state.tool_build_consumer is not None,
+        )
     except Exception as exc:
+        _mark_consumer_status(app, "toolBuild", started=False, error=exc)
         logger.error("Tool build Kafka consumer startup failed: %s", exc, exc_info=True)
 
     try:

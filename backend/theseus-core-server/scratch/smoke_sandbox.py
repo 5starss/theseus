@@ -8,12 +8,31 @@ from src.sandbox.docker_executor import DockerExecutor, SandboxUnavailableError
 
 
 DUMMY_TOOL_CODE = """
-def main(payload):
-    return {
-        "ok": True,
-        "tool": payload["tool_name"],
-        "module": payload["module_name"],
-    }
+from pydantic import BaseModel
+
+from theseus_engine.tools.core.base_tools import (
+    BaseTool,
+    ToolExecutionContext,
+    ToolResult,
+)
+
+
+class SmokeInput(BaseModel):
+    pass
+
+
+class SmokeTool(BaseTool):
+    name = "smoke_tool"
+    description = "Sandbox smoke tool."
+    input_model = SmokeInput
+    permission_level = 1
+
+    async def execute(
+        self,
+        arguments: SmokeInput,
+        context: ToolExecutionContext,
+    ) -> ToolResult:
+        return ToolResult(output={"ok": True})
 """
 
 
