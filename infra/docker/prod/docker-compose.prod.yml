@@ -86,6 +86,7 @@ services:
       SPRING_KAFKA_CONSUMER_GROUP_ID: ${SPRING_KAFKA_CONSUMER_GROUP_ID:-theseus-api-server-prod}
       SPRING_DATA_REDIS_HOST: ${SPRING_DATA_REDIS_HOST:-redis-stg.ssafyapp.com}
       SPRING_DATA_REDIS_PORT: ${SPRING_DATA_REDIS_PORT:-6379}
+      THESEUS_CORE_BASE_URL: ${THESEUS_CORE_BASE_URL:-http://theseus-core-server:8086}
     ports:
       - "8080:8080"
     depends_on:
