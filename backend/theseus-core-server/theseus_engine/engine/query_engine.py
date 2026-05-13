@@ -350,8 +350,13 @@ def _record_tool_carryover(
     elif tool_name == "bash":
         command = str(tool_input.get("command") or "").strip()
         summary = (tool_output.splitlines()[0].strip() if tool_output.strip() else "no output")
-        _remember_verified_work(meta, f"Ran bash command {command[:160]} [{summary[:120]}]")
-        _remember_work_log(meta, entry=f"Ran bash: {command[:160]} [{summary[:120]}]")
+        if isinstance(meta, dict) and meta.get("remote_workspace") is not None:
+            command_name = command.split(maxsplit=1)[0] if command else "unknown"
+            _remember_verified_work(meta, f"Ran remote bash command {command_name} [{summary[:120]}]")
+            _remember_work_log(meta, entry=f"Ran remote bash: {command_name} [{summary[:120]}]")
+        else:
+            _remember_verified_work(meta, f"Ran bash command {command[:160]} [{summary[:120]}]")
+            _remember_work_log(meta, entry=f"Ran bash: {command[:160]} [{summary[:120]}]")
     elif tool_name == "grep":
         pattern = str(tool_input.get("pattern") or "").strip()
         _remember_verified_work(meta, f"Checked repository matches for grep pattern {pattern[:180]}")
@@ -457,10 +462,19 @@ async def _execute_tool_call(
             return _result(pre.reason or f"pre_tool_use hook blocked {tool_name}", True)
 
     # 실행
-    pre_change_metadata = _capture_file_change_snapshot(
-        context.cwd,
-        tool_name,
-        _file_path,
+    is_remote_workspace_tool = (
+        isinstance(context.tool_metadata, dict)
+        and context.tool_metadata.get("remote_workspace") is not None
+        and tool_name in {"read_file", "glob", "grep", "bash", "write_file", "edit_file"}
+    )
+    pre_change_metadata = (
+        {}
+        if is_remote_workspace_tool
+        else _capture_file_change_snapshot(
+            context.cwd,
+            tool_name,
+            _file_path,
+        )
     )
     t0 = time.monotonic()
     try:
@@ -537,7 +551,7 @@ async def _execute_tool_call(
         tool_input=tool_input,
         tool_output=tool_result.content,
         is_error=tool_result.is_error,
-        resolved_file_path=_file_path,
+        resolved_file_path=None if is_remote_workspace_tool else _file_path,
     )
     return ExecutedToolCall(result=tool_result, metadata=event_metadata)
 
