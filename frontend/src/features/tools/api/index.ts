@@ -1,30 +1,7 @@
 import { apiClient } from '@/api/client';
 import type { ApiResponse } from '@/api/auth';
+import type { PageResponse } from '@/features/admin/api';
 import type { ToolDetailResponse, ToolItem } from '../types';
-
-export const mockTools: ToolItem[] = [
-  {
-    id: 'tool-1',
-    name: 'API Error Helper',
-    description: 'Analyzes endpoint responses and suggests fixes.',
-    type: 'BLUE',
-    iconName: 'TerminalSquare'
-  },
-  {
-    id: 'tool-2',
-    name: 'Data Pattern Analyzer',
-    description: 'Finds hidden correlations and anomalies in datasets.',
-    type: 'AMBER',
-    iconName: 'LineChart'
-  },
-  {
-    id: 'tool-3',
-    name: 'System Optimizer',
-    description: 'Detects resource issues and suggests allocation changes.',
-    type: 'BLUE',
-    iconName: 'Cpu'
-  }
-];
 
 export const toolApi = {
   /**
@@ -32,17 +9,11 @@ export const toolApi = {
    */
   getTools: async (projectId: string | number): Promise<ToolItem[]> => {
     try {
-      const response = await apiClient.get<ApiResponse<ToolItem[]>>(`/api/v1/projects/${projectId}/tools`);
-
-      if (!Array.isArray(response.data?.result) || response.data.result.length === 0) {
-        console.warn('API returned empty or non-array tools, using mock data.');
-        return mockTools;
-      }
-
-      return response.data.result;
+      const response = await apiClient.get<ApiResponse<PageResponse<ToolItem>>>(`/api/v1/projects/${projectId}/tools`);
+      return response.data.result?.content || [];
     } catch (error) {
-      console.warn('Failed to fetch tools from API, falling back to mock data.', error);
-      return mockTools;
+      console.error('Failed to fetch tools:', error);
+      throw error;
     }
   },
 
@@ -56,35 +27,8 @@ export const toolApi = {
       );
       return response.data.result;
     } catch (error) {
-      console.warn(`Failed to fetch tool ${toolId} from API, falling back to mock data.`, error);
-
-      const idStr = String(toolId);
-      const parsedToolId = typeof toolId === 'number' ? toolId : parseInt(idStr.replace(/\D/g, '') || '0', 10);
-      const codeSnapshot = `def execute(params):
-    source = params.get("source", "default")
-    return f"Analyzed {source}"
-`;
-
-      return {
-        toolId: parsedToolId,
-        projectId: Number(projectId),
-        chatSessionId: 1,
-        createdByProjectMemberId: 1,
-        createdByUserId: 1,
-        createdByUserName: 'Mock User',
-        fileName: 'data_analyzer.py',
-        displayName: 'Data Analyzer',
-        displayDescription: 'Analyzes data patterns.',
-        status: 'APPROVED',
-        toolGrade: 1,
-        sourceToolPlanId: 1,
-        moduleName: 'data_analyzer',
-        artifactPath: 'projects/mock/data_analyzer.py',
-        codeSnapshot,
-        metadataJson: JSON.stringify({ language: 'python' }),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      console.error(`Failed to fetch tool ${toolId}:`, error);
+      throw error;
     }
   },
 
@@ -100,8 +44,8 @@ export const toolApi = {
       await apiClient.patch(`/api/v1/projects/${projectId}/tools/${toolId}/status`, { status });
       return true;
     } catch (error) {
-      console.warn(`Failed to update tool ${toolId} status to ${status}, falling back to mock delay.`, error);
-      return new Promise((resolve) => setTimeout(() => resolve(true), 1000));
+      console.error(`Failed to update tool ${toolId} status:`, error);
+      throw error;
     }
   }
 };
