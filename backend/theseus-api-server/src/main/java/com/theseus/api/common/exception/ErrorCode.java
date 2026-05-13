@@ -47,6 +47,11 @@ public enum ErrorCode {
     INVALID_PROJECT_MEMBER_STATUS(HttpStatus.BAD_REQUEST, "PMEM-007", "지원하지 않는 프로젝트 멤버 상태입니다."),
     INVALID_PROJECT_MEMBER_ACCESS_LEVEL(HttpStatus.BAD_REQUEST, "PMEM-008", "프로젝트 멤버 accessLevel은 1 이상 99 이하만 지정할 수 있습니다."),
 
+    // RemoteWorkspace
+    REMOTE_WORKSPACE_NOT_FOUND(HttpStatus.NOT_FOUND, "RWSP-001", "RemoteWorkspace를 찾을 수 없습니다."),
+    REMOTE_WORKSPACE_ADMIN_PERMISSION_REQUIRED(HttpStatus.FORBIDDEN, "RWSP-002", "RemoteWorkspace 관리는 프로젝트 ADMIN 권한이 필요합니다."),
+    REMOTE_WORKSPACE_PAYLOAD_INVALID(HttpStatus.BAD_REQUEST, "RWSP-003", "RemoteWorkspace 요청 값이 올바르지 않습니다."),
+
     // Chat
     CHAT_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "CHAT-001", "채팅 세션을 찾을 수 없습니다."),
     CLOSED_CHAT_SESSION(HttpStatus.CONFLICT, "CHAT-002", "종료된 채팅 세션에는 메시지를 등록할 수 없습니다."),
