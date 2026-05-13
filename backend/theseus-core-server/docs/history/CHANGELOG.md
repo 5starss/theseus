@@ -4,6 +4,70 @@
 
 ## [Unreleased]
 
+### 🧭 Session 101 — PLAN runtime 용어 경계 및 prompt map 정리 (2026-05-13)
+
+#### `src/tool_plan` / `src/tool_build` / `src/tool_generation` / `src/auth` / `src/history`
+
+- LLM-facing 문구와 일반 채팅 설명에서 `ToolPlan` 노출을 줄이고 `PLAN draft`, `plan JSON`, `approved plan`, `custom tool artifact` 용어로 정리
+- `ToolPlan` 명칭은 `theseus.tool-plan.*`, `toolPlanId`, Pydantic event/schema 등 API/Kafka 툴 생성 worker 계약 안에서만 유지
+- 내부 설명 주석과 worker 예외 메시지 중 일반 runtime 설명에 가까운 문구도 `PLAN draft` 기준으로 정리
+- `structuredPlanJson`이 `state.py` PLAN DRAFTING 스키마의 `goal`, `context`, `tasks`, `verification`, `action_plan` 형태를 그대로 보존하도록 변경
+- API 표시/버전 호환용 `schemaVersion`, `planVersion`, `blocks` projection은 `planSnapshot`에 유지하고, legacy regeneration은 `draftSnapshot.planVersion` fallback을 사용하도록 보정
+
+#### `docs/prompt/prompt_architecture_map.md`
+
+- `/stream`의 `ASK|AGENT|PLAN`은 `state.py` 기준 일반 runtime mode이고 ToolPlan은 API/Kafka 계약명이라는 용어 경계를 추가
+- `/stream`, Spring history, `theseus.tool-plan.request`, `theseus.tool-build.request`, repair, remote workspace context에서 서버 간 검증이 필요한 prompt/input 계약과 주의점을 정리
+
+#### 검증
+
+- `python -m py_compile src\history\mapper.py src\tool_build\builder.py src\tool_plan\planner.py src\tool_plan\agent_loop.py src\tool_generation\schemas.py src\tool_generation\processor.py src\auth\client.py src\auth\schemas.py` 성공
+- fake LLM 기반 PLAN draft JSON smoke로 `structuredPlanJson`이 `state.py` JSON을 보존하고 `planSnapshot`이 API projection을 유지하는 것 확인
+
+---
+
+### 🐛 Session 100 — Core stream mode / remote workspace payload 보정 (2026-05-13)
+
+#### `src/routes/stream.py` / `src/builder/engine.py`
+
+- `/api/v1/stream`이 `mode=ASK|AGENT|PLAN` 쿼리 파라미터를 실제 `EngineBuildContext.mode`로 반영하도록 변경
+- `ASK` 모드는 빈 tool schema로 실행할 수 있게 해 질문/답변 전용 프롬프트가 실제 적용되도록 보정
+- `PLAN` 모드에서 `plan_id`가 없으면 `DRAFTING`, `plan_id`가 있으면 기존처럼 `EXECUTING`으로 system prompt phase를 결정하도록 정리
+- `/stream`의 optional `remote_workspace_id` / `remoteWorkspaceId`를 받아 `EngineBuildContext.remote_workspace_id`와 `tool_metadata.remote_workspace_id`에 전달
+
+#### `src/tool_plan` / `src/history`
+
+- `theseus.tool-plan.request` 검증 schema에 `RemoteWorkspacePayload`, `remoteWorkspaceId`, `remoteWorkspace` optional 필드를 추가
+- PLAN draft LLM 응답에 PLAN JSON 블록이 없지만 일반 텍스트 응답이 있으면 `TOOL_PLAN_FAILED`가 아니라 `TOOL_PLAN_SKIPPED` + `assistantMessage(messageType=CHAT)`로 반환해 일반 채팅 답변처럼 저장될 수 있도록 보정
+- Spring history의 `SYSTEM` sender를 `ConversationMessage(role="system")`으로 변환하지 않고 엔진 히스토리에서 제외해 `/stream` 500을 방지
+
+#### 검증
+
+- `python -m py_compile src\routes\stream.py src\builder\engine.py src\history\mapper.py src\tool_plan\schemas.py src\tool_plan\planner.py` 성공
+- `python -m compileall -q src\routes src\builder src\history src\tool_plan` 성공
+
+---
+
+### 🐛 Session 99 — Core PLAN draft 프롬프트 정렬 (2026-05-13)
+
+#### `src/tool_plan`
+
+- API/Kafka tool 생성 planner가 별도 `Task-specific output contract`와 `SKIP` intent 프롬프트를 주입하지 않고 `theseus_engine.models.state.TheseusStateMachine.get_system_prompt()`의 PLAN DRAFTING/REVIEW 프롬프트를 사용하도록 변경
+- 짧은 입력을 worker 자체 판정으로 `TOOL_PLAN_SKIPPED` 처리하던 경로를 제거하고, CLI/TUI와 같이 PLAN DRAFTING 응답의 ```json 계획 블록을 감지해 plan payload로 변환하도록 조정
+- 기존 API Server 응답 호환을 위해 CLI PLAN JSON은 `structuredPlanJson`으로 유지하고, `planSnapshot.blocks`는 `tasks[]`에서 파생해 계속 채움
+
+#### `src/builder` / `src/tool_build`
+
+- Core server system prompt helper가 `runtime_reminders`를 추가로 주입하지 않고 `state.py`의 `TheseusStateMachine.get_system_prompt()` 결과만 반환하도록 정리
+- ToolBuild LLM 호출도 system prompt에 별도 reminder를 더하지 않도록 조정해, 서버 연결부 system prompt 경로를 `state.py` 기준으로 통일
+
+#### 검증
+
+- `python -m py_compile src\builder\system_prompt.py src\tool_build\builder.py src\tool_plan\planner.py src\tool_plan\agent_loop.py src\builder\engine.py` 성공
+- fake LLM 기반으로 짧은 입력이 SKIP 없이 PLAN JSON으로 처리되고 API/Kafka worker contract가 system prompt에 포함되지 않는 것을 확인
+
+---
+
 ### 🐛 Session 98 — Extension UX/Context/Session 통합 보정 (2026-05-13)
 
 #### Activity / Tool 표시
@@ -19,6 +83,7 @@
 #### Context / Prompt 주입
 
 - 현재 IDE에서 열린 파일을 모든 사용자 입력에 자동 보조 컨텍스트로 붙이지 않고, “현재 파일”, “이 파일”, “여기”, “this file”처럼 사용자가 명시적으로 현재 편집기 컨텍스트를 가리킬 때만 주입하도록 변경
+- “지금 IDE에 떠 있는 파일”, “열려 있는 파일”, “보고 있는 코드”처럼 사용자가 현재 편집기 컨텍스트를 가리키는 자연어 표현도 active editor 보조 컨텍스트 주입 조건에 포함
 - active file context bar 문구를 `context ...`에서 `active ...`로 바꿔 “자동 포함되는 컨텍스트”가 아니라 현재 열린 파일 상태 표시임을 명확히 함
 - `WorkspaceContext.injectCursorContext()`가 LLM 입력에 붙이는 active editor 보조 컨텍스트 문구를 영어(`IDE auxiliary context`)로 변경
 - `Theseus: Explain Problem` / `Theseus: Fix Problem` / `Theseus: Explain Selection`이 입력창에 삽입하는 요청 문구를 영어로 변경
@@ -32,12 +97,18 @@
 - session menu accordion open/closed 상태를 WebView state에 저장해 세션 목록 refresh 이후에도 접힘 상태가 유지되도록 보강
 - 세션 목록의 삭제 액션을 텍스트 `Delete` 버튼에서 compact `x` 버튼으로 바꿔 좁은 sidebar에서도 세션 목록과 삭제 액션이 한 줄에 들어가도록 조정
 - `getSessions`가 실행 중 runner에 `/session list`를 보내지 않고 Extension Host의 local session snapshot으로 `SessionListEvent`를 반환하도록 변경
+- 세션 생성/전환/삭제/이름변경/export 버튼이 runner stopped/error 상태에서도 Extension Host의 `.theseus_sessions/*.json` snapshot을 직접 갱신하도록 보강
+- 선택한 local session을 Extension Host workspace state에 저장하고 daemon/stdio runner 시작 시 `--session` 인자로 전달해, runner 재시작 후 `default`로 되돌아가지 않도록 보정
 - `/session`, `/sessions`, `/session list` 입력은 채팅에 “세션 목록” system message를 추가하지 않고 session menu를 열어 새로고침하는 UI 동작으로 처리
 - `SessionChangedEvent.current`를 `SessionManager`의 current runner status에도 반영해 세션 전환 뒤 session label과 fallback summary가 stale `default`로 되돌아가는 문제를 줄임
+- `.vscodeignore`에서 `.theseus_sessions/`와 `.theseus/`를 제외해 개발용 로컬 세션 파일이 VSIX에 포함되지 않도록 수정
 
 #### 검증
 
 - `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py theseus_engine\daemon.py theseus_engine\cli_runner.py` 성공
+- 임시 workspace에서 `LocalSessionStore` create/switch/delete snapshot smoke 성공
+- `npx.cmd @vscode/vsce package` 성공, VSIX 포함 목록에서 `.theseus_sessions/` 제외 확인
 - `node --check media\main.js media\components\ActivityLog.js media\components\SessionMenu.js media\state.js` 성공
 - `git diff --check` 성공
 
@@ -121,7 +192,7 @@
 - `src/builder/system_prompt.py`가 `available_tools`와 `runtime_reminders`를 canonical `TheseusStateMachine`으로 전달하도록 확장
 - `src/builder/engine.py`와 `theseus_engine/core/engine_builder.py`가 실제 active registry의 tool 이름을 시스템 프롬프트 조립에 전달
 - `theseus_engine/runner_runtime.py`가 mode/PLAN phase 변경 후 active registry를 먼저 동기화하고, 그 tool 이름으로 시스템 프롬프트를 재생성하도록 수정
-- ToolPlan/ToolBuild worker는 실제 tool schema가 비어 있으므로 `available_tools=[]`와 worker-specific runtime reminder로 프롬프트를 조립해 도구 호출 지침을 주입하지 않음
+- API/Kafka tool 생성 worker는 실제 tool schema가 비어 있으므로 `available_tools=[]`와 worker-specific runtime reminder로 프롬프트를 조립해 도구 호출 지침을 주입하지 않음
 
 #### 문서/검증
 

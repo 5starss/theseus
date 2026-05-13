@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-13 — Extension user-message template 영어화
+> **최종 업데이트**: 2026-05-13 — Core stream/runtime prompt 용어 경계 정리
 
 ---
 
@@ -165,12 +165,43 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 
 | `src` 경로 | 주입 모드/단계 | 요청별 입력 계약 |
 |---|---|---|
-| `src/routes/stream.py` → `src/builder/engine.py` | `AGENT`, 또는 plan 실행 시 `PLAN/EXECUTING` | 사용자 prompt와 Spring history를 `QueryEngine` 메시지로 전달합니다. |
-| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | ToolPlan JSON schema, base plan, feedback, history snapshot은 user message에 포함합니다. |
-| `src/tool_build/builder.py` | `PLAN/EXECUTING` | ToolBuild JSON/code schema와 검증 실패 repair context는 user message에 포함합니다. |
+| `src/routes/stream.py` → `src/builder/engine.py` | `ASK`, `AGENT`, `PLAN/DRAFTING`, `PLAN/EXECUTING` | `/stream`의 `mode=ASK\|AGENT\|PLAN`을 `state.py` runtime mode로 해석하고, 사용자 prompt와 Spring history를 `QueryEngine` 메시지로 전달합니다. |
+| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | API/Kafka 계약명은 ToolPlan이지만, LLM 입력과 설명은 `PLAN draft`, `plan JSON`, `approved plan` 용어를 사용합니다. PLAN JSON은 `state.py`의 DRAFTING 스키마를 따릅니다. |
+| `src/tool_build/builder.py` | `PLAN/EXECUTING` | 승인된 plan을 기반으로 custom tool artifact JSON/code schema와 검증 실패 repair context를 user message에 포함합니다. |
 | `src/tool_generation/processor.py` | legacy 요청을 `PLAN/DRAFTING` 또는 `PLAN/WAIT_FOR_REVIEW`로 변환 | 기존 `theseus.tool-generation.*` 통신을 임시 유지하기 위한 adapter입니다. |
 
-레거시 ToolGeneration consumer는 최종 ToolPlan markdown을 여러 `chunk` 이벤트로 나누어 기존 UI의 스트리밍형 표시를 유지합니다. API 서버가 새 `tool-plan`/`tool-build` 토픽으로 전환되기 전까지는 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=true`, `CORE_TOOL_PLAN_CONSUMER_ENABLED=false`가 기본 운영 조합입니다. 전환 후에는 `CORE_TOOL_PLAN_CONSUMER_ENABLED=true`로 신규 ToolPlan consumer를 켜고, 필요 시 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=false`로 legacy adapter를 끕니다.
+레거시 ToolGeneration consumer는 최종 PLAN draft markdown을 여러 `chunk` 이벤트로 나누어 기존 UI의 스트리밍형 표시를 유지합니다. API 서버가 새 `tool-plan`/`tool-build` 토픽으로 전환되기 전까지는 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=true`, `CORE_TOOL_PLAN_CONSUMER_ENABLED=false`가 기본 운영 조합입니다. 전환 후에는 `CORE_TOOL_PLAN_CONSUMER_ENABLED=true`로 신규 API/Kafka ToolPlan consumer를 켜고, 필요 시 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=false`로 legacy adapter를 끕니다.
+
+### 4.1 용어 경계: runtime PLAN vs API/Kafka ToolPlan
+
+`ToolPlan`은 `theseus-api-server`와 Kafka topic 계약에서 사용하는 서버 도메인 이름입니다. `theseus_engine` runtime에는 `ToolPlan`이라는 모드가 없고, `state.py` 기준의 `AgentMode.PLAN`과 `PlanPhase`만 있습니다.
+
+| 범위 | 사용할 용어 | 주의점 |
+|---|---|---|
+| `/stream`, CLI, Extension, `state.py` runtime | `PLAN`, `PLAN draft`, `plan JSON`, `approved plan` | 일반 채팅/프롬프트/assistant 응답에서는 ToolPlan 용어를 쓰지 않습니다. |
+| API/Kafka payload, DB entity, Java DTO, Python Pydantic contract | `ToolPlan`, `toolPlanId`, `TOOL_PLAN_*`, `theseus.tool-plan.*` | 외부 계약 필드명과 이벤트명은 호환성 때문에 유지합니다. |
+| 문서 설명 | runtime 설명은 PLAN 용어, 계약 설명은 ToolPlan 용어 | 같은 문단에서 두 의미를 섞지 말고 “API/Kafka 계약명” 여부를 명시합니다. |
+
+### 4.2 서버 간 검증이 필요한 프롬프트/입력 계약
+
+서버 연결 경로에서는 LLM prompt 자체뿐 아니라 Spring API Server와 Core Server 사이의 payload 계약이 함께 맞아야 합니다. 아래 항목은 변경 시 반드시 양쪽을 함께 확인합니다.
+
+| 경로 | LLM/입력 계약 | 검증 포인트 |
+|---|---|---|
+| `/api/v1/stream` | `mode=ASK\|AGENT\|PLAN`, `prompt`, `chat_session_id`, optional `plan_id`, optional `remote_workspace_id` | `mode`가 `state.py` mode로 반영되는지, `ASK`에서 tool schema가 비어도 실패하지 않는지, `PLAN`이 `plan_id` 유무에 따라 DRAFTING/EXECUTING으로 분기되는지 확인합니다. |
+| Spring history → `src/history/mapper.py` | `USER`/`ASSISTANT`만 engine `ConversationMessage`로 변환 | `SYSTEM` sender가 `role="system"`으로 들어가면 engine message 검증에서 실패할 수 있습니다. 시스템 알림은 history에서 제외하거나 user/assistant 요약으로 변환합니다. |
+| `theseus.tool-plan.request` generate | API/Kafka 계약명은 ToolPlan, LLM 출력은 `state.py` PLAN DRAFTING JSON | `structuredPlanJson`은 `goal`, `context`, `tasks`, `verification`, `action_plan` 중심의 state.py JSON을 보존합니다. API 표시용 `blocks`, `schemaVersion`, `planVersion`은 `planSnapshot` 같은 projection에 둡니다. |
+| `theseus.tool-plan.request` regenerate | base plan과 feedback을 user message로 전달 | 별도 schema를 새로 강제하지 말고 `state.py` PLAN REVIEW 흐름에서 전체 plan JSON을 다시 제시하게 합니다. feedback payload는 LLM 입력 전에 필요한 최소 내용만 요약합니다. |
+| `theseus.tool-build.request` | 승인된 plan → custom tool artifact JSON spec 생성 | `system_prompt`는 `state.py` PLAN EXECUTING을 사용하되, user message의 출력 계약은 generated artifact 파싱을 위한 JSON spec으로 제한합니다. prompt 문구에서는 ToolPlan 대신 approved plan/custom tool artifact 용어를 사용합니다. |
+| Tool build repair | 이전 spec, error code/message, sandbox/validation failure context | 실패 원인을 충분히 주되 비밀값, 원격 workspace credential, 불필요한 파일 내용을 넣지 않습니다. repair 결과도 동일 JSON spec으로 검증합니다. |
+| Remote workspace context | `remoteWorkspaceId` 또는 `remote_workspace_id` | LLM prompt에 원격 접속 비밀을 직접 넣지 않습니다. Core `tool_metadata`에는 식별자 중심으로 전달하고, 실제 접속/검증은 서버가 허용한 tool/service 경계에서 처리합니다. |
+
+주의해서 볼 점:
+
+- `state.py`의 PLAN DRAFTING JSON 스키마가 바뀌면 `src/tool_plan/planner.py`의 `structuredPlanJson` 보존 방식과 `planSnapshot` projection을 함께 갱신해야 합니다.
+- API/Kafka 이벤트명은 호환성 때문에 `TOOL_PLAN_*`을 유지하더라도, LLM-facing 문구와 일반 채팅 응답에는 `ToolPlan`을 노출하지 않습니다.
+- `/stream`은 일반 runtime 경로입니다. 새 worker 계약을 추가할 때 `/stream` mode semantics를 tool 생성 전용 흐름으로 오염시키지 않습니다.
+- server worker의 user message contract는 `state.py` system prompt보다 낮은 우선순위입니다. 출력 shape 강제가 필요하면 “왜 파싱 가능한 JSON이 필요한지”가 명확한 worker 경로에만 둡니다.
 
 ---
 
