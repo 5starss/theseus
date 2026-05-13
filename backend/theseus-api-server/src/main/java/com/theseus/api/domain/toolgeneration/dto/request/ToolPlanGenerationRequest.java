@@ -13,4 +13,6 @@ public class ToolPlanGenerationRequest {
 
 	@NotBlank
 	private String prompt;
+
+	private Long remoteWorkspaceId;
 }

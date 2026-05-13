@@ -17,7 +17,7 @@ public record CoreStreamProperties(String baseUrl) {
 		}
 	}
 
-	public URI streamUri(String prompt, Long projectId, Long sessionId, ToolPlanMode mode) {
+	public URI streamUri(String prompt, Long projectId, Long sessionId, ToolPlanMode mode, Long remoteWorkspaceId) {
 		String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
 		String query = "prompt=%s&chat_session_id=%d&project_id=%d&mode=%s".formatted(
 			encode(prompt),
@@ -25,6 +25,9 @@ public record CoreStreamProperties(String baseUrl) {
 			projectId,
 			mode.name()
 		);
+		if (remoteWorkspaceId != null) {
+			query += "&remote_workspace_id=%d".formatted(remoteWorkspaceId);
+		}
 		return URI.create(normalizedBaseUrl + "/api/v1/stream?" + query);
 	}
 

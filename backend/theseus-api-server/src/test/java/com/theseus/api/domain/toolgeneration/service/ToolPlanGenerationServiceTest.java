@@ -29,6 +29,9 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
+import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanGroup;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
@@ -83,6 +86,9 @@ class ToolPlanGenerationServiceTest {
 	private ProjectMemberRepository projectMemberRepository;
 
 	@Mock
+	private RemoteWorkspaceRepository remoteWorkspaceRepository;
+
+	@Mock
 	private UserRepository userRepository;
 
 	@Mock
@@ -104,6 +110,7 @@ class ToolPlanGenerationServiceTest {
 			chatMessageRepository,
 			projectRepository,
 			projectMemberRepository,
+			remoteWorkspaceRepository,
 			userRepository,
 			chatMessageService,
 			eventPublisher,
@@ -187,6 +194,8 @@ class ToolPlanGenerationServiceTest {
 		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
 		assertThat(payload.requestedByUserId()).isEqualTo(fixture.user().getId());
 		assertThat(payload.requestedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
+		assertThat(payload.remoteWorkspaceId()).isNull();
+		assertThat(payload.remoteWorkspace()).isNull();
 		assertThat(payload.prompt()).isEqualTo(request.getPrompt());
 		assertThat(payload.history()).hasSize(2);
 		assertThat(payload.history().get(0).content()).isEqualTo("이전 질문");
@@ -209,6 +218,94 @@ class ToolPlanGenerationServiceTest {
 			);
 
 		verifyNoInteractions(userRepository, toolPlanRunRepository, chatMessageService, eventPublisher);
+	}
+
+	@Test
+	@DisplayName("RemoteWorkspace媛 ?좏깮??PLAN ?앹꽦 ?붿껌? run怨?Kafka payload???곌껐 ?뺣낫瑜??ы븿?쒕떎")
+	void generatePlanIncludesRemoteWorkspacePayload() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGenerationRequest request = createRequest(ToolPlanMode.PLAN, "Remote Workspace瑜?遺꾩꽍?섎뒗 PLAN");
+		ReflectionTestUtils.setField(request, "remoteWorkspaceId", 70L);
+		RemoteWorkspace remoteWorkspace = createRemoteWorkspace(70L, fixture);
+		ChatMessage savedUserMessage = createChatMessage(chatSession, 1, ChatMessageSenderType.USER, request.getPrompt());
+		ReflectionTestUtils.setField(savedUserMessage, "id", 400L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(70L, fixture.project(), RemoteWorkspaceStatus.DELETED))
+			.thenReturn(Optional.of(remoteWorkspace));
+		when(chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(chatSession)).thenReturn(List.of());
+		when(toolPlanRunRepository.save(any(ToolPlanRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(chatMessageService.saveUserToolPlanRunMessage(
+			same(chatSession),
+			any(ToolPlanRun.class),
+			eq(ChatMessageType.TOOL_PLAN_REQUEST),
+			eq(ChatMessageContentType.TEXT),
+			eq(request.getPrompt())
+		)).thenReturn(savedUserMessage);
+
+		toolPlanGenerationService.generatePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			request
+		);
+
+		ArgumentCaptor<ToolPlanRun> runCaptor = ArgumentCaptor.forClass(ToolPlanRun.class);
+		verify(toolPlanRunRepository).save(runCaptor.capture());
+		assertThat(runCaptor.getValue().getRemoteWorkspace()).isEqualTo(remoteWorkspace);
+
+		ArgumentCaptor<ToolPlanKafkaPublishEvent> eventCaptor =
+			ArgumentCaptor.forClass(ToolPlanKafkaPublishEvent.class);
+		verify(eventPublisher).publishEvent(eventCaptor.capture());
+		ToolPlanGenerationRequestEvent payload = (ToolPlanGenerationRequestEvent) eventCaptor.getValue().payload();
+		assertThat(payload.remoteWorkspaceId()).isEqualTo(70L);
+		assertThat(payload.remoteWorkspace()).isNotNull();
+		assertThat(payload.remoteWorkspace().id()).isEqualTo(70L);
+		assertThat(payload.remoteWorkspace().host()).isEqualTo("10.0.1.20");
+		assertThat(payload.remoteWorkspace().password()).isEqualTo("password");
+	}
+
+	@Test
+	@DisplayName("RemoteWorkspace媛 ?꾨줈?앺듃???띠븯吏 ?딆쑝硫?PLAN ?앹꽦 ?붿껌??嫄곕??쒕떎")
+	void generatePlanFailsWhenRemoteWorkspaceIsNotAccessible() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGenerationRequest request = createRequest(ToolPlanMode.PLAN, "PLAN ?앹꽦");
+		ReflectionTestUtils.setField(request, "remoteWorkspaceId", 70L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(70L, fixture.project(), RemoteWorkspaceStatus.DELETED))
+			.thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> toolPlanGenerationService.generatePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			request
+		))
+			.isInstanceOfSatisfying(BusinessException.class, exception ->
+				assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.REMOTE_WORKSPACE_NOT_FOUND)
+			);
+
+		verify(toolPlanRunRepository, never()).save(any());
+		verifyNoInteractions(chatMessageService, eventPublisher);
 	}
 
 	@Test
@@ -275,6 +372,8 @@ class ToolPlanGenerationServiceTest {
 		ToolPlanGroup planGroup = createToolPlanGroup(40L, fixture, chatSession);
 		ToolPlan baseToolPlan = createToolPlan(50L, fixture, chatSession, planGroup, 2L, ToolPlanStatus.REVIEW);
 		ToolPlanRegenerationRequest request = createRegenerationRequest(ToolPlanMode.PLAN, 2L);
+		ReflectionTestUtils.setField(request, "remoteWorkspaceId", 70L);
+		RemoteWorkspace remoteWorkspace = createRemoteWorkspace(70L, fixture);
 		ChatMessage savedUserMessage = createChatMessage(
 			chatSession,
 			4,
@@ -302,6 +401,8 @@ class ToolPlanGenerationServiceTest {
 			fixture.project(),
 			chatSession
 		)).thenReturn(Optional.of(baseToolPlan));
+		when(remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(70L, fixture.project(), RemoteWorkspaceStatus.DELETED))
+			.thenReturn(Optional.of(remoteWorkspace));
 		when(toolPlanRunRepository.save(any(ToolPlanRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
 		when(chatMessageService.saveUserToolPlanMessage(
 			same(chatSession),
@@ -330,6 +431,7 @@ class ToolPlanGenerationServiceTest {
 		verify(toolPlanRunRepository).save(runCaptor.capture());
 		ToolPlanRun savedRun = runCaptor.getValue();
 		assertThat(savedRun.getRequestType()).isEqualTo(ToolPlanRunRequestType.REGENERATE_PLAN);
+		assertThat(savedRun.getRemoteWorkspace()).isEqualTo(remoteWorkspace);
 		assertThat(savedRun.getBaseToolPlan()).isEqualTo(baseToolPlan);
 		assertThat(savedRun.getPlanGroup()).isEqualTo(planGroup);
 		assertThat(savedRun.getUserMessageId()).isEqualTo(401L);
@@ -349,6 +451,9 @@ class ToolPlanGenerationServiceTest {
 		assertThat(payload.runId()).isEqualTo(response.getRunId());
 		assertThat(payload.projectId()).isEqualTo(fixture.project().getId());
 		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
+		assertThat(payload.remoteWorkspaceId()).isEqualTo(70L);
+		assertThat(payload.remoteWorkspace()).isNotNull();
+		assertThat(payload.remoteWorkspace().username()).isEqualTo("ubuntu");
 		assertThat(payload.baseToolPlanId()).isEqualTo(baseToolPlan.getId());
 		assertThat(payload.planGroupId()).isEqualTo(planGroup.getId());
 		assertThat(payload.basePlanVersion()).isEqualTo(2L);
@@ -581,6 +686,23 @@ class ToolPlanGenerationServiceTest {
 			.contentType(ChatMessageContentType.TEXT)
 			.content(content)
 			.build();
+	}
+
+	private RemoteWorkspace createRemoteWorkspace(Long id, ProjectFixture fixture) {
+		RemoteWorkspace remoteWorkspace = RemoteWorkspace.builder()
+			.project(fixture.project())
+			.createdByProjectMember(fixture.projectMember())
+			.name("?명뵾利앷텒 ?댁쁺?쒕쾭")
+			.host("10.0.1.20")
+			.port(22)
+			.username("ubuntu")
+			.password("password")
+			.privateKeyPath(null)
+			.basePath("/home/ubuntu/ssafy-stock")
+			.status(RemoteWorkspaceStatus.ACTIVE)
+			.build();
+		ReflectionTestUtils.setField(remoteWorkspace, "id", id);
+		return remoteWorkspace;
 	}
 
 	private ProjectFixture createProjectFixture(boolean canCreateTool, ProjectMemberStatus status) {

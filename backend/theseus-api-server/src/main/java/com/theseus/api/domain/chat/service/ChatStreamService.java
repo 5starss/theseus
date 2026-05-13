@@ -13,6 +13,8 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
+import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -46,6 +48,7 @@ public class ChatStreamService {
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final ChatSessionRepository chatSessionRepository;
+	private final RemoteWorkspaceRepository remoteWorkspaceRepository;
 	private final ObjectMapper objectMapper;
 	private final HttpClient httpClient = HttpClient.newBuilder()
 		.connectTimeout(Duration.ofSeconds(5))
@@ -69,6 +72,7 @@ public class ChatStreamService {
 		ChatSession chatSession = getAccessibleChatSession(sessionId, project, projectMember);
 		validateOpenChatSession(chatSession);
 		validateAgentModePermission(request.getMode(), projectMember);
+		validateRemoteWorkspace(project, request.getRemoteWorkspaceId());
 
 		return outputStream -> proxyCoreStream(
 			outputStream,
@@ -87,7 +91,13 @@ public class ChatStreamService {
 		String authorizationHeader
 	) throws IOException {
 		HttpRequest coreRequest = HttpRequest.newBuilder(
-				coreStreamProperties.streamUri(request.getPrompt(), projectId, sessionId, request.getMode())
+				coreStreamProperties.streamUri(
+					request.getPrompt(),
+					projectId,
+					sessionId,
+					request.getMode(),
+					request.getRemoteWorkspaceId()
+				)
 			)
 			.timeout(CORE_STREAM_TIMEOUT)
 			.header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -180,5 +190,17 @@ public class ChatStreamService {
 		if (chatSession.isClosed()) {
 			throw BusinessException.of(ErrorCode.CLOSED_CHAT_SESSION);
 		}
+	}
+
+	private void validateRemoteWorkspace(Project project, Long remoteWorkspaceId) {
+		if (remoteWorkspaceId == null) {
+			return;
+		}
+
+		remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
+			remoteWorkspaceId,
+			project,
+			RemoteWorkspaceStatus.DELETED
+		).orElseThrow(() -> BusinessException.of(ErrorCode.REMOTE_WORKSPACE_NOT_FOUND));
 	}
 }

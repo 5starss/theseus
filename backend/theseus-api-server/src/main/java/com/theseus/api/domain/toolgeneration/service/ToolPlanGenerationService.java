@@ -18,6 +18,9 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
+import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanRun;
@@ -33,6 +36,7 @@ import com.theseus.api.domain.toolgeneration.event.ToolPlanGenerationRequestEven
 import com.theseus.api.domain.toolgeneration.event.ToolPlanHistoryMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanKafkaPublishEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanRegenerationRequestEvent;
+import com.theseus.api.domain.toolgeneration.event.ToolPlanRemoteWorkspacePayload;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
@@ -63,6 +67,7 @@ public class ToolPlanGenerationService {
 	private final ChatMessageRepository chatMessageRepository;
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
+	private final RemoteWorkspaceRepository remoteWorkspaceRepository;
 	private final UserRepository userRepository;
 	private final ChatMessageService chatMessageService;
 	private final ApplicationEventPublisher eventPublisher;
@@ -87,6 +92,7 @@ public class ToolPlanGenerationService {
 
 		ChatSession chatSession = getAccessibleChatSessionForUpdate(sessionId, project, projectMember);
 		validateOpenChatSession(chatSession);
+		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceIfRequested(project, request.getRemoteWorkspaceId());
 
 		List<ToolPlanHistoryMessagePayload> history = createHistorySnapshot(chatSession);
 		String runId = createRunId();
@@ -96,6 +102,7 @@ public class ToolPlanGenerationService {
 			project,
 			chatSession,
 			projectMember,
+			remoteWorkspace,
 			request,
 			history,
 			requestedAt
@@ -109,6 +116,7 @@ public class ToolPlanGenerationService {
 			.mode(ToolPlanMode.PLAN)
 			.status(ToolPlanRunStatus.REQUESTED)
 			.requestedByProjectMember(projectMember)
+			.remoteWorkspace(remoteWorkspace)
 			.requestPayloadJson(writeAsJson(requestEvent))
 			.historySnapshotJson(writeAsJson(history))
 			.requestedAt(requestedAt)
@@ -152,6 +160,7 @@ public class ToolPlanGenerationService {
 		validateRegenerationPermission(projectMember, baseToolPlan);
 		validateRegeneratableToolPlan(baseToolPlan);
 		validateBasePlanVersion(baseToolPlan, request.getBasePlanVersion());
+		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceIfRequested(project, request.getRemoteWorkspaceId());
 
 		String runId = createRunId();
 		LocalDateTime requestedAt = LocalDateTime.now();
@@ -163,6 +172,7 @@ public class ToolPlanGenerationService {
 			.mode(ToolPlanMode.PLAN)
 			.status(ToolPlanRunStatus.REQUESTED)
 			.requestedByProjectMember(projectMember)
+			.remoteWorkspace(remoteWorkspace)
 			.baseToolPlan(baseToolPlan)
 			.planGroup(baseToolPlan.getPlanGroup())
 			.requestedAt(requestedAt)
@@ -184,6 +194,7 @@ public class ToolPlanGenerationService {
 			project,
 			chatSession,
 			baseToolPlan,
+			remoteWorkspace,
 			request,
 			history,
 			requestedAt
@@ -220,6 +231,7 @@ public class ToolPlanGenerationService {
 		Project project,
 		ChatSession chatSession,
 		ProjectMember projectMember,
+		RemoteWorkspace remoteWorkspace,
 		ToolPlanGenerationRequest request,
 		List<ToolPlanHistoryMessagePayload> history,
 		LocalDateTime requestedAt
@@ -232,6 +244,8 @@ public class ToolPlanGenerationService {
 			chatSession.getId(),
 			projectMember.getUser().getId(),
 			projectMember.getId(),
+			remoteWorkspace == null ? null : remoteWorkspace.getId(),
+			ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace),
 			request.getPrompt(),
 			history,
 			requestedAt
@@ -243,6 +257,7 @@ public class ToolPlanGenerationService {
 		Project project,
 		ChatSession chatSession,
 		ToolPlan baseToolPlan,
+		RemoteWorkspace remoteWorkspace,
 		ToolPlanRegenerationRequest request,
 		List<ToolPlanHistoryMessagePayload> history,
 		LocalDateTime requestedAt
@@ -253,6 +268,8 @@ public class ToolPlanGenerationService {
 			runId,
 			project.getId(),
 			chatSession.getId(),
+			remoteWorkspace == null ? null : remoteWorkspace.getId(),
+			ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace),
 			baseToolPlan.getId(),
 			baseToolPlan.getPlanGroup().getId(),
 			request.getBasePlanVersion(),
@@ -326,6 +343,18 @@ public class ToolPlanGenerationService {
 	private ToolPlan getToolPlanForUpdate(Long toolPlanId, Project project, ChatSession chatSession) {
 		return toolPlanRepository.findByIdAndProjectAndChatSessionForUpdate(toolPlanId, project, chatSession)
 			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_PLAN_NOT_FOUND));
+	}
+
+	private RemoteWorkspace getRemoteWorkspaceIfRequested(Project project, Long remoteWorkspaceId) {
+		if (remoteWorkspaceId == null) {
+			return null;
+		}
+
+		return remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
+			remoteWorkspaceId,
+			project,
+			RemoteWorkspaceStatus.DELETED
+		).orElseThrow(() -> BusinessException.of(ErrorCode.REMOTE_WORKSPACE_NOT_FOUND));
 	}
 
 	private void validatePlanMode(ToolPlanMode mode) {

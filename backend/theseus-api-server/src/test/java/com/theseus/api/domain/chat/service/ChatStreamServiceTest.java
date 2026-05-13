@@ -18,6 +18,8 @@ import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
+import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
 import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
@@ -52,6 +54,9 @@ class ChatStreamServiceTest {
 	@Mock
 	private ChatSessionRepository chatSessionRepository;
 
+	@Mock
+	private RemoteWorkspaceRepository remoteWorkspaceRepository;
+
 	private ChatStreamService service;
 	private User user;
 	private Project project;
@@ -65,6 +70,7 @@ class ChatStreamServiceTest {
 			projectRepository,
 			projectMemberRepository,
 			chatSessionRepository,
+			remoteWorkspaceRepository,
 			new ObjectMapper()
 		);
 		user = User.builder()
@@ -129,6 +135,30 @@ class ChatStreamServiceTest {
 
 	@Test
 	@DisplayName("PLAN 모드는 채팅 스트림 엔드포인트에서 거부한다.")
+	void streamFailsWhenRemoteWorkspaceIsNotAccessible() {
+		// Given
+		ProjectMember projectMember = createProjectMember(false);
+		stubAccessibleSession(projectMember);
+		ChatStreamRequest request = createRequest(ToolPlanMode.ASK);
+		ReflectionTestUtils.setField(request, "remoteWorkspaceId", 70L);
+		when(remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(70L, project, RemoteWorkspaceStatus.DELETED))
+			.thenReturn(Optional.empty());
+
+		// When & Then
+		assertThatThrownBy(() -> service.streamChat(
+			createAuthenticatedUser(),
+			PROJECT_ID,
+			SESSION_ID,
+			request,
+			AUTHORIZATION_HEADER
+		))
+			.isInstanceOf(BusinessException.class)
+			.extracting("errorCode")
+			.isEqualTo(ErrorCode.REMOTE_WORKSPACE_NOT_FOUND);
+	}
+
+	@Test
+	@DisplayName("PLAN 紐⑤뱶??梨꾪똿 ?ㅽ듃由??붾뱶?ъ씤?몄뿉??嫄곕??쒕떎.")
 	void streamPlanModeIsRejected() {
 		// Given
 		ChatStreamRequest request = createRequest(ToolPlanMode.PLAN);
