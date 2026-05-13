@@ -66,7 +66,7 @@ class BillingUsageReport(BaseModel):
     def validate_identifier(cls, value: object) -> int:
         return _coerce_int(value)
 
-# --- Tool Plan Storage Schemas ---
+# --- PLAN Draft Storage Schemas ---
 
 class PlanStep(BaseModel):
     stepNumber: int
@@ -88,7 +88,7 @@ class StructuredPlan(BaseModel):
 
 class AgentToolPlanPayload(BaseModel):
     """
-    AI 서버가 도구 플랜 생성을 완료한 후 Backend(Spring)에 저장을 요청할 때 사용하는 페이로드
+    AI 서버가 PLAN draft 생성을 완료한 후 Backend(Spring)에 저장을 요청할 때 사용하는 페이로드
     """
     projectMemberId: int
     chatSessionId: int

@@ -73,6 +73,8 @@ class ToolDraftPayload(BaseModel):
         version = self.structured_plan_json.get("planVersion")
         if version is None:
             version = self.structured_plan_json.get("version")
+        if version is None and isinstance(self.draft_snapshot, dict):
+            version = self.draft_snapshot.get("planVersion")
         return int(version) if isinstance(version, int | str) and str(version).isdigit() else None
 
 

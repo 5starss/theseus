@@ -176,7 +176,7 @@ class BillingClient:
 
 class AgentClient:
     """
-    AI 에이전트의 결과물(Tool Plan 등)을 Backend(Spring)에 전송하는 클라이언트
+    AI 에이전트의 PLAN draft 결과물을 Backend(Spring)에 전송하는 클라이언트
     """
     def __init__(self):
         self.save_plan_url = settings.SPRING_BOOT_TOOL_PLAN_URL
@@ -184,7 +184,7 @@ class AgentClient:
 
     async def save_tool_plan(self, payload: AgentToolPlanPayload) -> bool:
         """
-        생성된 도구 플랜을 Spring 서버에 저장하도록 요청합니다.
+        생성된 PLAN draft를 Spring 서버에 저장하도록 요청합니다.
         """
         async with httpx.AsyncClient() as client:
             try:

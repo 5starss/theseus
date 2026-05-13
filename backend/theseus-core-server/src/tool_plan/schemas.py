@@ -30,6 +30,24 @@ class BaseToolPlanPayload(BaseModel):
     plan_snapshot: dict[str, Any] = Field(default_factory=dict, alias="planSnapshot")
 
 
+class RemoteWorkspacePayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    remote_workspace_id: int | None = Field(default=None, alias="remoteWorkspaceId")
+    project_id: int | None = Field(default=None, alias="projectId")
+    created_by_project_member_id: int | None = Field(
+        default=None,
+        alias="createdByProjectMemberId",
+    )
+    name: str | None = None
+    host: str | None = None
+    port: int | None = None
+    username: str | None = None
+    private_key_path: str | None = Field(default=None, alias="privateKeyPath")
+    base_path: str | None = Field(default=None, alias="basePath")
+    status: str | None = None
+
+
 class ToolPlanRequestedEvent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -42,6 +60,11 @@ class ToolPlanRequestedEvent(BaseModel):
     requested_by_project_member_id: int = Field(alias="requestedByProjectMemberId")
     prompt: str
     history: list[ConversationHistoryItem] = Field(default_factory=list)
+    remote_workspace_id: int | None = Field(default=None, alias="remoteWorkspaceId")
+    remote_workspace: RemoteWorkspacePayload | None = Field(
+        default=None,
+        alias="remoteWorkspace",
+    )
     requested_at: datetime = Field(alias="requestedAt")
 
 
@@ -59,6 +82,11 @@ class ToolPlanRegenerationRequestedEvent(BaseModel):
     base_plan: BaseToolPlanPayload = Field(alias="basePlan")
     feedback_items: list[ToolPlanFeedbackItem] = Field(alias="feedbackItems")
     history: list[ConversationHistoryItem] = Field(default_factory=list)
+    remote_workspace_id: int | None = Field(default=None, alias="remoteWorkspaceId")
+    remote_workspace: RemoteWorkspacePayload | None = Field(
+        default=None,
+        alias="remoteWorkspace",
+    )
     requested_at: datetime = Field(alias="requestedAt")
 
 

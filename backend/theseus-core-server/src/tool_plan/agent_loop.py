@@ -101,7 +101,7 @@ class ToolPlanAgentLoop:
                     final_message = llm_event.message
 
             if final_message is None:
-                raise RuntimeError("ToolPlan agent loop finished without an assistant message")
+                raise RuntimeError("PLAN draft agent loop finished without an assistant message")
 
             messages.append(final_message)
             completed_steps = turn_index + 1
@@ -158,7 +158,7 @@ class ToolPlanAgentLoop:
                 checkpoint_callback=checkpoint_callback,
             )
 
-        raise RuntimeError(f"ToolPlan agent loop exceeded max turns: {self.max_turns}")
+        raise RuntimeError(f"PLAN draft agent loop exceeded max turns: {self.max_turns}")
 
     def _has_pending_tool_use(self, messages: list[ConversationMessage]) -> bool:
         if not messages:

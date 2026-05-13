@@ -7,13 +7,13 @@ from src.history.schemas import HistoryMessageRecord
 logger = logging.getLogger(__name__)
 
 
-def _normalize_role(sender_type: str) -> str:
+def _normalize_role(sender_type: str) -> str | None:
     normalized = sender_type.upper()
     if normalized == "USER":
         return "user"
     if normalized == "ASSISTANT":
         return "assistant"
-    return "system"
+    return None
 
 
 def _summarize_feedback_json(content: str) -> str:
@@ -24,9 +24,9 @@ def _summarize_feedback_json(content: str) -> str:
 
     feedback_items = payload.get("feedbackItems", [])
     if not isinstance(feedback_items, list) or not feedback_items:
-        return "Requested tool-plan feedback changes."
+        return "Requested PLAN draft feedback changes."
 
-    lines = [f"Requested {len(feedback_items)} tool-plan revisions:"]
+    lines = [f"Requested {len(feedback_items)} PLAN draft revisions:"]
     for item in feedback_items:
         if not isinstance(item, dict):
             continue
@@ -62,21 +62,31 @@ def to_engine_messages(records: list[HistoryMessageRecord]) -> list[Any]:
         )
         return [
             {
-                "role": _normalize_role(record.sender_type),
+                "role": role,
                 "content": _render_record_content(record),
             }
             for record in records
+            for role in [_normalize_role(record.sender_type)]
+            if role is not None
             if _render_record_content(record).strip()
         ]
 
     messages: list[Any] = []
     for record in records:
+        role = _normalize_role(record.sender_type)
+        if role is None:
+            logger.debug(
+                "Skipping non-conversational history senderType=%s messageType=%s",
+                record.sender_type,
+                record.message_type,
+            )
+            continue
         rendered_content = _render_record_content(record)
         if not rendered_content.strip():
             continue
         messages.append(
             ConversationMessage(
-                role=_normalize_role(record.sender_type),
+                role=role,
                 content=[TextBlock(text=rendered_content)],
             )
         )

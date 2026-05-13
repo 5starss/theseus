@@ -3,21 +3,19 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
-from src.builder.system_prompt import build_theseus_system_prompt
 from src.config import resolve_model_name
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
-    GeneratedPlanBlock,
-    GeneratedToolPlan,
     ToolPlanRegenerationRequestedEvent,
     ToolPlanRequestEvent,
     ToolPlanRequestedEvent,
     ToolPlanResult,
     ToolPlanSkippedResult,
 )
-from theseus_engine.models.state import AgentMode, PlanPhase
+from theseus_engine.engine.stream_events import extract_plan_json
+from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
 from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
@@ -48,41 +46,29 @@ class ToolPlanPlanner:
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> ToolPlanResult | ToolPlanSkippedResult:
-        await self._emit_progress(progress_callback, "INTENT_CHECKING", 10)
+        await self._emit_progress(progress_callback, "PLAN_DRAFTING", 10)
         generated = await self._generate(
             event,
             chunk_callback=chunk_callback,
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
         )
-
-        if generated.intent == "SKIP":
-            message = generated.skip_message or (
-                "Tool 명세로 만들 목표, 입력, 출력, 실행 조건을 더 구체적으로 알려주세요."
-            )
-            return ToolPlanSkippedResult(message=message)
+        if isinstance(generated, ToolPlanSkippedResult):
+            return generated
+        raw_markdown, structured_plan = generated
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
         version = self._resolve_plan_version(event)
-        snapshot = self._build_snapshot(generated, version=version, event=event)
-        structured = {
-            "schemaVersion": 1,
-            "planVersion": version,
-            "title": snapshot["title"],
-            "summary": snapshot["summary"],
-            "blocks": snapshot["blocks"],
-            "inputs": snapshot["inputs"],
-            "outputs": snapshot["outputs"],
-            "constraints": snapshot["constraints"],
-        }
-        raw_markdown = self._build_markdown(snapshot)
+        snapshot = self._build_snapshot(structured_plan, version=version, event=event)
+        structured = self._build_structured_plan(structured_plan)
+        rendered_markdown = self._build_markdown(snapshot)
 
         await self._emit_progress(progress_callback, "PLAN_VALIDATING", 90)
         self._validate_snapshot(snapshot)
         await self._emit_progress(progress_callback, "PLAN_COMPLETED", 100)
 
         return ToolPlanResult(
-            rawMarkdown=raw_markdown,
+            rawMarkdown=raw_markdown or rendered_markdown,
             structuredPlanJson=structured,
             planSnapshot=snapshot,
         )
@@ -94,7 +80,7 @@ class ToolPlanPlanner:
         chunk_callback: ChunkCallback | None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
-    ) -> GeneratedToolPlan:
+    ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
         prompt = self._build_prompt(event)
         agent_loop = ToolPlanAgentLoop(
             llm_client=self.llm_client,
@@ -108,25 +94,38 @@ class ToolPlanPlanner:
             chunk_callback=chunk_callback,
         )
 
-        try:
-            payload = json.loads(self._extract_json_object(loop_result.final_text))
-            return GeneratedToolPlan.model_validate(payload)
-        except Exception as exc:
-            raise ToolPlanPlannerError(f"Invalid ToolPlan LLM output: {exc}") from exc
+        payload = extract_plan_json(loop_result.final_text)
+        if payload is None:
+            try:
+                parsed = json.loads(self._extract_json_object(loop_result.final_text))
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except Exception:
+                payload = None
+        if payload is None:
+            message = self._plain_chat_response(loop_result.final_text)
+            if message:
+                return ToolPlanSkippedResult(message=message)
+            raise ToolPlanPlannerError(
+                "Invalid PLAN draft LLM output: no PLAN JSON block was found."
+            )
+        return loop_result.final_text, payload
 
     def _build_prompt(self, event: ToolPlanRequestEvent) -> str:
-        history = [item.model_dump(mode="json", by_alias=True) for item in event.history]
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
-            return self._build_regenerate_message(
-                base_plan_version=event.base_plan_version,
-                base_plan=event.base_plan.model_dump(mode="json", by_alias=True),
-                feedback_items=[
-                    item.model_dump(mode="json", by_alias=True)
-                    for item in event.feedback_items
-                ],
-                history=history,
+            feedback = [
+                item.model_dump(mode="json", by_alias=True)
+                for item in event.feedback_items
+            ]
+            return (
+                "Revise the current plan according to this review feedback.\n\n"
+                f"Base plan version: {event.base_plan_version}\n\n"
+                "Base plan:\n"
+                f"{json.dumps(event.base_plan.model_dump(mode='json', by_alias=True), ensure_ascii=False, indent=2)}\n\n"
+                "Feedback:\n"
+                f"{json.dumps(feedback, ensure_ascii=False, indent=2)}"
             )
-        return self._build_generate_message(prompt=event.prompt, history=history)
+        return event.prompt
 
     def _build_system_prompt(self, event: ToolPlanRequestEvent) -> str:
         phase = (
@@ -134,113 +133,47 @@ class ToolPlanPlanner:
             if isinstance(event, ToolPlanRegenerationRequestedEvent)
             else PlanPhase.DRAFTING
         )
-        return build_theseus_system_prompt(
-            mode=AgentMode.PLAN,
-            plan_phase=phase,
-            available_tools=[],
-            runtime_reminders=[
-                "This ToolPlan worker receives an empty tool schema. Do not call tools; return only the task-specific JSON contract from the user message.",
-            ],
-        )
-
-    @staticmethod
-    def _build_generate_message(*, prompt: str, history: list[dict]) -> str:
-        return (
-            "Task-specific output contract for this ToolPlan worker request.\n"
-            "Follow the Theseus mode rules from the system prompt. For response shape, "
-            "use this contract exactly.\n\n"
-            "Decide whether the user is asking for a concrete ToolPlan candidate.\n"
-            "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n\n"
-            "If the prompt is not a ToolPlan request, return:\n"
-            '{\n  "intent": "SKIP",\n  "skipMessage": '
-            '"Ask for the missing tool goal, inputs, outputs, or execution conditions."\n}\n\n'
-            "If it is a valid ToolPlan request, return:\n"
-            "{\n"
-            '  "intent": "TOOL_PLAN",\n'
-            '  "title": "Short tool title",\n'
-            '  "summary": "One paragraph summary.",\n'
-            '  "blocks": [\n'
-            "    {\n"
-            '      "blockId": "kebab-case-semantic-id",\n'
-            '      "title": "Block title",\n'
-            '      "content": "Stable user-facing plan content.",\n'
-            '      "order": 1\n'
-            "    }\n"
-            "  ],\n"
-            '  "inputs": [],\n'
-            '  "outputs": [],\n'
-            '  "constraints": []\n'
-            "}\n\n"
-            "BlockId rules:\n"
-            "- Use stable kebab-case semantic ids.\n"
-            "- Keep the same blockId when regenerating a block with the same meaning.\n"
-            "- Create a new blockId only for a new meaning.\n"
-            "- Exclude deleted blocks.\n"
-            "- For split/merged blocks, keep the most representative existing blockId for one block only.\n\n"
-            "Generate a ToolPlan candidate from this PLAN mode user request.\n\n"
-            f"User prompt:\n{prompt}\n\n"
-            f"Conversation history snapshot:\n{history}\n\n"
-            "Judge intent first. Return only the JSON object described above."
-        )
-
-    @staticmethod
-    def _build_regenerate_message(
-        *,
-        base_plan_version: int,
-        base_plan: dict,
-        feedback_items: list[dict],
-        history: list[dict],
-    ) -> str:
-        return (
-            "Task-specific output contract for this ToolPlan worker regeneration request.\n"
-            "Follow the Theseus review rules from the system prompt. For response shape, "
-            "use the ToolPlan JSON contract below exactly.\n\n"
-            "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n"
-            "The JSON object must use this schema:\n"
-            "{\n"
-            '  "intent": "TOOL_PLAN",\n'
-            '  "title": "Short tool title",\n'
-            '  "summary": "One paragraph summary.",\n'
-            '  "blocks": [\n'
-            "    {\n"
-            '      "blockId": "kebab-case-semantic-id",\n'
-            '      "title": "Block title",\n'
-            '      "content": "Stable user-facing plan content.",\n'
-            '      "order": 1\n'
-            "    }\n"
-            "  ],\n"
-            '  "inputs": [],\n'
-            '  "outputs": [],\n'
-            '  "constraints": []\n'
-            "}\n\n"
-            "Regenerate the full ToolPlan candidate from the existing plan and block feedback.\n\n"
-            f"Base plan version: {base_plan_version}\n\n"
-            f"Base plan:\n{base_plan}\n\n"
-            f"Feedback items:\n{feedback_items}\n\n"
-            f"Conversation history snapshot:\n{history}\n\n"
-            "Return the full updated plan, not a patch. Preserve stable blockIds for unchanged meanings. "
-            "Return only the JSON object described above."
-        )
+        state_machine = TheseusStateMachine(initial_mode=AgentMode.PLAN)
+        state_machine.plan_phase = phase
+        if isinstance(event, ToolPlanRegenerationRequestedEvent):
+            state_machine.plan = json.dumps(
+                event.base_plan.model_dump(mode="json", by_alias=True),
+                ensure_ascii=False,
+                indent=2,
+            )
+        return state_machine.get_system_prompt(available_tools=[])
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
             return event.base_plan_version + 1
         return 1
 
-    def _build_snapshot(self, generated: GeneratedToolPlan, *, version: int, event: ToolPlanRequestEvent) -> dict:
+    def _build_structured_plan(self, plan_json: dict[str, Any]) -> dict:
+        return dict(plan_json)
+
+    def _build_snapshot(self, plan_json: dict[str, Any], *, version: int, event: ToolPlanRequestEvent) -> dict:
         base_block_ids_by_title = self._base_block_ids_by_title(event)
         used_ids: set[str] = set()
         blocks = []
 
-        for index, block in enumerate(generated.blocks, start=1):
-            block_id = self._stable_block_id(block, base_block_ids_by_title, used_ids)
+        tasks = plan_json.get("tasks") if isinstance(plan_json.get("tasks"), list) else []
+        for index, task in enumerate(tasks, start=1):
+            task_dict = task if isinstance(task, dict) else {"description": str(task)}
+            title = str(
+                task_dict.get("title")
+                or task_dict.get("description")
+                or task_dict.get("id")
+                or f"Task {index}"
+            ).strip()
+            explicit_id = str(task_dict.get("id") or "").strip()
+            block_id = self._stable_block_id(title, explicit_id, base_block_ids_by_title, used_ids)
             used_ids.add(block_id)
             blocks.append(
                 {
                     "blockId": block_id,
-                    "title": block.title.strip(),
-                    "content": block.content.strip(),
-                    "order": block.order or index,
+                    "title": title,
+                    "content": self._task_content(task_dict),
+                    "order": self._task_order(task_dict, index),
                 }
             )
 
@@ -249,7 +182,7 @@ class ToolPlanPlanner:
                 {
                     "blockId": "requirements-summary",
                     "title": "Requirements Summary",
-                    "content": generated.summary or "Define the tool goal, inputs, outputs, and execution policy.",
+                    "content": self._summary_from_plan(plan_json) or event.prompt,
                     "order": 1,
                 }
             ]
@@ -257,12 +190,12 @@ class ToolPlanPlanner:
         return {
             "schemaVersion": 1,
             "planVersion": version,
-            "title": (generated.title or "Tool Plan").strip(),
-            "summary": (generated.summary or "").strip(),
+            "title": self._title_from_plan(plan_json),
+            "summary": self._summary_from_plan(plan_json),
             "blocks": sorted(blocks, key=lambda item: item["order"]),
-            "inputs": generated.inputs,
-            "outputs": generated.outputs,
-            "constraints": generated.constraints,
+            "inputs": self._list_of_dicts(plan_json.get("inputs")),
+            "outputs": self._list_of_dicts(plan_json.get("outputs")),
+            "constraints": self._constraints_from_plan(plan_json),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -280,25 +213,86 @@ class ToolPlanPlanner:
 
     def _stable_block_id(
         self,
-        block: GeneratedPlanBlock,
+        title: str,
+        explicit_id: str,
         base_block_ids_by_title: dict[str, str],
         used_ids: set[str],
     ) -> str:
-        title_key = block.title.strip().lower()
+        title_key = title.strip().lower()
         candidates = [
             base_block_ids_by_title.get(title_key, ""),
-            block.block_id or "",
-            self._slugify(block.title),
+            explicit_id,
+            self._slugify(title),
         ]
         for candidate in candidates:
             normalized = self._slugify(candidate)
             if normalized and normalized not in used_ids:
                 return normalized
-        base = self._slugify(block.title) or "plan-block"
+        base = self._slugify(title) or "plan-block"
         suffix = 2
         while f"{base}-{suffix}" in used_ids:
             suffix += 1
         return f"{base}-{suffix}"
+
+    @staticmethod
+    def _title_from_plan(plan_json: dict[str, Any]) -> str:
+        return str(plan_json.get("goal") or plan_json.get("title") or "PLAN Draft").strip()
+
+    def _summary_from_plan(self, plan_json: dict[str, Any]) -> str:
+        context = plan_json.get("context") if isinstance(plan_json.get("context"), dict) else {}
+        parts = [
+            plan_json.get("summary"),
+            plan_json.get("goal"),
+            context.get("problem_analysis"),
+            context.get("current_state"),
+        ]
+        return "\n\n".join(str(part).strip() for part in parts if str(part or "").strip())
+
+    @staticmethod
+    def _task_content(task: dict[str, Any]) -> str:
+        fields = [
+            ("Problem", task.get("problem")),
+            ("Solution", task.get("solution")),
+            ("Description", task.get("description")),
+            ("Expected effect", task.get("expected_effect")),
+            ("Target files", task.get("target_files")),
+            ("Integration points", task.get("integration_points")),
+            ("Dependencies", task.get("sequential_dependencies")),
+        ]
+        lines = []
+        for label, value in fields:
+            if value in (None, "", []):
+                continue
+            if isinstance(value, (list, dict)):
+                rendered = json.dumps(value, ensure_ascii=False)
+            else:
+                rendered = str(value)
+            lines.append(f"{label}: {rendered}")
+        return "\n".join(lines).strip() or str(task)
+
+    @staticmethod
+    def _task_order(task: dict[str, Any], fallback: int) -> int:
+        try:
+            return int(task.get("order") or fallback)
+        except (TypeError, ValueError):
+            return fallback
+
+    @staticmethod
+    def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, dict)]
+
+    @staticmethod
+    def _constraints_from_plan(plan_json: dict[str, Any]) -> list[str]:
+        constraints = plan_json.get("constraints")
+        if isinstance(constraints, list):
+            return [str(item) for item in constraints if str(item).strip()]
+        context = plan_json.get("context") if isinstance(plan_json.get("context"), dict) else {}
+        risks = context.get("risks")
+        if risks:
+            return [str(risks)]
+        return []
 
     def _build_markdown(self, snapshot: dict) -> str:
         lines = [f"## {snapshot['title']}", "", snapshot.get("summary", "")]
@@ -343,6 +337,16 @@ class ToolPlanPlanner:
         if start >= 0 and end > start:
             return stripped[start:end + 1]
         raise ValueError("No JSON object found")
+
+    @staticmethod
+    def _plain_chat_response(text: str) -> str:
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        fence_match = re.fullmatch(r"```(?:[a-zA-Z0-9_-]+)?\s*(.*?)\s*```", stripped, re.DOTALL)
+        if fence_match:
+            return fence_match.group(1).strip()
+        return stripped
 
     async def _emit_progress(self, callback: ProgressCallback | None, message: str, rate: int) -> None:
         if callback is None:
