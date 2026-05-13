@@ -97,11 +97,30 @@ async def stream_agent_response(
                 assistant_chunks.append(event.text)
                 yield sse_event("chunk", {"content": event.text})
             elif isinstance(event, assembly.tool_execution_started_type):
+                logger.info(
+                    "Theseus tool started: user=%s project=%s chat_session=%s mode=%s tool=%s input_keys=%s",
+                    session.user_id,
+                    session.project_id,
+                    chat_session_id,
+                    engine_context.mode.name,
+                    event.tool_name,
+                    sorted((event.tool_input or {}).keys()),
+                )
                 yield sse_event(
                     "status",
                     {"message": f"Executing tool: {event.tool_name}"},
                 )
             elif isinstance(event, assembly.tool_execution_completed_type):
+                logger.info(
+                    "Theseus tool completed: user=%s project=%s chat_session=%s mode=%s tool=%s is_error=%s output_len=%s",
+                    session.user_id,
+                    session.project_id,
+                    chat_session_id,
+                    engine_context.mode.name,
+                    event.tool_name,
+                    event.is_error,
+                    len(str(event.output or "")),
+                )
                 yield sse_event(
                     "tool_result",
                     {
@@ -110,7 +129,35 @@ async def stream_agent_response(
                     },
                 )
             elif isinstance(event, assembly.error_event_type):
+                logger.warning(
+                    "Theseus stream error event: user=%s project=%s chat_session=%s mode=%s message=%s",
+                    session.user_id,
+                    session.project_id,
+                    chat_session_id,
+                    engine_context.mode.name,
+                    event.message,
+                )
                 yield sse_event("error", {"message": event.message})
+            elif event.__class__.__name__ == "AgentLoopStatus":
+                phase = getattr(event, "phase", None)
+                logger.info(
+                    "Theseus agent loop status: user=%s project=%s chat_session=%s mode=%s phase=%s turn=%s tool=%s tool_count=%s is_error=%s message=%s",
+                    session.user_id,
+                    session.project_id,
+                    chat_session_id,
+                    engine_context.mode.name,
+                    phase,
+                    getattr(event, "turn", None),
+                    getattr(event, "tool_name", None),
+                    getattr(event, "tool_count", None),
+                    getattr(event, "is_error", None),
+                    getattr(event, "message", None),
+                )
+            else:
+                logger.debug(
+                    "Theseus stream event ignored by route: type=%s",
+                    event.__class__.__name__,
+                )
 
         total_usage = getattr(assembly.engine, "total_usage", None)
         if total_usage:
@@ -190,6 +237,15 @@ async def stream_endpoint(
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
     stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    logger.info(
+        "Fetched project tool permissions: user=%s project=%s chat_session=%s mode=%s tool_count=%d tools=%s",
+        session.user_id,
+        session.project_id,
+        chat_session_id,
+        stream_mode.name,
+        len(project_tool_permissions),
+        ",".join(sorted(project_tool_permissions.keys())),
+    )
     if plan_id:
         bound_plan = validate_executing_plan_binding(
             db,
