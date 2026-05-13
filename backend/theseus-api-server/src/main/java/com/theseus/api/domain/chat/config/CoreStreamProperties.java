@@ -37,6 +37,11 @@ public record CoreStreamProperties(String baseUrl) {
 		return URI.create(normalizedBaseUrl + "/api/v1/stream?" + query);
 	}
 
+	public URI remoteWorkspaceConnectionTestUri() {
+		String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+		return URI.create(normalizedBaseUrl + "/api/v1/remote-workspaces/test-connection");
+	}
+
 	private String encode(String value) {
 		return URLEncoder.encode(value, StandardCharsets.UTF_8);
 	}

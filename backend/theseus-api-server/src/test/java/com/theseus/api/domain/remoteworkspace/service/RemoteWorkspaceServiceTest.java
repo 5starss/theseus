@@ -161,7 +161,7 @@ class RemoteWorkspaceServiceTest {
 
 	@Test
 	@DisplayName("연결 테스트 API는 Core SSH Connector 연동 전까지 대기 응답을 반환한다")
-	void testConnectionReturnsPendingResponse() {
+	void testConnectionReturnsUnavailableResponse() {
 		// Given
 		ProjectFixture fixture = createProjectFixture("RW302051");
 		RemoteWorkspace remoteWorkspace = createRemoteWorkspace(fixture, "test-server");
@@ -176,7 +176,7 @@ class RemoteWorkspaceServiceTest {
 		// Then
 		assertThat(response.getRemoteWorkspaceId()).isEqualTo(remoteWorkspace.getId());
 		assertThat(response.getAvailable()).isFalse();
-		assertThat(response.getMessage()).contains("Core connector");
+		assertThat(response.getMessage()).isNotBlank();
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber) {

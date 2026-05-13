@@ -12,11 +12,15 @@ public class RemoteWorkspaceConnectionTestResponse {
 	private Boolean available;
 	private String message;
 
-	public static RemoteWorkspaceConnectionTestResponse createPendingFrom(RemoteWorkspace remoteWorkspace) {
+	public static RemoteWorkspaceConnectionTestResponse createFrom(
+		RemoteWorkspace remoteWorkspace,
+		Boolean available,
+		String message
+	) {
 		return RemoteWorkspaceConnectionTestResponse.builder()
 			.remoteWorkspaceId(remoteWorkspace.getId())
-			.available(false)
-			.message("SSH connection test will be supported after Core connector integration.")
+			.available(available)
+			.message(message)
 			.build();
 	}
 }
