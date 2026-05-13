@@ -8,6 +8,11 @@ from src.builder.system_prompt import build_theseus_system_prompt
 from src.config import resolve_model_name
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
+from src.remote_workspace.read_primitives import (
+    REMOTE_READ_ANALYSIS_TOOL_NAMES,
+    build_remote_read_analysis_tools,
+)
+from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tooling import load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
@@ -55,6 +60,7 @@ class EngineBuildContext:
     plan_content: dict[str, Any] | None = None
     plan_phase: PlanPhase | None = None
     remote_workspace_id: int | None = None
+    remote_workspace: RemoteWorkspaceConnectionConfig | None = None
 
 
 @dataclass(slots=True)
@@ -117,17 +123,27 @@ def _resolve_excluded_tools(
     mode: AgentMode,
     plan_phase: PlanPhase | None,
     full_registry: ToolRegistry,
+    *,
+    has_remote_workspace: bool,
 ) -> set[str]:
     all_tool_names = _all_tool_names(full_registry)
     if mode == AgentMode.ASK:
+        if has_remote_workspace:
+            return all_tool_names - REMOTE_READ_ANALYSIS_TOOL_NAMES
         return all_tool_names
     if mode == AgentMode.PLAN and plan_phase in {
         PlanPhase.DRAFTING,
         PlanPhase.WAIT_FOR_REVIEW,
     }:
-        return all_tool_names - _PLAN_DRAFTING_ALLOWED_TOOLS
+        allowed_tools = set(_PLAN_DRAFTING_ALLOWED_TOOLS)
+        if has_remote_workspace:
+            allowed_tools.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
+        return all_tool_names - allowed_tools
     if mode != AgentMode.PLAN:
-        return {"create_tool"}
+        excluded_tools = {"create_tool"}
+        if has_remote_workspace:
+            excluded_tools.update({"write_file", "edit_file"})
+        return excluded_tools
     return set()
 
 
@@ -240,6 +256,9 @@ def get_query_engine(
     full_registry = ToolRegistry()
     for tool_cls in ALL_CORE_TOOLS:
         full_registry.register(tool_cls())
+    if build_context.remote_workspace is not None:
+        for tool in build_remote_read_analysis_tools(build_context.remote_workspace):
+            full_registry.register(tool)
 
     inferred_permissions = _infer_registry_permissions(full_registry)
     tool_permissions = dict(inferred_permissions)
@@ -268,6 +287,7 @@ def get_query_engine(
             build_context.mode,
             plan_phase,
             full_registry,
+            has_remote_workspace=build_context.remote_workspace is not None,
         ),
     )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
@@ -320,6 +340,11 @@ def get_query_engine(
             "agent_mode": build_context.mode.value,
             "plan_phase": plan_phase.value if plan_phase is not None else None,
             "remote_workspace_id": build_context.remote_workspace_id,
+            "remote_workspace": (
+                build_context.remote_workspace.model_dump(mode="json", by_alias=True)
+                if build_context.remote_workspace is not None
+                else None
+            ),
         },
     )
 

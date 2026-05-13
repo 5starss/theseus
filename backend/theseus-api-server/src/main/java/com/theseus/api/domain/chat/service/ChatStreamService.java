@@ -13,9 +13,11 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
 import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
+import com.theseus.api.domain.toolgeneration.event.ToolPlanRemoteWorkspacePayload;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.io.IOException;
@@ -23,9 +25,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -72,14 +76,15 @@ public class ChatStreamService {
 		ChatSession chatSession = getAccessibleChatSession(sessionId, project, projectMember);
 		validateOpenChatSession(chatSession);
 		validateAgentModePermission(request.getMode(), projectMember);
-		validateRemoteWorkspace(project, request.getRemoteWorkspaceId());
+		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceIfRequested(project, request.getRemoteWorkspaceId());
 
 		return outputStream -> proxyCoreStream(
 			outputStream,
 			projectId,
 			sessionId,
 			request,
-			authorizationHeader
+			authorizationHeader,
+			remoteWorkspace
 		);
 	}
 
@@ -88,21 +93,23 @@ public class ChatStreamService {
 		Long projectId,
 		Long sessionId,
 		ChatStreamRequest request,
-		String authorizationHeader
+		String authorizationHeader,
+		RemoteWorkspace remoteWorkspace
 	) throws IOException {
+		String requestBody = objectMapper.writeValueAsString(createCoreStreamRequestPayload(
+			projectId,
+			sessionId,
+			request,
+			remoteWorkspace
+		));
 		HttpRequest coreRequest = HttpRequest.newBuilder(
-				coreStreamProperties.streamUri(
-					request.getPrompt(),
-					projectId,
-					sessionId,
-					request.getMode(),
-					request.getRemoteWorkspaceId()
-				)
+				coreStreamProperties.streamUri(projectId, sessionId)
 			)
 			.timeout(CORE_STREAM_TIMEOUT)
 			.header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
+			.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
 			.header(HttpHeaders.AUTHORIZATION, authorizationHeader)
-			.GET()
+			.POST(BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
 			.build();
 
 		try {
@@ -136,6 +143,25 @@ public class ChatStreamService {
 			+ "data: " + objectMapper.writeValueAsString(data) + "\n\n";
 		outputStream.write(payload.getBytes(StandardCharsets.UTF_8));
 		outputStream.flush();
+	}
+
+	/**
+	 * Core stream 요청 본문을 구성하고 Remote Workspace 연결 정보는 내부 payload로만 전달합니다.
+	 */
+	private Map<String, Object> createCoreStreamRequestPayload(
+		Long projectId,
+		Long sessionId,
+		ChatStreamRequest request,
+		RemoteWorkspace remoteWorkspace
+	) {
+		Map<String, Object> payload = new LinkedHashMap<>();
+		payload.put("prompt", request.getPrompt());
+		payload.put("projectId", projectId);
+		payload.put("chatSessionId", sessionId);
+		payload.put("mode", request.getMode().name());
+		payload.put("remoteWorkspaceId", request.getRemoteWorkspaceId());
+		payload.put("remoteWorkspace", ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace));
+		return payload;
 	}
 
 	private void validateStreamMode(ToolPlanMode mode) {
@@ -192,12 +218,15 @@ public class ChatStreamService {
 		}
 	}
 
-	private void validateRemoteWorkspace(Project project, Long remoteWorkspaceId) {
+	/**
+	 * 요청한 Remote Workspace가 프로젝트에 속한 활성 작업 환경인지 조회합니다.
+	 */
+	private RemoteWorkspace getRemoteWorkspaceIfRequested(Project project, Long remoteWorkspaceId) {
 		if (remoteWorkspaceId == null) {
-			return;
+			return null;
 		}
 
-		remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
+		return remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
 			remoteWorkspaceId,
 			project,
 			RemoteWorkspaceStatus.DELETED

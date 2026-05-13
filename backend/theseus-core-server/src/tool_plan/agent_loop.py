@@ -47,6 +47,7 @@ class ToolPlanAgentLoop:
     llm_client: SupportsStreamingMessages
     model_name: str
     tool_registry: Any = field(default_factory=EmptyToolRegistry)
+    tool_metadata: dict[str, Any] = field(default_factory=dict)
     max_turns: int = field(default_factory=lambda: settings.CORE_TOOL_PLAN_MAX_AGENT_TURNS)
     cwd: Path = field(default_factory=lambda: Path.cwd())
 
@@ -240,7 +241,10 @@ class ToolPlanAgentLoop:
             )
         try:
             parsed_input = tool.input_model.model_validate(tool_input)
-            result = await tool.execute(parsed_input, ToolPlanToolExecutionContext(cwd=self.cwd))
+            result = await tool.execute(
+                parsed_input,
+                ToolPlanToolExecutionContext(cwd=self.cwd, metadata=self.tool_metadata),
+            )
             return ToolResultBlock(
                 tool_use_id=tool_use_id,
                 content=result.output,
