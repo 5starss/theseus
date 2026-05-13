@@ -347,13 +347,14 @@ class EditorRuntime:
         model: str,
         user_level: int,
         cwd: Path,
+        initial_session: str = "default",
         permission_prompt: Optional[Callable[[str, str], Any]] = None,
     ) -> None:
         self.model = model
         self.user_level = user_level
         self.cwd = cwd
         self.permission_prompt = permission_prompt or self._default_permission_prompt
-        self.sessions = LocalSessionProvider()
+        self.sessions = LocalSessionProvider(default_name=initial_session or "default")
         self.sm: Any = None
         self.engine: Any = None
         self.full_registry: Any = None

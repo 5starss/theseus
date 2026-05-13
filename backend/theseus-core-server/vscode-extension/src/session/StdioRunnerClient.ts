@@ -24,7 +24,7 @@ export class StdioRunnerClient implements RunnerClient {
 
     return cp.spawn(
       config.pythonExec,
-      ['-m', 'theseus_engine.cli_runner', '--json-mode'],
+      ['-m', 'theseus_engine.cli_runner', '--json-mode', '--session', config.initialSession || 'default'],
       {
         cwd: config.workspaceCwd,
         env: {

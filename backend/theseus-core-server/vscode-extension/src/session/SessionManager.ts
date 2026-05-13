@@ -43,6 +43,7 @@ const DAEMON_SSE_RECONNECT_MAX = 5;
 const DAEMON_SSE_RECONNECT_BASE_MS = 750;
 const LIFECYCLE_HISTORY_LIMIT = 100;
 const SESSION_STATE_KEY = 'theseus.lastActiveSession';
+const SELECTED_SESSION_KEY = 'theseus.selectedLocalSession';
 const TERMINAL_DAEMON_RUN_STATUSES = new Set(['completed', 'interrupted', 'error']);
 
 function nowIso(): string {
@@ -51,6 +52,11 @@ function nowIso(): string {
 
 function makeSessionId(): string {
   return `theseus-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeSessionName(name: string | undefined): string {
+  const clean = String(name || '').trim();
+  return clean && /^[A-Za-z0-9]+$/.test(clean) ? clean : 'default';
 }
 
 function sleep(ms: number): Promise<void> {
@@ -88,6 +94,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   private daemonSendQueue: Promise<void> = Promise.resolve();
   private readonly daemonReplayGapWarnings = new Set<string>();
   private readonly permissionRequestsHandled = new Set<string>();
+  private preferredSession = 'default';
 
   readonly output = vscode.window.createOutputChannel('Theseus');
   private readonly daemonClient = new DaemonRunnerClient(this.output);
@@ -97,11 +104,21 @@ export class TheseusSessionManager implements vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     const previous = this.context.workspaceState.get<Partial<TheseusSessionMetadata> & { sessionId?: string }>(SESSION_STATE_KEY);
     if (previous?.sessionId) this.sessionId = previous.sessionId;
+    const selected = this.context.workspaceState.get<string>(SELECTED_SESSION_KEY);
+    if (selected?.trim()) this.preferredSession = normalizeSessionName(selected);
   }
 
   get hasProcess(): boolean { return !!this.proc || !!this.daemon; }
   get isRunning(): boolean { return ['ready', 'busy', 'waiting_input'].includes(this.state); }
   get currentState(): TheseusSessionState { return this.state; }
+  get preferredSessionName(): string { return this.preferredSession || 'default'; }
+
+  setPreferredSession(name: string): void {
+    const clean = normalizeSessionName(name);
+    if (clean === this.preferredSession) return;
+    this.preferredSession = clean;
+    void this.context.workspaceState.update(SELECTED_SESSION_KEY, clean);
+  }
 
   get status(): RunnerEvent {
     const processRunning = this.hasProcess;
@@ -123,7 +140,7 @@ export class TheseusSessionManager implements vscode.Disposable {
       runtimeMode: this.runtimeMode,
       daemonPid: this.daemon?.pid ?? this.proc?.pid,
       daemonPort: this.daemon?.port,
-      session: this.lastReadyEvent?.session,
+      session: this.lastReadyEvent?.session || this.preferredSessionName,
       lastEventAt: this.lastEventAt,
       lastHeartbeatAt: this.lastHeartbeatAt,
       exitReason: this.exitReason,
@@ -367,7 +384,7 @@ export class TheseusSessionManager implements vscode.Disposable {
 
     this.runtimeMode = 'local-daemon';
     this.sessionId = makeSessionId();
-    this.startMetadata = { coreRoot, workspaceCwd, pythonExec, serverUrl, runtimeMode: 'local-daemon' };
+    this.startMetadata = { coreRoot, workspaceCwd, pythonExec, serverUrl, runtimeMode: 'local-daemon', initialSession: this.preferredSessionName };
     this.lastReadyEvent = undefined;
     this.lastDiagnostic = undefined;
     this.exitReason = undefined;
@@ -389,6 +406,7 @@ export class TheseusSessionManager implements vscode.Disposable {
         workspaceCwd,
         pythonExec,
         serverUrl,
+        initialSession: this.preferredSessionName,
         signal: this.abortController.signal,
       });
     } catch (err) {
@@ -475,6 +493,7 @@ export class TheseusSessionManager implements vscode.Disposable {
         }),
         coreRoot,
         workspaceCwd,
+        initialSession: this.preferredSessionName,
         runtimeMode: 'local-daemon',
         daemonHost: this.daemon.host,
         daemonPort: this.daemon.port,
@@ -658,6 +677,9 @@ export class TheseusSessionManager implements vscode.Disposable {
   private applyDaemonStatus(status: DaemonStatus): void {
     this.daemonHeartbeatFailures = 0;
     this.lastHeartbeatAt = Date.now();
+    if (typeof status.session === 'string' && status.session) {
+      this.setPreferredSession(status.session);
+    }
     const lastEventAt = typeof status.lastEventAt === 'number' ? status.lastEventAt : undefined;
     if (lastEventAt) this.lastEventAt = lastEventAt > 1_000_000_000_000 ? lastEventAt : Math.round(lastEventAt * 1000);
     if (this.daemon) {
@@ -734,7 +756,7 @@ export class TheseusSessionManager implements vscode.Disposable {
 
     this.runtimeMode = 'stdio';
     this.sessionId = makeSessionId();
-    this.startMetadata = { coreRoot, workspaceCwd, pythonExec, serverUrl, runtimeMode: 'stdio' };
+    this.startMetadata = { coreRoot, workspaceCwd, pythonExec, serverUrl, runtimeMode: 'stdio', initialSession: this.preferredSessionName };
     this.lastReadyEvent = undefined;
     this.lastDiagnostic = undefined;
     this.jsonParseErrorCount = 0;
@@ -756,6 +778,7 @@ export class TheseusSessionManager implements vscode.Disposable {
         workspaceCwd,
         pythonExec,
         serverUrl,
+        initialSession: this.preferredSessionName,
         signal: this.abortController.signal,
       });
     } catch (err) {
@@ -989,6 +1012,9 @@ export class TheseusSessionManager implements vscode.Disposable {
 
   private emit(event: RunnerEvent): void {
     if (event.type === 'RunnerReady') {
+      if (typeof event.session === 'string' && event.session) {
+        this.setPreferredSession(event.session);
+      }
       if (this.readyTimer) clearTimeout(this.readyTimer);
       this.readyTimer = undefined;
       if (this.daemon) {
@@ -1007,9 +1033,13 @@ export class TheseusSessionManager implements vscode.Disposable {
       if (this.state === 'stale' && this.lastReadyEvent) this.setState('ready');
     } else if (event.type === 'SessionChangedEvent') {
       const current = typeof event.current === 'string' ? event.current : undefined;
+      if (current) this.setPreferredSession(current);
       if (current && this.lastReadyEvent) {
         this.lastReadyEvent = { ...this.lastReadyEvent, session: current };
       }
+    } else if (event.type === 'SessionListEvent') {
+      const current = typeof event.current === 'string' ? event.current : undefined;
+      if (current) this.setPreferredSession(current);
     } else if (event.type === 'AssistantTextDelta' || event.type === 'ToolExecutionStarted') {
       if (this.isRunning) this.state = 'busy';
     } else if (event.type === 'AssistantTurnComplete' || event.type === 'PlanDraftedEvent') {

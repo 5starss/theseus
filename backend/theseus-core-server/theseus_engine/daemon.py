@@ -93,6 +93,7 @@ class DaemonState:
         model: str,
         user_level: int,
         session_id: str | None = None,
+        initial_session: str = "default",
         workspace_hash_value: str | None = None,
         runtime_factory: Callable[[], EditorRuntime] | None = None,
     ) -> None:
@@ -113,6 +114,7 @@ class DaemonState:
             model=model,
             user_level=user_level,
             cwd=workspace,
+            initial_session=initial_session,
             permission_prompt=self.permission_prompt,
         )
 
@@ -451,6 +453,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--token", default="")
     parser.add_argument("--model", default="google/gemini-3.1-pro-preview-customtools")
     parser.add_argument("--user-level", type=int, default=5)
+    parser.add_argument("--session", default="default")
     return parser.parse_args(argv)
 
 
@@ -481,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
             "mode": "local-daemon",
             "model": model,
             "sessionId": session_id,
+            "session": args.session or "default",
             "workspaceHash": workspace_hash_value,
             "workspaceCwd": str(workspace),
             "coreRoot": args.core_root,
@@ -493,6 +497,7 @@ def main(argv: list[str] | None = None) -> int:
         model=model,
         user_level=args.user_level,
         session_id=session_id,
+        initial_session=args.session or "default",
         workspace_hash_value=workspace_hash_value,
     )
     config = uvicorn.Config(create_app(state), host=args.host, port=actual_port, log_level="info")
