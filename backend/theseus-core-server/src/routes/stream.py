@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from src.auth.dependencies import get_sse_session_context
@@ -21,10 +22,28 @@ from src.history.service import (
     persist_user_message,
 )
 from src.plan.service import restore_plan_after_stream, validate_executing_plan_binding
+from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class CoreStreamRequest(BaseModel):
+    """Server-to-server stream request body from API Server."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    prompt: str
+    chat_session_id: int = Field(alias="chatSessionId")
+    project_id: int | None = Field(default=None, alias="projectId")
+    mode: str = "AGENT"
+    plan_id: str | None = Field(default=None, alias="planId")
+    remote_workspace_id: int | None = Field(default=None, alias="remoteWorkspaceId")
+    remote_workspace: RemoteWorkspaceConnectionConfig | None = Field(
+        default=None,
+        alias="remoteWorkspace",
+    )
 
 
 def sse_event(event_type: str, data: dict) -> str:
@@ -212,6 +231,80 @@ async def stream_agent_response(
         )
 
 
+async def create_streaming_response(
+    *,
+    prompt: str,
+    chat_session_id: int,
+    mode: str,
+    plan_id: str | None,
+    remote_workspace_id: int | None,
+    remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    session: SessionContext,
+    db: Session,
+) -> StreamingResponse:
+    """Assemble stream context and return a Core SSE response."""
+
+    if remote_workspace_id is None and remote_workspace is not None:
+        remote_workspace_id = remote_workspace.remote_workspace_id
+
+    if not prompt.strip():
+        raise HTTPException(status_code=422, detail="Prompt must not be blank")
+
+    project_tool_permissions = await get_project_tool_permissions(
+        project_id=session.project_id,
+        user_id=session.user_id,
+    )
+
+    history_messages = await load_history_messages(session, chat_session_id)
+    bound_plan = None
+    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    logger.info(
+        "Fetched project tool permissions: user=%s project=%s chat_session=%s mode=%s tool_count=%d tools=%s",
+        session.user_id,
+        session.project_id,
+        chat_session_id,
+        stream_mode.name,
+        len(project_tool_permissions),
+        ",".join(sorted(project_tool_permissions.keys())),
+    )
+    if plan_id:
+        bound_plan = validate_executing_plan_binding(
+            db,
+            plan_id=plan_id,
+            project_id=str(session.project_id),
+            chat_session_id=chat_session_id,
+        )
+
+    engine_context = EngineBuildContext(
+        user_level=session.permission_level,
+        project_tool_permissions=project_tool_permissions,
+        mode=stream_mode,
+        approval_policy="reject",
+        user_query=prompt,
+        history_messages=history_messages,
+        session_id=str(chat_session_id),
+        project_id=str(session.project_id),
+        actor_user_id=str(session.user_id),
+        chat_session_id=chat_session_id,
+        plan_id=plan_id,
+        plan_content=bound_plan.content if bound_plan is not None else None,
+        remote_workspace_id=remote_workspace_id,
+        remote_workspace=remote_workspace,
+    )
+
+    await persist_user_message(session, chat_session_id, prompt)
+
+    return StreamingResponse(
+        stream_agent_response(session, chat_session_id, prompt, engine_context, db),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/stream")
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
@@ -286,4 +379,24 @@ async def stream_endpoint(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Nginx 스트리밍 최적화
         },
+    )
+
+
+@router.post("/stream")
+async def stream_endpoint_post(
+    request: CoreStreamRequest,
+    session: SessionContext = Depends(get_sse_session_context),
+    db: Session = Depends(get_db),
+):
+    """Stream chat using a JSON body so sensitive Remote Workspace fields stay out of URLs."""
+
+    return await create_streaming_response(
+        prompt=request.prompt,
+        chat_session_id=request.chat_session_id,
+        mode=request.mode,
+        plan_id=request.plan_id,
+        remote_workspace_id=request.remote_workspace_id,
+        remote_workspace=request.remote_workspace,
+        session=session,
+        db=db,
     )

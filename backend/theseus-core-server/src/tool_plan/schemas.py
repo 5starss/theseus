@@ -43,6 +43,7 @@ class RemoteWorkspacePayload(BaseModel):
     host: str | None = None
     port: int | None = None
     username: str | None = None
+    password: str | None = None
     private_key_path: str | None = Field(default=None, alias="privateKeyPath")
     base_path: str | None = Field(default=None, alias="basePath")
     status: str | None = None
