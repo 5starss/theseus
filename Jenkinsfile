@@ -2,6 +2,7 @@ pipeline {
     agent any
 
     options {
+        gitLabConnection('SSAFY-GitLab')
         timestamps()
         disableConcurrentBuilds()
     }
@@ -19,6 +20,12 @@ pipeline {
     }
 
     stages {
+        stage('Initialize GitLab Status') {
+            steps {
+                updateGitlabCommitStatus(name: 'Jenkins CI/CD', state: 'running')
+            }
+        }
+
         stage('Checkout') {
             steps {
                 echo '[CI] Checking out source code'
@@ -336,9 +343,11 @@ PY
         }
         success {
             echo '[SUCCESS] Pipeline completed'
+            updateGitlabCommitStatus(name: 'Jenkins CI/CD', state: 'success')
         }
         failure {
             echo '[FAILURE] Pipeline failed'
+            updateGitlabCommitStatus(name: 'Jenkins CI/CD', state: 'failed')
         }
     }
 }
