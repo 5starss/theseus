@@ -29,6 +29,7 @@ interface ChatSessionState {
   draftVersion: number;
   planVersion: number;
   abortController: AbortController | null;
+  selectedRemoteWorkspaceId: number | null;
   title: string;
   isClosed: boolean;
 
@@ -71,6 +72,7 @@ interface ChatSessionState {
   setDraftVersion: (version: number) => void;
   setPlanVersion: (version: number) => void;
   setAbortController: (ctrl: AbortController | null) => void;
+  setSelectedRemoteWorkspaceId: (remoteWorkspaceId: number | null) => void;
   abortGeneration: () => void;
   updateTitle: (title: string) => void;
   setClosed: (isClosed: boolean) => void;
@@ -97,6 +99,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   activeTab: 'plan',
   isBuilding: false,
   abortController: null,
+  selectedRemoteWorkspaceId: null,
   title: '',
   isClosed: false,
 
@@ -207,6 +210,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   setIsBuilding: (isBuilding) => set({ isBuilding }),
   setAbortController: (ctrl) => set({ abortController: ctrl }),
+  setSelectedRemoteWorkspaceId: (remoteWorkspaceId) => set({ selectedRemoteWorkspaceId: remoteWorkspaceId }),
   abortGeneration: () => {
     const ctrl = get().abortController;
     if (ctrl) {

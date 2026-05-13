@@ -5,12 +5,14 @@ import { Lock, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
+import { remoteWorkspaceApi } from '../../api/remoteWorkspace';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import { ToolPlanMode } from '../../types/chat';
 import type { ChatMessage, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+import type { RemoteWorkspaceResponse } from '../../types/project';
 
 const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
   { value: ToolPlanMode.ASK, label: 'ASK', description: '일반 대화' },
@@ -31,14 +33,17 @@ export function ChatArea() {
     progressInfo,
     title,
     isClosed,
+    selectedRemoteWorkspaceId,
     setMode,
     setCurrentRunId,
     setDraftPhase,
     setPlanStatus,
     setCurrentPlan,
+    setSelectedRemoteWorkspaceId,
   } = useChatSessionStore();
 
   const [input, setInput] = useState('');
+  const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspaceResponse[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { connectSSE } = useToolGenerationSSE();
   const { connectChatStream } = useChatStreamSSE();
@@ -50,6 +55,35 @@ export function ChatArea() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isGenerating, progressInfo]);
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    let cancelled = false;
+    const fetchRemoteWorkspaces = async () => {
+      try {
+        const responses = await remoteWorkspaceApi.getRemoteWorkspaces(projectId);
+        if (cancelled) return;
+
+        setRemoteWorkspaces(responses);
+        const hasSelectedWorkspace = responses.some(
+          workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
+        );
+        if (selectedRemoteWorkspaceId && !hasSelectedWorkspace) {
+          setSelectedRemoteWorkspaceId(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to load remote workspaces', error);
+        }
+      }
+    };
+
+    void fetchRemoteWorkspaces();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, selectedRemoteWorkspaceId, setSelectedRemoteWorkspaceId]);
 
   const appendUserMessage = (content: string) => {
     addMessage({
@@ -80,7 +114,13 @@ export function ChatArea() {
     setDraftPhase(null);
     setPlanStatus(null);
     setCurrentPlan(null);
-    connectChatStream(projectId!, sessionId!, streamMode, userMessage);
+    connectChatStream(
+      projectId!,
+      sessionId!,
+      streamMode,
+      userMessage,
+      selectedRemoteWorkspaceId ?? undefined
+    );
   };
 
   const sendPlanMessage = async (userMessage: string) => {
@@ -94,7 +134,11 @@ export function ChatArea() {
     const result = await chatApi.generateToolPlan(
       projectId!,
       sessionId!,
-      { userMessage, mode: ToolPlanMode.PLAN }
+      {
+        userMessage,
+        mode: ToolPlanMode.PLAN,
+        remoteWorkspaceId: selectedRemoteWorkspaceId ?? undefined
+      }
     );
 
     setCurrentRunId(result.runId);
@@ -274,6 +318,25 @@ export function ChatArea() {
               {option.label}
             </button>
           ))}
+        </div>
+
+        <div className="mb-3 max-w-xs">
+          <select
+            value={selectedRemoteWorkspaceId ?? ''}
+            onChange={(event) => {
+              const value = event.target.value;
+              setSelectedRemoteWorkspaceId(value ? Number(value) : null);
+            }}
+            disabled={isGenerating || isClosed}
+            className="w-full rounded border border-slate-700 bg-[#0d1c2d] px-3 py-2 text-xs font-medium text-slate-300 outline-none transition-colors focus:border-blue-400/60 disabled:opacity-40"
+          >
+            <option value="">Remote Workspace 없음</option>
+            {remoteWorkspaces.map(workspace => (
+              <option key={workspace.remoteWorkspaceId} value={workspace.remoteWorkspaceId}>
+                {workspace.name} ({workspace.host})
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : isClosed ? 'border-red-900/30' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
