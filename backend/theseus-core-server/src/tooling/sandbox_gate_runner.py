@@ -71,7 +71,16 @@ def _find_tool_class(namespace: dict, base_tool_cls: type) -> type:
         if isinstance(obj, type) and issubclass(obj, base_tool_cls) and obj is not base_tool_cls:
             candidates.append(obj)
     if not candidates:
-        raise RuntimeError("No BaseTool subclass was found in the generated module.")
+        defined_classes = sorted(
+            obj.__name__
+            for obj in namespace.values()
+            if isinstance(obj, type) and obj is not base_tool_cls
+        )
+        hint = ", ".join(defined_classes) if defined_classes else "none"
+        raise RuntimeError(
+            "No BaseTool subclass was found in the generated module. "
+            f"Defined classes: {hint}."
+        )
     return candidates[0]
 
 
@@ -87,22 +96,35 @@ def main() -> int:
         exec(code, namespace)
 
         tool_class = _find_tool_class(namespace, base_tool_cls)
+        missing_attrs = [
+            attr for attr in ("name", "description", "input_model")
+            if not getattr(tool_class, attr, None)
+        ]
+        if missing_attrs:
+            raise RuntimeError(
+                f"Tool class {tool_class.__name__} is missing required class "
+                f"attributes: {', '.join(missing_attrs)}."
+            )
+
         tool_instance = tool_class()
 
         execute_method = getattr(tool_instance, "execute", None)
-        if execute_method is None:
-            raise RuntimeError("Tool class is missing execute().")
+        if execute_method is None or not callable(execute_method):
+            raise RuntimeError(
+                f"Tool class {tool_class.__name__} is missing callable "
+                "execute(self, arguments, context)."
+            )
 
         signature = inspect.signature(execute_method)
         params = list(signature.parameters.keys())
         if params and params[0] == "self":
             params = params[1:]
         if len(params) != 2:
-            raise RuntimeError("execute() must accept exactly 2 parameters after self.")
-
-        for attr in ("name", "description", "input_model"):
-            if not getattr(tool_class, attr, None):
-                raise RuntimeError(f"Tool class is missing required attribute: {attr}")
+            raise RuntimeError(
+                f"{tool_class.__name__}.execute must accept exactly 2 parameters "
+                "after self: arguments and context. "
+                f"Actual signature: {signature}; parameters after self: {params}."
+            )
 
         _write_result(
             {

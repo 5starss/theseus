@@ -1,11 +1,11 @@
 from functools import lru_cache
 import os
-from typing import Optional
+from typing import Annotated, Optional
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 DEFAULT_INTERNAL_API_KEY = "theseus-local-internal-api-key"
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # App Settings
     APP_NAME: str = "TheseusCoreServer"
     ENV: Literal["dev", "test", "prod"] = "dev"
-    ALLOWED_ORIGINS: list[str] = []
+    ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = []
 
     # Auth Settings
     AUTH_MODE: Literal["mock", "spring"] = "spring"
@@ -56,19 +56,37 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
+    CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
     CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
     CORE_RUN_LEASE_TTL_SECONDS: int = 60
     CORE_RUN_EVENT_REPUBLISH_BATCH_SIZE: int = 50
-    CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
     
     # Database Settings (PostgreSQL + pgvector)
-    CORE_POSTGRES_HOST: str = "localhost"
-    CORE_POSTGRES_PORT: int = 15432
-    CORE_POSTGRES_DB: str = "theseus_core"
-    CORE_POSTGRES_USER: str = "root"
-    CORE_POSTGRES_PASSWORD: str = "root"
-    CORE_POSTGRES_SCHEMA: str = "public"
+    CORE_POSTGRES_HOST: str = Field(
+        "localhost",
+        validation_alias=AliasChoices("CORE_POSTGRES_HOST", "POSTGRES_HOST"),
+    )
+    CORE_POSTGRES_PORT: int = Field(
+        15432,
+        validation_alias=AliasChoices("CORE_POSTGRES_PORT", "POSTGRES_PORT"),
+    )
+    CORE_POSTGRES_DB: str = Field(
+        "theseus_core",
+        validation_alias=AliasChoices("CORE_POSTGRES_DB", "POSTGRES_DB"),
+    )
+    CORE_POSTGRES_USER: str = Field(
+        "root",
+        validation_alias=AliasChoices("CORE_POSTGRES_USER", "POSTGRES_USER"),
+    )
+    CORE_POSTGRES_PASSWORD: str = Field(
+        "root",
+        validation_alias=AliasChoices("CORE_POSTGRES_PASSWORD", "POSTGRES_PASSWORD"),
+    )
+    CORE_POSTGRES_SCHEMA: str = Field(
+        "public",
+        validation_alias=AliasChoices("CORE_POSTGRES_SCHEMA", "POSTGRES_SCHEMA"),
+    )
 
     @property
     def database_url(self) -> str:
@@ -82,10 +100,18 @@ class Settings(BaseSettings):
     RAG_MIN_SCORE: float = 0.3
     
     # AI / Tools Settings (Optional for now)
+    THESEUS_MODEL: Optional[str] = None
+    OPENHARNESS_MODEL: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     LANGSMITH_API_KEY: Optional[str] = None
     LANGSMITH_TRACING: bool = False
     LANGSMITH_PROJECT: str = "theseus-core"
+
+    # Sandbox shared workdir settings.
+    # When Core runs inside a Docker container and controls the host Docker daemon,
+    # both paths must point at the same bind-mounted directory from each side.
+    SANDBOX_HOST_TEMP_ROOT: Optional[str] = None
+    SANDBOX_CONTAINER_TEMP_ROOT: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -172,3 +198,9 @@ def get_settings() -> Settings:
     return Settings()
 
 settings = get_settings()
+
+
+def resolve_model_name(explicit_model: str | None = None) -> str:
+    if explicit_model:
+        return explicit_model
+    return settings.THESEUS_MODEL or settings.OPENHARNESS_MODEL or "gpt-4o"
