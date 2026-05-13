@@ -107,12 +107,14 @@ export interface ToolBuildGenerationResponse {
 export interface ToolPlanGenerationRequest {
   mode: ToolPlanMode;
   prompt: string;
+  remoteWorkspaceId?: number;
 }
 
 export interface ToolPlanRegenerationRequest {
   mode: ToolPlanMode;
   basePlanVersion: number;
   feedbackItems: Array<{ blockId: string; comment: string }>;
+  remoteWorkspaceId?: number;
 }
 
 export interface ToolPlanDetailResponse {

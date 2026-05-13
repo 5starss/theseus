@@ -21,4 +21,6 @@ public class ToolPlanRegenerationRequest {
 	@Valid
 	@NotEmpty
 	private List<ToolFeedbackItemRequest> feedbackItems;
+
+	private Long remoteWorkspaceId;
 }

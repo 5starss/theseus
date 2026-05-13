@@ -13,4 +13,6 @@ public class ChatStreamRequest {
 
 	@NotBlank
 	private String prompt;
+
+	private Long remoteWorkspaceId;
 }

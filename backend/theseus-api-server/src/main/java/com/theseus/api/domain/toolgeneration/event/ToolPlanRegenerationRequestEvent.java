@@ -11,6 +11,8 @@ public record ToolPlanRegenerationRequestEvent(
 	String runId,
 	Long projectId,
 	Long chatSessionId,
+	Long remoteWorkspaceId,
+	ToolPlanRemoteWorkspacePayload remoteWorkspace,
 	Long baseToolPlanId,
 	Long planGroupId,
 	Long basePlanVersion,

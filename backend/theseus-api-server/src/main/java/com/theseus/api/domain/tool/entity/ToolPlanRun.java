@@ -5,6 +5,7 @@ import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
+import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -83,6 +84,13 @@ public class ToolPlanRun {
 
 	@ManyToOne(fetch = FetchType.LAZY)
 	@JoinColumn(
+		name = "remote_workspace_id",
+		foreignKey = @ForeignKey(name = "fk_tool_plan_runs_remote_workspace")
+	)
+	private RemoteWorkspace remoteWorkspace;
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(
 		name = "base_tool_plan_id",
 		foreignKey = @ForeignKey(name = "fk_tool_plan_runs_base_tool_plan")
 	)
@@ -141,6 +149,7 @@ public class ToolPlanRun {
 		ToolPlanMode mode,
 		ToolPlanRunStatus status,
 		ProjectMember requestedByProjectMember,
+		RemoteWorkspace remoteWorkspace,
 		ToolPlan baseToolPlan,
 		ToolPlan resultToolPlan,
 		ToolPlanGroup planGroup,
@@ -159,6 +168,7 @@ public class ToolPlanRun {
 			requestedByProjectMember,
 			"requestedByProjectMember must not be null"
 		);
+		this.remoteWorkspace = remoteWorkspace;
 		this.baseToolPlan = baseToolPlan;
 		this.resultToolPlan = resultToolPlan;
 		this.planGroup = planGroup;

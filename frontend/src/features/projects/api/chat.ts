@@ -71,11 +71,12 @@ export const chatApi = {
   generateToolPlan: async (
     projectId: string,
     sessionId: string,
-    payload: { userMessage: string; mode?: ToolPlanMode }
+    payload: { userMessage: string; mode?: ToolPlanMode; remoteWorkspaceId?: number }
   ): Promise<ToolPlanGenerationResponse> => {
     const apiPayload: ToolPlanGenerationRequest = {
       mode: payload.mode || ToolPlanMode.PLAN,
-      prompt: payload.userMessage
+      prompt: payload.userMessage,
+      remoteWorkspaceId: payload.remoteWorkspaceId
     };
     const response = await apiClient.post<ApiResponse<ToolPlanGenerationResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/generate`,
@@ -88,12 +89,18 @@ export const chatApi = {
     projectId: string,
     sessionId: string,
     toolPlanId: string,
-    payload: { basePlanVersion: number; feedbackItems: Array<{ blockId: string; comment: string }>; mode?: ToolPlanMode }
+    payload: {
+      basePlanVersion: number;
+      feedbackItems: Array<{ blockId: string; comment: string }>;
+      mode?: ToolPlanMode;
+      remoteWorkspaceId?: number;
+    }
   ): Promise<ToolPlanGenerationResponse> => {
     const apiPayload: ToolPlanRegenerationRequest = {
       mode: payload.mode || ToolPlanMode.PLAN,
       basePlanVersion: payload.basePlanVersion,
-      feedbackItems: payload.feedbackItems
+      feedbackItems: payload.feedbackItems,
+      remoteWorkspaceId: payload.remoteWorkspaceId
     };
     const response = await apiClient.patch<ApiResponse<ToolPlanGenerationResponse>>(
       `/api/v1/projects/${projectId}/sessions/${sessionId}/tool-plans/${toolPlanId}/regenerate`,

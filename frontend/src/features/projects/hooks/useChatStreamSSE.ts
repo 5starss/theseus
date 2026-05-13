@@ -29,7 +29,8 @@ export function useChatStreamSSE() {
     projectId: string,
     sessionId: string,
     mode: Extract<ToolPlanMode, 'ASK' | 'AGENT'>,
-    prompt: string
+    prompt: string,
+    remoteWorkspaceId?: number
   ) => {
     disconnectChatStream();
 
@@ -47,7 +48,7 @@ export function useChatStreamSSE() {
         Accept: 'text/event-stream',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ mode, prompt }),
+      body: JSON.stringify({ mode, prompt, remoteWorkspaceId }),
       signal: controller.signal,
       openWhenHidden: true,
 
