@@ -13,6 +13,7 @@ from src.remote_workspace.read_primitives import (
     build_remote_read_analysis_tools,
 )
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
+from src.remote_workspace.write_primitives import build_remote_write_execution_tools
 from src.tooling import load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
@@ -119,6 +120,12 @@ def _resolve_plan_phase(build_context: EngineBuildContext) -> PlanPhase | None:
     return PlanPhase.DRAFTING
 
 
+def _allows_remote_write_execution(mode: AgentMode, plan_phase: PlanPhase | None) -> bool:
+    if mode == AgentMode.AGENT:
+        return True
+    return False
+
+
 def _resolve_excluded_tools(
     mode: AgentMode,
     plan_phase: PlanPhase | None,
@@ -140,10 +147,7 @@ def _resolve_excluded_tools(
             allowed_tools.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
         return all_tool_names - allowed_tools
     if mode != AgentMode.PLAN:
-        excluded_tools = {"create_tool"}
-        if has_remote_workspace:
-            excluded_tools.update({"write_file", "edit_file"})
-        return excluded_tools
+        return {"create_tool"}
     return set()
 
 
@@ -259,6 +263,9 @@ def get_query_engine(
     if build_context.remote_workspace is not None:
         for tool in build_remote_read_analysis_tools(build_context.remote_workspace):
             full_registry.register(tool)
+        if _allows_remote_write_execution(build_context.mode, plan_phase):
+            for tool in build_remote_write_execution_tools(build_context.remote_workspace):
+                full_registry.register(tool)
 
     inferred_permissions = _infer_registry_permissions(full_registry)
     tool_permissions = dict(inferred_permissions)

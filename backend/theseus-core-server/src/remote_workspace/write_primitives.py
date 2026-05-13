@@ -1,0 +1,271 @@
+from __future__ import annotations
+
+import posixpath
+import shlex
+
+from src.remote_workspace.exceptions import RemoteWorkspaceError
+from src.remote_workspace.read_primitives import (
+    DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
+    ConnectorFactory,
+    RemoteWorkspaceToolMixin,
+)
+from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
+from src.remote_workspace.ssh_connector import SshRemoteWorkspaceConnector
+from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
+from theseus_engine.tools.core.bash_tool import BashInput
+from theseus_engine.tools.core.file_edit_tool import EditFileInput
+from theseus_engine.tools.core.file_utils import _strip_markdown_links
+from theseus_engine.tools.core.file_write_tool import WriteFileInput
+
+
+REMOTE_WRITE_EXECUTION_TOOL_NAMES = frozenset({"write_file", "edit_file", "bash"})
+
+
+class RemoteWritableToolMixin(RemoteWorkspaceToolMixin):
+    """Provides guarded SFTP helpers for Remote Workspace write primitive tools."""
+
+    def write_remote_text(
+        self,
+        connector: SshRemoteWorkspaceConnector,
+        remote_path: str,
+        content: str,
+    ) -> None:
+        parent_path = posixpath.dirname(remote_path)
+        mkdir_result = connector.run_command(
+            f"mkdir -p {shlex.quote(parent_path)}",
+            working_directory=".",
+            timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
+        )
+        if mkdir_result.exit_code != 0:
+            raise RemoteWorkspaceError(mkdir_result.stderr.strip() or "Remote directory creation failed.")
+
+        client = connector.connect()
+        try:
+            sftp_client = client.open_sftp()
+            try:
+                with sftp_client.open(remote_path, "wb") as remote_file:
+                    remote_file.write(content.encode("utf-8"))
+            finally:
+                sftp_client.close()
+        finally:
+            client.close()
+
+    def read_remote_text(
+        self,
+        connector: SshRemoteWorkspaceConnector,
+        remote_path: str,
+    ) -> str:
+        client = connector.connect()
+        try:
+            sftp_client = client.open_sftp()
+            try:
+                with sftp_client.open(remote_path, "rb") as remote_file:
+                    raw_content = remote_file.read()
+            finally:
+                sftp_client.close()
+        finally:
+            client.close()
+
+        if isinstance(raw_content, bytes):
+            return raw_content.decode("utf-8")
+        return str(raw_content)
+
+    def strip_code_markdown_links(self, path: str, content: str) -> str:
+        if path.endswith((".py", ".ts", ".js", ".tsx", ".jsx", ".sh")):
+            return _strip_markdown_links(content)
+        return content
+
+
+class RemoteWriteFileTool(RemoteWritableToolMixin, BaseTool):
+    name = "write_file"
+    description = "Create or overwrite a file in the selected Remote Workspace."
+    input_model = WriteFileInput
+    permission_level = 2
+    is_destructive = True
+
+    def is_read_only(self, arguments) -> bool:
+        return False
+
+    async def execute(self, arguments: WriteFileInput, context: ToolExecutionContext) -> ToolResult:
+        del context
+        connector = self.create_connector()
+        try:
+            remote_path = connector.resolve_path(arguments.path)
+            content = self.strip_code_markdown_links(arguments.path, arguments.content)
+            self.write_remote_text(connector, remote_path, content)
+            return ToolResult(
+                output=f"Successfully wrote {len(content.encode('utf-8'))} bytes to remote:{arguments.path}",
+                metadata={"remote_path": remote_path},
+            )
+        except RemoteWorkspaceError as exc:
+            return self.format_remote_error(exc)
+        except OSError as exc:
+            return ToolResult(output=f"Remote file write failed: {exc}", is_error=True)
+        except UnicodeError as exc:
+            return ToolResult(output=f"Remote file content encoding failed: {exc}", is_error=True)
+
+
+class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
+    name = "edit_file"
+    description = "Edit a remote file by replacing a specific text block with new content."
+    input_model = EditFileInput
+    permission_level = 2
+    is_destructive = True
+
+    def is_read_only(self, arguments) -> bool:
+        return False
+
+    async def execute(self, arguments: EditFileInput, context: ToolExecutionContext) -> ToolResult:
+        del context
+        connector = self.create_connector()
+        try:
+            remote_path = connector.resolve_path(arguments.path)
+            content = self.read_remote_text(connector, remote_path)
+            old_string = self.strip_code_markdown_links(arguments.path, arguments.old_str)
+            new_string = self.strip_code_markdown_links(arguments.path, arguments.new_str)
+            if old_string not in content:
+                return ToolResult(
+                    output=(
+                        f"Error: The provided 'old_str' was not found in remote:{arguments.path}. "
+                        "Ensure exact match including whitespace."
+                    ),
+                    is_error=True,
+                )
+
+            replace_count = -1 if arguments.replace_all else 1
+            updated_content = content.replace(old_string, new_string, replace_count)
+            self.write_remote_text(connector, remote_path, updated_content)
+            actual_replaces = content.count(old_string) if arguments.replace_all else 1
+            return ToolResult(
+                output=f"Successfully updated remote:{arguments.path} ({actual_replaces} replacements made).",
+                metadata={"remote_path": remote_path, "replace_count": actual_replaces},
+            )
+        except FileNotFoundError:
+            return ToolResult(output=f"File not found: remote:{arguments.path}", is_error=True)
+        except UnicodeDecodeError as exc:
+            return ToolResult(output=f"Remote file is not valid UTF-8 text: {exc}", is_error=True)
+        except RemoteWorkspaceError as exc:
+            return self.format_remote_error(exc)
+        except OSError as exc:
+            return ToolResult(output=f"Remote file edit failed: {exc}", is_error=True)
+
+
+class RemoteBashTool(RemoteWorkspaceToolMixin, BaseTool):
+    name = "bash"
+    description = "Run a guarded shell command in the selected Remote Workspace."
+    input_model = BashInput
+    permission_level = 3
+    is_destructive = True
+
+    DENIED_COMMANDS = frozenset(
+        {
+            "dd",
+            "bash",
+            "cd",
+            "fish",
+            "halt",
+            "mkfs",
+            "pkill",
+            "poweroff",
+            "reboot",
+            "rm",
+            "rmdir",
+            "sh",
+            "shutdown",
+            "su",
+            "sudo",
+            "unlink",
+            "zsh",
+        }
+    )
+    DENIED_PATTERNS = (
+        " rm -rf /",
+        " rm -fr /",
+        " chmod -r 777 /",
+        " chmod 777 /",
+        " chown -r ",
+        " && ",
+        " || ",
+        " ; ",
+        "| sh",
+        "| bash",
+        "\n",
+        "`",
+        "$(",
+    )
+
+    def is_read_only(self, arguments) -> bool:
+        return False
+
+    async def execute(self, arguments: BashInput, context: ToolExecutionContext) -> ToolResult:
+        del context
+        denied_reason = self.validate_guarded_command(arguments.command)
+        if denied_reason:
+            return ToolResult(output=denied_reason, is_error=True)
+
+        connector = self.create_connector()
+        try:
+            result = connector.run_command(
+                arguments.command,
+                working_directory=arguments.cwd or ".",
+                timeout_seconds=min(arguments.timeout_seconds, DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS),
+            )
+            output = result.stdout.strip()
+            if result.stderr.strip():
+                output = f"{output}\n{result.stderr.strip()}".strip()
+            return ToolResult(
+                output=output or "(no output)",
+                is_error=result.exit_code != 0,
+                metadata={"exit_code": result.exit_code, "remote_workspace": True},
+            )
+        except RemoteWorkspaceError as exc:
+            return self.format_remote_error(exc)
+
+    def validate_guarded_command(self, command: str) -> str | None:
+        stripped_command = command.strip()
+        if not stripped_command:
+            return "Remote bash command must not be blank."
+        try:
+            command_parts = shlex.split(stripped_command)
+        except ValueError as exc:
+            return f"Remote bash command is invalid: {exc}"
+
+        first_command = command_parts[0]
+        if first_command.startswith("/"):
+            return "Remote bash command must use command names, not absolute executable paths."
+        if first_command in self.DENIED_COMMANDS:
+            return f"Remote bash command '{first_command}' is not allowed."
+
+        lowered_command = f" {stripped_command.lower()} "
+        for pattern in self.DENIED_PATTERNS:
+            if pattern in lowered_command:
+                return f"Remote bash command contains a denied pattern: {pattern.strip()}"
+        if "|" in lowered_command and (" curl " in lowered_command or " wget " in lowered_command):
+            return "Remote bash command cannot pipe downloaded content into another command."
+
+        for part in command_parts[1:]:
+            if part.startswith("~"):
+                return "Remote bash command path must not use home-directory expansion."
+            if part.startswith("/") and not self.is_under_base_path(part):
+                return "Remote bash command path must stay under the Remote Workspace basePath."
+        return None
+
+    def is_under_base_path(self, path: str) -> bool:
+        base_path = self.config.base_path.rstrip("/")
+        if not base_path:
+            return path.startswith("/")
+        return path == base_path or path.startswith(f"{base_path}/")
+
+
+def build_remote_write_execution_tools(
+    config: RemoteWorkspaceConnectionConfig,
+    *,
+    connector_factory: ConnectorFactory | None = None,
+) -> list[BaseTool]:
+    """Return Remote Workspace write/execute tools using existing LLM tool names."""
+
+    return [
+        RemoteWriteFileTool(config, connector_factory=connector_factory),
+        RemoteEditFileTool(config, connector_factory=connector_factory),
+        RemoteBashTool(config, connector_factory=connector_factory),
+    ]
