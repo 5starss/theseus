@@ -98,6 +98,12 @@ public class ToolPlanRunStateResponse {
 				return toolPlan.getStatus().name();
 			}
 		}
+
+		if (ToolPlanRunRequestType.BUILD_TOOL.equals(toolPlanRun.getRequestType())
+			&& !toolPlanRun.isFinished()) {
+			return "BUILDING";
+		}
+
 		return toolPlanRun.getStatus().name();
 	}
 }

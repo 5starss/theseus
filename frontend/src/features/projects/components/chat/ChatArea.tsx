@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useParams } from 'react-router-dom';
-import { Lock } from 'lucide-react';
+import { Lock, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
@@ -27,6 +27,7 @@ export function ChatArea() {
     addMessage,
     isGenerating,
     setIsGenerating,
+    isBuilding,
     progressInfo,
     title,
     isClosed,
@@ -155,6 +156,18 @@ export function ChatArea() {
             </div>
           );
         }
+
+        if (parsed.toolApprovalId) {
+          return (
+            <div className="flex flex-col gap-1.5">
+              <div className="font-bold text-blue-300 text-xs uppercase tracking-tight">도구 생성 요청</div>
+              <div className="text-[14px] flex items-center gap-2 text-slate-300">
+                <CheckCircle className="w-3.5 h-3.5 text-blue-400" />
+                <span>도구 생성을 요청했습니다</span>
+              </div>
+            </div>
+          );
+        }
       } catch {
         // JSON 파싱 실패 시 일반 텍스트로 렌더링
       }
@@ -187,7 +200,7 @@ export function ChatArea() {
             {messages.map((msg, idx) => {
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && idx === messages.length - 1;
-              if (isLastAssistant && isGenerating && mode === ToolPlanMode.PLAN) return null;
+              if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
 
               return (
                 <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
@@ -203,7 +216,7 @@ export function ChatArea() {
             })}
 
             {/* 별도의 생성 로그 UI (말풍선과 별개) */}
-            {isGenerating && mode === ToolPlanMode.PLAN && (
+            {(isGenerating || isBuilding) && mode === ToolPlanMode.PLAN && (
               <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="w-full max-w-[85%] bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
                   <div className="bg-blue-500/10 px-4 py-2 border-b border-blue-500/10 flex items-center justify-between">
@@ -214,7 +227,7 @@ export function ChatArea() {
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:0.4s]" />
                       </div>
                       <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em]">
-                        {progressInfo?.step || 'Agent Processing'}
+                        {isBuilding ? 'Tool Building' : (progressInfo?.step || 'Agent Processing')}
                       </span>
                     </div>
                   </div>

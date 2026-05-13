@@ -78,6 +78,15 @@ export function useToolGenerationSSE() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const store = useChatSessionStore.getState();
+    if (flow === 'BUILD') {
+      store.setIsBuilding(true);
+      store.setIsGenerating(false);
+    } else {
+      store.setIsGenerating(true);
+      store.setIsBuilding(false);
+    }
+
     const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
     const fullUrl = sseUrl.startsWith('http') ? sseUrl : `${baseUrl}${sseUrl}`;
     const token = useAuthStore.getState().accessToken;
@@ -194,7 +203,7 @@ export function useToolGenerationSSE() {
               break;
 
             case 'skipped':
-            case 'tool_plan_skipped':
+            case 'tool_plan_skipped': {
               store.setIsGenerating(false);
               store.setIsBuilding(false);
               store.setDraftPhase(null);
@@ -249,6 +258,7 @@ export function useToolGenerationSSE() {
 
               disconnectSSE();
               break;
+            }
 
             case 'failed':
             case 'tool_plan_failed':

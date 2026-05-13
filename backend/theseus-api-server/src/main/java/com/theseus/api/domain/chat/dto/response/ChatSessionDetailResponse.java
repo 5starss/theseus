@@ -68,12 +68,18 @@ public class ChatSessionDetailResponse {
 			ToolPlan toolPlan = resolveToolPlan(toolPlanRun);
 			ToolPlanGroup planGroup = resolvePlanGroup(toolPlanRun, toolPlan);
 
+			String status = toolPlanRun.getStatus().name();
+			if (com.theseus.api.domain.tool.entity.ToolPlanRunRequestType.BUILD_TOOL.equals(toolPlanRun.getRequestType())
+				&& !toolPlanRun.isFinished()) {
+				status = "BUILDING";
+			}
+
 			return CurrentPlanResponse.builder()
 				.runId(toolPlanRun.getRunId())
 				.toolPlanGroupId(planGroup == null ? null : planGroup.getId())
 				.toolPlanId(toolPlan == null ? null : toolPlan.getId())
 				.planVersion(toolPlan == null ? null : toolPlan.getPlanVersion())
-				.status(toolPlanRun.getStatus().name())
+				.status(status)
 				.build();
 		}
 
