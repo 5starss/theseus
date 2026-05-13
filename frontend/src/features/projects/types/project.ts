@@ -32,3 +32,34 @@ export interface ProjectMemberResponse {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface RemoteWorkspaceResponse {
+  remoteWorkspaceId: number;
+  projectId: number;
+  createdByProjectMemberId: number;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  privateKeyPath: string | null;
+  basePath: string;
+  status: 'ACTIVE' | 'DELETED';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RemoteWorkspaceCreateRequest {
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  privateKeyPath?: string;
+  basePath: string;
+}
+
+export interface RemoteWorkspaceConnectionTestResponse {
+  remoteWorkspaceId: number;
+  available: boolean;
+  message: string;
+}

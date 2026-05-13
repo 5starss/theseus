@@ -17,7 +17,7 @@ export function InspectorPanel() {
   const {
     currentPlan, toolResult, activeTab, isBuilding,
     draftPhase, commentMode, draftComments, currentToolPlanId, planVersion,
-    isGenerating, isClosed, createdTool,
+    isGenerating, isClosed, createdTool, selectedRemoteWorkspaceId,
   } = useChatSessionStore(useShallow(state => ({
     currentPlan: state.currentPlan,
     toolResult: state.toolResult,
@@ -31,6 +31,7 @@ export function InspectorPanel() {
     isGenerating: state.isGenerating,
     isClosed: state.isClosed,
     createdTool: state.createdTool,
+    selectedRemoteWorkspaceId: state.selectedRemoteWorkspaceId,
   })));
 
   const {
@@ -98,7 +99,8 @@ export function InspectorPanel() {
         {
           basePlanVersion: planVersion,
           feedbackItems,
-          mode: ToolPlanMode.PLAN
+          mode: ToolPlanMode.PLAN,
+          remoteWorkspaceId: selectedRemoteWorkspaceId ?? undefined
         }
       );
 
