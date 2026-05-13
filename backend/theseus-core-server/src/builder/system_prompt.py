@@ -18,7 +18,6 @@ def build_theseus_system_prompt(
     coordinator_phase: CoordinatorPhase | None = None,
     plan_content: Any | None = None,
     available_tools: Iterable[str] | None = None,
-    runtime_reminders: Iterable[str] | None = None,
 ) -> str:
     """Build the canonical Theseus system prompt for a server-side request."""
 
@@ -31,10 +30,7 @@ def build_theseus_system_prompt(
     if plan_content is not None:
         state_machine.plan = _format_plan_content(plan_content)
 
-    return state_machine.get_system_prompt(
-        available_tools=available_tools,
-        runtime_reminders=runtime_reminders,
-    )
+    return state_machine.get_system_prompt(available_tools=available_tools)
 
 
 def _format_plan_content(plan_content: Any) -> str:

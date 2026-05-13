@@ -53,6 +53,8 @@ class EngineBuildContext:
     chat_session_id: int | None = None
     plan_id: str | None = None
     plan_content: dict[str, Any] | None = None
+    plan_phase: PlanPhase | None = None
+    remote_workspace_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -75,9 +77,55 @@ def _infer_registry_permissions(full_registry: Any) -> dict[str, int]:
     return permissions
 
 
-def _resolve_excluded_tools(mode: AgentMode) -> set[str]:
-    # Server route only supports AGENT initially. Keep create_tool out of
-    # non-Plan modes so the server cannot expose meta-tooling prematurely.
+_PLAN_DRAFTING_ALLOWED_TOOLS = frozenset(
+    {
+        "read_file",
+        "glob",
+        "grep",
+        "web_fetch",
+        "web_search",
+        "deep_research",
+        "lsp",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "skill_read",
+        "skill_list",
+        "search_knowledge_base",
+        "memory_read",
+        "memory_list",
+        "tool_search",
+        "brief",
+    }
+)
+
+
+def _all_tool_names(full_registry: ToolRegistry) -> set[str]:
+    return {tool.name for tool in full_registry.list_tools()}
+
+
+def _resolve_plan_phase(build_context: EngineBuildContext) -> PlanPhase | None:
+    if build_context.mode != AgentMode.PLAN:
+        return None
+    if build_context.plan_phase is not None:
+        return build_context.plan_phase
+    if build_context.plan_id:
+        return PlanPhase.EXECUTING
+    return PlanPhase.DRAFTING
+
+
+def _resolve_excluded_tools(
+    mode: AgentMode,
+    plan_phase: PlanPhase | None,
+    full_registry: ToolRegistry,
+) -> set[str]:
+    all_tool_names = _all_tool_names(full_registry)
+    if mode == AgentMode.ASK:
+        return all_tool_names
+    if mode == AgentMode.PLAN and plan_phase in {
+        PlanPhase.DRAFTING,
+        PlanPhase.WAIT_FOR_REVIEW,
+    }:
+        return all_tool_names - _PLAN_DRAFTING_ALLOWED_TOOLS
     if mode != AgentMode.PLAN:
         return {"create_tool"}
     return set()
@@ -185,6 +233,7 @@ def get_query_engine(
     if not isinstance(build_context.mode, AgentMode):
         raise EngineInitializationError("Engine mode must be a valid AgentMode.")
 
+    plan_phase = _resolve_plan_phase(build_context)
     model_name = resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
@@ -215,17 +264,21 @@ def get_query_engine(
         full_registry,
         tool_permissions,
         build_context.user_level,
-        exclude_tools=_resolve_excluded_tools(build_context.mode),
+        exclude_tools=_resolve_excluded_tools(
+            build_context.mode,
+            plan_phase,
+            full_registry,
+        ),
     )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
-    if not allowed_tools:
+    if not allowed_tools and build_context.mode != AgentMode.ASK:
         raise EngineInitializationError(
             "No tools are available for the current server session."
         )
 
     system_prompt = build_theseus_system_prompt(
         mode=build_context.mode,
-        plan_phase=PlanPhase.EXECUTING if build_context.mode == AgentMode.PLAN else None,
+        plan_phase=plan_phase,
         plan_content=build_context.plan_content,
         available_tools=allowed_tools,
     )
@@ -264,6 +317,9 @@ def get_query_engine(
             "user_id": build_context.actor_user_id,
             "chat_session_id": build_context.chat_session_id,
             "plan_id": build_context.plan_id,
+            "agent_mode": build_context.mode.value,
+            "plan_phase": plan_phase.value if plan_phase is not None else None,
+            "remote_workspace_id": build_context.remote_workspace_id,
         },
     )
 

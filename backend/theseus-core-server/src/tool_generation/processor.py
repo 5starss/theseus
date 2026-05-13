@@ -34,8 +34,8 @@ class ToolGenerationProcessor:
     """Compatibility adapter for the legacy ToolGeneration Kafka contract.
 
     Legacy API Server flows still publish TOOL_GENERATION_* messages keyed by
-    toolId. Internally, Core now routes those requests through ToolPlanPlanner so
-    the active system prompt comes from theseus_engine.models.state.
+    toolId. Internally, Core routes those requests through the API-compatible
+    PLAN draft planner so the active system prompt comes from theseus_engine.models.state.
     """
 
     def __init__(

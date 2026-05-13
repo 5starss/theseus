@@ -70,9 +70,6 @@ class ToolBuilder:
             plan_phase=PlanPhase.EXECUTING,
             plan_content=approved_plan,
             available_tools=[],
-            runtime_reminders=[
-                "This ToolBuild worker receives an empty tool schema. Do not call create_tool or other tools; return only the task-specific JSON contract from the user message.",
-            ],
         )
         spec = await self._generate_tool_spec(
             self._build_tool_message(
@@ -203,7 +200,7 @@ class ToolBuilder:
     @staticmethod
     def _build_tool_message(*, approved_plan: dict, project_id: int, chat_session_id: int, tool_plan_id: int) -> str:
         return (
-            "Task-specific output contract for this ToolBuild worker request.\n"
+            "Task-specific output contract for this custom tool artifact build request.\n"
             "Follow the approved Theseus plan from the system prompt. For response shape, "
             "use this contract exactly.\n\n"
             "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n\n"
@@ -227,7 +224,7 @@ class ToolBuilder:
             "- Do not perform network calls unless the approved plan explicitly requires them.\n"
             "- Do not read or write arbitrary local files.\n"
             "- Keep the tool deterministic and safe by default.\n\n"
-            "Build an executable Theseus custom tool from this approved ToolPlan.\n"
+            "Build an executable Theseus custom tool from this approved plan.\n"
             f"projectId={project_id}\n"
             f"chatSessionId={chat_session_id}\n"
             f"toolPlanId={tool_plan_id}\n\n"
@@ -246,9 +243,9 @@ class ToolBuilder:
         attempt: int,
     ) -> str:
         return (
-            "Task-specific output contract for this ToolBuild repair request.\n"
+            "Task-specific output contract for this custom tool artifact repair request.\n"
             "Follow the approved Theseus plan from the system prompt. Return the same complete JSON schema "
-            "used for ToolBuild generation.\n\n"
+            "used for custom tool artifact generation.\n\n"
             "The previous generated tool failed Core validation or sandbox execution.\n"
             f"Repair attempt: {attempt}\n"
             f"Error code: {error_code}\n"

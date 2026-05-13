@@ -41,6 +41,24 @@ def _truncate_tool_output(output: object, max_length: int = 500) -> str:
     return text[:max_length] + "..."
 
 
+def _resolve_stream_mode(raw_mode: str, *, plan_id: str | None) -> AgentMode:
+    if plan_id:
+        return AgentMode.PLAN
+
+    normalized = (raw_mode or "AGENT").strip().upper()
+    mode_map = {
+        "ASK": AgentMode.ASK,
+        "AGENT": AgentMode.AGENT,
+        "PLAN": AgentMode.PLAN,
+    }
+    if normalized not in mode_map:
+        raise HTTPException(
+            status_code=422,
+            detail="mode must be one of ASK, AGENT, or PLAN",
+        )
+    return mode_map[normalized]
+
+
 async def stream_agent_response(
     session: SessionContext,
     chat_session_id: int,
@@ -67,9 +85,10 @@ async def stream_agent_response(
         usage_data.model_name = assembly.model_name
 
         logger.info(
-            "Starting Theseus stream for user=%s project=%s tools=%s",
+            "Starting Theseus stream for user=%s project=%s mode=%s tools=%s",
             session.user_id,
             session.project_id,
+            engine_context.mode.name,
             ",".join(assembly.allowed_tools),
         )
 
@@ -150,7 +169,10 @@ async def stream_agent_response(
 async def stream_endpoint(
     prompt: str = Query(..., min_length=1),
     chat_session_id: int = Query(..., ge=1),
+    mode: str = Query("AGENT"),
     plan_id: str | None = Query(None),
+    remote_workspace_id: int | None = Query(None),
+    remote_workspace_id_camel: int | None = Query(None, alias="remoteWorkspaceId"),
     session: SessionContext = Depends(get_sse_session_context),
     db: Session = Depends(get_db),
 ):
@@ -167,7 +189,7 @@ async def stream_endpoint(
 
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
-    mode = AgentMode.AGENT
+    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
     if plan_id:
         bound_plan = validate_executing_plan_binding(
             db,
@@ -175,13 +197,19 @@ async def stream_endpoint(
             project_id=str(session.project_id),
             chat_session_id=chat_session_id,
         )
-        mode = AgentMode.PLAN
+
+    resolved_remote_workspace_id = (
+        remote_workspace_id
+        if remote_workspace_id is not None
+        else remote_workspace_id_camel
+    )
 
     engine_context = EngineBuildContext(
         user_level=session.permission_level,
         project_tool_permissions=project_tool_permissions,
-        mode=mode,
+        mode=stream_mode,
         approval_policy="reject",
+        user_query=prompt,
         history_messages=history_messages,
         session_id=str(chat_session_id),
         project_id=str(session.project_id),
@@ -189,6 +217,7 @@ async def stream_endpoint(
         chat_session_id=chat_session_id,
         plan_id=plan_id,
         plan_content=bound_plan.content if bound_plan is not None else None,
+        remote_workspace_id=resolved_remote_workspace_id,
     )
 
     await persist_user_message(session, chat_session_id, prompt)
