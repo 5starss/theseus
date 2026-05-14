@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
+    THESEUS_TOOL_REPAIR_MAX_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
     CORE_RUN_LEASE_TTL_SECONDS: int = 60

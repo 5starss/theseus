@@ -14,6 +14,7 @@ from theseus_engine.tools.core import (
     load_custom_tools_for_project,
     ToolSearchTool,
 )
+from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.core.tool_retriever import ESSENTIAL_TOOL_NAMES
 from theseus_engine.models.rbac import TheseusPermissionChecker
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
@@ -230,6 +231,9 @@ async def setup_engine(
             "tool_registry": full_registry,
             "tool_permissions": project_tool_permissions,
             "active_registry": active_registry,
+            "llm_client": api_client,
+            "model_name": model_name,
+            "tool_repair_policy": ToolRepairPolicy.from_env(),
             "cost_tracker": tracker,
             "session_stats": stats,
             "scoped_memory": scoped_memory,
