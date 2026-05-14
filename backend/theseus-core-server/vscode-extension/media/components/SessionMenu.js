@@ -105,7 +105,6 @@ export function renderSessionMenu({
         event.preventDefault();
         event.stopPropagation();
         onDelete(session.name);
-        onClose();
       });
       row.appendChild(deleteBtn);
     }
