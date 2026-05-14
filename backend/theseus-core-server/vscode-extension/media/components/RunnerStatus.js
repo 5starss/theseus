@@ -131,7 +131,16 @@ export function applyRunnerStatusEvent({
     if (nextState.pendingSubmitText) {
       const text = nextState.pendingSubmitText;
       nextState.pendingSubmitText = null;
-      sendPromptText(text);
+      if (nextState.state === 'busy' || nextState.lifecycle === 'busy') {
+        appendTransientMessage(
+          'system',
+          '에이전트가 이미 응답 중입니다. 완료 후 다시 전송하세요. 입력 내용은 유지됩니다.',
+          'hint',
+          4000,
+        );
+      } else {
+        sendPromptText(text);
+      }
     }
     return nextState;
   }

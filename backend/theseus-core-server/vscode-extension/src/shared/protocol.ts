@@ -201,6 +201,7 @@ export type WebviewToHostMessage =
   | { type: 'savePastedImage'; name?: string; data?: unknown }
   | { type: 'revertChangedFile'; id?: string; path?: string; oldContent?: string }
   | { type: 'openFile'; path?: string }
+  | { type: 'openExternal'; url?: string }
   | { type: 'openGeneratedTool' | 'openDiff'; event?: RunnerEvent };
 
 const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
@@ -240,6 +241,7 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'savePastedImage',
   'revertChangedFile',
   'openFile',
+  'openExternal',
   'openGeneratedTool',
   'openDiff',
 ]);
@@ -425,6 +427,9 @@ export function asWebviewToHostMessage(value: unknown): WebviewToHostMessage | u
     return undefined;
   }
   if (type === 'openPlanPreview' && value.plan !== undefined && !isObject(value.plan)) {
+    return undefined;
+  }
+  if (type === 'openExternal' && value.url !== undefined && typeof value.url !== 'string') {
     return undefined;
   }
   return value as WebviewToHostMessage;

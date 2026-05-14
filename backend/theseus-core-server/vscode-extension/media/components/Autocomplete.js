@@ -1,22 +1,4 @@
-const SLASH_COMMANDS = [
-  { value: '/tools', description: 'Refresh and open Custom Tools', scope: 'local' },
-  { value: '/tools custom', description: 'Show custom tool list', scope: 'local' },
-  { value: '/session', description: 'Refresh local sessions', scope: 'local' },
-  { value: '/session list', description: 'Refresh local sessions', scope: 'local' },
-  { value: '/session new', description: 'Create a new session', scope: 'runner required' },
-  { value: '/session delete', description: 'Delete a session by name', scope: 'runner required' },
-  { value: '/clear', description: 'Clear visible chat history', scope: 'local' },
-  { value: '/cost', description: 'Show runner token/cost stats', scope: 'runner required' },
-  { value: '/stats', description: 'Show runner session stats', scope: 'runner required' },
-  { value: '/validate', description: 'Validate custom tools in runner', scope: 'runner required' },
-  { value: '/plan approve', description: 'Approve a pending plan', scope: 'plan review only' },
-  { value: '/plan reject', description: 'Reject a pending plan', scope: 'plan review only' },
-  { value: '/plan cancel', description: 'Cancel the current session plan', scope: 'runner required' },
-  { value: '/plan delete', description: 'Delete the current session plan', scope: 'runner required' },
-  { value: '/help', description: 'Show command help', scope: 'local' },
-  { value: '/quit', description: 'Stop the runner', scope: 'local' },
-  { value: '/exit', description: 'Stop the runner', scope: 'local' },
-];
+import { SLASH_COMMANDS } from './SlashCommands.js';
 
 export function getWordBefore(text, pos) {
   const before = text.slice(0, pos);

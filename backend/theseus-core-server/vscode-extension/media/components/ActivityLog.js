@@ -16,6 +16,21 @@ function formatToolPayload(value) {
   }
 }
 
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function renderToolPayload(pre, value) {
+  const text = formatToolPayload(value);
+  if (!text) return false;
+  const renderer = window.TheseusMarkdown?.renderMarkdown;
+  pre.innerHTML = renderer ? renderer(text) : escHtml(text);
+  return true;
+}
+
 function compactPrompt(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return 'request';
@@ -120,6 +135,10 @@ export function createActivityLogController({
     request.summaryMetaEl.textContent = `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${parts.join(', ')}`;
   }
 
+  function scrollRequestIntoView(request) {
+    request?.groupEl?.scrollIntoView?.({ block: 'nearest' });
+  }
+
   function note({ key, label, detail = '', state = 'info' } = {}) {
     const text = String(label || '').trim();
     if (!text) return null;
@@ -159,7 +178,7 @@ export function createActivityLogController({
       detailEl.textContent = detailText ? ` ${detailText}` : '';
     }
     updateGroupSummary(request);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollRequestIntoView(request);
     return item;
   }
 
@@ -202,6 +221,38 @@ export function createActivityLogController({
     };
   }
 
+  function appendToolSection(body, label, value) {
+    const text = formatToolPayload(value);
+    if (!text) return;
+    const section = document.createElement('section');
+    section.className = 'tool-section';
+
+    const heading = document.createElement('div');
+    heading.className = 'tool-section-label';
+    heading.textContent = label;
+
+    const pre = document.createElement('pre');
+    renderToolPayload(pre, value);
+
+    section.append(heading, pre);
+    body.appendChild(section);
+  }
+
+  function renderToolContent(toolEl, { toolInput, output, isRunning }) {
+    let body = toolEl.querySelector('.tool-body');
+    if (!body) {
+      body = document.createElement('div');
+      body.className = 'tool-body';
+      toolEl.appendChild(body);
+    }
+    body.innerHTML = '';
+    appendToolSection(body, isRunning ? 'Input' : 'Input', toolInput);
+    appendToolSection(body, isRunning ? 'Running' : 'Output', isRunning ? null : output);
+    if (!body.childNodes.length) {
+      appendToolSection(body, isRunning ? 'Running' : 'Output', isRunning ? toolInput : output);
+    }
+  }
+
   function appendTool(toolName, toolInput, output, isError, save = true, eventData = null) {
     const request = ensureRequest();
     const isRunning = eventData?.status === 'running'
@@ -219,14 +270,12 @@ export function createActivityLogController({
       ? `${toolName} running...`
       : `${toolName} ${isError ? 'failed' : 'done'}`;
 
-    const pre = document.createElement('pre');
-    pre.textContent = formatToolPayload(isRunning ? toolInput : output);
-
-    item.append(summary, pre);
+    item.appendChild(summary);
+    renderToolContent(item, { toolInput, output, isRunning });
     if (eventData) appendDiffAction(item, eventData);
     request.listEl.appendChild(item);
     updateGroupSummary(request);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    scrollRequestIntoView(request);
 
     if (save) {
       onPersistTool(buildToolEntry(toolName, toolInput, output, isError, item.dataset.status, eventData));
@@ -266,15 +315,17 @@ export function createActivityLogController({
     const running = runningToolEls.get(key);
     const existing = running?.toolEl;
     if (existing) {
+      const wasOpen = existing.open;
       existing.className = event.is_error ? 'tool error' : 'tool';
-      existing.open = true;
+      existing.open = wasOpen;
       existing.dataset.status = event.is_error ? 'failed' : 'done';
       existing.querySelector('summary').textContent =
         `${event.tool_name} ${event.is_error ? 'failed' : 'done'}`;
-      existing.querySelector('pre').textContent = formatToolPayload(event.output);
+      renderToolContent(existing, { toolInput: event.tool_input, output: event.output, isRunning: false });
       appendDiffAction(existing, event);
       runningToolEls.delete(key);
       updateGroupSummary(running.request || currentRequest);
+      scrollRequestIntoView(running.request || currentRequest);
       onPersistTool(buildToolEntry(event.tool_name, event.tool_input, event.output, event.is_error, existing.dataset.status, event));
     } else {
       appendTool(event.tool_name, event.tool_input, event.output, event.is_error, true, event);

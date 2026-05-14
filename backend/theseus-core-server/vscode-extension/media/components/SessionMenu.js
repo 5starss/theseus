@@ -102,8 +102,8 @@ export function renderSessionMenu({
       deleteBtn.title = `Delete ${session.name}`;
       deleteBtn.setAttribute('aria-label', `Delete ${session.name}`);
       deleteBtn.addEventListener('click', (event) => {
+        event.preventDefault();
         event.stopPropagation();
-        if (!confirm(`Delete session "${session.name}"?`)) return;
         onDelete(session.name);
         onClose();
       });
@@ -115,6 +115,25 @@ export function renderSessionMenu({
 
   const actions = document.createElement('div');
   actions.className = 'session-actions';
+  const renameForm = document.createElement('form');
+  renameForm.className = 'session-create session-rename';
+  const renameInput = document.createElement('input');
+  renameInput.type = 'text';
+  renameInput.placeholder = 'Rename current session';
+  renameInput.value = currentSession || '';
+  renameInput.setAttribute('aria-label', 'Rename current session');
+  const renameBtn = document.createElement('button');
+  renameBtn.type = 'submit';
+  renameBtn.textContent = 'Rename';
+  renameForm.append(renameInput, renameBtn);
+  renameForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = renameInput.value.trim();
+    if (name && name !== currentSession) onRename(currentSession, name);
+    onClose();
+  });
+  actions.appendChild(renameForm);
+
   const addAction = (label, handler) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -122,11 +141,6 @@ export function renderSessionMenu({
     btn.addEventListener('click', handler);
     actions.appendChild(btn);
   };
-  addAction('Rename', () => {
-    const name = prompt('Rename session to', currentSession);
-    if (name && name !== currentSession) onRename(currentSession, name);
-    onClose();
-  });
   addAction('Export MD', () => {
     onExport(currentSession, 'markdown');
     onClose();

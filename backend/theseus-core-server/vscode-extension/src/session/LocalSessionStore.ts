@@ -186,12 +186,42 @@ function historyForUi(envelope: Record<string, unknown>): Array<Record<string, u
       ? envelope.history
       : [];
   const history: Array<Record<string, unknown>> = [];
+  const pendingTools = new Map<string, { toolName: string; toolInput: unknown }>();
   for (const item of rawHistory) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const message = item as Record<string, unknown>;
     const role = typeof message.role === 'string' ? message.role : 'message';
-    const text = messageText(message);
+    const text = visibleMessageText(message);
     if (text) history.push({ type: 'message', role, text });
+    if (role === 'assistant') {
+      for (const toolUse of toolUseBlocks(message)) {
+        const toolUseId = typeof toolUse.id === 'string' ? toolUse.id : '';
+        if (!toolUseId) continue;
+        pendingTools.set(toolUseId, {
+          toolName: typeof toolUse.name === 'string' && toolUse.name ? toolUse.name : 'tool',
+          toolInput: toolUse.input && typeof toolUse.input === 'object' && !Array.isArray(toolUse.input)
+            ? toolUse.input
+            : {},
+        });
+      }
+    }
+    if (role === 'user') {
+      for (const toolResult of toolResultBlocks(message)) {
+        const toolUseId = typeof toolResult.tool_use_id === 'string' ? toolResult.tool_use_id : '';
+        const toolInfo = toolUseId ? pendingTools.get(toolUseId) : undefined;
+        if (toolUseId) pendingTools.delete(toolUseId);
+        const isError = toolResult.is_error === true;
+        history.push({
+          type: 'tool',
+          tool_use_id: toolUseId || undefined,
+          tool_name: toolInfo?.toolName || 'tool',
+          tool_input: toolInfo?.toolInput || {},
+          output: typeof toolResult.content === 'string' ? toolResult.content : '',
+          is_error: isError,
+          status: isError ? 'failed' : 'done',
+        });
+      }
+    }
   }
   return history;
 }
@@ -215,4 +245,40 @@ function messageText(message: Record<string, unknown>): string {
     }
   }
   return chunks.filter(Boolean).join('\n');
+}
+
+function visibleMessageText(message: Record<string, unknown>): string {
+  if (typeof message.text === 'string') return message.text;
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const chunks: string[] = [];
+  for (const block of content) {
+    if (typeof block === 'string') {
+      chunks.push(block);
+    } else if (block && typeof block === 'object' && !Array.isArray(block)) {
+      const record = block as Record<string, unknown>;
+      if (typeof record.text === 'string') chunks.push(record.text);
+    }
+  }
+  return chunks.filter(Boolean).join('\n');
+}
+
+function contentRecords(message: Record<string, unknown>, type: string): Array<Record<string, unknown>> {
+  const content = message.content;
+  if (!Array.isArray(content)) return [];
+  return content.filter((block): block is Record<string, unknown> => (
+    !!block
+    && typeof block === 'object'
+    && !Array.isArray(block)
+    && (block as Record<string, unknown>).type === type
+  ));
+}
+
+function toolUseBlocks(message: Record<string, unknown>): Array<Record<string, unknown>> {
+  return contentRecords(message, 'tool_use');
+}
+
+function toolResultBlocks(message: Record<string, unknown>): Array<Record<string, unknown>> {
+  return contentRecords(message, 'tool_result');
 }

@@ -43,6 +43,9 @@ export function getCoreRootPathFallback(): string | undefined {
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     if (hasTheseusEngine(folder.uri.fsPath)) return folder.uri.fsPath;
   }
+  const extension = vscode.extensions.getExtension('theseus.theseus-vscode');
+  const devRoot = extension ? path.resolve(extension.extensionUri.fsPath, '..') : '';
+  if (devRoot && hasTheseusEngine(devRoot)) return devRoot;
   return undefined;
 }
 
@@ -132,6 +135,8 @@ export function getCustomToolSearchRoots(): string[] {
   if (workspace) roots.add(workspace);
   const corePath = vscode.workspace.getConfiguration('theseus').get<string>('corePath')?.trim();
   if (corePath) roots.add(corePath);
+  const fallbackCore = getCoreRootPathFallback();
+  if (fallbackCore) roots.add(fallbackCore);
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     roots.add(folder.uri.fsPath);
     if (hasTheseusEngine(folder.uri.fsPath)) roots.add(folder.uri.fsPath);
