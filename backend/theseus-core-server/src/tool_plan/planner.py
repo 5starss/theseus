@@ -93,6 +93,7 @@ class ToolPlanPlanner:
             event,
             remote_workspace=remote_workspace,
             chunk_callback=chunk_callback,
+            progress_callback=progress_callback,
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
         )
@@ -122,6 +123,7 @@ class ToolPlanPlanner:
         *,
         remote_workspace: RemoteWorkspaceConnectionConfig | None,
         chunk_callback: ChunkCallback | None,
+        progress_callback: ProgressCallback | None = None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
@@ -155,10 +157,8 @@ class ToolPlanPlanner:
             ),
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
-            # PLAN drafts contain machine-readable JSON. Publish only the
-            # parsed display Markdown after validation so users do not see
-            # internal IDs or raw JSON while generation is still streaming.
-            chunk_callback=None,
+            chunk_callback=chunk_callback,
+            progress_callback=progress_callback,
         )
 
         payload = extract_plan_json(loop_result.final_text)
