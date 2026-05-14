@@ -18,6 +18,8 @@ from enum import Enum
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
+from theseus_engine.tools.tool_repair import COMMON_CUSTOM_TOOL_SECURITY_RULES
+
 
 class AgentMode(Enum):
     """최상위 사용자 선택 모드 (Cursor/Copilot 스타일)."""
@@ -179,9 +181,10 @@ _CREATE_TOOL_CAPABILITY_PROMPT = """\
    (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
    (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
  - IMPORTANT: Do NOT use ToolResult.from_error() or ToolResult(status=..., data=...) — they don't exist.
+ - Generated custom tools must follow the shared Theseus security rules below.
  - You CANNOT create a tool and call it in the SAME turn. Call `create_tool`, wait for \
 the success result, and ONLY THEN call the newly created tool in your next response.\
-"""
+""" + "\n" + COMMON_CUSTOM_TOOL_SECURITY_RULES
 
 
 @dataclass(frozen=True)

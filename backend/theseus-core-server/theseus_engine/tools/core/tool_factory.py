@@ -18,6 +18,12 @@ from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
 from pydantic import BaseModel, Field
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
+from theseus_engine.tools.tool_repair import (
+    COMMON_CUSTOM_TOOL_SECURITY_RULES,
+    ToolRepairFailure,
+    ToolRepairLoop,
+    ToolRepairPolicy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -721,7 +727,10 @@ class ToolCreatorInput(BaseModel):
             "(list of 3-5 short user utterances in Korean and English) that would "
             "trigger this tool. This boosts retrieval accuracy in the RAG-based "
             "tool selector. Example: "
-            "example_queries = ['날씨 알려줘', '오늘 비 와?', \"what's the weather\"]"
+            "example_queries = ['날씨 알려줘', '오늘 비 와?', \"what's the weather\"]. "
+            "Generated tools must follow Theseus custom tool security rules: no "
+            "subprocess/shell execution or other banned modules/functions; use safe "
+            "read-only APIs such as psutil, /proc, or /sys where possible."
         )
     )
     permission_level: int = Field(
@@ -754,6 +763,9 @@ class ToolCreatorTool(BaseTool):
         "Do not nest unescaped triple double quotes inside another triple double "
         "quoted string. Prefer helper functions, constants, or JSON data over "
         "nested Python source strings when possible. "
+        "Generated custom tools must not import subprocess or execute shell commands; "
+        "if a required capability needs prohibited command execution, explain that "
+        "user feedback or a trusted core adapter is required. "
         "Always declare an 'example_queries' class attribute listing 3-5 short "
         "user utterances (mix Korean/English) that should trigger this tool — "
         "this dramatically improves the RAG retriever's ability to surface it. "
@@ -769,6 +781,147 @@ class ToolCreatorTool(BaseTool):
     # but we can be explicit if needed.
 
     async def execute(
+        self, arguments: ToolCreatorInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        return await self._execute_with_repair(arguments, context)
+
+    async def _execute_with_repair(
+        self, arguments: ToolCreatorInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        llm_client = context.metadata.get("llm_client")
+        model_name = str(context.metadata.get("model_name") or "")
+        policy = context.metadata.get("tool_repair_policy")
+        if not isinstance(policy, ToolRepairPolicy):
+            policy = ToolRepairPolicy.from_env()
+
+        if llm_client is None or not model_name or policy.max_attempts <= 0:
+            return await self._execute_once(arguments, context)
+
+        initial_candidate = self._candidate_from_arguments(arguments)
+        repair_loop: ToolRepairLoop[dict[str, Any], ToolResult] = ToolRepairLoop(
+            llm_client=llm_client,
+            model_name=model_name,
+            policy=policy,
+            debug_context={
+                "session_id": context.metadata.get("session_id"),
+                "project_id": context.metadata.get("project_id"),
+                "chat_session_id": context.metadata.get("chat_session_id"),
+                "run_id": context.run_id,
+                "agent_mode": context.metadata.get("agent_mode"),
+            },
+        )
+
+        async def _validate(candidate: dict[str, Any]) -> ToolResult:
+            candidate_args = self._arguments_from_candidate(candidate, fallback=arguments)
+            result = await self._execute_once(candidate_args, context)
+            if result.is_error:
+                raise self._failure_from_tool_result(result)
+            return result
+
+        result = await repair_loop.run(
+            initial_prompt="Validate and, if needed, repair this create_tool request.",
+            initial_candidate=initial_candidate,
+            task_context=(
+                "The runtime is executing the create_tool meta-tool. "
+                "Repair the generated Python custom tool code while preserving the "
+                "requested capability and following the security rules.\n\n"
+                f"Original toolName={arguments.tool_name}\n"
+                f"Original permissionLevel={arguments.permission_level}\n"
+            ),
+            candidate_contract=self._creator_candidate_contract(),
+            generate_candidate=self._generate_unexpected_creator_candidate,
+            validate_candidate=_validate,
+            parse_candidate_payload=self._parse_creator_candidate,
+            render_candidate=lambda candidate: candidate,
+        )
+
+        if result.success and result.value is not None:
+            metadata = dict(result.value.metadata)
+            metadata["repairAttempts"] = result.attempts
+            result.value.metadata = metadata
+            return result.value
+
+        message = result.final_message(policy)
+        metadata = {
+            "status": "repair_failed",
+            "repairAttempts": result.attempts,
+            "lastFailureCode": result.last_failure.code if result.last_failure else None,
+            "needsUserFeedback": result.needs_user_feedback,
+        }
+        if result.feedback_message:
+            metadata["feedbackMessage"] = result.feedback_message
+        return ToolResult(output=f"❌ Tool repair failed:\n{message}", is_error=True, metadata=metadata)
+
+    async def _generate_unexpected_creator_candidate(self, prompt: str) -> dict[str, Any]:
+        raise ToolRepairFailure(
+            stage="repair_generation",
+            code="LLM_OUTPUT_INVALID",
+            message="create_tool repair candidate generation did not produce a candidate.",
+            metadata={"prompt": prompt[:1000]},
+        )
+
+    @staticmethod
+    def _candidate_from_arguments(arguments: ToolCreatorInput) -> dict[str, Any]:
+        return {
+            "toolName": arguments.tool_name,
+            "pythonCode": arguments.python_code,
+            "permissionLevel": arguments.permission_level,
+        }
+
+    @staticmethod
+    def _arguments_from_candidate(
+        candidate: dict[str, Any],
+        *,
+        fallback: ToolCreatorInput,
+    ) -> ToolCreatorInput:
+        return ToolCreatorInput(
+            tool_name=str(candidate.get("toolName") or candidate.get("tool_name") or fallback.tool_name),
+            python_code=str(candidate.get("pythonCode") or candidate.get("python_code") or fallback.python_code),
+            permission_level=int(
+                candidate.get("permissionLevel")
+                or candidate.get("permission_level")
+                or fallback.permission_level
+            ),
+        )
+
+    @staticmethod
+    def _parse_creator_candidate(payload: dict[str, Any]) -> dict[str, Any]:
+        tool_name = payload.get("toolName") or payload.get("tool_name")
+        python_code = payload.get("pythonCode") or payload.get("python_code")
+        if not tool_name or not python_code:
+            raise ValueError("candidate requires toolName and pythonCode")
+        permission_level = payload.get("permissionLevel") or payload.get("permission_level") or 1
+        return {
+            "toolName": str(tool_name),
+            "pythonCode": str(python_code),
+            "permissionLevel": int(permission_level),
+        }
+
+    @staticmethod
+    def _creator_candidate_contract() -> str:
+        return (
+            "Candidate object schema:\n"
+            "{\n"
+            '  "toolName": "snake_case logical tool name",\n'
+            '  "pythonCode": "complete Python source code for one Theseus BaseTool module",\n'
+            '  "permissionLevel": 1\n'
+            "}\n\n"
+            f"{COMMON_CUSTOM_TOOL_SECURITY_RULES}"
+        )
+
+    @staticmethod
+    def _failure_from_tool_result(result: ToolResult) -> ToolRepairFailure:
+        metadata = result.metadata or {}
+        stage = str(metadata.get("stage") or metadata.get("status") or "validation_failed")
+        errors = metadata.get("errors")
+        return ToolRepairFailure(
+            stage=stage,
+            code=stage.upper(),
+            message=str(result.output),
+            metadata={"errors": errors, **metadata},
+        )
+
+    async def _execute_once(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
         """서버 컨텍스트가 있으면 서버 파이프라인, 없으면 standalone 경로로 실행합니다."""
