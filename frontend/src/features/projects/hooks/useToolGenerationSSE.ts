@@ -105,6 +105,16 @@ export function useToolGenerationSSE() {
 
         try {
           const data: ToolGenerationSseEvent = JSON.parse(ev.data);
+
+          // Check if the event belongs to the current project and session
+          if (
+            (data.projectId !== undefined && String(data.projectId) !== String(projectId))
+            || (data.chatSessionId !== undefined && String(data.chatSessionId) !== String(sessionId))
+          ) {
+            console.log(`[SSE] Ignoring event for different session: proj=${data.projectId}, sess=${data.chatSessionId}`);
+            return;
+          }
+
           const eventType = normalizeEventType(ev.event, data.eventType);
           const store = useChatSessionStore.getState();
 
@@ -314,7 +324,7 @@ export function useToolGenerationSSE() {
     return () => {
       disconnectSSE();
     };
-  }, [disconnectSSE]);
+  }, [disconnectSSE, projectId, sessionId]);
 
   return { connectSSE, disconnectSSE };
 }

@@ -1,7 +1,7 @@
-"""Theseus RBAC — OpenHarness PermissionChecker/PermissionSettings 독립 구현.
+"""Theseus RBAC permission checker/settings.
 
 QueryEngine이 duck-typing으로 ``evaluate(tool_name, *, is_read_only, file_path, command)``
-인터페이스만 요구하므로 OpenHarness 상속 없이 동일한 프로토콜을 구현합니다.
+인터페이스만 요구하므로 동일한 프로토콜을 자체 구현합니다.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Dict
 
 
 class PermissionMode(str, Enum):
-    """Theseus permission modes (OpenHarness PermissionMode 독립)."""
+    """Theseus permission modes."""
     DEFAULT = "default"
     PLAN = "plan"
     FULL_AUTO = "full_auto"
@@ -27,16 +27,16 @@ class PermissionDecision:
     reason: str = ""
 
 
-# OpenHarness PermissionSettings 대체
+# Theseus permission settings
 class TheseusPermissionSettings:
-    """Theseus 자체 권한 설정 (OpenHarness PermissionSettings 독립)."""
+    """Theseus 자체 권한 설정."""
     def __init__(self) -> None:
         self.allowed_tools: list[str] = []
         self.denied_tools: list[str] = []
         self.denied_commands: list[str] = []
 
 
-# 민감한 자격증명 경로 패턴 (OpenHarness SENSITIVE_PATH_PATTERNS에서 이관)
+# 민감한 자격증명 경로 패턴
 SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
     "*/.ssh/*",
     "*/.aws/credentials",
@@ -50,7 +50,7 @@ SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
 
 
 class TheseusPermissionChecker:
-    """Theseus RBAC 권한 체커 (OpenHarness 상속 없음).
+    """Theseus RBAC 권한 체커.
 
     QueryEngine이 duck-typing으로 ``evaluate()``를 호출하므로
     동일한 메서드 시그니처를 유지합니다.

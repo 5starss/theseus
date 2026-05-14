@@ -15,8 +15,9 @@ services:
       CORE_KAFKA_CONSUMER_ENABLED: true
       SANDBOX_STARTUP_CHECK: false
       DOCKER_HOST: unix:///var/run/docker.sock
-      SANDBOX_HOST_TEMP_ROOT: /tmp/theseus-sandbox-shared
-      SANDBOX_CONTAINER_TEMP_ROOT: /tmp/theseus-sandbox-shared
+      THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
+      SANDBOX_HOST_TEMP_ROOT: ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
+      SANDBOX_CONTAINER_TEMP_ROOT: ${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       CORE_POSTGRES_HOST: theseus-local-postgres
       CORE_POSTGRES_PORT: 5432
       CORE_POSTGRES_DSN: postgresql://root:root@theseus-local-postgres:5432/theseus_core
@@ -26,12 +27,13 @@ services:
       SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
       SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
       SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
+      SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: http://theseus-api-server:8080/api/internal/remote-workspaces/connection-config
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-local-kafka:29092
     ports:
       - "8086:8086"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/theseus-sandbox-shared:/tmp/theseus-sandbox-shared
+      - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
     depends_on:
       theseus-local-postgres:
         condition: service_healthy

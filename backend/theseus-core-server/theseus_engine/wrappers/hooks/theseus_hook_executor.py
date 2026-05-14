@@ -1,11 +1,11 @@
-"""Theseus Hook Executor — OpenHarness 독립 구현.
+"""Theseus Hook Executor.
 
-OpenHarness HookExecutor를 상속하지 않고, 동일한 ``execute(event, payload)``
+외부 HookExecutor를 상속하지 않고, 동일한 ``execute(event, payload)``
 인터페이스를 독자적으로 구현합니다.  QueryEngine은 duck-typing으로 이
 인터페이스를 호출하므로 상속이 필요하지 않습니다.
 
 Theseus 검증기(Execution/Query), 감사 LLM, HITL, 동적 도구 검색을
-모두 자체적으로 관리하며, OpenHarness Hook 파이프라인이 선행하는
+모두 자체적으로 관리하며, 외부 hook 파이프라인이 선행하는
 문제를 원천 제거합니다.
 """
 
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Theseus-native hook types (OpenHarness 의존 제거)
+# Theseus-native hook types
 # ---------------------------------------------------------------------------
 # QueryEngine 호환을 위해 동일한 필드/프로퍼티 시그니처를 유지합니다.
 
@@ -85,7 +85,7 @@ class AggregatedHookResult:
 class TheseusHookExecutor:
     """Theseus 독립 Hook Executor.
 
-    OpenHarness HookExecutor를 상속하지 않으며, QueryEngine이
+    외부 HookExecutor를 상속하지 않으며, QueryEngine이
     duck-typing으로 호출하는 ``execute(event, payload)`` 인터페이스만
     구현합니다.  모든 검증(Execution/Query/Audit LLM/HITL)을
     Theseus가 직접 제어합니다.
@@ -135,7 +135,7 @@ class TheseusHookExecutor:
     ) -> AggregatedHookResult:
         """Theseus 독립 Hook 파이프라인을 실행합니다.
 
-        OpenHarness HookExecutor를 호출하지 않으며, Theseus 자체
+        외부 HookExecutor를 호출하지 않으며, Theseus 자체
         검증기(Execution/Query/Audit LLM/HITL)만 사용합니다.
 
         Args:
@@ -218,7 +218,7 @@ class TheseusHookExecutor:
                     )
                 )
 
-            # 자체 감사 LLM — OpenHarness AgentHook 없이 TheseusLLMClient로 직접 실행
+            # 자체 감사 LLM — TheseusLLMClient로 직접 실행
             if tool_name in self._audit_tools:
                 audit_result = await self._run_audit_llm(tool_name, tool_input)
                 if audit_result is not None:
@@ -288,7 +288,7 @@ class TheseusHookExecutor:
     ) -> HookResult | None:
         """TheseusLLMClient를 직접 호출하여 파일 수정 안전성을 감사합니다.
 
-        OpenHarness AgentHookDefinition 없이 독립적으로 동작합니다.
+        외부 hook 정의 없이 독립적으로 동작합니다.
         Returns:
             HookResult(blocked=True) if unsafe, None if safe or llm_client absent.
         """
@@ -535,7 +535,7 @@ class TheseusHookExecutor:
         )
 
         try:
-            # OpenHarness PermissionPrompt 규격에 맞춰 (tool_name, reason) 형식으로 호출
+            # permission prompt callback은 (tool_name, reason) 형식으로 호출
             # 'ask_permission'이 bool을 반환할 수도 있고, 'input'처럼 문자열을 반환할 수도 있음
             result = await permission_prompt(tool_name, prompt_msg)
             

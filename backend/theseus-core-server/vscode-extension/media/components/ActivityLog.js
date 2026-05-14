@@ -34,28 +34,58 @@ export function createActivityLogController({
   const runningTools = new Map();
   const runningToolEls = new Map();
   const noteEls = new Map();
+  const requests = new Set();
   let currentRequest = null;
   let requestSeq = 0;
 
   function startRequest(prompt, anchorEl) {
+    if (currentRequest?.collapseTimer) clearTimeout(currentRequest.collapseTimer);
     requestSeq += 1;
     currentRequest = {
       id: requestSeq,
       prompt: prompt || '',
       anchorEl,
+      turnEl: null,
       groupEl: null,
       listEl: null,
+      summaryEl: null,
       summaryTitleEl: null,
       summaryMetaEl: null,
+      collapseTimer: null,
     };
+    requests.add(currentRequest);
+    ensureTurnContainer(currentRequest);
   }
 
-  function appendAfterAnchor(el, anchorEl) {
-    if (anchorEl?.parentNode === messagesEl) {
-      messagesEl.insertBefore(el, anchorEl.nextSibling);
-    } else {
-      messagesEl.appendChild(el);
+  function ensureTurnContainer(request) {
+    if (!request?.anchorEl) return null;
+    if (request.turnEl?.parentNode) return request.turnEl;
+    let turnEl = request.anchorEl.closest?.('.turn');
+    if (!turnEl && request.anchorEl.parentNode === messagesEl) {
+      turnEl = document.createElement('section');
+      turnEl.className = 'turn';
+      messagesEl.insertBefore(turnEl, request.anchorEl);
+      turnEl.appendChild(request.anchorEl);
     }
+    request.turnEl = turnEl || null;
+    return request.turnEl;
+  }
+
+  function appendAfterAnchor(el, request) {
+    const turnEl = ensureTurnContainer(request);
+    if (turnEl) {
+      if (request.anchorEl?.parentNode === turnEl) {
+        request.anchorEl.insertAdjacentElement('afterend', el);
+      } else {
+        turnEl.appendChild(el);
+      }
+      return;
+    }
+    if (request.anchorEl?.parentNode === messagesEl) {
+      messagesEl.insertBefore(el, request.anchorEl.nextSibling);
+      return;
+    }
+    messagesEl.appendChild(el);
   }
 
   function ensureRequest() {
@@ -66,20 +96,30 @@ export function createActivityLogController({
         id: requestSeq,
         prompt: fallbackAnchor?.querySelector?.('.body')?.textContent || '',
         anchorEl: fallbackAnchor,
+        turnEl: null,
         groupEl: null,
         listEl: null,
+        summaryEl: null,
         summaryTitleEl: null,
         summaryMetaEl: null,
+        collapseTimer: null,
       };
+      requests.add(currentRequest);
+      ensureTurnContainer(currentRequest);
     }
     if (currentRequest.groupEl) return currentRequest;
 
-    const groupEl = document.createElement('details');
-    groupEl.className = 'activity-group';
-    groupEl.open = true;
+    const groupEl = document.createElement('div');
+    groupEl.className = 'activity-group open';
 
-    const summary = document.createElement('summary');
+    const summary = document.createElement('button');
+    summary.type = 'button';
     summary.className = 'activity-summary';
+    summary.setAttribute('aria-expanded', 'true');
+
+    const caret = document.createElement('span');
+    caret.className = 'activity-caret';
+    caret.textContent = '›';
 
     const title = document.createElement('span');
     title.className = 'activity-title';
@@ -87,20 +127,76 @@ export function createActivityLogController({
     const meta = document.createElement('span');
     meta.className = 'activity-meta';
 
-    summary.append(title, meta);
-
     const list = document.createElement('div');
     list.className = 'activity-list';
 
+    summary.addEventListener('click', () => {
+      const nextOpen = !groupEl.classList.contains('open');
+      groupEl.classList.toggle('open', nextOpen);
+      summary.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+      list.hidden = !nextOpen;
+    });
+
+    summary.append(caret, title, meta);
     groupEl.append(summary, list);
-    appendAfterAnchor(groupEl, currentRequest.anchorEl);
+    appendAfterAnchor(groupEl, currentRequest);
 
     currentRequest.groupEl = groupEl;
     currentRequest.listEl = list;
+    currentRequest.summaryEl = summary;
     currentRequest.summaryTitleEl = title;
     currentRequest.summaryMetaEl = meta;
     updateGroupSummary(currentRequest);
     return currentRequest;
+  }
+
+  function setRequestOpen(request, open) {
+    if (!request?.groupEl || !request.listEl) return;
+    request.groupEl.classList.toggle('open', !!open);
+    request.listEl.hidden = !open;
+    request.summaryEl?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function setRequestActive(request, active) {
+    if (!request?.groupEl) return;
+    request.groupEl.toggleAttribute('data-active', !!active);
+    if (active) {
+      if (request.collapseTimer) clearTimeout(request.collapseTimer);
+      request.collapseTimer = null;
+      setRequestOpen(request, true);
+    }
+  }
+
+  function attachAssistant(article) {
+    if (!currentRequest || !article) return false;
+    const turnEl = ensureTurnContainer(currentRequest);
+    if (!turnEl) return false;
+    if (article.parentNode !== turnEl) {
+      turnEl.appendChild(article);
+    }
+    return true;
+  }
+
+  function requestRunningToolCount(request) {
+    if (!request?.groupEl) return 0;
+    return request.groupEl.querySelectorAll('details.tool[data-status="running"]').length;
+  }
+
+  function scheduleCollapse(request, delay = 1200) {
+    if (!request?.groupEl || requestRunningToolCount(request) > 0) return;
+    if (request.collapseTimer) clearTimeout(request.collapseTimer);
+    request.collapseTimer = setTimeout(() => {
+      if (requestRunningToolCount(request) === 0) {
+        setRequestActive(request, false);
+        setRequestOpen(request, false);
+      }
+      request.collapseTimer = null;
+    }, delay);
+  }
+
+  function finishRequest() {
+    if (!currentRequest) return;
+    scheduleCollapse(currentRequest, 700);
   }
 
   function updateGroupSummary(request) {
@@ -158,6 +254,11 @@ export function createActivityLogController({
       const detailText = String(detail || '').trim();
       detailEl.textContent = detailText ? ` ${detailText}` : '';
     }
+    if (state === 'running' || state === 'tool') {
+      setRequestActive(request, true);
+    } else if (state === 'info' && requestRunningToolCount(request) === 0) {
+      scheduleCollapse(request);
+    }
     updateGroupSummary(request);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return item;
@@ -207,9 +308,10 @@ export function createActivityLogController({
     const isRunning = eventData?.status === 'running'
       || eventData?.type === 'ToolExecutionStarted'
       || (!eventData && output === undefined && !isError);
+    if (isRunning) setRequestActive(request, true);
     const item = document.createElement('details');
     item.className = isError ? 'tool error' : 'tool';
-    item.open = true;
+    item.open = isRunning || save;
     item.dataset.status = isRunning ? 'running' : isError ? 'failed' : 'done';
     if (eventData?.tool_use_id) item.dataset.toolId = eventData.tool_use_id;
     if (toolName) item.dataset.tool = toolName;
@@ -227,6 +329,9 @@ export function createActivityLogController({
     request.listEl.appendChild(item);
     updateGroupSummary(request);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (!isRunning && !save) {
+      setRequestOpen(request, false);
+    }
 
     if (save) {
       onPersistTool(buildToolEntry(toolName, toolInput, output, isError, item.dataset.status, eventData));
@@ -276,8 +381,10 @@ export function createActivityLogController({
       runningToolEls.delete(key);
       updateGroupSummary(running.request || currentRequest);
       onPersistTool(buildToolEntry(event.tool_name, event.tool_input, event.output, event.is_error, existing.dataset.status, event));
+      scheduleCollapse(running.request || currentRequest);
     } else {
-      appendTool(event.tool_name, event.tool_input, event.output, event.is_error, true, event);
+      const toolEl = appendTool(event.tool_name, event.tool_input, event.output, event.is_error, true, event);
+      scheduleCollapse(currentRequest);
     }
     onStatsUpdate(event.tool_name, !event.is_error);
     if (event.tool_name === 'create_tool' && !event.is_error) {
@@ -291,6 +398,10 @@ export function createActivityLogController({
     runningTools.clear();
     runningToolEls.clear();
     noteEls.clear();
+    for (const request of requests) {
+      if (request?.collapseTimer) clearTimeout(request.collapseTimer);
+    }
+    requests.clear();
     currentRequest = null;
     messagesEl.querySelectorAll('.activity-group').forEach(el => el.remove());
   }
@@ -302,5 +413,7 @@ export function createActivityLogController({
     complete,
     clear,
     startRequest,
+    attachAssistant,
+    finishRequest,
   };
 }

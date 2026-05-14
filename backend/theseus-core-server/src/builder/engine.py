@@ -29,6 +29,7 @@ from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissi
 from theseus_engine.models.state import AgentMode, PlanPhase
 from theseus_engine.tools.core import ALL_CORE_TOOLS, build_filtered_registry, load_custom_tools
 from theseus_engine.tools.core.base_tools import ToolRegistry
+from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
     AggregatedHookResult,
     HookEvent,
@@ -362,6 +363,9 @@ def get_query_engine(
         tool_metadata={
             "tool_registry": full_registry,
             "tool_permissions": tool_permissions,
+            "llm_client": api_client,
+            "model_name": model_name,
+            "tool_repair_policy": ToolRepairPolicy.from_env(),
             "permission_prompt": _deny_permission_prompt,
             "session_id": build_context.session_id,
             "project_id": build_context.project_id,

@@ -6,8 +6,7 @@
 기본 모드: Regex (패턴 매칭, 비용 0)
 고급 모드: LLM (에이전트 판단, THESEUS_USE_LLM_VALIDATOR=true)
 
-OpenHarness의 CommandHookDefinition / AgentHookDefinition을
-래핑하여 PRE_TOOL_USE Hook 파이프라인에 연결할 수 있습니다.
+Theseus hook executor가 PRE_TOOL_USE 단계에서 호출할 수 있습니다.
 """
 
 from __future__ import annotations

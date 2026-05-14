@@ -11,8 +11,10 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceConnectionConfigRequest;
 import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceCreateRequest;
 import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceUpdateRequest;
+import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceConnectionConfigResponse;
 import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceConnectionTestResponse;
 import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceResponse;
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
@@ -164,7 +166,7 @@ class RemoteWorkspaceServiceTest {
 	}
 
 	@Test
-	@DisplayName("연결 테스트 API는 Core SSH Connector 연동 전까지 대기 응답을 반환한다")
+	@DisplayName("Core 연결 테스트 요청이 실패하면 RemoteWorkspace 기준 실패 응답을 반환한다.")
 	void testConnectionReturnsUnavailableResponse() {
 		// Given
 		ProjectFixture fixture = createProjectFixture("RW302051");
@@ -180,9 +182,29 @@ class RemoteWorkspaceServiceTest {
 		// Then
 		assertThat(response.getRemoteWorkspaceId()).isEqualTo(remoteWorkspace.getId());
 		assertThat(response.getAvailable()).isFalse();
-		assertThat(response.getMessage()).isEqualTo(
-			"Remote Workspace connection test is not enabled until secure secret resolution is ready."
-		);
+		assertThat(response.getMessage()).isEqualTo("Remote Workspace connection test failed.");
+	}
+
+	@Test
+	@DisplayName("내부 API는 RemoteWorkspace SSH 연결 설정을 조회할 수 있다.")
+	void getConnectionConfig() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("RW302061");
+		RemoteWorkspace remoteWorkspace = createRemoteWorkspace(fixture, "config-server");
+		RemoteWorkspaceConnectionConfigRequest request = new RemoteWorkspaceConnectionConfigRequest();
+		ReflectionTestUtils.setField(request, "projectId", fixture.project().getId());
+		ReflectionTestUtils.setField(request, "remoteWorkspaceId", remoteWorkspace.getId());
+
+		// When
+		RemoteWorkspaceConnectionConfigResponse response = remoteWorkspaceService.getConnectionConfig(request);
+
+		// Then
+		assertThat(response.getRemoteWorkspaceId()).isEqualTo(remoteWorkspace.getId());
+		assertThat(response.getProjectId()).isEqualTo(fixture.project().getId());
+		assertThat(response.getHost()).isEqualTo("127.0.0.1");
+		assertThat(response.getUsername()).isEqualTo("deploy");
+		assertThat(response.getPassword()).isEqualTo("password");
+		assertThat(response.getBasePath()).isEqualTo("/srv/app");
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber) {

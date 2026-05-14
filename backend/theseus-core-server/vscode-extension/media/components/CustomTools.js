@@ -135,7 +135,9 @@ export function renderCustomTools(tools, {
     permInput.max = '5';
     permInput.value = permission === '?' ? '' : permission;
     permInput.title = 'permissionLevel';
+    permInput.disabled = !tool.metadataPath;
     permInput.addEventListener('change', () => {
+      if (!tool.metadataPath) return;
       onPermissionChange(tool.metadataPath, Number(permInput.value));
     });
 

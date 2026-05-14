@@ -4,13 +4,13 @@ Selects the correct Theseus-native API client based on the model name
 and delegates streaming to it.  Gemini-specific quirks (thought_signature
 preservation) are handled by ``gemini_compat``.
 
-OpenHarness 의존 없음 — 모든 타입을 Theseus-native 모듈에서 import합니다.
+모든 타입을 Theseus-native 모듈에서 import합니다.
 """
 
 import os
 import sys
 import json
-import datetime
+import re
 from pathlib import Path
 from typing import AsyncIterator, Any
 
@@ -52,26 +52,68 @@ DEBUG_DUMP_DIR = Path(
 )
 
 
-def _dump_debug_payload(name: str, data: Any) -> None:
+def _sanitize_debug_path_part(value: Any, *, default: str) -> str:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        text = default
+    text = re.sub(r"[^A-Za-z0-9._=-]+", "_", text).strip("._")
+    return (text or default)[:120]
+
+
+def _debug_scope_name(debug_context: dict[str, Any] | None) -> str:
+    context = debug_context if isinstance(debug_context, dict) else {}
+    explicit = context.get("debug_dump_scope")
+    if explicit:
+        return _sanitize_debug_path_part(explicit, default="session_unscoped")
+
+    project_id = context.get("project_id")
+    chat_session_id = context.get("chat_session_id")
+    session_id = context.get("session_id")
+    run_id = context.get("run_id")
+
+    if project_id is not None and chat_session_id is not None:
+        return _sanitize_debug_path_part(
+            f"project_{project_id}_chat_{chat_session_id}",
+            default="session_unscoped",
+        )
+    if session_id is not None:
+        return _sanitize_debug_path_part(f"session_{session_id}", default="session_unscoped")
+    if run_id is not None:
+        return _sanitize_debug_path_part(f"run_{run_id}", default="session_unscoped")
+    return "session_unscoped"
+
+
+def _dump_debug_payload(
+    name: str,
+    data: Any,
+    *,
+    debug_context: dict[str, Any] | None = None,
+) -> None:
     """페이로드를 JSON 파일로 덤프합니다.
 
     THESEUS_DEBUG_DUMP=true 일 때만 실행됩니다.
-    저장 경로: THESEUS_DEBUG_DUMP_DIR (기본 ~/.theseus/debug_dumps)
+    저장 경로: THESEUS_DEBUG_DUMP_DIR/<session-scope>/<payload-name>.json
     """
     if not _DEBUG_DUMP_ENABLED:
         return
     try:
-        DEBUG_DUMP_DIR.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        dump_path = DEBUG_DUMP_DIR / f"{name}_{timestamp}.json"
+        scope_name = _debug_scope_name(debug_context)
+        dump_dir = DEBUG_DUMP_DIR / scope_name
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        file_name = f"{_sanitize_debug_path_part(name, default='payload')}.json"
+        dump_path = dump_dir / file_name
+        tmp_path = dump_path.with_name(f".{dump_path.stem}.{os.getpid()}.{id(data)}.tmp")
 
         def _serializer(obj):
-            if hasattr(obj, "model_dump"): return obj.model_dump()
-            if hasattr(obj, "__dict__"): return obj.__dict__
+            if hasattr(obj, "model_dump"):
+                return obj.model_dump()
+            if hasattr(obj, "__dict__"):
+                return obj.__dict__
             return str(obj)
 
-        with open(dump_path, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=_serializer)
+        tmp_path.replace(dump_path)
         print(f"\n[DEBUG] Dumped {name} to {dump_path}\n", file=sys.stderr)
     except Exception as e:
         print(f"\n[DEBUG] Failed to dump {name}: {e}\n", file=sys.stderr)
@@ -151,7 +193,11 @@ class TheseusGeminiClient(TheseusOpenAICompatClient):
             params.pop("stream_options", None)
 
         # --- DEBUG: Dump final params sent to Gemini ---
-        _dump_debug_payload("gemini_final_params", params)
+        _dump_debug_payload(
+            "gemini_final_params",
+            params,
+            debug_context=request.debug_context,
+        )
         # -----------------------------------------------
 
         # 2. Stream and collect response
@@ -334,7 +380,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
         _dump_debug_payload("router_incoming_request", {
             "target_model": self.model_name,
             "request": request,
-        })
+        }, debug_context=request.debug_context)
         # ----------------------------------------------
 
         # Patch messages to make tool errors extremely explicit for open-source models
@@ -381,6 +427,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
             system_prompt=request.system_prompt,
             max_tokens=request.max_tokens,
             tools=request.tools,
+            debug_context=request.debug_context,
         )
 
         # 도구 호출 추적 초기화 (이번 턴)

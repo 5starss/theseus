@@ -568,7 +568,25 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'deleteSession':
           if (typeof msg.name === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
+            const target = msg.name.trim();
+            const current = this.currentSessionName();
+            if (target && target !== current) {
+              try {
+                const snapshot = deleteLocalSession(this.localSessionWorkspace(), target, current);
+                this.postRunnerEvent({
+                  type: 'SessionListEvent',
+                  source: 'local',
+                  current,
+                  sessions: snapshot.sessions,
+                });
+              } catch (err) {
+                if (this.canRouteSessionCommandToRunner()) {
+                  this.sessionManager.send(`/session delete ${JSON.stringify(target)}`);
+                } else {
+                  this.postLocalSessionError(err);
+                }
+              }
+            } else if (this.canRouteSessionCommandToRunner()) {
               this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
             } else if (this.canHandleSessionLocally()) {
               try {

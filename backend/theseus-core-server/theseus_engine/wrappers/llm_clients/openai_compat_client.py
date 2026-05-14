@@ -1,6 +1,6 @@
-"""Theseus OpenAI-compatible 클라이언트 — OpenHarness 완전 독립.
+"""Theseus OpenAI-compatible 클라이언트.
 
-OH OpenAICompatibleClient + 변환 함수 4개를 Theseus-native로 재구현합니다.
+OpenAI-compatible streaming/client 변환을 Theseus-native로 구현합니다.
 DashScope, Gemini(OpenAI 호환), DeepSeek, Ollama, vLLM, OpenAI 등
 OpenAI Chat Completions 포맷을 지원하는 모든 제공자에 사용합니다.
 """

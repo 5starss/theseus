@@ -1,7 +1,6 @@
-"""Theseus-native LLM API 타입 — OpenHarness 완전 독립.
+"""Theseus-native LLM API 타입.
 
-OH openharness.api.client / openharness.api.usage 의존을 제거하고
-동일한 인터페이스를 Theseus 자체 정의로 제공합니다.
+LLM wrapper clients가 사용하는 공통 타입을 Theseus 자체 정의로 제공합니다.
 """
 
 from __future__ import annotations
@@ -48,6 +47,7 @@ class ApiMessageRequest:
     system_prompt: str | None = None
     max_tokens: int = 4096
     tools: list[dict[str, Any]] = field(default_factory=list)
+    debug_context: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Stream Events ─────────────────────────────────────────────

@@ -19,4 +19,9 @@ public record CoreStreamProperties(String baseUrl) {
 		String query = "chat_session_id=%d&project_id=%d".formatted(sessionId, projectId);
 		return URI.create(normalizedBaseUrl + "/api/v1/stream?" + query);
 	}
+
+	public URI remoteWorkspaceConnectionTestUri() {
+		String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+		return URI.create(normalizedBaseUrl + "/api/v1/remote-workspaces/test-connection");
+	}
 }

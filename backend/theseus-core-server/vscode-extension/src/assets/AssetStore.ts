@@ -25,7 +25,8 @@ export async function saveAssetToWorkspace(name: string, data: unknown): Promise
 export async function resolveReadableUri(candidate: unknown): Promise<vscode.Uri | undefined> {
   if (typeof candidate !== 'string' || !candidate.trim()) return undefined;
   const raw = candidate.trim();
-  const roots = [getWorkspaceCwd(), getCoreRootPathFallback()].filter((v): v is string => !!v);
+  const configuredCore = vscode.workspace.getConfiguration('theseus').get<string>('corePath')?.trim();
+  const roots = [getWorkspaceCwd(), configuredCore, getCoreRootPathFallback()].filter((v): v is string => !!v);
   const paths = path.isAbsolute(raw)
     ? [raw]
     : roots.map(root => path.resolve(root, raw));

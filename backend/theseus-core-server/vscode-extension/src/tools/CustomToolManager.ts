@@ -41,16 +41,28 @@ function readJsonObject(filePath: string): Record<string, unknown> | undefined {
 export function validateCustomToolPair(metadataPath: string): ToolValidationResult {
   const meta = readJsonObject(metadataPath);
   if (!meta) return { success: false, message: 'Invalid meta.json' };
+  const configuredModulePath = typeof meta.modulePath === 'string'
+    ? meta.modulePath
+    : typeof meta.module_path === 'string'
+      ? meta.module_path
+      : '';
+  const modulePathLooksLikeFile = /[\\/]/.test(configuredModulePath) || configuredModulePath.endsWith('.py');
   const fileName = typeof meta.fileName === 'string'
     ? meta.fileName
+    : modulePathLooksLikeFile
+      ? path.basename(configuredModulePath)
     : `${path.basename(metadataPath).replace(/\.meta\.json$/i, '')}.py`;
-  const modulePath = path.join(path.dirname(metadataPath), fileName);
+  const modulePath = modulePathLooksLikeFile && path.isAbsolute(configuredModulePath)
+    ? configuredModulePath
+    : path.join(path.dirname(metadataPath), modulePathLooksLikeFile ? configuredModulePath : fileName);
   if (!fs.existsSync(modulePath)) {
     return { success: false, message: `Missing module file: ${fileName}` };
   }
   try {
     const code = fs.readFileSync(modulePath, 'utf8');
-    if (!/\bBaseTool\b/.test(code) || !/\bexecute\s*\(/.test(code)) {
+    const hasBaseTool = /\bBaseTool\b/.test(code) || /\bclass\s+\w+\s*\([^)]*Tool[^)]*\)/.test(code);
+    const hasExecute = /\b(?:async\s+def|def)\s+execute\s*\(/.test(code);
+    if (!hasBaseTool || !hasExecute) {
       return { success: false, message: `${fileName} does not look like a BaseTool module` };
     }
   } catch (err) {

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -22,6 +21,13 @@ from src.tooling.service import (
 )
 from theseus_engine.models.messages import ConversationMessage
 from theseus_engine.models.state import AgentMode, PlanPhase
+from theseus_engine.tools.tool_repair import (
+    COMMON_CUSTOM_TOOL_SECURITY_RULES,
+    ToolRepairFailure,
+    ToolRepairLoop,
+    ToolRepairPolicy,
+    extract_json_object,
+)
 from theseus_engine.wrappers.llm_clients.api_types import (
     ApiMessageCompleteEvent,
     ApiMessageRequest,
@@ -54,7 +60,9 @@ class ToolBuilder:
         self.model_name = resolve_model_name(model_name)
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
         self.storage_root = storage_root
-        self.max_repair_attempts = max(settings.CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS, 0)
+        self.repair_policy = ToolRepairPolicy.from_env(
+            default_attempts=settings.CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS,
+        )
 
     async def build(
         self,
@@ -63,7 +71,6 @@ class ToolBuilder:
         progress_callback: ProgressCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
     ) -> ToolArtifactPayload:
-        await self._emit_progress(progress_callback, "TOOL_BUILD_LLM_DRAFTING", 20)
         approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
         system_prompt = build_theseus_system_prompt(
             mode=AgentMode.PLAN,
@@ -71,40 +78,60 @@ class ToolBuilder:
             plan_content=approved_plan,
             available_tools=[],
         )
-        spec = await self._generate_tool_spec(
-            self._build_tool_message(
-                approved_plan=approved_plan,
-                project_id=event.project_id,
-                chat_session_id=event.chat_session_id,
-                tool_plan_id=event.tool_plan_id,
-            ),
-            system_prompt=system_prompt,
-            chunk_callback=chunk_callback,
+        debug_context = self._debug_context_for_event(event)
+        prompt = self._build_tool_message(
+            approved_plan=approved_plan,
+            project_id=event.project_id,
+            chat_session_id=event.chat_session_id,
+            tool_plan_id=event.tool_plan_id,
         )
 
-        last_error: ToolBuildError | None = None
-        for attempt in range(0, self.max_repair_attempts + 1):
-            try:
-                return await self._validate_and_package_spec(event, spec, progress_callback=progress_callback)
-            except ToolBuildError as exc:
-                last_error = exc
-                if attempt >= self.max_repair_attempts:
-                    break
-                await self._emit_progress(progress_callback, "TOOL_BUILD_REPAIRING", 60 + min(attempt * 5, 10))
-                spec = await self._generate_tool_spec(
-                    self._build_tool_repair_message(
-                        approved_plan=approved_plan,
-                        previous_spec=spec.model_dump(mode="json", by_alias=True),
-                        error_code=exc.code,
-                        error_message=exc.message,
-                        attempt=attempt + 1,
-                    ),
-                    system_prompt=system_prompt,
-                    chunk_callback=chunk_callback,
-                )
+        repair_loop: ToolRepairLoop[GeneratedToolSpec, ToolArtifactPayload] = ToolRepairLoop(
+            llm_client=self.llm_client,
+            model_name=self.model_name,
+            policy=self.repair_policy,
+            debug_context=debug_context,
+        )
+        result = await repair_loop.run(
+            initial_prompt=prompt,
+            task_context=(
+                "Build an executable Theseus custom tool artifact from this approved plan.\n"
+                f"projectId={event.project_id}\n"
+                f"chatSessionId={event.chat_session_id}\n"
+                f"toolPlanId={event.tool_plan_id}\n\n"
+                "Approved plan payload:\n"
+                f"{json.dumps(approved_plan, ensure_ascii=False, indent=2)}"
+            ),
+            candidate_contract=self._tool_spec_contract(),
+            generate_candidate=lambda candidate_prompt: self._generate_tool_spec(
+                candidate_prompt,
+                system_prompt=system_prompt,
+                debug_context=debug_context,
+                chunk_callback=chunk_callback,
+            ),
+            validate_candidate=lambda spec: self._validate_and_package_spec(
+                event,
+                spec,
+                progress_callback=progress_callback,
+            ),
+            parse_candidate_payload=self._parse_tool_spec_payload,
+            render_candidate=lambda spec: (
+                spec.model_dump(mode="json", by_alias=True) if spec is not None else None
+            ),
+            on_attempt=lambda attempt, is_repair: self._emit_repair_progress(
+                progress_callback,
+                attempt,
+                is_repair,
+            ),
+        )
 
-        if last_error is not None:
-            raise last_error
+        if result.success and result.value is not None:
+            return result.value
+        if result.last_failure is not None:
+            raise ToolBuildError(
+                result.last_failure.code,
+                result.final_message(self.repair_policy),
+            )
         raise ToolBuildError("TOOL_BUILD_FAILED", "Tool build failed without a captured error.")
 
     async def _validate_and_package_spec(
@@ -146,7 +173,12 @@ class ToolBuilder:
             )
             metadata = read_tool_metadata(paths)
         except ToolCreationError as exc:
-            raise ToolBuildError(exc.stage.upper(), exc.message) from exc
+            raise ToolRepairFailure(
+                stage=exc.stage,
+                code=exc.stage.upper(),
+                message=exc.message,
+                metadata={"errors": exc.errors},
+            ) from exc
 
         merged_metadata = dict(metadata)
         merged_metadata["generatedSpec"] = {
@@ -171,6 +203,7 @@ class ToolBuilder:
         prompt: str,
         *,
         system_prompt: str,
+        debug_context: dict[str, object] | None = None,
         chunk_callback: ChunkCallback | None = None,
     ) -> GeneratedToolSpec:
         request = ApiMessageRequest(
@@ -179,6 +212,7 @@ class ToolBuilder:
             system_prompt=system_prompt,
             max_tokens=8192,
             tools=[],
+            debug_context=debug_context or {},
         )
 
         final_text = ""
@@ -196,7 +230,18 @@ class ToolBuilder:
             payload = json.loads(self._extract_json_object(final_text))
             return GeneratedToolSpec.model_validate(payload)
         except Exception as exc:
-            raise ToolBuildError("LLM_OUTPUT_INVALID", f"Invalid tool build LLM output: {exc}") from exc
+            preview = final_text.strip()
+            if len(preview) > 2000:
+                preview = preview[:2000] + "..."
+            raise ToolRepairFailure(
+                stage="llm_output",
+                code="LLM_OUTPUT_INVALID",
+                message=(
+                    f"Invalid tool build LLM output: {exc}\n"
+                    f"Raw output preview:\n{preview}"
+                ),
+                metadata={"rawResponse": preview},
+            ) from exc
 
     @staticmethod
     def _build_tool_message(*, approved_plan: dict, project_id: int, chat_session_id: int, tool_plan_id: int) -> str:
@@ -207,13 +252,14 @@ class ToolBuilder:
             "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n\n"
             "The JSON object must have:\n"
             "- toolName: snake_case, lowercase, 3-64 chars\n"
-            '- fileName: "<toolName>.py"\n'
-            "- moduleName: toolName\n"
+            '- fileName: "<moduleName>.py"\n'
+            "- moduleName: canonical module stem. Use '<toolName>_tool' unless toolName already ends with '_tool'.\n"
             "- displayName: short human-readable name\n"
             "- displayDescription: one sentence\n"
             "- permissionLevel: integer from 1 to 5\n"
             "- pythonCode: complete Python source code\n"
             "- metadataJson: object with inputs, outputs, constraints, and implementationNotes\n\n"
+            f"{COMMON_CUSTOM_TOOL_SECURITY_RULES}\n"
             "Python code requirements:\n"
             "- Import BaseModel from pydantic.\n"
             "- Import BaseTool, ToolExecutionContext, and ToolResult from theseus_engine.tools.core.base_tools.\n"
@@ -222,11 +268,12 @@ class ToolBuilder:
             "- Implement async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult.\n"
             "- Return ToolResult(output=<string or JSON-serializable value>) on success.\n"
             "- Return ToolResult(output=<clear error>, is_error=True) on handled failures.\n"
+            "- Avoid embedding executable Python source inside another Python source string. "
+            "Prefer helper functions, constants, and JSON payloads.\n"
             "- If embedding Python code inside a Python string, use triple single quotes for the outer "
             "string when the inner code contains triple double quote docstrings.\n"
             "- Do not nest unescaped triple double quotes inside another triple double quoted string.\n"
-            "- Prefer separate helper functions, constants, or JSON data over generating nested Python "
-            "source strings when possible.\n"
+            "- If nested code is unavoidable, do not use docstrings inside the embedded code; use comments instead.\n"
             "- Do not perform network calls unless the approved plan explicitly requires them.\n"
             "- Do not read or write arbitrary local files.\n"
             "- Keep the tool deterministic and safe by default.\n\n"
@@ -240,32 +287,24 @@ class ToolBuilder:
         )
 
     @staticmethod
-    def _build_tool_repair_message(
-        *,
-        approved_plan: dict,
-        previous_spec: dict,
-        error_code: str,
-        error_message: str,
-        attempt: int,
-    ) -> str:
+    def _tool_spec_contract() -> str:
         return (
-            "Task-specific output contract for this custom tool artifact repair request.\n"
-            "Follow the approved Theseus plan from the system prompt. Return the same complete JSON schema "
-            "used for custom tool artifact generation.\n\n"
-            "The previous generated tool failed Core validation or sandbox execution.\n"
-            f"Repair attempt: {attempt}\n"
-            f"Error code: {error_code}\n"
-            f"Error message: {error_message}\n\n"
-            "Approved plan payload:\n"
-            f"{approved_plan}\n\n"
-            "Previous generated JSON spec:\n"
-            f"{previous_spec}\n\n"
-            "Return a corrected complete JSON object using the same schema. "
-            "If the failure was a SyntaxError from nested triple-quoted strings, switch the outer "
-            "embedded Python string to triple single quotes or remove the nested code string. "
-            "Preserve the approved plan intent. Prefer keeping the same toolName unless "
-            "the name itself caused the failure. Return only JSON."
+            "Candidate object schema:\n"
+            "{\n"
+            '  "toolName": "snake_case logical tool name",\n'
+            '  "fileName": "<moduleName>.py",\n'
+            '  "moduleName": "canonical module stem, usually <toolName>_tool",\n'
+            '  "displayName": "short human-readable name",\n'
+            '  "displayDescription": "one sentence",\n'
+            '  "permissionLevel": 1,\n'
+            '  "pythonCode": "complete Python source code",\n'
+            '  "metadataJson": {"inputs": {}, "outputs": {}, "constraints": [], "implementationNotes": "..."}\n'
+            "}"
         )
+
+    @staticmethod
+    def _parse_tool_spec_payload(payload: dict) -> GeneratedToolSpec:
+        return GeneratedToolSpec.model_validate(payload)
 
     def _artifact_path(self, module_path: Path) -> str:
         try:
@@ -274,18 +313,34 @@ class ToolBuilder:
             return str(module_path)
 
     @staticmethod
+    def _debug_context_for_event(event: ToolBuildRequestedEvent) -> dict[str, object]:
+        return {
+            "run_id": event.run_id,
+            "project_id": event.project_id,
+            "chat_session_id": event.chat_session_id,
+            "user_id": event.approved_by_project_member_id,
+            "plan_id": event.tool_plan_id,
+            "agent_mode": "TOOL_BUILD",
+        }
+
+    @staticmethod
     def _extract_json_object(text: str) -> str:
-        stripped = text.strip()
-        fence_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", stripped, re.DOTALL)
-        if fence_match:
-            stripped = fence_match.group(1).strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
-            return stripped
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start >= 0 and end > start:
-            return stripped[start:end + 1]
-        raise ValueError("No JSON object found")
+        return extract_json_object(text)
+
+    async def _emit_repair_progress(
+        self,
+        callback: ProgressCallback | None,
+        attempt: int,
+        is_repair: bool,
+    ) -> None:
+        if is_repair:
+            await self._emit_progress(
+                callback,
+                "TOOL_BUILD_REPAIRING",
+                60 + min((attempt - 1) * 5, 10),
+            )
+        else:
+            await self._emit_progress(callback, "TOOL_BUILD_LLM_DRAFTING", 20)
 
     async def _emit_progress(
         self,

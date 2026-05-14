@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SPRING_BOOT_BILLING_USAGE_URL: str = "http://localhost:8080/api/internal/billing/usage"
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: str = "http://localhost:8080/api/internal/history/messages"
+    SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: str = (
+        "http://localhost:8080/api/internal/remote-workspaces/connection-config"
+    )
     SPRING_BOOT_INTERNAL_API_KEY: str = "theseus-local-internal-api-key"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
@@ -57,6 +60,7 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
+    THESEUS_TOOL_REPAIR_MAX_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS: int = 2
     CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS: int = 180
     CORE_RUN_LEASE_TTL_SECONDS: int = 60
@@ -101,7 +105,6 @@ class Settings(BaseSettings):
     
     # AI / Tools Settings (Optional for now)
     THESEUS_MODEL: Optional[str] = None
-    OPENHARNESS_MODEL: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     LANGSMITH_API_KEY: Optional[str] = None
     LANGSMITH_TRACING: bool = False
@@ -169,6 +172,7 @@ class Settings(BaseSettings):
             "SPRING_BOOT_BILLING_USAGE_URL": self.SPRING_BOOT_BILLING_USAGE_URL,
             "SPRING_BOOT_TOOL_PLAN_URL": self.SPRING_BOOT_TOOL_PLAN_URL,
             "SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL": self.SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL,
+            "SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL": self.SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL,
         }
         for name, value in required_urls.items():
             if not value.strip():
@@ -203,4 +207,4 @@ settings = get_settings()
 def resolve_model_name(explicit_model: str | None = None) -> str:
     if explicit_model:
         return explicit_model
-    return settings.THESEUS_MODEL or settings.OPENHARNESS_MODEL or "gpt-4o"
+    return settings.THESEUS_MODEL or "gpt-4o"

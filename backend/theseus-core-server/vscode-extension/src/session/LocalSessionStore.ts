@@ -186,17 +186,22 @@ function historyForUi(envelope: Record<string, unknown>): Array<Record<string, u
       ? envelope.history
       : [];
   const history: Array<Record<string, unknown>> = [];
+  const pendingTools = new Map<string, Record<string, unknown>>();
   for (const item of rawHistory) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const message = item as Record<string, unknown>;
     const role = typeof message.role === 'string' ? message.role : 'message';
-    const text = messageText(message);
+    const text = messageText(message, pendingTools, history);
     if (text) history.push({ type: 'message', role, text });
   }
   return history;
 }
 
-function messageText(message: Record<string, unknown>): string {
+function messageText(
+  message: Record<string, unknown>,
+  pendingTools: Map<string, Record<string, unknown>>,
+  history: Array<Record<string, unknown>>,
+): string {
   if (typeof message.text === 'string') return message.text;
   const content = message.content;
   if (typeof content === 'string') return content;
@@ -209,8 +214,29 @@ function messageText(message: Record<string, unknown>): string {
       const record = block as Record<string, unknown>;
       if (typeof record.text === 'string') {
         chunks.push(record.text);
-      } else if (record.type === 'tool_result' && typeof record.content === 'string') {
-        chunks.push(record.content);
+      } else if (record.type === 'tool_use') {
+        const toolUseId = typeof record.id === 'string' ? record.id : '';
+        if (toolUseId) {
+          pendingTools.set(toolUseId, {
+            tool_use_id: toolUseId,
+            tool_name: typeof record.name === 'string' ? record.name : 'tool',
+            tool_input: record.input && typeof record.input === 'object' ? record.input : {},
+          });
+        }
+      } else if (record.type === 'tool_result') {
+        const toolUseId = typeof record.tool_use_id === 'string' ? record.tool_use_id : '';
+        const tool = toolUseId ? pendingTools.get(toolUseId) : undefined;
+        if (toolUseId) pendingTools.delete(toolUseId);
+        const isError = record.is_error === true;
+        history.push({
+          type: 'tool',
+          tool_use_id: toolUseId,
+          tool_name: typeof tool?.tool_name === 'string' ? tool.tool_name : 'tool_result',
+          tool_input: tool?.tool_input || {},
+          output: record.content ?? '',
+          is_error: isError,
+          status: isError ? 'failed' : 'done',
+        });
       }
     }
   }

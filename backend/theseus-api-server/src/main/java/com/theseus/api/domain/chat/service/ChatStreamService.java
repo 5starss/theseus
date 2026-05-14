@@ -44,6 +44,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 public class ChatStreamService {
 
 	private static final Duration CORE_STREAM_TIMEOUT = Duration.ofMinutes(30);
+	private static final int CORE_ERROR_BODY_PREVIEW_LENGTH = 2000;
 
 	private final CoreStreamProperties coreStreamProperties;
 	private final UserRepository userRepository;
@@ -53,6 +54,7 @@ public class ChatStreamService {
 	private final RemoteWorkspaceRepository remoteWorkspaceRepository;
 	private final ObjectMapper objectMapper;
 	private final HttpClient httpClient = HttpClient.newBuilder()
+		.version(HttpClient.Version.HTTP_1_1)
 		.connectTimeout(Duration.ofSeconds(5))
 		.build();
 
@@ -100,6 +102,7 @@ public class ChatStreamService {
 		HttpRequest coreRequest = HttpRequest.newBuilder(
 				coreStreamProperties.streamUri(projectId, sessionId)
 			)
+			.version(HttpClient.Version.HTTP_1_1)
 			.timeout(CORE_STREAM_TIMEOUT)
 			.header(HttpHeaders.ACCEPT, MediaType.TEXT_EVENT_STREAM_VALUE)
 			.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
@@ -110,7 +113,12 @@ public class ChatStreamService {
 		try {
 			HttpResponse<InputStream> response = httpClient.send(coreRequest, HttpResponse.BodyHandlers.ofInputStream());
 			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				log.warn(">>>> Core chat stream returned non-success status. status={}", response.statusCode());
+				String errorBodyPreview = readCoreErrorBodyPreview(response.body());
+				log.warn(
+					">>>> Core chat stream returned non-success status. status={}, body={}",
+					response.statusCode(),
+					errorBodyPreview
+				);
 				writeSseEvent(
 					outputStream,
 					"error",
@@ -120,8 +128,12 @@ public class ChatStreamService {
 			}
 
 			try (InputStream body = response.body()) {
-				body.transferTo(outputStream);
-				outputStream.flush();
+				byte[] buffer = new byte[8192];
+				int read;
+				while ((read = body.read(buffer)) != -1) {
+					outputStream.write(buffer, 0, read);
+					outputStream.flush();
+				}
 			}
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
@@ -138,6 +150,22 @@ public class ChatStreamService {
 			+ "data: " + objectMapper.writeValueAsString(data) + "\n\n";
 		outputStream.write(payload.getBytes(StandardCharsets.UTF_8));
 		outputStream.flush();
+	}
+
+	private String readCoreErrorBodyPreview(InputStream body) {
+		if (body == null) {
+			return "";
+		}
+
+		try (InputStream inputStream = body) {
+			byte[] bytes = inputStream.readNBytes(CORE_ERROR_BODY_PREVIEW_LENGTH + 1);
+			int previewLength = Math.min(bytes.length, CORE_ERROR_BODY_PREVIEW_LENGTH);
+			String preview = new String(bytes, 0, previewLength, StandardCharsets.UTF_8);
+			return bytes.length > CORE_ERROR_BODY_PREVIEW_LENGTH ? preview + "..." : preview;
+		} catch (IOException exception) {
+			log.warn(">>>> Failed to read Core chat stream error body.", exception);
+			return "";
+		}
 	}
 
 	/**

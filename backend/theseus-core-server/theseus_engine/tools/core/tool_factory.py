@@ -18,6 +18,12 @@ from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
 from pydantic import BaseModel, Field
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
+from theseus_engine.tools.tool_repair import (
+    COMMON_CUSTOM_TOOL_SECURITY_RULES,
+    ToolRepairFailure,
+    ToolRepairLoop,
+    ToolRepairPolicy,
+)
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +36,14 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
+
+
+def canonical_tool_module_stem(tool_name: str) -> str:
+    """Return the persisted module stem for a logical custom tool name."""
+    normalized = tool_name.strip().lower().replace("-", "_")
+    if normalized.endswith("_tool"):
+        return normalized
+    return f"{normalized}_tool"
 
 
 def _custom_tool_dirs(extra_dirs: Optional[List[str | os.PathLike[str]]] = None) -> List[str]:
@@ -578,65 +592,80 @@ def load_custom_tools_for_project(
         )
         return loaded
 
+    seen_files: Set[str] = set()
+    candidates: List[Tuple[str, str, Optional[Dict[str, Any]]]] = []
+
+    for filename in sorted(os.listdir(project_dir)):
+        if not filename.endswith(".meta.json") or filename.startswith("_"):
+            continue
+        meta_path = os.path.join(project_dir, filename)
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as exc:
+            log.warning("Failed to read project tool meta %s: %s", meta_path, exc)
+            continue
+
+        fallback_stem = filename.removesuffix(".meta.json")
+        file_name = os.path.basename(str(meta.get("fileName") or f"{fallback_stem}.py"))
+        if not file_name.endswith(".py") or file_name.startswith("_"):
+            file_name = f"{fallback_stem}.py"
+        module_name = str(meta.get("moduleName") or file_name[:-3]).strip() or file_name[:-3]
+        candidates.append((module_name, file_name, meta))
+        seen_files.add(os.path.normcase(file_name))
+
     for filename in sorted(os.listdir(project_dir)):
         if not filename.endswith(".py") or filename.startswith("_"):
             continue
+        if os.path.normcase(filename) in seen_files:
+            continue
+        candidates.append((filename[:-3], filename, None))
 
-        module_name = filename[:-3]
+    for module_name, filename, meta in candidates:
         file_path = os.path.join(project_dir, filename)
-        meta_path = os.path.join(project_dir, f"{module_name}.meta.json")
+        if not os.path.exists(file_path):
+            continue
 
         # ── meta.json active 체크 ────────────────────────────
-        if os.path.exists(meta_path):
-            try:
-                with open(meta_path, encoding="utf-8") as f:
-                    meta = json.load(f)
-                if not meta.get("isActive", True):
-                    log.info("Skipped inactive project tool: %s", module_name)
-                    continue
-                if meta.get("status", "active") != "active":
-                    log.info(
-                        "Skipped non-active project tool: %s (status=%s)",
-                        module_name,
-                        meta.get("status"),
-                    )
-                    continue
-            except Exception as exc:
-                log.warning(
-                    "Failed to read project tool meta %s: %s", meta_path, exc,
+        if meta is not None:
+            if not meta.get("isActive", True):
+                log.info("Skipped inactive project tool: %s", module_name)
+                continue
+            if meta.get("status", "active") != "active":
+                log.info(
+                    "Skipped non-active project tool: %s (status=%s)",
+                    module_name,
+                    meta.get("status"),
                 )
+                continue
 
         # ── 코드 검증 + 로드 ─────────────────────────────────
         is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
-            module_name, file_path,
+            module_name,
+            file_path,
         )
-        if is_valid and tool_class is not None:
-            try:
-                instance = tool_class()
-                registry.register(instance)
-                loaded.append(tool_class.name)
+        if not is_valid or tool_class is None:
+            log.warning("Skipped invalid project tool %s: %s", filename, msg)
+            continue
 
-                level = getattr(
-                    tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL,
-                )
-                if tool_permissions is not None:
-                    tool_permissions[tool_class.name] = level
+        try:
+            instance = tool_class()
+            registry.register(instance)
+            loaded.append(tool_class.name)
 
-                log.info(
-                    "Project tool loaded: %s (project=%s level=%d file=%s)",
-                    tool_class.name,
-                    project_id,
-                    level,
-                    filename,
-                )
-            except Exception as exc:
-                log.warning(
-                    "Failed to instantiate project tool %s: %s", filename, exc,
-                )
-        else:
-            log.warning(
-                "Skipped invalid project tool %s: %s", filename, msg,
+            level = getattr(tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL)
+            if tool_permissions is not None:
+                tool_permissions[tool_class.name] = level
+
+            log.info(
+                "Project tool loaded: %s (project=%s level=%d file=%s)",
+                tool_class.name,
+                project_id,
+                level,
+                filename,
             )
+        except Exception as exc:
+            log.warning("Failed to instantiate project tool %s: %s", filename, exc)
 
     return loaded
 
@@ -683,7 +712,11 @@ class ToolCreatorInput(BaseModel):
     """Input model for the create_tool meta-tool."""
 
     tool_name: str = Field(
-        description="File name for the new tool (e.g. weather_fetcher)."
+        description=(
+            "Logical name for the new tool (e.g. weather_fetcher). The saved "
+            "module file uses the canonical '<tool_name>_tool.py' pattern unless "
+            "the name already ends with '_tool'."
+        )
     )
     python_code: str = Field(
         description=(
@@ -694,7 +727,10 @@ class ToolCreatorInput(BaseModel):
             "(list of 3-5 short user utterances in Korean and English) that would "
             "trigger this tool. This boosts retrieval accuracy in the RAG-based "
             "tool selector. Example: "
-            "example_queries = ['날씨 알려줘', '오늘 비 와?', \"what's the weather\"]"
+            "example_queries = ['날씨 알려줘', '오늘 비 와?', \"what's the weather\"]. "
+            "Generated tools must follow Theseus custom tool security rules: no "
+            "subprocess/shell execution or other banned modules/functions; use safe "
+            "read-only APIs such as psutil, /proc, or /sys where possible."
         )
     )
     permission_level: int = Field(
@@ -727,6 +763,9 @@ class ToolCreatorTool(BaseTool):
         "Do not nest unescaped triple double quotes inside another triple double "
         "quoted string. Prefer helper functions, constants, or JSON data over "
         "nested Python source strings when possible. "
+        "Generated custom tools must not import subprocess or execute shell commands; "
+        "if a required capability needs prohibited command execution, explain that "
+        "user feedback or a trusted core adapter is required. "
         "Always declare an 'example_queries' class attribute listing 3-5 short "
         "user utterances (mix Korean/English) that should trigger this tool — "
         "this dramatically improves the RAG retriever's ability to surface it. "
@@ -742,6 +781,147 @@ class ToolCreatorTool(BaseTool):
     # but we can be explicit if needed.
 
     async def execute(
+        self, arguments: ToolCreatorInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        return await self._execute_with_repair(arguments, context)
+
+    async def _execute_with_repair(
+        self, arguments: ToolCreatorInput, context: ToolExecutionContext
+    ) -> ToolResult:
+        llm_client = context.metadata.get("llm_client")
+        model_name = str(context.metadata.get("model_name") or "")
+        policy = context.metadata.get("tool_repair_policy")
+        if not isinstance(policy, ToolRepairPolicy):
+            policy = ToolRepairPolicy.from_env()
+
+        if llm_client is None or not model_name or policy.max_attempts <= 0:
+            return await self._execute_once(arguments, context)
+
+        initial_candidate = self._candidate_from_arguments(arguments)
+        repair_loop: ToolRepairLoop[dict[str, Any], ToolResult] = ToolRepairLoop(
+            llm_client=llm_client,
+            model_name=model_name,
+            policy=policy,
+            debug_context={
+                "session_id": context.metadata.get("session_id"),
+                "project_id": context.metadata.get("project_id"),
+                "chat_session_id": context.metadata.get("chat_session_id"),
+                "run_id": context.run_id,
+                "agent_mode": context.metadata.get("agent_mode"),
+            },
+        )
+
+        async def _validate(candidate: dict[str, Any]) -> ToolResult:
+            candidate_args = self._arguments_from_candidate(candidate, fallback=arguments)
+            result = await self._execute_once(candidate_args, context)
+            if result.is_error:
+                raise self._failure_from_tool_result(result)
+            return result
+
+        result = await repair_loop.run(
+            initial_prompt="Validate and, if needed, repair this create_tool request.",
+            initial_candidate=initial_candidate,
+            task_context=(
+                "The runtime is executing the create_tool meta-tool. "
+                "Repair the generated Python custom tool code while preserving the "
+                "requested capability and following the security rules.\n\n"
+                f"Original toolName={arguments.tool_name}\n"
+                f"Original permissionLevel={arguments.permission_level}\n"
+            ),
+            candidate_contract=self._creator_candidate_contract(),
+            generate_candidate=self._generate_unexpected_creator_candidate,
+            validate_candidate=_validate,
+            parse_candidate_payload=self._parse_creator_candidate,
+            render_candidate=lambda candidate: candidate,
+        )
+
+        if result.success and result.value is not None:
+            metadata = dict(result.value.metadata)
+            metadata["repairAttempts"] = result.attempts
+            result.value.metadata = metadata
+            return result.value
+
+        message = result.final_message(policy)
+        metadata = {
+            "status": "repair_failed",
+            "repairAttempts": result.attempts,
+            "lastFailureCode": result.last_failure.code if result.last_failure else None,
+            "needsUserFeedback": result.needs_user_feedback,
+        }
+        if result.feedback_message:
+            metadata["feedbackMessage"] = result.feedback_message
+        return ToolResult(output=f"❌ Tool repair failed:\n{message}", is_error=True, metadata=metadata)
+
+    async def _generate_unexpected_creator_candidate(self, prompt: str) -> dict[str, Any]:
+        raise ToolRepairFailure(
+            stage="repair_generation",
+            code="LLM_OUTPUT_INVALID",
+            message="create_tool repair candidate generation did not produce a candidate.",
+            metadata={"prompt": prompt[:1000]},
+        )
+
+    @staticmethod
+    def _candidate_from_arguments(arguments: ToolCreatorInput) -> dict[str, Any]:
+        return {
+            "toolName": arguments.tool_name,
+            "pythonCode": arguments.python_code,
+            "permissionLevel": arguments.permission_level,
+        }
+
+    @staticmethod
+    def _arguments_from_candidate(
+        candidate: dict[str, Any],
+        *,
+        fallback: ToolCreatorInput,
+    ) -> ToolCreatorInput:
+        return ToolCreatorInput(
+            tool_name=str(candidate.get("toolName") or candidate.get("tool_name") or fallback.tool_name),
+            python_code=str(candidate.get("pythonCode") or candidate.get("python_code") or fallback.python_code),
+            permission_level=int(
+                candidate.get("permissionLevel")
+                or candidate.get("permission_level")
+                or fallback.permission_level
+            ),
+        )
+
+    @staticmethod
+    def _parse_creator_candidate(payload: dict[str, Any]) -> dict[str, Any]:
+        tool_name = payload.get("toolName") or payload.get("tool_name")
+        python_code = payload.get("pythonCode") or payload.get("python_code")
+        if not tool_name or not python_code:
+            raise ValueError("candidate requires toolName and pythonCode")
+        permission_level = payload.get("permissionLevel") or payload.get("permission_level") or 1
+        return {
+            "toolName": str(tool_name),
+            "pythonCode": str(python_code),
+            "permissionLevel": int(permission_level),
+        }
+
+    @staticmethod
+    def _creator_candidate_contract() -> str:
+        return (
+            "Candidate object schema:\n"
+            "{\n"
+            '  "toolName": "snake_case logical tool name",\n'
+            '  "pythonCode": "complete Python source code for one Theseus BaseTool module",\n'
+            '  "permissionLevel": 1\n'
+            "}\n\n"
+            f"{COMMON_CUSTOM_TOOL_SECURITY_RULES}"
+        )
+
+    @staticmethod
+    def _failure_from_tool_result(result: ToolResult) -> ToolRepairFailure:
+        metadata = result.metadata or {}
+        stage = str(metadata.get("stage") or metadata.get("status") or "validation_failed")
+        errors = metadata.get("errors")
+        return ToolRepairFailure(
+            stage=stage,
+            code=stage.upper(),
+            message=str(result.output),
+            metadata={"errors": errors, **metadata},
+        )
+
+    async def _execute_once(
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
         """서버 컨텍스트가 있으면 서버 파이프라인, 없으면 standalone 경로로 실행합니다."""
@@ -808,8 +988,9 @@ class ToolCreatorTool(BaseTool):
             log.error("[ToolAudit] Legacy tool creation failed at naming: %s", e.message)
             return ToolResult(output=f"❌ Naming validation failed:\n{e.message}", is_error=True)
 
-        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.py")
-        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.meta.json")
+        module_stem = canonical_tool_module_stem(safe_tool_name)
+        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_stem}.py")
+        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_stem}.meta.json")
 
         # 1. 권한 자동 주입 (service.py 재사용)
         try:
@@ -845,7 +1026,7 @@ class ToolCreatorTool(BaseTool):
 
         # 4. 모듈 로드 및 구조(Schema) 검증
         is_valid_module, mod_msg, tool_class = ToolValidator.validate_and_load_module(
-            safe_tool_name, file_path
+            module_stem, file_path
         )
         if not is_valid_module:
             os.remove(file_path)
@@ -859,12 +1040,12 @@ class ToolCreatorTool(BaseTool):
         now = datetime.now(timezone.utc).isoformat()
         metadata = {
             "toolName": tool_class.name,
-            "moduleName": safe_tool_name,
+            "moduleName": module_stem,
             "projectId": "local",
             "chatSessionId": None,
             "creatorUserId": "cli_user",
             "planId": None,
-            "fileName": f"{safe_tool_name}.py",
+            "fileName": f"{module_stem}.py",
             "createdAt": now,
             "updatedAt": now,
             "permissionLevel": getattr(tool_class, "permission_level", arguments.permission_level),
@@ -881,7 +1062,7 @@ class ToolCreatorTool(BaseTool):
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
         # 5b. 생성 직후 정규화 (스키마 일관성 보장)
-        normalize_tool_meta(meta_path, tool_class, safe_tool_name)
+        normalize_tool_meta(meta_path, tool_class, module_stem)
         result_metadata = {
             "tool_name": tool_class.name,
             "module_path": file_path,

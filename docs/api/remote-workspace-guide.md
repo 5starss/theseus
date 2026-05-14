@@ -2,13 +2,13 @@
 
 ## 개념
 
-Remote Workspace는 Theseus가 프로젝트 단위로 등록하는 외부 서버 작업 대상이다.
+Remote Workspace는 Theseus가 프로젝트 단위로 등록하는 외부 서버 작업 환경이다.
 
 ```text
 서버관리 프로젝트
 -> 싸피증권 운영서버를 Remote Workspace로 등록
 -> ASK / PLAN / AGENT / 생성 Tool 실행에서 remoteWorkspaceId 선택
--> Core Server가 허용된 도구 경계 안에서 원격 서버를 분석하거나 작업
+-> Core Server가 허용된 도구 범위 안에서 원격 서버를 분석하거나 작업
 ```
 
 Remote Workspace는 ToolPlan 전용 참고자료가 아니다. 생성된 Theseus Tool과 AGENT가 실제로 작업하는 외부 서버 실행 환경이다.
@@ -17,11 +17,33 @@ Remote Workspace는 ToolPlan 전용 참고자료가 아니다. 생성된 Theseus
 
 | 구분 | 역할 |
 | --- | --- |
-| Remote Workspace | 프로젝트가 연결할 외부 서버와 작업 기준 경로 |
+| Remote Workspace | 프로젝트가 연결한 외부 서버와 작업 기준 경로 |
 | Core local tool | Core 서버 로컬 파일시스템/프로세스를 다루는 기본 도구 |
 | Core remote tool | Remote Workspace를 SSH로 다루는 `remote_*` 도구 |
 | Theseus Tool | ToolPlan 승인 및 build 이후 프로젝트 Tool 저장소에 등록되는 사용자용 Tool |
 | ToolPlan | 승인 전 Tool 명세 |
+
+## FE 입력값과 Core resolver URL
+
+FE에서 입력하는 Remote URL은 “어느 외부 서버에 SSH로 붙을 것인가”를 뜻한다.
+
+```text
+name = 싸피증권 운영서버
+host = ssafy-stock.kr 또는 54.180.80.22
+port = 22
+username = ubuntu
+privateKeyPath = /home/appuser/.ssh/ssafy-ec2-key.pem
+basePath = /home/ubuntu
+```
+
+Core 환경변수의 resolver URL은 “Core가 API Server에게 remoteWorkspaceId의 접속 정보를 물어보는 내부 API 주소”다.
+
+```env
+SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL=http://theseus-api-server:8080/api/internal/remote-workspaces/connection-config
+SPRING_BOOT_INTERNAL_API_KEY=theseus-local-internal-api-key
+```
+
+작업 대상 서버 URL과 resolver URL은 서로 다른 개념이다.
 
 ## 저장 정보
 
@@ -36,30 +58,65 @@ Remote Workspace는 ToolPlan 전용 참고자료가 아니다. 생성된 Theseus
 | `host` | SSH host |
 | `port` | SSH port |
 | `username` | SSH username |
-| `password` | password 인증이 필요한 경우의 내부 저장 값 |
+| `password` | password 인증 또는 private key passphrase |
 | `private_key_path` | Core Server가 접근할 수 있는 private key path |
 | `base_path` | 원격 서버 작업 기준 경로 |
 | `allow_write_execution` | AGENT/승인 Tool 실행에서 쓰기/명령 실행 허용 여부 |
 | `status` | `ACTIVE`, `DELETED` |
 
-`password`는 응답 DTO에 포함하지 않는다. `privateKeyPath`는 key 내용이 아니라 Core Server 내부 경로다.
+`password`와 `privateKeyPath`는 public 응답 DTO에 포함하지 않는다. Core가 실제 SSH 실행 직전에 internal API로만 조회한다.
 
 ## 보안 경계
 
-API Server와 Core Server 사이의 공개 계약에는 secret을 싣지 않는다.
+public 계약에는 secret을 넣지 않는다.
 
 ```text
-Kafka ToolPlan payload: remoteWorkspaceId만 포함
-ASK/AGENT stream payload: remoteWorkspaceId만 포함
 FE 요청 body: remoteWorkspaceId만 포함
-SSE/로그/응답: password 미노출
+ASK/AGENT stream payload: remoteWorkspaceId만 포함
+ToolPlan Kafka payload: remoteWorkspaceId만 포함
+SSE/로그/FE 응답: password/privateKeyPath 미노출
 ```
 
-`password`, `privateKeyPath`, full `remoteWorkspace` block을 Kafka/stream payload로 전달하지 않는다. 실제 SSH secret resolution은 별도 설계 후 활성화한다.
+Core는 `remoteWorkspaceId`와 `projectId`로 API Server internal endpoint를 호출해 SSH config를 resolve한다.
+
+```http
+POST /api/internal/remote-workspaces/connection-config
+X-Internal-Api-Key: {internal-api-key}
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "projectId": 1,
+  "remoteWorkspaceId": 1
+}
+```
+
+Response result:
+
+```json
+{
+  "remoteWorkspaceId": 1,
+  "projectId": 1,
+  "name": "싸피증권 운영서버",
+  "host": "ssafy-stock.kr",
+  "port": 22,
+  "username": "ubuntu",
+  "password": null,
+  "privateKeyPath": "/home/appuser/.ssh/ssafy-ec2-key.pem",
+  "basePath": "/home/ubuntu",
+  "allowWriteExecution": false,
+  "status": "ACTIVE"
+}
+```
+
+이 internal API는 Core Server 같은 서버 간 호출만 사용한다.
 
 ## 쓰기/명령 실행 스위치
 
-Remote Workspace의 기본값은 read-only다.
+Remote Workspace 기본값은 read-only다.
 
 ```text
 allowWriteExecution = false
@@ -74,7 +131,7 @@ allowWriteExecution = false
 | `ASK` | 읽기/분석 도구만 사용 |
 | `PLAN` | ToolPlan 작성을 위한 읽기/분석 도구만 사용 |
 | `AGENT` | 읽기/분석 도구 사용, `allowWriteExecution=true`일 때 쓰기/명령 도구 사용 |
-| 승인 Tool 실행 | Tool 권한과 Remote Workspace 설정이 허용할 때 쓰기/명령 도구 사용 |
+| 승인 Tool 실행 | Tool 권한과 Remote Workspace 설정이 허용하면 쓰기/명령 도구 사용 |
 
 ASK/PLAN은 `allowWriteExecution=true`여도 쓰기/명령 실행 도구를 노출하지 않는다.
 
@@ -115,7 +172,7 @@ LLM에는 현재 실행 대상과 모드에 맞는 active registry만 노출한�
 
 ## API 목록
 
-모든 API는 `ApiResponse<T>` 래퍼를 사용한다.
+모든 API는 `ApiResponse<T>` wrapper를 사용한다.
 
 ### 등록
 
@@ -156,7 +213,6 @@ Response result item:
   "host": "ssafy-stock.kr",
   "port": 22,
   "username": "ubuntu",
-  "privateKeyPath": "/home/appuser/.ssh/ssafy-ec2-key.pem",
   "basePath": "/home/ubuntu",
   "allowWriteExecution": false,
   "status": "ACTIVE",
@@ -209,21 +265,21 @@ PATCH /api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}/delete
 POST /api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}/test-connection
 ```
 
-현재 연결 테스트는 secret resolver가 준비될 때까지 비활성 응답을 반환한다. API Server는 Core로 secret payload를 전달하지 않는다.
+API Server는 Core Server에 `projectId`, `remoteWorkspaceId`만 전달한다. Core Server는 internal resolver로 SSH config를 조회한 뒤 `pwd` 수준의 짧은 연결 테스트를 수행한다.
 
 Response result:
 
 ```json
 {
   "remoteWorkspaceId": 1,
-  "available": false,
-  "message": "Remote Workspace connection test is not enabled until secure secret resolution is ready."
+  "available": true,
+  "message": "Remote Workspace connection succeeded."
 }
 ```
 
 ## ASK / PLAN / AGENT 요청 연결
 
-FE는 선택된 Remote Workspace의 ID만 요청에 포함한다.
+FE는 선택한 Remote Workspace의 ID만 요청에 포함한다.
 
 ASK/AGENT stream:
 
@@ -285,7 +341,7 @@ Base Path: /home/ubuntu
 allowWriteExecution: false
 ```
 
-DB/Redis가 다른 pem으로 접근되는 구조라면 운영서버 Remote Workspace를 재사용하지 않는다. DB/Redis 접근 Bastion 또는 접근 서버를 별도 Remote Workspace로 등록한다.
+DB/Redis가 다른 pem으로 접근하는 구조라면 운영서버 Remote Workspace를 재사용하지 않는다. DB/Redis 접근 Bastion 또는 접근 서버를 별도 Remote Workspace로 등록한다.
 
 MVP 기준 DB/Redis는 조회와 진단 중심으로 사용한다. `UPDATE`, `DELETE`, `DROP`, `FLUSHALL`, `CONFIG SET`처럼 운영 데이터나 인프라 상태를 변경하는 작업은 별도 승인, 감사 로그, rollback 정책 전까지 자동화 범위에 포함하지 않는다.
 

@@ -1,4 +1,4 @@
-"""Theseus-native slash command registry — OpenHarness 의존 없음."""
+"""Theseus-native slash command registry."""
 
 from __future__ import annotations
 

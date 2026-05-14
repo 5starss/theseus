@@ -37,8 +37,10 @@ button, textarea { font: inherit; }
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 6px 10px;
+  position: relative;
+  z-index: 60;
   border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
   background: var(--vscode-sideBarSectionHeader-background);
 }
@@ -178,7 +180,7 @@ button, textarea { font: inherit; }
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  z-index: 40;
+  z-index: 80;
 }
 
 .session-menu[hidden] { display: none; }
@@ -442,25 +444,85 @@ button, textarea { font: inherit; }
 .message.info  .body { color: var(--vscode-descriptionForeground); }
 .message.hint  .body { color: var(--vscode-descriptionForeground); font-size: 11px; }
 
+.turn {
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border);
+  display: grid;
+  gap: 2px;
+  grid-template-areas:
+    "user"
+    "activity"
+    "assistant";
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.turn > .message {
+  border-bottom: 0;
+}
+
+.turn > .message.user {
+  grid-area: user;
+}
+
+.turn > .message.assistant {
+  grid-area: assistant;
+}
+
+.turn > .activity-group {
+  grid-area: activity;
+}
+
 .activity-group {
+  background: var(--vscode-editorWidget-background, transparent);
   border: 1px solid var(--vscode-widget-border, var(--vscode-sideBarSectionHeader-border));
   border-radius: 6px;
-  margin: 6px 0 10px 24px;
+  margin: 6px 44px 10px 48px;
   overflow: hidden;
+}
+
+.activity-group[data-active] {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.24);
+  position: sticky;
+  top: 8px;
+  z-index: 8;
 }
 
 .activity-summary {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--vscode-foreground);
   cursor: pointer;
   display: flex;
   gap: 8px;
+  min-height: 30px;
   min-width: 0;
   padding: 7px 9px;
+  text-align: left;
   user-select: none;
+  width: 100%;
+}
+
+.activity-summary:hover {
+  background: var(--vscode-list-hoverBackground, transparent);
+}
+
+.activity-caret {
+  color: var(--vscode-descriptionForeground);
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+
+.activity-group.open .activity-caret {
+  transform: rotate(90deg);
 }
 
 .activity-title {
+  color: var(--vscode-foreground);
   flex: 1 1 auto;
+  font-weight: 600;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -479,6 +541,14 @@ button, textarea { font: inherit; }
   flex-direction: column;
   gap: 5px;
   padding: 6px 9px;
+}
+
+.activity-list[hidden] {
+  display: none;
+}
+
+.activity-list .tool pre {
+  max-height: 40vh;
 }
 
 .activity-note {
@@ -1572,7 +1642,7 @@ textarea {
   }
 
   .activity-group {
-    margin-left: 8px;
+    margin: 6px 8px 10px;
   }
 
   .activity-summary {

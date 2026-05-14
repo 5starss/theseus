@@ -10,6 +10,8 @@ export function isTransientSystemText(text) {
     'Connected  model:',
     'Runner stopped',
     'Runner stopped gracefully',
+    'Auto-compacting conversation memory',
+    'Prompt too long; compacting and retrying',
     'View > Output > "Theseus"',
     'Settings changed.',
   ].some(fragment => value.includes(fragment));

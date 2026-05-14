@@ -4,6 +4,82 @@
 
 ## [Unreleased]
 
+### 🐛 Session 105 — VSCode Extension turn 단위 Activity/Session UX 복구 (2026-05-14)
+
+#### `vscode-extension`
+
+- 질문 단위 tool/activity accordion이 답변 스트리밍과 대화 누적 중 위로 밀려 사라지던 문제를 줄이기 위해 `USER → Activity → ASSISTANT`를 하나의 `.turn` grid 컨테이너로 묶도록 WebView 렌더링 구조를 조정
+- `ActivityLog`를 `<details>` 의존 렌더링에서 button 기반 custom accordion으로 바꾸고, tool 실행 중에는 펼친 상태를 유지하다 완료 후 자동으로 접히도록 변경
+- active activity group은 해당 turn 내부에서만 sticky로 유지되게 해 긴 assistant 답변 중에도 현재 tool/status 진행 상황을 확인할 수 있도록 보강
+- 세션 메뉴에서 `x`로 세션을 삭제해도 session detail popup이 닫히지 않도록 수정하고, non-current session 삭제는 local session snapshot을 즉시 갱신해 목록에서 바로 사라지도록 보정
+- 세션 전환 후 tool result JSON이 `USER` 메시지로 복원되던 문제를 수정해 `tool_result` 블록은 일반 대화 텍스트가 아니라 `type: "tool"` activity entry로 재구성되도록 변경
+- runner/local session history 복구 시 `message.text`와 `content[].text`가 같은 텍스트를 중복 표시하던 문제를 방어해 user/assistant 본문이 두 번 보이지 않도록 보정
+- 답변 완료 후 stale runner busy 상태 때문에 “현재 응답이 진행 중입니다” 안내가 남는 문제를 줄이기 위해 WebView busy 판정을 실제 생성 중 상태 중심으로 정리하고, `AssistantTurnComplete` 수신 시 WebView runner 상태를 ready로 동기화
+- tool activity summary의 가시성을 높이고 narrow sidebar에서 activity margin이 과하게 잡히지 않도록 responsive CSS를 보강
+
+#### `theseus_engine`
+
+- `runner_runtime.history_for_ui()`가 `tool_use` / `tool_result` message block을 UI 복구용 tool activity entry로 변환하도록 보강
+- `message.text`와 `content[].text`가 같은 provider history shape에서도 표시 텍스트를 한 번만 보이도록 중복 chunk 방어 로직을 추가
+
+#### 검증
+
+- `npm.cmd run compile` 성공
+- `node --check media\main.js` 성공
+- `node --check media\components\ActivityLog.js` 성공
+- `python -m py_compile theseus_engine\runner_runtime.py` 성공
+- `git diff --check` 성공
+- `npx.cmd @vscode/vsce package` 성공
+
+---
+
+### 🐛 Session 104 — PLAN custom tool 안전 대안 안내 보강 (2026-05-14)
+
+#### `theseus_engine` / `src/tool_plan`
+
+- PLAN draft 시스템 프롬프트의 custom tool 생성 스키마에 `alternatives`, `plan_b`, `safe_alternative` 안내를 추가해 금지 import/명령이 필요한 요청은 안전한 Plan B를 제안하도록 보강
+- Server PLAN draft worker가 사용자 prompt를 그대로 넘기기 전에 공통 generated custom tool 보안 규칙과 Plan B 안내 컨텍스트를 명시적으로 주입하도록 변경
+- `planSnapshot`에 `alternatives` projection을 추가하고, 사용자 표시 Markdown에 `대안 / Plan B` 섹션으로 노출되도록 정리
+
+#### 검증
+
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\theseus_engine\models\state.py` 성공
+
+---
+
+### 🐛 Session 103 — Engine 공통 Tool repair loop 추가 (2026-05-14)
+
+#### `theseus_engine` / `src/tool_build`
+
+- custom tool 자동 repair 규약을 `theseus_engine.tools.tool_repair` 공통 모듈로 분리해 CLI/TUI/Extension/Server runtime과 Server ToolBuild가 같은 정책을 쓰도록 정리
+- generated custom tool의 공통 보안 규칙을 추가하고 `subprocess`, shell 실행, 임의 프로그램 실행이 반복되면 `needs_user_feedback`으로 전환하도록 보강
+- `create_tool` 실행 경로가 실패 결과를 즉시 반환하기 전에 engine 공통 repair loop를 사용할 수 있도록 `llm_client`, `model_name`, `tool_repair_policy`를 runtime metadata에 주입
+- Server Kafka ToolBuild의 자체 repair loop를 공통 `ToolRepairLoop` 기반으로 교체하되, 기존 API/Kafka event schema와 실패 publish 구조는 유지
+- `THESEUS_TOOL_REPAIR_MAX_ATTEMPTS`를 추가하고 기존 `CORE_TOOL_BUILD_MAX_REPAIR_ATTEMPTS`는 호환 alias로 유지
+
+#### 검증
+
+- `python -m py_compile backend\theseus-core-server\theseus_engine\tools\tool_repair.py backend\theseus-core-server\theseus_engine\tools\core\tool_factory.py backend\theseus-core-server\theseus_engine\core\engine_builder.py backend\theseus-core-server\theseus_engine\runner_runtime.py backend\theseus-core-server\theseus_engine\models\state.py backend\theseus-core-server\src\tool_build\builder.py backend\theseus-core-server\src\builder\engine.py backend\theseus-core-server\src\config.py` 성공
+- fake LLM smoke로 `subprocess` 정책 위반 후보가 safe 후보로 repair되면 성공하고, 같은 정책 위반이 반복되면 `needs_user_feedback=True`로 종료되는 것 확인
+- `python -m compileall -q backend\theseus-core-server\theseus_engine backend\theseus-core-server\src` 성공
+
+---
+
+### 🐛 Session 102 — Core PLAN multi-turn history 주입 보정 (2026-05-14)
+
+#### `src/tool_plan`
+
+- `theseus.tool-plan.request`의 `history` payload를 `ConversationMessage` 리스트로 변환해 PLAN draft LLM 요청에 주입하도록 보정
+- checkpoint conversation이 없는 새 PLAN run은 `[history..., current prompt]` 순서로 시작하고, checkpoint가 있으면 기존 checkpoint conversation을 우선 사용하도록 정리
+- history item의 `USER` / `ASSISTANT` role과 TEXT / JSON content를 provider 요청 메시지로 안전하게 변환해 Debug Dump의 `router_incoming_request.messages`에서 이전 turn들이 보이도록 수정
+
+#### 검증
+
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\agent_loop.py` 성공
+- fake LLM smoke로 새 run의 LLM 요청 메시지가 `previous user -> previous assistant -> current prompt` 순서로 구성되고, checkpoint가 있으면 checkpoint conversation이 우선되는 것을 확인
+
+---
+
 ### 🧭 Session 101 — PLAN runtime 용어 경계 및 prompt map 정리 (2026-05-13)
 
 #### `src/tool_plan` / `src/tool_build` / `src/tool_generation` / `src/auth` / `src/history`

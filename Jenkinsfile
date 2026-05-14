@@ -198,6 +198,10 @@ pipeline {
                 echo '[CI] Validating Core server Python imports inside Docker image'
                 sh '''
                     set -eu
+                    if ! docker image inspect "${CORE_SERVER_CI_IMAGE}" >/dev/null 2>&1; then
+                        echo "[CI] Core server CI image not found. Building ${CORE_SERVER_CI_IMAGE}"
+                        docker build -t "${CORE_SERVER_CI_IMAGE}" -f "${CORE_SERVER_DIR}/Dockerfile" "${CORE_SERVER_DIR}"
+                    fi
                     docker run --rm -i \
                         -e ENV=dev \
                         -e AUTH_MODE=spring \

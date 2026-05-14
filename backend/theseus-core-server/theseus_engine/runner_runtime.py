@@ -280,6 +280,23 @@ def _message_text(message: Any) -> str:
     return "\n".join(c for c in chunks if c)
 
 
+def _block_value(block: Any, key: str, default: Any = None) -> Any:
+    if isinstance(block, dict):
+        return block.get(key, default)
+    return getattr(block, key, default)
+
+
+def _append_visible_chunk(chunks: list[str], value: Any) -> None:
+    if value is None:
+        return
+    text = str(value)
+    if not text:
+        return
+    if chunks and chunks[-1] == text:
+        return
+    chunks.append(text)
+
+
 def _message_to_json(message: Any) -> dict[str, Any]:
     if hasattr(message, "model_dump"):
         return message.model_dump()
@@ -288,13 +305,53 @@ def _message_to_json(message: Any) -> dict[str, Any]:
     return {"role": getattr(message, "role", "message"), "text": _message_text(message)}
 
 
-def history_for_ui(messages: list[Any]) -> list[dict[str, str]]:
-    history: list[dict[str, str]] = []
+def history_for_ui(messages: list[Any]) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    pending_tools: dict[str, dict[str, Any]] = {}
     for msg in messages:
         role = str(getattr(msg, "role", "message"))
-        text = _message_text(msg)
+        text = getattr(msg, "text", "")
+        chunks: list[str] = []
         if text:
-            history.append({"type": "message", "role": role, "text": text})
+            _append_visible_chunk(chunks, text)
+        blocks = getattr(msg, "content", []) or []
+        if isinstance(blocks, str):
+            _append_visible_chunk(chunks, blocks)
+            blocks = []
+        for block in blocks:
+            if isinstance(block, str):
+                _append_visible_chunk(chunks, block)
+                continue
+            block_type = str(_block_value(block, "type", ""))
+            block_text = _block_value(block, "text", None)
+            if block_text is not None:
+                _append_visible_chunk(chunks, block_text)
+                continue
+            if block_type == "tool_use":
+                tool_use_id = str(_block_value(block, "id", "") or "")
+                if tool_use_id:
+                    pending_tools[tool_use_id] = {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": str(_block_value(block, "name", "tool") or "tool"),
+                        "tool_input": _json_safe(_block_value(block, "input", {})),
+                    }
+                continue
+            if block_type == "tool_result":
+                tool_use_id = str(_block_value(block, "tool_use_id", "") or "")
+                tool = pending_tools.pop(tool_use_id, None) if tool_use_id else None
+                is_error = bool(_block_value(block, "is_error", False))
+                history.append({
+                    "type": "tool",
+                    "tool_use_id": tool_use_id,
+                    "tool_name": (tool or {}).get("tool_name") or "tool_result",
+                    "tool_input": (tool or {}).get("tool_input") or {},
+                    "output": _block_value(block, "content", ""),
+                    "is_error": is_error,
+                    "status": "failed" if is_error else "done",
+                })
+        visible_text = "\n".join(c for c in chunks if c)
+        if visible_text:
+            history.append({"type": "message", "role": role, "text": visible_text})
     return history
 
 

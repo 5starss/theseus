@@ -1,6 +1,6 @@
 """Theseus TUI — 순수 Textual 기반 독자적 에이전트 UI.
 
-OpenHarness 의존 없음. CLI(`theseus_cli.py`)의 자율 복구 루프를
+Theseus-native 런타임입니다. CLI(`theseus_cli.py`)의 자율 복구 루프를
 비동기 워커 패턴으로 그대로 이식합니다.
 
 주요 기능:
@@ -584,9 +584,14 @@ class TheseusTUI(App):
         if not args:
             return CommandResult(message="Usage: /validate <tool_name>")
         import os as _os
-        from theseus_engine.tools.core.tool_factory import ToolValidator, CUSTOM_TOOLS_DIR
+        from theseus_engine.tools.core.tool_factory import (
+            CUSTOM_TOOLS_DIR,
+            ToolValidator,
+            canonical_tool_module_stem,
+        )
         tool_name = args.strip()
-        file_path = _os.path.join(CUSTOM_TOOLS_DIR, f"{tool_name}.py")
+        module_stem = canonical_tool_module_stem(tool_name)
+        file_path = _os.path.join(CUSTOM_TOOLS_DIR, f"{module_stem}.py")
         if not _os.path.exists(file_path):
             return CommandResult(message=f"[red]Tool file not found:[/red] {file_path}")
         with open(file_path, encoding="utf-8") as f:
@@ -957,5 +962,5 @@ if __name__ == "__main__":
     except ImportError:
         pass
 
-    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or "gpt-4o"
+    model_name = os.getenv("THESEUS_MODEL") or "gpt-4o"
     TheseusTUI(model=model_name).run()

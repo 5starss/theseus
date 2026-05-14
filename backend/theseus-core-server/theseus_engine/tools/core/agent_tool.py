@@ -2,7 +2,7 @@
 
 Allows the main agent to spawn sub-agents for parallel delegation
 of complex tasks. Uses Theseus's own task manager, independent
-of OpenHarness coordinator/swarm dependencies.
+of external coordinator/swarm dependencies.
 
 Feature 2 improvements: max_rbac_level inheritance, inherit_context flag,
 timeout_seconds support, THESEUS_SUBAGENT env variable propagation.

@@ -19,6 +19,7 @@ from theseus_engine.wrappers.llm_clients.api_types import (
 
 CheckpointCallback = Callable[[dict], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
+ProgressCallback = Callable[[str, int | None], Awaitable[None] | None]
 
 
 @dataclass
@@ -51,14 +52,32 @@ class ToolPlanAgentLoop:
     max_turns: int = field(default_factory=lambda: settings.CORE_TOOL_PLAN_MAX_AGENT_TURNS)
     cwd: Path = field(default_factory=lambda: Path.cwd())
 
+    def _llm_debug_context(self) -> dict[str, Any]:
+        allowed_keys = {
+            "session_id",
+            "project_id",
+            "user_id",
+            "chat_session_id",
+            "run_id",
+            "agent_mode",
+            "remote_workspace_id",
+        }
+        return {
+            key: value
+            for key, value in self.tool_metadata.items()
+            if key in allowed_keys and value is not None and not isinstance(value, (dict, list, tuple, set))
+        }
+
     async def run(
         self,
         *,
         initial_prompt: str,
+        initial_messages: list[ConversationMessage] | None = None,
         system_prompt: str,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> ToolPlanAgentLoopResult:
         restored_checkpoint = checkpoint if isinstance(checkpoint, dict) else {}
         state_machine = self._restore_state_machine(self._dict_or_none(restored_checkpoint.get("stateMachine")))
@@ -67,7 +86,8 @@ class ToolPlanAgentLoop:
         completed_steps = self._restore_completed_steps(restored_checkpoint.get("progress"))
 
         if not messages:
-            messages = [ConversationMessage.from_user_text(initial_prompt)]
+            messages = list(initial_messages or [])
+            messages.append(ConversationMessage.from_user_text(initial_prompt))
             await self._save_checkpoint(
                 state_machine,
                 messages,
@@ -86,6 +106,9 @@ class ToolPlanAgentLoop:
             )
 
         for turn_index in range(completed_steps, self.max_turns):
+            if progress_callback:
+                await self._emit_progress(progress_callback, f"Analyzing request... (Turn {turn_index + 1})")
+
             final_message = None
             async for llm_event in self.llm_client.stream_message(
                 ApiMessageRequest(
@@ -94,6 +117,7 @@ class ToolPlanAgentLoop:
                     system_prompt=system_prompt,
                     max_tokens=4096,
                     tools=self.tool_registry.to_api_schema(),
+                    debug_context=self._llm_debug_context(),
                 )
             ):
                 if isinstance(llm_event, ApiTextDeltaEvent):
@@ -137,6 +161,9 @@ class ToolPlanAgentLoop:
                     completed_steps=completed_steps,
                     checkpoint_callback=checkpoint_callback,
                 )
+
+                if progress_callback:
+                    await self._emit_progress(progress_callback, f"Executing tool '{tool_use.name}'...")
 
                 result_block = await self._execute_tool(tool_use.name, tool_use.id, tool_use.input)
                 trace_item["status"] = "failed" if result_block.is_error else "completed"
@@ -360,5 +387,12 @@ class ToolPlanAgentLoop:
         if callback is None or not content:
             return
         result = callback(content)
+        if result is not None:
+            await result
+
+    async def _emit_progress(self, callback: ProgressCallback | None, message: str, rate: int | None = None) -> None:
+        if callback is None:
+            return
+        result = callback(message, rate)
         if result is not None:
             await result

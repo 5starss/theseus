@@ -37,7 +37,7 @@ class ModelRouter:
         - ``THESEUS_MODEL_ROUTING``: ``true`` 시 라우팅 활성화.
         - ``THESEUS_MODEL_FAST``: 단순 작업용 모델.
         - ``THESEUS_MODEL_REASONING``: 추론 작업용 모델.
-        - ``OPENHARNESS_MODEL``: 기본(fallback) 모델.
+        - ``THESEUS_MODEL``: 기본 모델.
     """
 
     def __init__(self) -> None:
@@ -45,9 +45,7 @@ class ModelRouter:
             os.getenv("THESEUS_MODEL_ROUTING", "false").lower()
             == "true"
         )
-        self.default_model = os.getenv(
-            "OPENHARNESS_MODEL", "gpt-4o"
-        )
+        self.default_model = os.getenv("THESEUS_MODEL", "gpt-4o")
         self.fast_model = os.getenv(
             "THESEUS_MODEL_FAST", self.default_model
         )

@@ -14,6 +14,7 @@ from theseus_engine.tools.core import (
     load_custom_tools_for_project,
     ToolSearchTool,
 )
+from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.core.tool_retriever import ESSENTIAL_TOOL_NAMES
 from theseus_engine.models.rbac import TheseusPermissionChecker
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
@@ -96,7 +97,7 @@ async def setup_engine(
     scoped_memory.ensure_gitignore()
     memory_context = scoped_memory.read_context()
 
-    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or "gpt-4o"
+    model_name = os.getenv("THESEUS_MODEL") or "gpt-4o"
     if api_client is None:
         api_client = TheseusLLMClient(model_name)
 
@@ -159,7 +160,7 @@ async def setup_engine(
             rag_failed = True
     # --------------------------------------------------------------
 
-    # Theseus 자체 PermissionSettings — OpenHarness PermissionSettings 제거
+    # Theseus 자체 PermissionSettings 사용
     from theseus_engine.models.rbac import TheseusPermissionSettings
     settings = TheseusPermissionSettings()
     permission_checker = TheseusPermissionChecker(
@@ -230,6 +231,9 @@ async def setup_engine(
             "tool_registry": full_registry,
             "tool_permissions": project_tool_permissions,
             "active_registry": active_registry,
+            "llm_client": api_client,
+            "model_name": model_name,
+            "tool_repair_policy": ToolRepairPolicy.from_env(),
             "cost_tracker": tracker,
             "session_stats": stats,
             "scoped_memory": scoped_memory,
