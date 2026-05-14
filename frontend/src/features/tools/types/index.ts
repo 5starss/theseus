@@ -1,9 +1,9 @@
 export interface ToolItem {
-  id: string;
-  name: string;
-  description: string;
-  type: 'BLUE' | 'AMBER' | 'ROSE';
-  iconName: string;
+  toolId: number;
+  displayName: string;
+  displayDescription: string;
+  status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DELETED';
+  iconName?: string;
 }
 
 export interface ToolListResponse {

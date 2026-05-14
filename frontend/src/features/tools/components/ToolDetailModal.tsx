@@ -18,7 +18,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
     const fetchDetail = async () => {
       setIsLoading(true);
       try {
-        const data = await toolApi.getTool(projectId, toolItem.id);
+        const data = await toolApi.getTool(projectId, toolItem.toolId);
         if (isMounted) {
           setDetail(data);
         }
@@ -30,7 +30,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
     };
     fetchDetail();
     return () => { isMounted = false; };
-  }, [projectId, toolItem.id]);
+  }, [projectId, toolItem.toolId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -40,7 +40,7 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/50">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-slate-100">{toolItem.name}</h2>
+            <h2 className="text-xl font-bold text-slate-100">{toolItem.displayName}</h2>
             {detail && (
               <span className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded bg-slate-800 text-slate-400">
                 PLAN #{detail.sourceToolPlanId ?? '-'}
