@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SPRING_BOOT_BILLING_USAGE_URL: str = "http://localhost:8080/api/internal/billing/usage"
     SPRING_BOOT_TOOL_PLAN_URL: str = "http://localhost:8080/api/internal/tool-plan/save"
     SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: str = "http://localhost:8080/api/internal/history/messages"
+    SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: str = (
+        "http://localhost:8080/api/internal/remote-workspaces/connection-config"
+    )
     SPRING_BOOT_INTERNAL_API_KEY: str = "theseus-local-internal-api-key"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
@@ -169,6 +172,7 @@ class Settings(BaseSettings):
             "SPRING_BOOT_BILLING_USAGE_URL": self.SPRING_BOOT_BILLING_USAGE_URL,
             "SPRING_BOOT_TOOL_PLAN_URL": self.SPRING_BOOT_TOOL_PLAN_URL,
             "SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL": self.SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL,
+            "SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL": self.SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL,
         }
         for name, value in required_urls.items():
             if not value.strip():

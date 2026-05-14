@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from src.config import resolve_model_name
+from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
+from src.remote_workspace.resolver import RemoteWorkspaceResolver, resolve_remote_workspace_config
+from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
     ToolPlanRegenerationRequestedEvent,
@@ -34,9 +37,11 @@ class ToolPlanPlanner:
         *,
         llm_client: SupportsStreamingMessages | None = None,
         model_name: str | None = None,
+        remote_workspace_resolver: RemoteWorkspaceResolver | None = None,
     ) -> None:
         self.model_name = resolve_model_name(model_name)
         self.llm_client = llm_client or TheseusLLMClient(self.model_name)
+        self.remote_workspace_resolver = remote_workspace_resolver
 
     async def plan(
         self,
@@ -48,8 +53,14 @@ class ToolPlanPlanner:
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> ToolPlanResult | ToolPlanSkippedResult:
         await self._emit_progress(progress_callback, "PLAN_DRAFTING", 10)
+        remote_workspace = await resolve_remote_workspace_config(
+            project_id=event.project_id,
+            remote_workspace_id=event.remote_workspace_id,
+            resolver=self.remote_workspace_resolver,
+        )
         generated = await self._generate(
             event,
+            remote_workspace=remote_workspace,
             chunk_callback=chunk_callback,
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
@@ -78,18 +89,24 @@ class ToolPlanPlanner:
         self,
         event: ToolPlanRequestEvent,
         *,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
         chunk_callback: ChunkCallback | None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
         ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
         prompt = self._build_prompt(event)
-        tool_registry = self._build_tool_registry(event)
+        tool_registry = self._build_tool_registry(event, remote_workspace=remote_workspace)
         agent_loop = ToolPlanAgentLoop(
             llm_client=self.llm_client,
             model_name=self.model_name,
             tool_registry=tool_registry,
             tool_metadata={
                 "remote_workspace_id": event.remote_workspace_id,
+                "remote_workspace": (
+                    remote_workspace.model_dump(mode="json", by_alias=True)
+                    if remote_workspace is not None
+                    else None
+                ),
             },
         )
         loop_result = await agent_loop.run(
@@ -157,9 +174,17 @@ class ToolPlanPlanner:
             )
         return state_machine.get_system_prompt(available_tools=available_tools)
 
-    def _build_tool_registry(self, event: ToolPlanRequestEvent) -> ToolRegistry:
+    def _build_tool_registry(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    ) -> ToolRegistry:
         del event
         registry = ToolRegistry()
+        if remote_workspace is not None:
+            for tool in build_remote_read_analysis_tools(remote_workspace):
+                registry.register(tool)
         return registry
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:

@@ -22,6 +22,10 @@ from src.history.service import (
     persist_user_message,
 )
 from src.plan.service import restore_plan_after_stream, validate_executing_plan_binding
+from src.remote_workspace.resolver import (
+    RemoteWorkspaceResolveError,
+    resolve_remote_workspace_config,
+)
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
@@ -249,6 +253,10 @@ async def create_streaming_response(
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
     stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    remote_workspace = await _resolve_remote_workspace_for_stream(
+        project_id=session.project_id,
+        remote_workspace_id=remote_workspace_id,
+    )
     logger.info(
         "Fetched project tool permissions: user=%s project=%s chat_session=%s mode=%s tool_count=%d tools=%s",
         session.user_id,
@@ -280,6 +288,7 @@ async def create_streaming_response(
         plan_id=plan_id,
         plan_content=bound_plan.content if bound_plan is not None else None,
         remote_workspace_id=remote_workspace_id,
+        remote_workspace=remote_workspace,
     )
 
     await persist_user_message(session, chat_session_id, prompt)
@@ -320,6 +329,15 @@ async def stream_endpoint(
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
     stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    resolved_remote_workspace_id = (
+        remote_workspace_id
+        if remote_workspace_id is not None
+        else remote_workspace_id_camel
+    )
+    remote_workspace = await _resolve_remote_workspace_for_stream(
+        project_id=session.project_id,
+        remote_workspace_id=resolved_remote_workspace_id,
+    )
     logger.info(
         "Fetched project tool permissions: user=%s project=%s chat_session=%s mode=%s tool_count=%d tools=%s",
         session.user_id,
@@ -337,12 +355,6 @@ async def stream_endpoint(
             chat_session_id=chat_session_id,
         )
 
-    resolved_remote_workspace_id = (
-        remote_workspace_id
-        if remote_workspace_id is not None
-        else remote_workspace_id_camel
-    )
-
     engine_context = EngineBuildContext(
         user_level=session.permission_level,
         project_tool_permissions=project_tool_permissions,
@@ -357,6 +369,7 @@ async def stream_endpoint(
         plan_id=plan_id,
         plan_content=bound_plan.content if bound_plan is not None else None,
         remote_workspace_id=resolved_remote_workspace_id,
+        remote_workspace=remote_workspace,
     )
 
     await persist_user_message(session, chat_session_id, prompt)
@@ -389,3 +402,18 @@ async def stream_endpoint_post(
         session=session,
         db=db,
     )
+
+
+async def _resolve_remote_workspace_for_stream(
+    *,
+    project_id: int | str | None,
+    remote_workspace_id: int | None,
+):
+    try:
+        return await resolve_remote_workspace_config(
+            project_id=project_id,
+            remote_workspace_id=remote_workspace_id,
+        )
+    except RemoteWorkspaceResolveError as exc:
+        logger.warning("Remote Workspace resolve failed for stream: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
