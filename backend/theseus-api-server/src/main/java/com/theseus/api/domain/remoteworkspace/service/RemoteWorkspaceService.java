@@ -1,11 +1,8 @@
 package com.theseus.api.domain.remoteworkspace.service;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
-import com.theseus.api.domain.chat.config.CoreStreamProperties;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
@@ -19,41 +16,25 @@ import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceRespon
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
 import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
-import com.theseus.api.domain.toolgeneration.event.ToolPlanRemoteWorkspacePayload;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
-import java.io.IOException;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpRequest.BodyPublishers;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 @Service
 public class RemoteWorkspaceService {
 
-	private static final Duration CORE_CONNECTION_TEST_TIMEOUT = Duration.ofSeconds(15);
+	private static final String CONNECTION_TEST_DISABLED_MESSAGE =
+		"Remote Workspace connection test is not enabled until secure secret resolution is ready.";
 
 	private final RemoteWorkspaceRepository remoteWorkspaceRepository;
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
-	private final CoreStreamProperties coreStreamProperties;
-	private final ObjectMapper objectMapper;
-	private final HttpClient httpClient = HttpClient.newBuilder()
-		.connectTimeout(Duration.ofSeconds(5))
-		.build();
 
 	/**
 	 * 프로젝트 ADMIN 권한으로 외부 실행 대상 서버 정보를 등록합니다.
@@ -130,7 +111,8 @@ public class RemoteWorkspaceService {
 			request.getUsername(),
 			request.getPassword(),
 			request.getPrivateKeyPath(),
-			request.getBasePath()
+			request.getBasePath(),
+			request.getAllowWriteExecution()
 		);
 
 		return RemoteWorkspaceResponse.createFrom(remoteWorkspace);
@@ -170,47 +152,11 @@ public class RemoteWorkspaceService {
 		validateProjectAdmin(projectMember);
 		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceEntity(project, remoteWorkspaceId);
 
-		CoreConnectionTestResult result = requestCoreConnectionTest(remoteWorkspace);
 		return RemoteWorkspaceConnectionTestResponse.createFrom(
 			remoteWorkspace,
-			result.available(),
-			result.message()
+			false,
+			CONNECTION_TEST_DISABLED_MESSAGE
 		);
-	}
-
-	private CoreConnectionTestResult requestCoreConnectionTest(RemoteWorkspace remoteWorkspace) {
-		try {
-			String requestBody = objectMapper.writeValueAsString(
-				ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace)
-			);
-			HttpRequest request = HttpRequest.newBuilder(coreStreamProperties.remoteWorkspaceConnectionTestUri())
-				.timeout(CORE_CONNECTION_TEST_TIMEOUT)
-				.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-				.POST(BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
-				.build();
-
-			HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-			if (response.statusCode() < 200 || response.statusCode() >= 300) {
-				log.warn(">>>> Core RemoteWorkspace connection test returned non-success status. status={}",
-					response.statusCode());
-				return new CoreConnectionTestResult(false, "Core Remote Workspace connection test failed.");
-			}
-
-			CoreConnectionTestResult result = objectMapper.readValue(response.body(), CoreConnectionTestResult.class);
-			return new CoreConnectionTestResult(
-				Boolean.TRUE.equals(result.available()),
-				result.message() == null || result.message().isBlank()
-					? "Remote Workspace connection test completed."
-					: result.message()
-			);
-		} catch (InterruptedException exception) {
-			Thread.currentThread().interrupt();
-			log.warn(">>>> Core RemoteWorkspace connection test was interrupted.", exception);
-			return new CoreConnectionTestResult(false, "Core Remote Workspace connection test was interrupted.");
-		} catch (IOException exception) {
-			log.warn(">>>> Core RemoteWorkspace connection test request failed.", exception);
-			return new CoreConnectionTestResult(false, "Core Remote Workspace connection test failed.");
-		}
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
@@ -279,12 +225,5 @@ public class RemoteWorkspaceService {
 
 	private boolean isBlank(String value) {
 		return value == null || value.isBlank();
-	}
-
-	@JsonIgnoreProperties(ignoreUnknown = true)
-	private record CoreConnectionTestResult(
-		Boolean available,
-		String message
-	) {
 	}
 }

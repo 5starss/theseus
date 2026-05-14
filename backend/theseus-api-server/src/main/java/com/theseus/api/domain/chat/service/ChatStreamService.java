@@ -13,11 +13,9 @@ import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
-import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
 import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.tool.entity.ToolPlanMode;
-import com.theseus.api.domain.toolgeneration.event.ToolPlanRemoteWorkspacePayload;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.io.IOException;
@@ -76,15 +74,14 @@ public class ChatStreamService {
 		ChatSession chatSession = getAccessibleChatSession(sessionId, project, projectMember);
 		validateOpenChatSession(chatSession);
 		validateAgentModePermission(request.getMode(), projectMember);
-		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceIfRequested(project, request.getRemoteWorkspaceId());
+		validateRemoteWorkspaceIfRequested(project, request.getRemoteWorkspaceId());
 
 		return outputStream -> proxyCoreStream(
 			outputStream,
 			projectId,
 			sessionId,
 			request,
-			authorizationHeader,
-			remoteWorkspace
+			authorizationHeader
 		);
 	}
 
@@ -93,14 +90,12 @@ public class ChatStreamService {
 		Long projectId,
 		Long sessionId,
 		ChatStreamRequest request,
-		String authorizationHeader,
-		RemoteWorkspace remoteWorkspace
+		String authorizationHeader
 	) throws IOException {
 		String requestBody = objectMapper.writeValueAsString(createCoreStreamRequestPayload(
 			projectId,
 			sessionId,
-			request,
-			remoteWorkspace
+			request
 		));
 		HttpRequest coreRequest = HttpRequest.newBuilder(
 				coreStreamProperties.streamUri(projectId, sessionId)
@@ -151,8 +146,7 @@ public class ChatStreamService {
 	private Map<String, Object> createCoreStreamRequestPayload(
 		Long projectId,
 		Long sessionId,
-		ChatStreamRequest request,
-		RemoteWorkspace remoteWorkspace
+		ChatStreamRequest request
 	) {
 		Map<String, Object> payload = new LinkedHashMap<>();
 		payload.put("prompt", request.getPrompt());
@@ -160,7 +154,6 @@ public class ChatStreamService {
 		payload.put("chatSessionId", sessionId);
 		payload.put("mode", request.getMode().name());
 		payload.put("remoteWorkspaceId", request.getRemoteWorkspaceId());
-		payload.put("remoteWorkspace", ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace));
 		return payload;
 	}
 
@@ -221,12 +214,12 @@ public class ChatStreamService {
 	/**
 	 * 요청한 Remote Workspace가 프로젝트에 속한 활성 작업 환경인지 조회합니다.
 	 */
-	private RemoteWorkspace getRemoteWorkspaceIfRequested(Project project, Long remoteWorkspaceId) {
+	private void validateRemoteWorkspaceIfRequested(Project project, Long remoteWorkspaceId) {
 		if (remoteWorkspaceId == null) {
-			return null;
+			return;
 		}
 
-		return remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
+		remoteWorkspaceRepository.findByIdAndProjectAndStatusNot(
 			remoteWorkspaceId,
 			project,
 			RemoteWorkspaceStatus.DELETED

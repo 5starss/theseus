@@ -30,7 +30,6 @@ class KafkaProducerConfigTest {
 			3L,
 			4L,
 			null,
-			null,
 			"Create an incident recovery guide ToolPlan.",
 			List.of(),
 			requestedAt

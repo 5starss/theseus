@@ -72,6 +72,9 @@ public class RemoteWorkspace {
 	@Column(name = "base_path", nullable = false, length = 500)
 	private String basePath;
 
+	@Column(name = "allow_write_execution", nullable = false)
+	private Boolean allowWriteExecution;
+
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 30)
 	private RemoteWorkspaceStatus status;
@@ -93,6 +96,7 @@ public class RemoteWorkspace {
 		String password,
 		String privateKeyPath,
 		String basePath,
+		Boolean allowWriteExecution,
 		RemoteWorkspaceStatus status
 	) {
 		this.project = Objects.requireNonNull(project, "project must not be null");
@@ -107,6 +111,7 @@ public class RemoteWorkspace {
 		this.password = normalizeOptional(password);
 		this.privateKeyPath = normalizeOptional(privateKeyPath);
 		this.basePath = normalizeRequired(basePath);
+		this.allowWriteExecution = Boolean.TRUE.equals(allowWriteExecution);
 		this.status = status == null ? RemoteWorkspaceStatus.ACTIVE : status;
 	}
 
@@ -117,7 +122,8 @@ public class RemoteWorkspace {
 		String username,
 		String password,
 		String privateKeyPath,
-		String basePath
+		String basePath,
+		Boolean allowWriteExecution
 	) {
 		if (name != null) {
 			this.name = normalizeRequired(name);
@@ -140,6 +146,13 @@ public class RemoteWorkspace {
 		if (basePath != null) {
 			this.basePath = normalizeRequired(basePath);
 		}
+		if (allowWriteExecution != null) {
+			this.allowWriteExecution = allowWriteExecution;
+		}
+	}
+
+	public Boolean isAllowWriteExecution() {
+		return Boolean.TRUE.equals(allowWriteExecution);
 	}
 
 	public void delete() {
@@ -153,6 +166,9 @@ public class RemoteWorkspace {
 	@PrePersist
 	private void prePersist() {
 		LocalDateTime now = LocalDateTime.now();
+		if (allowWriteExecution == null) {
+			allowWriteExecution = false;
+		}
 		createdAt = now;
 		updatedAt = now;
 	}

@@ -13,7 +13,6 @@ public record ToolPlanGenerationRequestEvent(
 	Long requestedByUserId,
 	Long requestedByProjectMemberId,
 	Long remoteWorkspaceId,
-	ToolPlanRemoteWorkspacePayload remoteWorkspace,
 	String prompt,
 	List<ToolPlanHistoryMessagePayload> history,
 	LocalDateTime requestedAt

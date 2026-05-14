@@ -33,6 +33,8 @@ public class RemoteWorkspaceCreateRequest {
 	@NotBlank
 	private String basePath;
 
+	private Boolean allowWriteExecution;
+
 	public RemoteWorkspace toEntity(Project project, ProjectMember createdByProjectMember) {
 		return RemoteWorkspace.builder()
 			.project(project)
@@ -44,6 +46,7 @@ public class RemoteWorkspaceCreateRequest {
 			.password(password)
 			.privateKeyPath(privateKeyPath)
 			.basePath(basePath)
+			.allowWriteExecution(allowWriteExecution)
 			.build();
 	}
 }
