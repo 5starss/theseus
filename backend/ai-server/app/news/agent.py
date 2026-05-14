@@ -79,7 +79,7 @@ class NewsReporterAgent:
             raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
         self.llm = ChatOpenAI(
-            model="gpt-4.1-nano",
+            model="gpt-5-mini",
             openai_api_key=api_key,
             openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
         )

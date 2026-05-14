@@ -1,4 +1,6 @@
 import logging
+import os
+import time as time_module
 from datetime import datetime, time
 from decimal import Decimal
 from functools import lru_cache
@@ -21,6 +23,15 @@ from app.trading.account_service import (
     extract_holding_from_snapshot,
 )
 from app.trading.agent_response_store import mark_agent_response
+from app.trading.analysis_store import (
+    ANALYSIS_WORKFLOW_VERSION,
+    current_trade_date,
+    load_cache_row,
+    load_payload,
+    save_completed,
+    save_failed,
+    try_mark_running,
+)
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD, KST
 from app.trading.core_api_client import execute_order, get_trading_account_snapshot, get_user_profile
 from app.trading.market_data import get_current_price
@@ -57,6 +68,9 @@ class TradingGraphState(TypedDict, total=False):
     quant_error_message: str
     judge_error_message: str
     rebuttal_result: Dict[str, Any]
+    analysis_profile: str
+    analysis_cache_status: str
+    analysis_cache_key: Dict[str, Any]
     signal_confidence: Any
     judge_payload: Dict[str, Any]
     order_card: Dict[str, Any]
@@ -228,6 +242,153 @@ def run_rebuttal_agent(
     return result
 
 
+def _analysis_profile_for_strategy(strategy_profile: Dict[str, Any]) -> str:
+    invest_style = str(strategy_profile.get("invest_style") or "LONG").lower()
+    return f"common_{invest_style}"
+
+
+def _build_analysis_payload(
+    *,
+    ticker: str,
+    strategy_slot: str,
+    analysis_profile: str,
+    news_card: Dict[str, Any],
+    quant_card: Dict[str, Any],
+    quant_state: Dict[str, Any],
+    rebuttal_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    trade_date = current_trade_date()
+    return {
+        "schema": "ticker_analysis_v1",
+        "ticker": ticker,
+        "trade_date": trade_date.isoformat(),
+        "strategy_slot": strategy_slot,
+        "analysis_profile": analysis_profile,
+        "workflow_version": ANALYSIS_WORKFLOW_VERSION,
+        "generated_at": datetime.now(KST).isoformat(),
+        "news_card": news_card,
+        "quant_card": quant_card,
+        "quant_state": quant_state,
+        "rebuttal_result": rebuttal_result,
+        "status": "completed",
+    }
+
+
+def _wait_for_completed_analysis(
+    *,
+    ticker: str,
+    strategy_slot: str,
+    analysis_profile: str,
+) -> Optional[Dict[str, Any]]:
+    wait_seconds = max(0, int(os.getenv("TICKER_ANALYSIS_CACHE_WAIT_SECONDS", "30")))
+    poll_seconds = max(1, int(os.getenv("TICKER_ANALYSIS_CACHE_POLL_SECONDS", "2")))
+    deadline = time_module.time() + wait_seconds
+
+    while time_module.time() <= deadline:
+        row = load_cache_row(
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+            workflow_version=ANALYSIS_WORKFLOW_VERSION,
+        )
+        if row and row.get("status") == "completed":
+            payload = load_payload(row)
+            if payload:
+                return payload
+        if row and row.get("status") == "failed":
+            return None
+        time_module.sleep(poll_seconds)
+    return None
+
+
+def _load_or_create_ticker_analysis(
+    *,
+    ticker: str,
+    strategy_slot: str,
+    strategy_profile: Dict[str, Any],
+    score_gap_threshold: int,
+) -> tuple[Dict[str, Any], str]:
+    analysis_profile = _analysis_profile_for_strategy(strategy_profile)
+    row = load_cache_row(
+        ticker=ticker,
+        strategy_slot=strategy_slot,
+        analysis_profile=analysis_profile,
+        workflow_version=ANALYSIS_WORKFLOW_VERSION,
+    )
+    if row and row.get("status") == "completed":
+        payload = load_payload(row)
+        if payload:
+            return payload, "hit"
+
+    acquired = try_mark_running(
+        ticker=ticker,
+        strategy_slot=strategy_slot,
+        analysis_profile=analysis_profile,
+        workflow_version=ANALYSIS_WORKFLOW_VERSION,
+    )
+    if not acquired:
+        payload = _wait_for_completed_analysis(
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+        )
+        if payload:
+            return payload, "wait_hit"
+        acquired = try_mark_running(
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+            workflow_version=ANALYSIS_WORKFLOW_VERSION,
+        )
+        if not acquired:
+            raise RuntimeError("ticker analysis is running and no completed payload is available")
+
+    try:
+        news_card = run_news_agent(ticker, question=strategy_profile["news_question"])
+        quant_card, quant_state = run_quant_agent(ticker)
+        if news_card.get("risk_flags") == ["system_error"] or quant_card.get("risk_flags") == ["system_error"]:
+            rebuttal_result = {
+                "triggered": False,
+                "rebuttal_round": 0,
+                "skipped": True,
+                "reason": "upstream_system_error",
+            }
+        else:
+            rebuttal_result = run_rebuttal_agent(
+                ticker,
+                news_card,
+                quant_card,
+                score_gap_threshold=score_gap_threshold,
+            )
+        payload = _build_analysis_payload(
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+            news_card=news_card,
+            quant_card=quant_card,
+            quant_state=quant_state,
+            rebuttal_result=rebuttal_result,
+        )
+        archive = save_completed(
+            payload=payload,
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+            workflow_version=ANALYSIS_WORKFLOW_VERSION,
+        )
+        payload["archive"] = archive
+        return payload, "created"
+    except Exception as exc:
+        save_failed(
+            ticker=ticker,
+            strategy_slot=strategy_slot,
+            analysis_profile=analysis_profile,
+            error=exc,
+            workflow_version=ANALYSIS_WORKFLOW_VERSION,
+        )
+        raise
+
+
 def _build_system_error_analysis_card(*, ticker: str, agent: str, error: Exception) -> Dict[str, Any]:
     return {
         "$schema": "analysis_card_v1",
@@ -340,6 +501,69 @@ def _quant_agent_node(state: TradingGraphState) -> TradingGraphState:
         }
 
 
+def _load_analysis_node(state: TradingGraphState) -> TradingGraphState:
+    ticker = state["ticker"]
+    user_id = state.get("user_id")
+    resolved_slot = state["resolved_slot"]
+    strategy_profile = state["strategy_profile"]
+    analysis_profile = _analysis_profile_for_strategy(strategy_profile)
+
+    try:
+        analysis_payload, cache_status = _load_or_create_ticker_analysis(
+            ticker=ticker,
+            strategy_slot=resolved_slot,
+            strategy_profile=strategy_profile,
+            score_gap_threshold=int(state.get("score_gap_threshold") or DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD),
+        )
+        mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="news")
+        mark_agent_response(user_id=user_id, ticker=ticker, strategy_slot=resolved_slot, agent_type="quant")
+        return {
+            "news_card": analysis_payload.get("news_card") or {},
+            "quant_card": analysis_payload.get("quant_card") or {},
+            "quant_state": analysis_payload.get("quant_state") or {},
+            "rebuttal_result": analysis_payload.get("rebuttal_result") or {},
+            "news_system_error": False,
+            "quant_system_error": False,
+            "news_error_message": "",
+            "quant_error_message": "",
+            "analysis_profile": analysis_profile,
+            "analysis_cache_status": cache_status,
+            "analysis_cache_key": {
+                "ticker": ticker,
+                "trade_date": analysis_payload.get("trade_date"),
+                "strategy_slot": resolved_slot,
+                "analysis_profile": analysis_profile,
+                "workflow_version": ANALYSIS_WORKFLOW_VERSION,
+            },
+        }
+    except Exception as exc:
+        logger.error("[%s] TickerAnalysis load/create failed: %s", ticker, exc)
+        return {
+            "news_card": _build_system_error_analysis_card(ticker=ticker, agent="news", error=exc),
+            "quant_card": _build_system_error_analysis_card(ticker=ticker, agent="quant", error=exc),
+            "quant_state": {},
+            "rebuttal_result": {
+                "triggered": False,
+                "rebuttal_round": 0,
+                "skipped": True,
+                "reason": "analysis_system_error",
+            },
+            "news_system_error": True,
+            "quant_system_error": True,
+            "news_error_message": str(exc),
+            "quant_error_message": str(exc),
+            "analysis_profile": analysis_profile,
+            "analysis_cache_status": "error",
+            "analysis_cache_key": {
+                "ticker": ticker,
+                "trade_date": current_trade_date().isoformat(),
+                "strategy_slot": resolved_slot,
+                "analysis_profile": analysis_profile,
+                "workflow_version": ANALYSIS_WORKFLOW_VERSION,
+            },
+        }
+
+
 def _rebuttal_agent_node(state: TradingGraphState) -> TradingGraphState:
     ticker = state["ticker"]
     if state.get("news_system_error") or state.get("quant_system_error"):
@@ -447,6 +671,10 @@ def _apply_constraints_node(state: TradingGraphState) -> TradingGraphState:
                 strategy_slot=state["resolved_slot"],
             ),
             "rebuttal": state["rebuttal_result"],
+            "analysis_cache": {
+                "status": state.get("analysis_cache_status"),
+                "key": state.get("analysis_cache_key"),
+            },
             "execution_mode": "immediate" if state.get("execute_immediately") else "deferred",
             "workflow": state.get("workflow", "langgraph"),
             "workflow_version": state.get("workflow_version", "v1"),
@@ -517,19 +745,14 @@ def _execute_finalize(
 def get_trading_graph():
     graph = StateGraph(TradingGraphState)
     graph.add_node("load_context", _load_context_node)
-    graph.add_node("news_agent", _news_agent_node)
-    graph.add_node("quant_agent", _quant_agent_node)
-    graph.add_node("rebuttal_agent", _rebuttal_agent_node)
+    graph.add_node("load_analysis", _load_analysis_node)
     graph.add_node("judge_agent", _judge_agent_node)
     graph.add_node("apply_constraints", _apply_constraints_node)
     graph.add_node("finalize_execution", _execute_finalize_node)
 
     graph.add_edge(START, "load_context")
-    graph.add_edge("load_context", "news_agent")
-    graph.add_edge("load_context", "quant_agent")
-    graph.add_edge("news_agent", "rebuttal_agent")
-    graph.add_edge("quant_agent", "rebuttal_agent")
-    graph.add_edge("rebuttal_agent", "judge_agent")
+    graph.add_edge("load_context", "load_analysis")
+    graph.add_edge("load_analysis", "judge_agent")
     graph.add_edge("judge_agent", "apply_constraints")
     graph.add_edge("apply_constraints", "finalize_execution")
     graph.add_edge("finalize_execution", END)
