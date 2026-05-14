@@ -36,6 +36,10 @@ from theseus_engine.wrappers.llm_clients.api_types import (
     TheseusApiError,
     UsageSnapshot,
 )
+from theseus_engine.wrappers.llm_clients.debug_dump import (
+    dump_debug_payload,
+    summarize_openai_params,
+)
 
 log = logging.getLogger(__name__)
 
@@ -274,6 +278,12 @@ class TheseusOpenAICompatClient:
         if openai_tools:
             params["tools"] = openai_tools
             params.pop("stream_options", None)
+
+        dump_debug_payload(
+            "openai_compat_final_params_summary",
+            summarize_openai_params(params),
+            debug_context=request.debug_context,
+        )
 
         collected_content = ""
         collected_reasoning = ""

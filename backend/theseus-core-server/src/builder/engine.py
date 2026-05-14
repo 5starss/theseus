@@ -13,6 +13,10 @@ from src.remote_workspace.read_primitives import (
     build_remote_read_analysis_tools,
 )
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
+from src.remote_workspace.runtime import (
+    REMOTE_WORKSPACE_RUNTIME_KEY,
+    register_remote_workspace_config,
+)
 from src.remote_workspace.write_primitives import (
     REMOTE_WRITE_EXECUTION_TOOL_NAMES,
     build_remote_write_execution_tools,
@@ -290,6 +294,11 @@ def get_query_engine(
         if allow_remote_write_execution:
             for tool in build_remote_write_execution_tools(build_context.remote_workspace):
                 full_registry.register(tool)
+    remote_workspace_runtime_key = (
+        register_remote_workspace_config(build_context.remote_workspace)
+        if build_context.remote_workspace is not None
+        else None
+    )
 
     inferred_permissions = _infer_registry_permissions(full_registry)
     tool_permissions = dict(inferred_permissions)
@@ -375,8 +384,9 @@ def get_query_engine(
             "agent_mode": build_context.mode.value,
             "plan_phase": plan_phase.value if plan_phase is not None else None,
             "remote_workspace_id": build_context.remote_workspace_id,
+            REMOTE_WORKSPACE_RUNTIME_KEY: remote_workspace_runtime_key,
             "remote_workspace": (
-                build_context.remote_workspace.model_dump(mode="json", by_alias=True)
+                build_context.remote_workspace.redacted_model_dump(by_alias=True)
                 if build_context.remote_workspace is not None
                 else None
             ),
