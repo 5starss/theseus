@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    options {
+        gitLabConnection('SSAFY-GitLab')
+    }
+
     environment {
         COMPOSE_DIR    = "docker-compose-prod"
         SERVER_COMPOSE = "docker-compose-server.yml"
@@ -8,6 +12,14 @@ pipeline {
     }
 
     stages {
+        stage('Report GitLab Pending') {
+            steps {
+                script {
+                    updateGitlabCommitStatus name: 'jenkins-ci', state: 'pending'
+                }
+            }
+        }
+
         stage('Checkout') {
             steps {
                 echo '🚚 [CI] Checking out source code...'
@@ -76,13 +88,13 @@ pipeline {
                 ]) {
                     // 1. .env 복사
                     sh "cp \$SECURE_ENV .env"
-                    
+
                     // 2. Windows식 줄바꿈(CRLF)을 Linux식(LF)으로 변환하여 오류 방지
-                    sh "sed -i 's/\\r\$//' .env" 
-                    
+                    sh "sed -i 's/\\r\$//' .env"
+
                     // 3. 변환된 .env를 Deploy 단계에서 사용할 위치로 복사
                     sh "cp .env ${COMPOSE_DIR}/.env"
-                    
+
                     // 4. 필요한 서비스에만 JWT 키 복사
                     script {
                         if (env.CHANGED_CORE_API_SERVER == 'true') {
@@ -260,7 +272,23 @@ pipeline {
             '''
             sh "docker image prune -f || true"
         }
-        success { echo '✅ [SUCCESS] CI/CD Pipeline completed!' }
-        failure { echo '❌ [FAILURE] Pipeline failed. Check console output.' }
+        success {
+            script {
+                updateGitlabCommitStatus name: 'jenkins-ci', state: 'success'
+            }
+            echo '✅ [SUCCESS] CI/CD Pipeline completed!'
+        }
+        failure {
+            script {
+                updateGitlabCommitStatus name: 'jenkins-ci', state: 'failed'
+            }
+            echo '❌ [FAILURE] Pipeline failed. Check console output.'
+        }
+        aborted {
+            script {
+                updateGitlabCommitStatus name: 'jenkins-ci', state: 'canceled'
+            }
+            echo '⚠️ [ABORTED] Pipeline was aborted.'
+        }
     }
 }
