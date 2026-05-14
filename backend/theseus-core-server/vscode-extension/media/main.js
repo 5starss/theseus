@@ -31,6 +31,7 @@ import {
 import { renderSessionMenu as renderSessionMenuComponent } from './components/SessionMenu.js';
 import { createActivityLogController } from './components/ActivityLog.js';
 import { createInitialState, persistWebviewState } from './state.js';
+import { createEventDispatcher } from './dispatcher.js';
 
 (function () {
   'use strict';
@@ -164,20 +165,25 @@ import { createInitialState, persistWebviewState } from './state.js';
   let lastActiveSkillsKey     = '';
 
   // ── Persistence ───────────────────────────────────────────────────
+  let persistStateTimeout = null;
   function persistState() {
-    persistWebviewState(vscode, {
-      savedHistory,
-      savedPlan,
-      planBySession,
-      currentMode,
-      currentSession,
-      sessions,
-      toolStats,
-      customToolsCollapsed,
-      customToolsView,
-      sessionListOpen,
-      changeReviews,
-    });
+    if (persistStateTimeout) clearTimeout(persistStateTimeout);
+    persistStateTimeout = setTimeout(() => {
+      persistStateTimeout = null;
+      persistWebviewState(vscode, {
+        savedHistory,
+        savedPlan,
+        planBySession,
+        currentMode,
+        currentSession,
+        sessions,
+        toolStats,
+        customToolsCollapsed,
+        customToolsView,
+        sessionListOpen,
+        changeReviews,
+      });
+    }, 500);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
@@ -279,6 +285,15 @@ import { createInitialState, persistWebviewState } from './state.js';
 
     const labelRow = document.createElement('div');
     labelRow.className = 'label-row';
+
+    const avatar = document.createElement('span');
+    avatar.className = role === 'assistant'
+      ? 'role-avatar assistant-avatar'
+      : role === 'user'
+        ? 'role-avatar user-avatar'
+        : 'role-avatar system-avatar';
+    avatar.textContent = role === 'assistant' ? '✦' : role === 'user' ? '●' : '⚙';
+    labelRow.appendChild(avatar);
 
     const label = document.createElement('span');
     label.className = 'label';
@@ -769,6 +784,33 @@ import { createInitialState, persistWebviewState } from './state.js';
   renderContextBar();
   renderChangeReviewPanel();
 
+  // ── Empty state (welcome screen) ──
+  if (messagesEl && messagesEl.querySelectorAll('.message').length === 0) {
+    const emptyState = document.createElement('div');
+    emptyState.className = 'empty-state';
+    emptyState.id = 'empty-state';
+    emptyState.innerHTML = `
+      <div class="empty-state-icon">✦</div>
+      <div class="empty-state-title">Theseus Agent</div>
+      <div class="empty-state-desc">무엇이든 물어보세요. 코드 분석, 리팩토링, 디버깅을 도와드립니다.</div>
+      <div class="empty-state-prompts">
+        <button class="empty-state-prompt" data-prompt="이 프로젝트의 구조를 분석해줘">📂 프로젝트 구조 분석</button>
+        <button class="empty-state-prompt" data-prompt="@problems 현재 에러를 해결해줘">🔧 현재 에러 해결</button>
+        <button class="empty-state-prompt" data-prompt="이 코드를 리팩토링해줘">✨ 코드 리팩토링</button>
+      </div>
+    `;
+    messagesEl.appendChild(emptyState);
+    emptyState.querySelectorAll('.empty-state-prompt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (promptEl) {
+          promptEl.value = btn.dataset.prompt || '';
+          promptEl.focus();
+        }
+        emptyState.remove();
+      });
+    });
+  }
+
   vscode.postMessage({ type: 'init' });
   vscode.postMessage({ type: 'getActiveFile' });
   vscode.postMessage({ type: 'getWorkspaceName' });
@@ -849,6 +891,7 @@ import { createInitialState, persistWebviewState } from './state.js';
   function applyMode(mode) {
     currentMode = mode;
     if (modeChipLabel) modeChipLabel.textContent = MODE_LABELS[mode] || mode.toUpperCase();
+    if (modeChipBtn) modeChipBtn.dataset.mode = mode;
     document.querySelectorAll('.mode-option').forEach(b => {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
@@ -1001,6 +1044,10 @@ import { createInitialState, persistWebviewState } from './state.js';
       if (inputHistory.length > 50) inputHistory.pop();
     }
     inputHistoryIdx = -1;
+
+    // Remove welcome screen if present
+    const emptyEl = document.getElementById('empty-state');
+    if (emptyEl) emptyEl.remove();
 
     const rendered = _appendMessageEl('user', text);
     toolPanel.startRequest(text, rendered.article);
@@ -1232,6 +1279,75 @@ import { createInitialState, persistWebviewState } from './state.js';
     }
   }
 
+  const dispatcherCtx = {
+    get currentAssistantEl() { return currentAssistantEl; },
+    set currentAssistantEl(v) { currentAssistantEl = v; },
+    get currentAssistantArticle() { return currentAssistantArticle; },
+    set currentAssistantArticle(v) { currentAssistantArticle = v; },
+    get currentAssistantTxt() { return currentAssistantTxt; },
+    set currentAssistantTxt(v) { currentAssistantTxt = v; },
+    get runnerState() { return runnerState; },
+    set runnerState(v) { runnerState = v; },
+    get changeReviews() { return changeReviews; },
+    set changeReviews(v) { changeReviews = v; },
+    get latestHealth() { return latestHealth; },
+    set latestHealth(v) { latestHealth = v; },
+    get healthPanelVisible() { return healthPanelVisible; },
+    set healthPanelVisible(v) { healthPanelVisible = v; },
+    get savedPlan() { return savedPlan; },
+    set savedPlan(v) { savedPlan = v; },
+    get sessions() { return sessions; },
+    set sessions(v) { sessions = v; },
+    get savedHistory() { return savedHistory; },
+    set savedHistory(v) { savedHistory = v; },
+    get activeFileContext() { return activeFileContext; },
+    set activeFileContext(v) { activeFileContext = v; },
+    get suppressedActiveFile() { return suppressedActiveFile; },
+    set suppressedActiveFile(v) { suppressedActiveFile = v; },
+    get activeRunnerMode() { return activeRunnerMode; },
+    set activeRunnerMode(v) { activeRunnerMode = v; },
+    get currentSession() { return currentSession; },
+    get planBySession() { return planBySession; },
+
+    createTypingIndicator: _createTypingIndicator,
+    renderMarkdown,
+    messagesEl,
+    persistState,
+    maybeAddFold: _maybeAddFold,
+    toolPanel,
+    setGenerating,
+    showActiveSkills,
+    formatAgentLoopStatus,
+    setLoopStatus,
+    formatCompactProgress,
+    appendTransientMessage,
+    createChangeReviewItem,
+    renderChangeReviewPanel,
+    applyRunnerStatus,
+    formatRunnerDiagnostic,
+    appendRetryBanner: _appendRetryBanner,
+    appendMessageEl: _appendMessageEl,
+    compactStatusFromMessage,
+    clearSavedPlan,
+    updateSession,
+    setSavedPlan,
+    planFromSessionState,
+    renderPlanPanel,
+    collapseDuplicatedHistoryText,
+    renderContextBar,
+    workspaceLabelEl,
+    activeFileEl,
+    renderCustomTools,
+    vscode,
+    renderHealthPanel,
+    insertMentionPath,
+    clearChat: _clearChat,
+    promptEl,
+    resizeTextarea,
+    autocomplete
+  };
+  const eventDispatcher = createEventDispatcher(dispatcherCtx);
+
   // ── Event handler ─────────────────────────────────────────────────
   window.addEventListener('message', ({ data }) => {
     data = normalizeHostMessage(data);
@@ -1251,360 +1367,7 @@ import { createInitialState, persistWebviewState } from './state.js';
     const event = data.event;
     if (!event) return;
 
-    switch (event.type) {
-
-      case 'AssistantTextDelta':
-        if (!currentAssistantEl) {
-          const { article, body } = _createTypingIndicator();
-          currentAssistantArticle = article;
-          currentAssistantEl      = body;
-          currentAssistantTxt     = '';
-        }
-        if (currentAssistantEl.querySelector('.typing-indicator')) {
-          currentAssistantEl.innerHTML = '';
-        }
-        currentAssistantTxt += event.text || '';
-        currentAssistantEl.innerHTML = renderMarkdown(currentAssistantTxt);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-        break;
-
-      case 'AssistantTurnComplete':
-        if (currentAssistantTxt) {
-          savedHistory.push({ type: 'message', role: 'assistant', text: currentAssistantTxt });
-          persistState();
-          if (currentAssistantArticle && currentAssistantEl) {
-            _maybeAddFold(currentAssistantArticle, currentAssistantEl, currentAssistantTxt);
-          }
-        } else if (currentAssistantArticle) {
-          currentAssistantArticle.remove();
-        }
-        toolPanel.note({
-          key: 'request',
-          label: 'answered',
-          state: 'info',
-        });
-        runnerState = {
-          ...runnerState,
-          state: runnerState.running ? 'ready' : runnerState.state,
-          lifecycle: runnerState.running ? 'ready' : runnerState.lifecycle,
-        };
-        currentAssistantArticle = null;
-        currentAssistantEl      = null;
-        currentAssistantTxt     = '';
-        setGenerating(false);
-        toolPanel.finishRequest();
-        break;
-
-      case 'AgentLoopStatus': {
-        showActiveSkills(event);
-        const status = formatAgentLoopStatus(event);
-        setLoopStatus(status.state, status.text);
-        if (status.state !== 'idle') {
-          toolPanel.note({
-            key: `loop:${event.tool_use_id || event.phase || 'status'}`,
-            label: status.text,
-            detail: event.message && event.message !== status.text ? event.message : '',
-            state: status.state,
-          });
-        }
-        break;
-      }
-
-      case 'CompactProgressEvent': {
-        const status = formatCompactProgress(event);
-        setLoopStatus(status.state, status.text);
-        toolPanel.note({
-          key: 'compact',
-          label: status.text,
-          detail: event.trigger ? `(${event.trigger})` : '',
-          state: status.state === 'error' ? 'error' : 'info',
-        });
-        if (event.phase === 'compact_failed') {
-          appendTransientMessage('system', status.text, 'warn', 5000);
-        }
-        break;
-      }
-
-      case 'ToolExecutionStarted': {
-        toolPanel.start(event);
-        break;
-      }
-
-      case 'ToolExecutionCompleted': {
-        showActiveSkills(event);
-        toolPanel.complete(event);
-        const reviewItem = createChangeReviewItem(event);
-        if (reviewItem) {
-          changeReviews = [reviewItem, ...changeReviews].slice(0, 20);
-          persistState();
-          renderChangeReviewPanel();
-        }
-        break;
-      }
-
-      case 'RunnerReady':
-        activeRunnerMode = 'agent';
-        applyRunnerStatus({ ...event, type: 'RunnerStatus', running: true, processRunning: true, lifecycle: 'ready', state: 'ready' });
-        if (runnerState.connectedSessionId !== runnerState.sessionId) {
-          runnerState.connectedSessionId = runnerState.sessionId;
-          appendTransientMessage('system', `✅ Connected  model: ${event.model}\ncwd: ${event.cwd}`, 'info', 1000);
-        }
-        break;
-
-      case 'RunnerStarting':
-        applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: true, lifecycle: 'starting', state: 'starting' });
-        break;
-
-      case 'RunnerStatus':
-        applyRunnerStatus(event);
-        break;
-
-      case 'RunnerDiagnostic':
-        runnerState.lastDiagnostic = event;
-        if (event.code === 'ready_timeout') {
-          setLoopStatus('error', 'starting stale');
-          appendTransientMessage('system', event.message || 'Runner startup is taking longer than expected.', 'warn');
-        } else if (event.code !== 'user_stop') {
-          appendTransientMessage('system', event.message || 'Runner diagnostic', 'warn');
-        }
-        break;
-
-      case 'RunnerExited':
-        applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'exited', state: 'exited' });
-        appendTransientMessage('system', 'Runner stopped.', 'warn');
-        break;
-
-      case 'RunnerStopped':
-        applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'stopped', state: 'stopped' });
-        appendTransientMessage('system', 'Runner stopped gracefully.', 'warn');
-        break;
-
-      case 'RunnerError':
-        runnerState.lastDiagnostic = event;
-        applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'error', state: 'error', lastDiagnostic: event });
-        appendTransientMessage('system', event.message || 'Unknown error', 'error');
-        _appendRetryBanner();
-        appendTransientMessage('system', '→ View > Output > "Theseus" for details', 'hint');
-        break;
-
-      case 'ErrorEvent':
-        setGenerating(false);
-        toolPanel.finishRequest();
-        _appendMessageEl('system', event.message || 'Error', 'error');
-        break;
-
-      case 'StatusEvent':
-        if (showActiveSkills(event) && /^Active skills:/i.test(event.message || '')) {
-          setGenerating(false);
-          break;
-        }
-        {
-          const compactStatus = compactStatusFromMessage(event.message);
-          if (compactStatus) {
-            setLoopStatus(compactStatus.state, compactStatus.label);
-            toolPanel.note({
-              key: 'compact',
-              label: compactStatus.label,
-              detail: compactStatus.detail,
-              state: compactStatus.state,
-            });
-            break;
-          }
-        }
-        setGenerating(false);
-        if (/PLAN 승인\/거부는 WAIT_FOR_REVIEW 상태에서만 가능합니다\./.test(event.message || '')) {
-          clearSavedPlan();
-          break;
-        }
-        if (/^(세션 목록|세션 전환|세션 삭제|세션 이름 변경|새 세션으로 전환):/.test(event.message || '')) {
-          appendTransientMessage('system', event.message || '', 'hint', 4000);
-          break;
-        }
-        _appendMessageEl('system', event.message || '', 'info');
-        break;
-
-      case 'PermissionRequest':
-        setLoopStatus('running', 'permission requested');
-        appendTransientMessage(
-          'system',
-          `Permission requested${event.tool_name ? ` for ${event.tool_name}` : ''}: ${event.message || 'waiting for runner decision'}`,
-          'warn',
-          5000,
-        );
-        break;
-
-      case 'filesResult':
-        autocomplete.show((event.files || []).map(autocomplete.mentionValue));
-        break;
-
-      case 'PlanDraftedEvent':
-        savedPlan = event.structured_plan || null;
-        if (savedPlan) {
-          savedPlan.reviewState = 'wait';
-          savedPlan.phase = 'wait';
-        }
-        setSavedPlan(savedPlan);
-        _appendMessageEl('system', '📋 Plan drafted — review and approve to execute.', 'info');
-        break;
-
-      case 'PlanPhaseTransitionRequested':
-        if (savedPlan) {
-          const rawPhase = String(event.to_phase || '').trim();
-          const normalizedPhase = rawPhase.toLowerCase();
-          const nextState = normalizedPhase === 'completed'
-            ? 'done'
-            : normalizedPhase === 'waitforreview'
-              ? 'wait'
-              : normalizedPhase || 'review';
-          savedPlan.reviewState = nextState;
-          savedPlan.phase = rawPhase || nextState;
-          setSavedPlan(savedPlan);
-        }
-        break;
-
-      case 'PlanReviewEvent':
-        if (['not_reviewable', 'closed', 'stale', 'cancelled', 'canceled', 'deleted'].includes(event.action)) {
-          clearSavedPlan();
-          break;
-        }
-        if (savedPlan) {
-          const nextState = event.action === 'completed'
-            ? 'done'
-            : event.action === 'approved'
-              ? 'executing'
-              : event.action === 'rejected'
-                ? 'drafting'
-                : String(event.action || event.phase || 'review').toLowerCase();
-          savedPlan.reviewState = nextState;
-          savedPlan.phase = event.phase || nextState;
-          if (Number.isInteger(event.totalTasks)) savedPlan.totalTasks = event.totalTasks;
-          if (Number.isInteger(event.completedTasks)) savedPlan.completedTasks = event.completedTasks;
-          if (Number.isInteger(event.remainingTasks)) savedPlan.remainingTasks = event.remainingTasks;
-          setSavedPlan(savedPlan);
-        }
-        break;
-
-      case 'SessionListEvent':
-        sessions = Array.isArray(event.sessions) ? event.sessions : [];
-        updateSession(event.current || currentSession);
-        break;
-
-      case 'SessionChangedEvent':
-        updateSession(event.current || 'default');
-        messagesEl.innerHTML = '';
-        toolPanel.clear();
-        if (Object.prototype.hasOwnProperty.call(event, 'planState')) {
-          setSavedPlan(planFromSessionState(event.planState));
-        } else {
-          savedPlan = planBySession[currentSession] || null;
-          renderPlanPanel(savedPlan);
-        }
-        savedHistory = Array.isArray(event.history) ? event.history : [];
-        savedHistory.forEach(m => {
-          if (m.type === 'message') {
-            const text = collapseDuplicatedHistoryText(m.text);
-            const rendered = _appendMessageEl(m.role, text, m.tone, false);
-            if (m.role === 'user') toolPanel.startRequest(text, rendered.article);
-            if (m.role === 'assistant') toolPanel.attachAssistant(rendered.article);
-          } else if (m.type === 'tool') {
-            toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false, m);
-          }
-        });
-        persistState();
-        renderContextBar();
-        break;
-
-      case 'SessionExportedEvent': {
-        const preview = event.format === 'json'
-          ? String(event.content || '').slice(0, 800)
-          : String(event.content || '').slice(0, 1200);
-        _appendMessageEl('system', `Exported ${event.name} (${event.format})\n\n${preview}`, 'info');
-        break;
-      }
-
-      case 'workspaceInfo':
-        if (workspaceLabelEl) {
-          workspaceLabelEl.textContent = event.name || '';
-          workspaceLabelEl.title       = event.path || '';
-        }
-        break;
-
-      case 'activeFileChanged':
-        if (activeFileEl) {
-          const name = (event.file || '').split(/[/\\]/).pop();
-          const line = Number.isInteger(event.line) ? `:${event.line}` : '';
-          activeFileEl.textContent = name ? `📄 ${name}${line}` : '';
-          activeFileEl.title       = event.file || '';
-        }
-        activeFileContext = event.file ? { file: event.file, line: event.line } : null;
-        if (suppressedActiveFile && suppressedActiveFile !== event.file) suppressedActiveFile = '';
-        renderContextBar();
-        break;
-
-      case 'customToolsLoaded':
-        renderCustomTools(event.tools || []);
-        break;
-
-      case 'customToolsChanged': {
-        const icons    = { created: '🔧➕', changed: '🔧✏️', deleted: '🔧🗑' };
-        const icon     = icons[event.action] || '🔧';
-        const fileName = (event.file || '').split(/[/\\]/).pop();
-        const validation = event.validation;
-        const msg = validation?.message ? ` — ${validation.message}` : '';
-        _appendMessageEl('system', `${icon} Tool file ${event.action}: ${fileName}${msg}`, validation?.success === false ? 'warn' : 'info');
-        vscode.postMessage({ type: 'getCustomTools' });
-        break;
-      }
-
-      case 'customToolValidation':
-        _appendMessageEl('system', event.message || '', event.success ? 'info' : 'warn');
-        break;
-
-      case 'healthStatus':
-        latestHealth = event;
-        healthPanelVisible = true;
-        renderHealthPanel();
-        break;
-
-      case 'changeReviewUpdated':
-        if (event.id) changeReviews = changeReviews.filter(item => item.id !== event.id);
-        persistState();
-        renderChangeReviewPanel();
-        _appendMessageEl('system', event.message || 'Change review updated.', event.success === false ? 'warn' : 'info');
-        break;
-
-      case 'assetSaved':
-        insertMentionPath(event.path || '');
-        _appendMessageEl('system', `Asset saved: ${event.path}`, 'info');
-        break;
-
-      case 'assetSaveFailed':
-        _appendMessageEl('system', event.message || 'Failed to save asset', 'error');
-        break;
-
-      case 'settingsChanged':
-        _appendMessageEl(
-          'system',
-          event.restartRequired
-            ? 'Settings changed. Restart Theseus to apply them.'
-            : 'Settings changed. They will apply on the next Start.',
-          'warn',
-        );
-        break;
-
-      case 'ClearChat':
-        _clearChat();
-        break;
-
-      case 'injectText': {
-        const injected = event.text || '';
-        promptEl.value = injected + (promptEl.value ? '\n' + promptEl.value : '');
-        resizeTextarea();
-        promptEl.focus();
-        promptEl.selectionStart = promptEl.selectionEnd = promptEl.value.length;
-        break;
-      }
-    }
+    eventDispatcher(event);
   });
 
 }());

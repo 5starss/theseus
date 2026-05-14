@@ -90,6 +90,23 @@ export type PermissionRequestEvent = RunnerBaseEvent<'PermissionRequest'> & {
   message?: Nullable<string>;
 };
 
+export type PermissionApprovalEvent = RunnerBaseEvent<'PermissionApproval'> & {
+  request_id?: Nullable<string>;
+  action?: 'approve' | 'reject';
+};
+
+export type RunnerReconnectEvent = RunnerBaseEvent<'RunnerReconnect'> & {
+  sessionId?: Nullable<string>;
+};
+
+export type RunnerReplayEvent = RunnerBaseEvent<'RunnerReplay'> & {
+  events?: JsonObject[];
+};
+
+export type RunnerCancelEvent = RunnerBaseEvent<'RunnerCancel'> & {
+  reason?: Nullable<string>;
+};
+
 export type SessionSummary = {
   name: string;
   title?: string;
@@ -117,6 +134,10 @@ export type KnownRunnerEvent =
   | RunnerBaseEvent<'ErrorEvent'>
   | RunnerBaseEvent<'StatusEvent'>
   | PermissionRequestEvent
+  | PermissionApprovalEvent
+  | RunnerReconnectEvent
+  | RunnerReplayEvent
+  | RunnerCancelEvent
   | (RunnerBaseEvent<'filesResult'> & { files?: string[] })
   | (RunnerBaseEvent<'PlanDraftedEvent'> & { structured_plan?: JsonObject })
   | (RunnerBaseEvent<'PlanPhaseTransitionRequested'> & {
@@ -202,7 +223,11 @@ export type WebviewToHostMessage =
   | { type: 'revertChangedFile'; id?: string; path?: string; oldContent?: string }
   | { type: 'openFile'; path?: string }
   | { type: 'openExternal'; url?: string }
-  | { type: 'openGeneratedTool' | 'openDiff'; event?: RunnerEvent };
+  | { type: 'openGeneratedTool' | 'openDiff'; event?: RunnerEvent }
+  | { type: 'permissionApproval'; requestId?: string; action?: 'approve' | 'reject' }
+  | { type: 'cancelSession'; reason?: string }
+  | { type: 'reconnectSession' }
+  | { type: 'replaySession' };
 
 const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'init',
@@ -244,6 +269,10 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'openExternal',
   'openGeneratedTool',
   'openDiff',
+  'permissionApproval',
+  'cancelSession',
+  'reconnectSession',
+  'replaySession',
 ]);
 
 const HOST_TO_WEBVIEW_MESSAGE_TYPES = new Set([
@@ -275,6 +304,10 @@ const KNOWN_RUNNER_EVENT_TYPES = new Set([
   'ErrorEvent',
   'StatusEvent',
   'PermissionRequest',
+  'PermissionApproval',
+  'RunnerReconnect',
+  'RunnerReplay',
+  'RunnerCancel',
   'filesResult',
   'PlanDraftedEvent',
   'PlanPhaseTransitionRequested',
@@ -345,7 +378,14 @@ function isKnownRunnerEventShape(value: JsonObject, type: string): boolean {
     case 'ErrorEvent':
     case 'StatusEvent':
     case 'PermissionRequest':
-      return optionalString(value.message);
+    case 'RunnerCancel':
+      return optionalString(value.message) || optionalString(value.reason);
+    case 'PermissionApproval':
+      return optionalString(value.request_id) && optionalString(value.action);
+    case 'RunnerReconnect':
+      return optionalString(value.sessionId);
+    case 'RunnerReplay':
+      return isMissing(value.events) || Array.isArray(value.events);
     case 'filesResult':
       return optionalStringArray(value.files);
     case 'SessionListEvent':
