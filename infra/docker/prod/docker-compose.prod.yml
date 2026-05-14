@@ -111,7 +111,9 @@ services:
     environment:
       ENV: prod
       AUTH_MODE: spring
-      CORE_KAFKA_CONSUMER_ENABLED: true
+      CORE_KAFKA_CONSUMER_ENABLED: ${CORE_KAFKA_CONSUMER_ENABLED:-true}
+      CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED: ${CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED:-false}
+      CORE_TOOL_PLAN_CONSUMER_ENABLED: ${CORE_TOOL_PLAN_CONSUMER_ENABLED:-true}
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
       DOCKER_HOST: unix:///var/run/docker.sock
       THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
@@ -123,7 +125,7 @@ services:
       SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
       SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
       SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
-      SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: http://theseus-api-server:8080/api/internal/remote-workspaces/connection-config
+      SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: ${SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL:-http://theseus-api-server:8080/api/internal/remote-workspaces/connection-config}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
