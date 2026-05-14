@@ -4,11 +4,11 @@ import shlex
 from fnmatch import fnmatch
 from collections.abc import Callable
 
+from pydantic import BaseModel, Field
 from src.remote_workspace.exceptions import RemoteWorkspaceError
 from src.remote_workspace.schemas import RemoteCommandResult, RemoteWorkspaceConnectionConfig
 from src.remote_workspace.ssh_connector import SshRemoteWorkspaceConnector
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
-from theseus_engine.tools.core.bash_tool import BashInput
 from theseus_engine.tools.core.file_read_tool import ReadFileInput
 from theseus_engine.tools.core.glob_tool import GlobInput
 from theseus_engine.tools.core.grep_tool import GrepInput
@@ -16,8 +16,26 @@ from theseus_engine.tools.core.grep_tool import GrepInput
 
 ConnectorFactory = Callable[[RemoteWorkspaceConnectionConfig], SshRemoteWorkspaceConnector]
 
-REMOTE_READ_ANALYSIS_TOOL_NAMES = frozenset({"read_file", "glob", "grep", "bash"})
+REMOTE_READ_ANALYSIS_TOOL_NAMES = frozenset(
+    {
+        "remote_read_file",
+        "remote_grep",
+        "remote_tail_log",
+        "remote_check_cpu",
+        "remote_check_memory",
+        "remote_check_disk",
+    }
+)
 DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS = 180
+
+
+class RemoteTailLogInput(BaseModel):
+    path: str = Field(description="Remote log file path relative to the Remote Workspace basePath.")
+    lines: int = Field(default=200, ge=1, le=1000, description="Number of log lines to read from the end.")
+
+
+class RemoteNoInput(BaseModel):
+    pass
 
 
 class RemoteWorkspaceToolMixin:
@@ -44,7 +62,7 @@ class RemoteWorkspaceToolMixin:
 
 
 class RemoteReadFileTool(RemoteWorkspaceToolMixin, BaseTool):
-    name = "read_file"
+    name = "remote_read_file"
     description = "Read a text file from the selected Remote Workspace with line numbers."
     input_model = ReadFileInput
     permission_level = 1
@@ -97,7 +115,7 @@ class RemoteReadFileTool(RemoteWorkspaceToolMixin, BaseTool):
 
 
 class RemoteGlobTool(RemoteWorkspaceToolMixin, BaseTool):
-    name = "glob"
+    name = "remote_glob"
     description = "Find files in the selected Remote Workspace matching a glob pattern."
     input_model = GlobInput
     permission_level = 1
@@ -154,7 +172,7 @@ class RemoteGlobTool(RemoteWorkspaceToolMixin, BaseTool):
 
 
 class RemoteGrepTool(RemoteWorkspaceToolMixin, BaseTool):
-    name = "grep"
+    name = "remote_grep"
     description = "Search for a pattern in file contents within the selected Remote Workspace."
     input_model = GrepInput
     permission_level = 1
@@ -189,127 +207,77 @@ class RemoteGrepTool(RemoteWorkspaceToolMixin, BaseTool):
             return self.format_remote_error(exc)
 
 
-class RemoteReadOnlyBashTool(RemoteWorkspaceToolMixin, BaseTool):
-    name = "bash"
-    description = "Run a read-only shell command in the selected Remote Workspace."
-    input_model = BashInput
+class RemoteTailLogTool(RemoteWorkspaceToolMixin, BaseTool):
+    name = "remote_tail_log"
+    description = "Read recent lines from a log file in the selected Remote Workspace."
+    input_model = RemoteTailLogInput
     permission_level = 1
     is_destructive = False
-
-    READ_ONLY_COMMANDS = frozenset(
-        {
-            "awk",
-            "cat",
-            "df",
-            "du",
-            "find",
-            "free",
-            "grep",
-            "head",
-            "id",
-            "journalctl",
-            "lsof",
-            "ls",
-            "netstat",
-            "ps",
-            "pwd",
-            "sed",
-            "ss",
-            "stat",
-            "tail",
-            "top",
-            "uname",
-            "uptime",
-            "wc",
-            "whoami",
-        }
-    )
-    DENIED_TOKENS = (
-        ">",
-        ">>",
-        "&&",
-        ";",
-        "| sh",
-        "| bash",
-        "`",
-        "$(",
-        " chmod ",
-        " chown ",
-        " cp ",
-        " curl ",
-        " dd ",
-        " docker ",
-        " kill ",
-        " kubectl ",
-        " mkdir ",
-        " mv ",
-        " npm ",
-        " pip ",
-        " pkill ",
-        " python ",
-        " reboot",
-        " rm ",
-        " rmdir ",
-        " service ",
-        " sudo ",
-        " systemctl ",
-        " tee ",
-        " touch ",
-        " truncate ",
-        " wget ",
-    )
 
     def is_read_only(self, arguments) -> bool:
         return True
 
-    async def execute(self, arguments: BashInput, context: ToolExecutionContext) -> ToolResult:
+    async def execute(self, arguments: RemoteTailLogInput, context: ToolExecutionContext) -> ToolResult:
         del context
-        denied_reason = self.validate_read_only_command(arguments.command)
-        if denied_reason:
-            return ToolResult(output=denied_reason, is_error=True)
-
         connector = self.create_connector()
         try:
+            remote_path = connector.resolve_path(arguments.path)
             result = connector.run_command(
-                arguments.command,
-                working_directory=arguments.cwd or ".",
-                timeout_seconds=min(arguments.timeout_seconds, DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS),
+                f"tail -n {arguments.lines} {shlex.quote(remote_path)}",
+                working_directory=".",
+                timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
             )
             if result.exit_code != 0:
                 return self.format_command_failure(result)
-            output = result.stdout.strip()
-            if result.stderr.strip():
-                output = f"{output}\n{result.stderr.strip()}".strip()
-            return ToolResult(output=output or "(no output)", metadata={"exit_code": result.exit_code})
+            return ToolResult(
+                output=result.stdout.strip() or "(no log output)",
+                metadata={"remote_path": remote_path, "lines": arguments.lines},
+            )
         except RemoteWorkspaceError as exc:
             return self.format_remote_error(exc)
 
-    def validate_read_only_command(self, command: str) -> str | None:
-        stripped = command.strip()
-        if not stripped:
-            return "Remote bash command must not be blank."
+
+class RemoteResourceCheckTool(RemoteWorkspaceToolMixin, BaseTool):
+    input_model = RemoteNoInput
+    permission_level = 1
+    is_destructive = False
+    command = ""
+
+    def is_read_only(self, arguments) -> bool:
+        return True
+
+    async def execute(self, arguments: RemoteNoInput, context: ToolExecutionContext) -> ToolResult:
+        del arguments, context
+        connector = self.create_connector()
         try:
-            command_parts = shlex.split(stripped)
-        except ValueError as exc:
-            return f"Remote bash command is invalid: {exc}"
-        first_command = command_parts[0]
-        if first_command not in self.READ_ONLY_COMMANDS:
-            return f"Remote bash only allows read-only inspection commands. Command '{first_command}' is not allowed."
+            result = connector.run_command(
+                self.command,
+                working_directory=".",
+                timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
+            )
+            if result.exit_code != 0:
+                return self.format_command_failure(result)
+            return ToolResult(output=result.stdout.strip() or "(no output)")
+        except RemoteWorkspaceError as exc:
+            return self.format_remote_error(exc)
 
-        lowered = f" {stripped.lower()} "
-        for token in self.DENIED_TOKENS:
-            if token in lowered:
-                return f"Remote bash command contains a denied token: {token.strip()}"
-        for part in command_parts[1:]:
-            if part.startswith("/") and not self.is_under_base_path(part):
-                return "Remote bash command path must stay under the Remote Workspace basePath."
-        return None
 
-    def is_under_base_path(self, path: str) -> bool:
-        base_path = self.config.base_path.rstrip("/")
-        if not base_path:
-            return path.startswith("/")
-        return path == base_path or path.startswith(f"{base_path}/")
+class RemoteCheckCpuTool(RemoteResourceCheckTool):
+    name = "remote_check_cpu"
+    description = "Inspect CPU load and top processes in the selected Remote Workspace."
+    command = "uptime && ps -eo pid,ppid,comm,%cpu,%mem --sort=-%cpu | head -n 15"
+
+
+class RemoteCheckMemoryTool(RemoteResourceCheckTool):
+    name = "remote_check_memory"
+    description = "Inspect memory usage in the selected Remote Workspace."
+    command = "free -m && ps -eo pid,ppid,comm,%mem,%cpu --sort=-%mem | head -n 15"
+
+
+class RemoteCheckDiskTool(RemoteResourceCheckTool):
+    name = "remote_check_disk"
+    description = "Inspect disk usage in the selected Remote Workspace."
+    command = "df -h"
 
 
 def build_remote_read_analysis_tools(
@@ -317,11 +285,13 @@ def build_remote_read_analysis_tools(
     *,
     connector_factory: ConnectorFactory | None = None,
 ) -> list[BaseTool]:
-    """Return Remote Workspace primitive tools using the existing LLM tool names."""
+    """Return Remote Workspace read-only primitive tools with explicit remote names."""
 
     return [
         RemoteReadFileTool(config, connector_factory=connector_factory),
-        RemoteGlobTool(config, connector_factory=connector_factory),
         RemoteGrepTool(config, connector_factory=connector_factory),
-        RemoteReadOnlyBashTool(config, connector_factory=connector_factory),
+        RemoteTailLogTool(config, connector_factory=connector_factory),
+        RemoteCheckCpuTool(config, connector_factory=connector_factory),
+        RemoteCheckMemoryTool(config, connector_factory=connector_factory),
+        RemoteCheckDiskTool(config, connector_factory=connector_factory),
     ]

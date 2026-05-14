@@ -13,7 +13,10 @@ from src.remote_workspace.read_primitives import (
     build_remote_read_analysis_tools,
 )
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
-from src.remote_workspace.write_primitives import build_remote_write_execution_tools
+from src.remote_workspace.write_primitives import (
+    REMOTE_WRITE_EXECUTION_TOOL_NAMES,
+    build_remote_write_execution_tools,
+)
 from src.tooling import load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
@@ -104,6 +107,9 @@ _PLAN_DRAFTING_ALLOWED_TOOLS = frozenset(
         "brief",
     }
 )
+_LOCAL_REMOTE_OVERLAP_TOOL_NAMES = frozenset(
+    {"read_file", "glob", "grep", "bash", "write_file", "edit_file"}
+)
 
 
 def _all_tool_names(full_registry: ToolRegistry) -> set[str]:
@@ -120,9 +126,14 @@ def _resolve_plan_phase(build_context: EngineBuildContext) -> PlanPhase | None:
     return PlanPhase.DRAFTING
 
 
-def _allows_remote_write_execution(mode: AgentMode, plan_phase: PlanPhase | None) -> bool:
+def _allows_remote_write_execution(
+    mode: AgentMode,
+    plan_phase: PlanPhase | None,
+    remote_workspace: RemoteWorkspaceConnectionConfig | None,
+) -> bool:
+    del plan_phase
     if mode == AgentMode.AGENT:
-        return True
+        return bool(remote_workspace and remote_workspace.allow_write_execution)
     return False
 
 
@@ -132,6 +143,7 @@ def _resolve_excluded_tools(
     full_registry: ToolRegistry,
     *,
     has_remote_workspace: bool,
+    allow_remote_write_execution: bool,
 ) -> set[str]:
     all_tool_names = _all_tool_names(full_registry)
     if mode == AgentMode.ASK:
@@ -144,10 +156,16 @@ def _resolve_excluded_tools(
     }:
         allowed_tools = set(_PLAN_DRAFTING_ALLOWED_TOOLS)
         if has_remote_workspace:
+            allowed_tools.difference_update(_LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
             allowed_tools.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
         return all_tool_names - allowed_tools
     if mode != AgentMode.PLAN:
-        return {"create_tool"}
+        excluded_tools = {"create_tool"}
+        if has_remote_workspace:
+            excluded_tools.update(_LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
+            if not allow_remote_write_execution:
+                excluded_tools.update(REMOTE_WRITE_EXECUTION_TOOL_NAMES)
+        return excluded_tools
     return set()
 
 
@@ -254,6 +272,11 @@ def get_query_engine(
         raise EngineInitializationError("Engine mode must be a valid AgentMode.")
 
     plan_phase = _resolve_plan_phase(build_context)
+    allow_remote_write_execution = _allows_remote_write_execution(
+        build_context.mode,
+        plan_phase,
+        build_context.remote_workspace,
+    )
     model_name = resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
@@ -263,7 +286,7 @@ def get_query_engine(
     if build_context.remote_workspace is not None:
         for tool in build_remote_read_analysis_tools(build_context.remote_workspace):
             full_registry.register(tool)
-        if _allows_remote_write_execution(build_context.mode, plan_phase):
+        if allow_remote_write_execution:
             for tool in build_remote_write_execution_tools(build_context.remote_workspace):
                 full_registry.register(tool)
 
@@ -295,6 +318,7 @@ def get_query_engine(
             plan_phase,
             full_registry,
             has_remote_workspace=build_context.remote_workspace is not None,
+            allow_remote_write_execution=allow_remote_write_execution,
         ),
     )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())

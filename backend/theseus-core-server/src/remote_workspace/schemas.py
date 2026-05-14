@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RemoteWorkspaceConnectionConfig(BaseModel):
-    """SSH connection information received from API Server."""
+    """Core-internal SSH connection information for a Remote Workspace."""
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -17,6 +17,7 @@ class RemoteWorkspaceConnectionConfig(BaseModel):
     password: str | None = None
     private_key_path: str | None = Field(default=None, alias="privateKeyPath")
     base_path: str = Field(alias="basePath")
+    allow_write_execution: bool = Field(default=False, alias="allowWriteExecution")
     status: str | None = None
 
     @field_validator("host", "username", "base_path")
