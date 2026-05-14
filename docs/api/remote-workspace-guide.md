@@ -41,6 +41,28 @@ Core Server
 | ToolPlan | 승인 전 Tool 명세 |
 | Tool build | 승인된 ToolPlan을 실제 Theseus Tool 코드로 만드는 과정 |
 
+## 접속 단위와 credential
+
+Remote Workspace는 고객사 환경 전체가 아니라 SSH로 접속 가능한 단일 실행 대상이다.
+
+서버별 접속 키가 다르면 Remote Workspace도 분리해서 등록한다.
+
+```text
+싸피증권 운영서버 Remote Workspace
+- host: ssafy-stock.kr
+- privateKeyPath: 운영서버 접근 pem
+
+싸피증권 DB 접근 서버 Remote Workspace
+- host: DB Bastion 또는 DB 접근용 서버
+- privateKeyPath: DB 접근 pem
+
+싸피증권 Redis 접근 서버 Remote Workspace
+- host: Redis Bastion 또는 Redis 접근용 서버
+- privateKeyPath: Redis 접근 pem
+```
+
+하나의 요청에서 선택하는 기본 대상은 `remoteWorkspaceId` 하나다. App 서버, DB 서버, Redis 서버를 한 번에 묶어 분석해야 하는 흐름은 별도 workspace profile 또는 복수 workspace 선택 정책이 필요하다.
+
 ## API Server 저장 정보
 
 `remote_workspaces`는 프로젝트 단위로 저장된다.
@@ -357,6 +379,8 @@ Request Body:
 
 `ASK`와 `PLAN`은 원격 서버를 분석 대상으로 사용할 수 있다. 원격 파일 수정, 임의 명령 실행, 패치 작업은 `AGENT` 또는 승인된 생성 Tool 실행에서 사용한다.
 
+DB/Redis 접근은 별도 pem 또는 Bastion이 필요한 경우 별도 Remote Workspace로 등록한다. MVP 기준 DB/Redis는 조회와 진단 중심으로 사용한다. `UPDATE`, `DELETE`, `DROP`, `FLUSHALL`, `CONFIG SET`처럼 운영 데이터나 인프라 상태를 변경하는 작업은 별도 승인, allowlist, 감사 로그, rollback 정책이 마련되기 전까지 자동화 범위에 포함하지 않는다.
+
 ## Core primitive 연결
 
 Remote Workspace가 선택되면 Core는 기존 tool name을 유지하면서 backend만 SSH 기반으로 바꾼다.
@@ -476,6 +500,8 @@ IP로 직접 접속할 때는 `Host`에 `54.180.80.22`를 입력한다.
 
 `basePath`는 반드시 원격 서버의 절대경로여야 한다. 처음에는 `/home/ubuntu`로 연결 테스트를 통과시킨 뒤 실제 서비스 경로로 좁힌다.
 
+DB 또는 Redis가 운영서버와 다른 pem으로 접근되는 구조라면 운영서버 Remote Workspace를 재사용하지 않는다. DB/Redis 접근용 Bastion 또는 접근 서버를 별도 Remote Workspace로 등록하고, 해당 workspace를 선택한 요청에서는 조회와 진단 목적의 명령만 사용한다.
+
 ## FE 사용 절차
 
 1. 프로젝트 설정으로 이동한다.
@@ -538,6 +564,8 @@ ToolPlan 승인 요청
 | `OpenAI API key is not configured` | `THESEUS_MODEL=vllm/...`와 `OPENAI_BASE_URL` 확인 |
 | PLAN 요청 후 응답 없음 | Kafka topic, Core consumer, API consumer, Redis/SSE 로그 확인 |
 | 생성 Tool이 Remote Workspace를 못 씀 | 실행 context에 `remoteWorkspace` metadata가 포함되는지 확인 |
+| DB/Redis 접근이 실패함 | 운영서버 pem과 DB/Redis pem이 같은지 확인하지 말고, DB/Redis 접근용 Remote Workspace가 별도로 등록되어 있는지 확인 |
+| DB/Redis 변경 작업이 필요함 | MVP 범위에서는 자동 실행하지 않고 별도 승인/감사/rollback 정책을 먼저 정의 |
 
 ## 관련 구현 파일
 
