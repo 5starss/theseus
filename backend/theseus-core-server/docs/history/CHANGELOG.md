@@ -4,6 +4,99 @@
 
 ## [Unreleased]
 
+### 🐛 Session 106 — Debug dump 세션별 overwrite 저장 (2026-05-14)
+
+#### `theseus_engine/wrappers/llm_clients` / `src/tool_plan` / `src/tool_build`
+
+- `THESEUS_DEBUG_DUMP=true`일 때 LLM 요청/응답 디버그 덤프가 매 요청마다 timestamp 파일을 새로 만들지 않고, 세션 스코프별 고정 JSON 파일을 덮어쓰도록 변경
+- 서버 stream, PLAN draft, ToolBuild LLM 요청에 `project_id`, `chat_session_id`, `run_id` 등 내부 debug context를 전달해 `project_<id>_chat_<id>/router_incoming_request.json` 형태로 정리
+- Gemini final params 덤프도 같은 세션 스코프 아래 `gemini_final_params.json`으로 저장되도록 변경
+- `.env.example`에 세션별 overwrite 저장 경로 예시를 추가
+
+#### 검증
+
+- `python -m py_compile theseus_engine\wrappers\llm_clients\api_types.py theseus_engine\wrappers\llm_clients\theseus_client.py theseus_engine\engine\query_engine.py src\tool_plan\agent_loop.py src\tool_plan\planner.py src\tool_build\builder.py` 성공
+- inline smoke로 같은 세션 스코프의 덤프 파일이 재호출 시 새 파일 생성 없이 덮어써지는지 확인
+
+---
+
+### 🔧 Session 105 — 레거시 런타임 명칭/모델 fallback 정리 (2026-05-14)
+
+#### `src` / `theseus_engine`
+
+- Core 모델 선택을 `THESEUS_MODEL` 중심으로 단순화하고, 삭제된 레거시 런타임용 모델 env fallback을 제거
+- CLI, daemon, runner runtime, engine builder, model router의 모델 fallback 경로를 `THESEUS_MODEL -> gpt-4o` 또는 명시 인자 우선 정책으로 정리
+- runtime docstring/comment와 `state.py` PLAN DRAFTING prompt에서 삭제된 외부 런타임 명칭을 제거하고 Theseus-native 표현으로 정리
+- `theseus_engine`의 hook, RBAC, LLM wrapper, validator, TUI, task/tool primitive 설명을 현재 자체 구현 기준으로 갱신
+
+#### 검증
+
+- `src`, `theseus_engine`, `.env.example` 범위에서 레거시 모델 env와 삭제된 외부 런타임 명칭 검색 결과 없음 확인
+
+---
+
+### 🐛 Session 104 — ToolBuild 생성 문법/파일명 및 PLAN 표시 안정화 (2026-05-14)
+
+#### `src/tool_build` / `src/tooling` / `src/tool_plan`
+
+- ToolBuild LLM 출력이 JSON 파싱 실패, Python 문법 오류, sandbox 실패를 만났을 때 같은 run 안에서 repair prompt를 재생성하도록 강화
+- SyntaxError context와 sandbox 실패 요약이 repair prompt와 최종 `TOOL_BUILD_FAILED.message`에 남도록 정리
+- 프로젝트별 생성 Tool 파일명을 논리 tool name과 분리해 `<tool_name>_tool.py` / `<tool_name>_tool.meta.json` 규칙으로 저장하도록 변경
+- 프로젝트 custom tool loader가 metadata의 `fileName` / `moduleName`을 우선 사용해 `_tool.py` 파일명을 안정적으로 로드하도록 보강
+- PLAN completed assistant message가 LLM 원문 JSON 대신 `planSnapshot` 기반 표시용 Markdown을 저장하도록 변경하고, `task_id` / `blockId` 같은 내부 ID는 사용자 메시지에서 숨김
+
+#### `theseus_engine`
+
+- 로컬 `create_tool` 저장 경로와 `/validate` 명령도 `_tool.py` 파일명 규칙을 따르도록 정리
+- PLAN DRAFTING prompt의 신규 tool 생성 target file 안내를 `_tool.py` / `_tool.meta.json` 규칙으로 갱신
+
+#### 검증
+
+- `python -m py_compile src\tool_build\builder.py src\tooling\service.py src\tool_plan\planner.py theseus_engine\tools\core\tool_factory.py theseus_engine\models\state.py theseus_engine\tui\tui_main.py` 성공
+- `python -m compileall -q src` 성공
+- inline smoke로 `create_sandbox_math_test`가 `create_sandbox_math_test_tool.py`로 저장되고 프로젝트 loader가 metadata 기반으로 로드하는 것 확인
+- fake LLM 기반 smoke로 `LLM_OUTPUT_INVALID` 후 repair 재생성이 같은 ToolBuild run 안에서 성공하는 것 확인
+- PLAN Markdown smoke에서 JSON 코드블록과 내부 `blockId`가 사용자 표시 Markdown에 포함되지 않는 것 확인
+
+---
+
+### 🐛 Session 103 — Extension 세션 복원 tool result 표시 보정 (2026-05-13)
+
+#### `theseus_engine/runner_runtime.py` / `vscode-extension/src/session/LocalSessionStore.ts`
+
+- 세션 전환/복원 시 LLM 컨텍스트 호환을 위해 `role=user`로 저장된 `tool_result` 블록이 일반 USER 메시지로 표시되던 문제를 수정
+- `assistant`의 `tool_use`와 이어지는 `user`의 `tool_result`를 `tool_use_id` 기준으로 매칭해 UI history에서는 `type=tool` activity entry로 복원하도록 변경
+- tool result만 들어 있는 내부 메시지는 채팅 말풍선으로 렌더링하지 않고, 기존처럼 사용자 질문 아래 Activity accordion에 input/output 형태로 표시되도록 정리
+
+#### 검증
+
+- `python -m py_compile theseus_engine\runner_runtime.py` 성공
+- `npm.cmd run compile` 성공
+- 기존 `.theseus_sessions\default.json` 기준 smoke에서 마지막 세션 항목이 `message(user) -> tool -> message(assistant)` 순서로 변환되는 것 확인
+
+---
+
+### 🔧 Session 102 — Core remote workspace SSH 기반 모듈 추가 (2026-05-13)
+
+#### `src/remote_workspace`
+
+- RemoteWorkspace payload를 SSH 접속 정보로 변환하는 Core 내부 schema를 추가
+- password 기반 SSH 인증을 `SecretStr`로 받고, privateKeyPath 기반 인증 로딩 틀을 추가
+- Paramiko 기반 SSH connector에 연결/종료, command 실행 wrapper, stdout/stderr/exitCode/timedOut/durationMs 분리 결과를 추가
+- 원격 `realpath` 기준으로 `basePath` 밖 cwd/target path 실행을 차단하는 guard를 추가
+- 로그/예외 context에서 password와 private key 내용을 제외하도록 정리
+
+#### `src/tool_plan`
+
+- `remoteWorkspace.password`가 Kafka payload로 들어와도 Core model dump와 repr에서 제외되도록 `SecretStr` 필드를 추가
+
+#### 검증
+
+- `python -m py_compile src\remote_workspace\schemas.py src\remote_workspace\exceptions.py src\remote_workspace\ssh_connector.py src\tool_plan\schemas.py` 성공
+- inline smoke로 password dump 제외, payload 변환, basePath prefix guard 확인
+
+---
+
 ### 🧭 Session 101 — PLAN runtime 용어 경계 및 prompt map 정리 (2026-05-13)
 
 #### `src/tool_plan` / `src/tool_build` / `src/tool_generation` / `src/auth` / `src/history`
