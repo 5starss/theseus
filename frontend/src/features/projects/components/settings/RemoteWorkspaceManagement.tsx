@@ -29,22 +29,31 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
   const [isSaving, setIsSaving] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
 
-  const loadRemoteWorkspaces = async () => {
-    try {
-      setIsLoading(true);
-      const responses = await remoteWorkspaceApi.getRemoteWorkspaces(projectId);
-      setRemoteWorkspaces(responses);
-    } catch (error) {
-      console.error('Failed to load remote workspaces', error);
-      toast.error('Remote Workspace 목록을 불러오지 못했습니다.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [fetchTrigger, setFetchTrigger] = useState(0);
+  const refetch = () => setFetchTrigger((n) => n + 1);
 
   useEffect(() => {
-    void loadRemoteWorkspaces();
-  }, [projectId]);
+    let cancelled = false;
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const responses = await remoteWorkspaceApi.getRemoteWorkspaces(projectId);
+        if (cancelled) return;
+        setRemoteWorkspaces(responses);
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load remote workspaces', error);
+          toast.error('Remote Workspace 목록을 불러오지 못했습니다.');
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, fetchTrigger]);
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.host.trim() || !form.username.trim() || !form.basePath.trim()) {
@@ -65,7 +74,7 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
       });
       setForm(EMPTY_FORM);
       toast.success('Remote Workspace를 등록했습니다.');
-      await loadRemoteWorkspaces();
+      refetch();
     } catch (error) {
       console.error('Failed to create remote workspace', error);
       toast.error('Remote Workspace 등록에 실패했습니다.');
@@ -95,7 +104,7 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
     try {
       await remoteWorkspaceApi.deleteRemoteWorkspace(projectId, remoteWorkspaceId);
       toast.success('Remote Workspace를 삭제했습니다.');
-      await loadRemoteWorkspaces();
+      refetch();
     } catch (error) {
       console.error('Failed to delete remote workspace', error);
       toast.error('Remote Workspace 삭제에 실패했습니다.');
