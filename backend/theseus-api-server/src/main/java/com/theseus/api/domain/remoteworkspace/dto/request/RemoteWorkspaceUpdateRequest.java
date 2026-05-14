@@ -22,4 +22,6 @@ public class RemoteWorkspaceUpdateRequest {
 	private String privateKeyPath;
 
 	private String basePath;
+
+	private Boolean allowWriteExecution;
 }

@@ -195,7 +195,6 @@ class ToolPlanGenerationServiceTest {
 		assertThat(payload.requestedByUserId()).isEqualTo(fixture.user().getId());
 		assertThat(payload.requestedByProjectMemberId()).isEqualTo(fixture.projectMember().getId());
 		assertThat(payload.remoteWorkspaceId()).isNull();
-		assertThat(payload.remoteWorkspace()).isNull();
 		assertThat(payload.prompt()).isEqualTo(request.getPrompt());
 		assertThat(payload.history()).hasSize(2);
 		assertThat(payload.history().get(0).content()).isEqualTo("이전 질문");
@@ -268,10 +267,7 @@ class ToolPlanGenerationServiceTest {
 		verify(eventPublisher).publishEvent(eventCaptor.capture());
 		ToolPlanGenerationRequestEvent payload = (ToolPlanGenerationRequestEvent) eventCaptor.getValue().payload();
 		assertThat(payload.remoteWorkspaceId()).isEqualTo(70L);
-		assertThat(payload.remoteWorkspace()).isNotNull();
-		assertThat(payload.remoteWorkspace().id()).isEqualTo(70L);
-		assertThat(payload.remoteWorkspace().host()).isEqualTo("10.0.1.20");
-		assertThat(payload.remoteWorkspace().password()).isEqualTo("password");
+		assertThat(payload.toString()).doesNotContain("password").doesNotContain("10.0.1.20");
 	}
 
 	@Test
@@ -452,8 +448,7 @@ class ToolPlanGenerationServiceTest {
 		assertThat(payload.projectId()).isEqualTo(fixture.project().getId());
 		assertThat(payload.chatSessionId()).isEqualTo(chatSession.getId());
 		assertThat(payload.remoteWorkspaceId()).isEqualTo(70L);
-		assertThat(payload.remoteWorkspace()).isNotNull();
-		assertThat(payload.remoteWorkspace().username()).isEqualTo("ubuntu");
+		assertThat(payload.toString()).doesNotContain("password").doesNotContain("ubuntu");
 		assertThat(payload.baseToolPlanId()).isEqualTo(baseToolPlan.getId());
 		assertThat(payload.planGroupId()).isEqualTo(planGroup.getId());
 		assertThat(payload.basePlanVersion()).isEqualTo(2L);

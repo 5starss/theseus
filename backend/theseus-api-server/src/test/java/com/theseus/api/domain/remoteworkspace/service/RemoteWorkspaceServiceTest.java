@@ -67,7 +67,9 @@ class RemoteWorkspaceServiceTest {
 			.orElseThrow();
 		assertThat(response.getProjectId()).isEqualTo(fixture.project().getId());
 		assertThat(response.getName()).isEqualTo("alpha-server");
+		assertThat(response.getAllowWriteExecution()).isFalse();
 		assertThat(savedRemoteWorkspace.getPassword()).isEqualTo("password");
+		assertThat(savedRemoteWorkspace.isAllowWriteExecution()).isFalse();
 		assertThat(savedRemoteWorkspace.getStatus()).isEqualTo(RemoteWorkspaceStatus.ACTIVE);
 	}
 
@@ -131,8 +133,10 @@ class RemoteWorkspaceServiceTest {
 		// Then
 		assertThat(response.getName()).isEqualTo("after-server");
 		assertThat(response.getPort()).isEqualTo(2222);
+		assertThat(response.getAllowWriteExecution()).isTrue();
 		assertThat(remoteWorkspace.getName()).isEqualTo("after-server");
 		assertThat(remoteWorkspace.getPort()).isEqualTo(2222);
+		assertThat(remoteWorkspace.isAllowWriteExecution()).isTrue();
 	}
 
 	@Test
@@ -176,7 +180,9 @@ class RemoteWorkspaceServiceTest {
 		// Then
 		assertThat(response.getRemoteWorkspaceId()).isEqualTo(remoteWorkspace.getId());
 		assertThat(response.getAvailable()).isFalse();
-		assertThat(response.getMessage()).isNotBlank();
+		assertThat(response.getMessage()).isEqualTo(
+			"Remote Workspace connection test is not enabled until secure secret resolution is ready."
+		);
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber) {
@@ -234,6 +240,7 @@ class RemoteWorkspaceServiceTest {
 		ReflectionTestUtils.setField(request, "password", "password");
 		ReflectionTestUtils.setField(request, "privateKeyPath", null);
 		ReflectionTestUtils.setField(request, "basePath", "/srv/app");
+		ReflectionTestUtils.setField(request, "allowWriteExecution", false);
 
 		return request;
 	}
@@ -242,6 +249,7 @@ class RemoteWorkspaceServiceTest {
 		RemoteWorkspaceUpdateRequest request = new RemoteWorkspaceUpdateRequest();
 		ReflectionTestUtils.setField(request, "name", name);
 		ReflectionTestUtils.setField(request, "port", port);
+		ReflectionTestUtils.setField(request, "allowWriteExecution", true);
 
 		return request;
 	}

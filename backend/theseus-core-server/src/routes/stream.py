@@ -22,7 +22,6 @@ from src.history.service import (
     persist_user_message,
 )
 from src.plan.service import restore_plan_after_stream, validate_executing_plan_binding
-from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from theseus_engine.models.state import AgentMode
 
 router = APIRouter()
@@ -40,10 +39,6 @@ class CoreStreamRequest(BaseModel):
     mode: str = "AGENT"
     plan_id: str | None = Field(default=None, alias="planId")
     remote_workspace_id: int | None = Field(default=None, alias="remoteWorkspaceId")
-    remote_workspace: RemoteWorkspaceConnectionConfig | None = Field(
-        default=None,
-        alias="remoteWorkspace",
-    )
 
 
 def sse_event(event_type: str, data: dict) -> str:
@@ -238,14 +233,10 @@ async def create_streaming_response(
     mode: str,
     plan_id: str | None,
     remote_workspace_id: int | None,
-    remote_workspace: RemoteWorkspaceConnectionConfig | None,
     session: SessionContext,
     db: Session,
 ) -> StreamingResponse:
     """Assemble stream context and return a Core SSE response."""
-
-    if remote_workspace_id is None and remote_workspace is not None:
-        remote_workspace_id = remote_workspace.remote_workspace_id
 
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
@@ -289,7 +280,6 @@ async def create_streaming_response(
         plan_id=plan_id,
         plan_content=bound_plan.content if bound_plan is not None else None,
         remote_workspace_id=remote_workspace_id,
-        remote_workspace=remote_workspace,
     )
 
     await persist_user_message(session, chat_session_id, prompt)
@@ -396,7 +386,6 @@ async def stream_endpoint_post(
         mode=request.mode,
         plan_id=request.plan_id,
         remote_workspace_id=request.remote_workspace_id,
-        remote_workspace=request.remote_workspace,
         session=session,
         db=db,
     )

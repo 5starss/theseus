@@ -18,7 +18,9 @@ from theseus_engine.tools.core.file_utils import _strip_markdown_links
 from theseus_engine.tools.core.file_write_tool import WriteFileInput
 
 
-REMOTE_WRITE_EXECUTION_TOOL_NAMES = frozenset({"write_file", "edit_file", "bash"})
+REMOTE_WRITE_EXECUTION_TOOL_NAMES = frozenset(
+    {"remote_write_file", "remote_edit_file", "remote_run_command"}
+)
 
 
 class RemoteWritableToolMixin(RemoteWorkspaceToolMixin):
@@ -77,7 +79,7 @@ class RemoteWritableToolMixin(RemoteWorkspaceToolMixin):
 
 
 class RemoteWriteFileTool(RemoteWritableToolMixin, BaseTool):
-    name = "write_file"
+    name = "remote_write_file"
     description = "Create or overwrite a file in the selected Remote Workspace."
     input_model = WriteFileInput
     permission_level = 2
@@ -106,7 +108,7 @@ class RemoteWriteFileTool(RemoteWritableToolMixin, BaseTool):
 
 
 class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
-    name = "edit_file"
+    name = "remote_edit_file"
     description = "Edit a remote file by replacing a specific text block with new content."
     input_model = EditFileInput
     permission_level = 2
@@ -150,8 +152,8 @@ class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
             return ToolResult(output=f"Remote file edit failed: {exc}", is_error=True)
 
 
-class RemoteBashTool(RemoteWorkspaceToolMixin, BaseTool):
-    name = "bash"
+class RemoteRunCommandTool(RemoteWorkspaceToolMixin, BaseTool):
+    name = "remote_run_command"
     description = "Run a guarded shell command in the selected Remote Workspace."
     input_model = BashInput
     permission_level = 3
@@ -262,10 +264,10 @@ def build_remote_write_execution_tools(
     *,
     connector_factory: ConnectorFactory | None = None,
 ) -> list[BaseTool]:
-    """Return Remote Workspace write/execute tools using existing LLM tool names."""
+    """Return Remote Workspace write/execute tools with explicit remote names."""
 
     return [
         RemoteWriteFileTool(config, connector_factory=connector_factory),
         RemoteEditFileTool(config, connector_factory=connector_factory),
-        RemoteBashTool(config, connector_factory=connector_factory),
+        RemoteRunCommandTool(config, connector_factory=connector_factory),
     ]

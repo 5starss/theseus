@@ -36,7 +36,6 @@ import com.theseus.api.domain.toolgeneration.event.ToolPlanGenerationRequestEven
 import com.theseus.api.domain.toolgeneration.event.ToolPlanHistoryMessagePayload;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanKafkaPublishEvent;
 import com.theseus.api.domain.toolgeneration.event.ToolPlanRegenerationRequestEvent;
-import com.theseus.api.domain.toolgeneration.event.ToolPlanRemoteWorkspacePayload;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
 import java.time.LocalDateTime;
@@ -245,7 +244,6 @@ public class ToolPlanGenerationService {
 			projectMember.getUser().getId(),
 			projectMember.getId(),
 			remoteWorkspace == null ? null : remoteWorkspace.getId(),
-			ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace),
 			request.getPrompt(),
 			history,
 			requestedAt
@@ -269,7 +267,6 @@ public class ToolPlanGenerationService {
 			project.getId(),
 			chatSession.getId(),
 			remoteWorkspace == null ? null : remoteWorkspace.getId(),
-			ToolPlanRemoteWorkspacePayload.createFrom(remoteWorkspace),
 			baseToolPlan.getId(),
 			baseToolPlan.getPlanGroup().getId(),
 			request.getBasePlanVersion(),

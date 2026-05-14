@@ -47,6 +47,9 @@ export function ChatArea() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { connectSSE } = useToolGenerationSSE();
   const { connectChatStream } = useChatStreamSSE();
+  const selectedRemoteWorkspace = remoteWorkspaces.find(
+    workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
+  );
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -337,6 +340,15 @@ export function ChatArea() {
               </option>
             ))}
           </select>
+          {selectedRemoteWorkspace && (
+            <p className="mt-2 text-xs text-slate-400">
+              {mode === ToolPlanMode.AGENT
+                ? selectedRemoteWorkspace.allowWriteExecution
+                  ? 'AGENT can use this Remote Workspace for write/command tasks.'
+                  : 'This Remote Workspace is read-only for AGENT.'
+                : 'ASK/PLAN use the selected Remote Workspace as read-only context.'}
+            </p>
+          )}
         </div>
 
         <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : isClosed ? 'border-red-900/30' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>

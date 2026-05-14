@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from src.config import resolve_model_name
-from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
-from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
     ToolPlanRegenerationRequestedEvent,
@@ -83,20 +81,14 @@ class ToolPlanPlanner:
         chunk_callback: ChunkCallback | None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
-    ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
+        ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
         prompt = self._build_prompt(event)
         tool_registry = self._build_tool_registry(event)
-        remote_workspace = self._remote_workspace_config(event)
         agent_loop = ToolPlanAgentLoop(
             llm_client=self.llm_client,
             model_name=self.model_name,
             tool_registry=tool_registry,
             tool_metadata={
-                "remote_workspace": (
-                    remote_workspace.model_dump(mode="json", by_alias=True)
-                    if remote_workspace is not None
-                    else None
-                ),
                 "remote_workspace_id": event.remote_workspace_id,
             },
         )
@@ -166,26 +158,9 @@ class ToolPlanPlanner:
         return state_machine.get_system_prompt(available_tools=available_tools)
 
     def _build_tool_registry(self, event: ToolPlanRequestEvent) -> ToolRegistry:
+        del event
         registry = ToolRegistry()
-        remote_workspace = self._remote_workspace_config(event)
-        if remote_workspace is None:
-            return registry
-        for tool in build_remote_read_analysis_tools(remote_workspace):
-            registry.register(tool)
         return registry
-
-    def _remote_workspace_config(
-        self,
-        event: ToolPlanRequestEvent,
-    ) -> RemoteWorkspaceConnectionConfig | None:
-        if event.remote_workspace is None:
-            return None
-        try:
-            return RemoteWorkspaceConnectionConfig.model_validate(
-                event.remote_workspace.model_dump(mode="json", by_alias=True)
-            )
-        except Exception as exc:
-            raise ToolPlanPlannerError("Invalid Remote Workspace payload for PLAN generation.") from exc
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:
         if isinstance(event, ToolPlanRegenerationRequestedEvent):

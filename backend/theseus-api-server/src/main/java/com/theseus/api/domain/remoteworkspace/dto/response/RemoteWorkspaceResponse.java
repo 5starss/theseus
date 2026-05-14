@@ -19,6 +19,7 @@ public class RemoteWorkspaceResponse {
 	private String username;
 	private String privateKeyPath;
 	private String basePath;
+	private Boolean allowWriteExecution;
 	private RemoteWorkspaceStatus status;
 	private LocalDateTime createdAt;
 	private LocalDateTime updatedAt;
@@ -34,6 +35,7 @@ public class RemoteWorkspaceResponse {
 			.username(remoteWorkspace.getUsername())
 			.privateKeyPath(remoteWorkspace.getPrivateKeyPath())
 			.basePath(remoteWorkspace.getBasePath())
+			.allowWriteExecution(remoteWorkspace.isAllowWriteExecution())
 			.status(remoteWorkspace.getStatus())
 			.createdAt(remoteWorkspace.getCreatedAt())
 			.updatedAt(remoteWorkspace.getUpdatedAt())
