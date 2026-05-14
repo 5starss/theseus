@@ -526,9 +526,10 @@ Classify each main task into one of three tiers:
  - This plan will be parsed programmatically. The JSON block must be valid.
  - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
 the plan must describe creating a Theseus custom tool during the Executing phase. \
-In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>.py` \
-and the generated `theseus_engine/custom_tools/<tool_name>.meta.json`. Do not use \
-OpenHarness paths or generic source-file fallbacks for new Theseus tools.\
+In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>_tool.py` \
+and the generated `theseus_engine/custom_tools/<tool_name>_tool.meta.json` unless \
+the logical tool name already ends with `_tool`. Do not use legacy framework paths or \
+generic source-file fallbacks for new Theseus tools.\
 """
 
 _PLAN_REVIEW_PROMPT = """\

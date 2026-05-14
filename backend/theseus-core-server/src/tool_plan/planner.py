@@ -67,20 +67,20 @@ class ToolPlanPlanner:
         )
         if isinstance(generated, ToolPlanSkippedResult):
             return generated
-        raw_markdown, structured_plan = generated
+        _raw_markdown, structured_plan = generated
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
         version = self._resolve_plan_version(event)
         snapshot = self._build_snapshot(structured_plan, version=version, event=event)
         structured = self._build_structured_plan(structured_plan)
-        rendered_markdown = self._build_markdown(snapshot)
+        display_markdown = self._build_markdown(snapshot)
 
         await self._emit_progress(progress_callback, "PLAN_VALIDATING", 90)
         self._validate_snapshot(snapshot)
         await self._emit_progress(progress_callback, "PLAN_COMPLETED", 100)
 
         return ToolPlanResult(
-            rawMarkdown=raw_markdown or rendered_markdown,
+            rawMarkdown=display_markdown,
             structuredPlanJson=structured,
             planSnapshot=snapshot,
         )
@@ -117,7 +117,10 @@ class ToolPlanPlanner:
             ),
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
-            chunk_callback=chunk_callback,
+            # PLAN drafts contain machine-readable JSON. Publish only the
+            # parsed display Markdown after validation so users do not see
+            # internal IDs or raw JSON while generation is still streaming.
+            chunk_callback=None,
         )
 
         payload = extract_plan_json(loop_result.final_text)
@@ -240,6 +243,7 @@ class ToolPlanPlanner:
             "inputs": self._list_of_dicts(plan_json.get("inputs")),
             "outputs": self._list_of_dicts(plan_json.get("outputs")),
             "constraints": self._constraints_from_plan(plan_json),
+            "verification": self._verification_from_plan(plan_json),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -338,18 +342,75 @@ class ToolPlanPlanner:
             return [str(risks)]
         return []
 
+    @staticmethod
+    def _verification_from_plan(plan_json: dict[str, Any]) -> dict[str, Any]:
+        verification = plan_json.get("verification")
+        if isinstance(verification, dict):
+            return dict(verification)
+        return {}
+
     def _build_markdown(self, snapshot: dict) -> str:
-        lines = [f"## {snapshot['title']}", "", snapshot.get("summary", "")]
-        for block in snapshot["blocks"]:
-            lines.extend(
-                [
-                    "",
-                    f"### {block['title']}",
-                    f"blockId: {block['blockId']}",
-                    block["content"],
-                ]
-            )
+        lines = [f"## {snapshot['title']}"]
+        summary = str(snapshot.get("summary") or "").strip()
+        if summary:
+            lines.extend(["", summary])
+
+        lines.extend(["", "### 주요 작업"])
+        for index, block in enumerate(snapshot["blocks"], start=1):
+            title = str(block.get("title") or f"작업 {index}").strip()
+            lines.append(f"{index}. **{title}**")
+            display_content = self._display_block_content(str(block.get("content") or ""))
+            if display_content:
+                lines.extend(f"   - {line}" for line in display_content)
+
+        constraints = [str(item).strip() for item in snapshot.get("constraints", []) if str(item).strip()]
+        if constraints:
+            lines.extend(["", "### 주의 사항"])
+            lines.extend(f"- {item}" for item in constraints)
+
+        verification_lines = self._display_verification(snapshot.get("verification") or {})
+        if verification_lines:
+            lines.extend(["", "### 검증 기준"])
+            lines.extend(f"- {line}" for line in verification_lines)
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _display_block_content(content: str) -> list[str]:
+        label_map = {
+            "Problem": "문제",
+            "Solution": "해결 방향",
+            "Description": "구현 내용",
+            "Expected effect": "기대 효과",
+            "Target files": "영향 파일",
+            "Integration points": "연동 지점",
+            "Dependencies": "의존 관계",
+        }
+        lines: list[str] = []
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if ":" in line:
+                label, value = line.split(":", 1)
+                display_label = label_map.get(label.strip())
+                if display_label:
+                    lines.append(f"**{display_label}**: {value.strip()}")
+                    continue
+            lines.append(line)
+        return lines
+
+    @staticmethod
+    def _display_verification(verification: dict[str, Any]) -> list[str]:
+        lines: list[str] = []
+        success = verification.get("success_criteria")
+        if success:
+            lines.append(f"성공 기준: {success}")
+        manual_checks = verification.get("manual_checks")
+        if isinstance(manual_checks, list):
+            lines.extend(str(item) for item in manual_checks if str(item).strip())
+        elif manual_checks:
+            lines.append(str(manual_checks))
+        return lines
 
     def _validate_snapshot(self, snapshot: dict) -> None:
         required = ["schemaVersion", "planVersion", "blocks"]
