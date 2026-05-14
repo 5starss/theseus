@@ -30,12 +30,6 @@ import {
 } from './components/RunnerStatus.js';
 import { renderSessionMenu as renderSessionMenuComponent } from './components/SessionMenu.js';
 import { createActivityLogController } from './components/ActivityLog.js';
-import {
-  findSlashCommand,
-  normalizeSlashCommand,
-  slashCommandRemainder,
-  SLASH_COMMANDS,
-} from './components/SlashCommands.js';
 import { createInitialState, persistWebviewState } from './state.js';
 
 (function () {
@@ -85,6 +79,33 @@ import { createInitialState, persistWebviewState } from './state.js';
   const LONG_RUNNING_MS = 30000;
   const MODE_LABELS    = { agent: 'AGENT', ask: 'ASK', plan: 'PLAN' };
   const MODE_SWITCH_GUIDANCE = '모드 전환은 입력창 아래 모드 선택을 사용하세요.';
+  const SLASH_COMMANDS = [
+    { value: '/tools', description: 'Custom Tools 패널 새로고침', kind: 'local' },
+    { value: '/tools custom', description: 'Custom Tools 패널 새로고침', kind: 'local' },
+    { value: '/session', description: '세션 목록 열기', kind: 'local' },
+    { value: '/sessions', description: '세션 목록 열기', kind: 'local' },
+    { value: '/session list', description: '세션 목록 새로고침', kind: 'local' },
+    { value: '/session new', description: '새 세션 생성', kind: 'local' },
+    { value: '/session delete', description: '세션 삭제', kind: 'local' },
+    { value: '/clear', description: '현재 채팅 화면 지우기', kind: 'local' },
+    { value: '/help', description: '사용 가능한 명령어 표시', kind: 'local' },
+    { value: '/?', description: '사용 가능한 명령어 표시', kind: 'local' },
+    { value: '/quit', description: 'runner 중지', kind: 'local' },
+    { value: '/exit', description: 'runner 중지', kind: 'local' },
+    { value: '/cost', description: 'runner token/cost 통계', kind: 'runner' },
+    { value: '/stats', description: 'runner 세션 통계', kind: 'runner' },
+    { value: '/validate', description: 'runner에서 커스텀 도구 검증', kind: 'runner' },
+    { value: '/plan approve', description: '대기 중인 PLAN 승인', kind: 'planReview' },
+    { value: '/plan reject', description: '대기 중인 PLAN 거부', kind: 'planReview' },
+    { value: '/plan cancel', description: '현재 세션 PLAN 취소', kind: 'localPlan' },
+    { value: '/plan clear', description: '현재 세션 PLAN 취소', kind: 'localPlan' },
+    { value: '/plan delete', description: '현재 세션 PLAN 삭제', kind: 'localPlan' },
+    { value: '/plan remove', description: '현재 세션 PLAN 삭제', kind: 'localPlan' },
+    { value: '/agent', description: '모드 선택 UI 사용', kind: 'mode' },
+    { value: '/ask', description: '모드 선택 UI 사용', kind: 'mode' },
+    { value: '/plan', description: '모드 선택 UI 사용', kind: 'mode' },
+    { value: '/coordinator', description: '모드 선택 UI 사용', kind: 'mode' },
+  ];
   const LOCAL_HELP_TEXT = [
     '사용 가능한 명령어:',
     ...SLASH_COMMANDS
@@ -220,6 +241,32 @@ import { createInitialState, persistWebviewState } from './state.js';
       return { state: 'running', label: 'compacting and retrying', detail: text };
     }
     return null;
+  }
+
+  function collapseDuplicatedHistoryText(text) {
+    const raw = String(text || '');
+    const lines = raw.split(/\r?\n/);
+    if (lines.length > 1 && lines.length % 2 === 0) {
+      const midpoint = lines.length / 2;
+      const first = lines.slice(0, midpoint).join('\n');
+      const second = lines.slice(midpoint).join('\n');
+      if (first === second) return first;
+    }
+    return raw;
+  }
+
+  function normalizeSlashCommand(text) {
+    return String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  function findSlashCommand(text) {
+    const normalized = normalizeSlashCommand(text);
+    const commands = [...SLASH_COMMANDS].sort((a, b) => b.value.length - a.value.length);
+    return commands.find(command => normalized === command.value || normalized.startsWith(`${command.value} `)) || null;
+  }
+
+  function slashCommandRemainder(text, commandValue) {
+    return String(text || '').trim().slice(commandValue.length).trim();
   }
 
   function _maybeAddFold(article, body, text) {
@@ -437,7 +484,10 @@ import { createInitialState, persistWebviewState } from './state.js';
   }
 
   function _createTypingIndicator() {
-    return createTypingIndicator(messagesEl);
+    const rendered = createTypingIndicator(messagesEl);
+    toolPanel?.attachAssistant(rendered.article);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return rendered;
   }
 
   function renderPlanPanel(plan) {
@@ -610,7 +660,7 @@ import { createInitialState, persistWebviewState } from './state.js';
   }
 
   function isAgentBusy() {
-    return isGenerating || runnerState.state === 'busy' || runnerState.lifecycle === 'busy';
+    return isGenerating;
   }
 
   function showRunnerRequired(command) {
@@ -706,8 +756,10 @@ import { createInitialState, persistWebviewState } from './state.js';
   savedHistory.forEach(m => {
     try {
       if (m.type === 'message') {
-        const rendered = _appendMessageEl(m.role, m.text, m.tone, false);
-        if (m.role === 'user') toolPanel.startRequest(m.text, rendered.article);
+        const text = collapseDuplicatedHistoryText(m.text);
+        const rendered = _appendMessageEl(m.role, text, m.tone, false);
+        if (m.role === 'user') toolPanel.startRequest(text, rendered.article);
+        if (m.role === 'assistant') toolPanel.attachAssistant(rendered.article);
       }
       else if (m.type === 'tool') toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false, m);
     } catch (e) { /* 손상된 히스토리 항목 무시 */ }
@@ -734,13 +786,6 @@ import { createInitialState, persistWebviewState } from './state.js';
 
   // ── Code block copy (delegated) ───────────────────────────────────
   document.addEventListener('click', (e) => {
-    const link = e.target.closest?.('a[data-external-url]');
-    if (link) {
-      e.preventDefault();
-      vscode.postMessage({ type: 'openExternal', url: link.dataset.externalUrl || link.href || '' });
-      return;
-    }
-
     if (!e.target.matches('.copy-btn')) return;
     const pre = document.getElementById(e.target.dataset.id);
     if (!pre) return;
@@ -960,7 +1005,15 @@ import { createInitialState, persistWebviewState } from './state.js';
     const rendered = _appendMessageEl('user', text);
     toolPanel.startRequest(text, rendered.article);
     const isSlashCommand = text.startsWith('/');
-    if (!isSlashCommand) setGenerating(true);
+    if (!isSlashCommand) {
+      toolPanel.note({
+        key: 'request',
+        label: 'thinking',
+        detail: currentMode === 'plan' ? 'plan mode' : '',
+        state: 'running',
+      });
+      setGenerating(true);
+    }
     if (!isSlashCommand && currentMode === 'plan') beginPlanDraft(text);
 
     const skipCursorContext = isSlashCommand || !!(activeFileContext?.file && activeFileContext.file === suppressedActiveFile);
@@ -1225,10 +1278,21 @@ import { createInitialState, persistWebviewState } from './state.js';
         } else if (currentAssistantArticle) {
           currentAssistantArticle.remove();
         }
+        toolPanel.note({
+          key: 'request',
+          label: 'answered',
+          state: 'info',
+        });
+        runnerState = {
+          ...runnerState,
+          state: runnerState.running ? 'ready' : runnerState.state,
+          lifecycle: runnerState.running ? 'ready' : runnerState.lifecycle,
+        };
         currentAssistantArticle = null;
         currentAssistantEl      = null;
         currentAssistantTxt     = '';
         setGenerating(false);
+        toolPanel.finishRequest();
         break;
 
       case 'AgentLoopStatus': {
@@ -1325,6 +1389,7 @@ import { createInitialState, persistWebviewState } from './state.js';
 
       case 'ErrorEvent':
         setGenerating(false);
+        toolPanel.finishRequest();
         _appendMessageEl('system', event.message || 'Error', 'error');
         break;
 
@@ -1437,8 +1502,10 @@ import { createInitialState, persistWebviewState } from './state.js';
         savedHistory = Array.isArray(event.history) ? event.history : [];
         savedHistory.forEach(m => {
           if (m.type === 'message') {
-            const rendered = _appendMessageEl(m.role, m.text, m.tone, false);
-            if (m.role === 'user') toolPanel.startRequest(m.text, rendered.article);
+            const text = collapseDuplicatedHistoryText(m.text);
+            const rendered = _appendMessageEl(m.role, text, m.tone, false);
+            if (m.role === 'user') toolPanel.startRequest(text, rendered.article);
+            if (m.role === 'assistant') toolPanel.attachAssistant(rendered.article);
           } else if (m.type === 'tool') {
             toolPanel.appendTool(m.tool_name, m.tool_input, m.output, m.is_error, false, m);
           }

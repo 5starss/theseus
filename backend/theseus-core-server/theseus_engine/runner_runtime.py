@@ -280,24 +280,21 @@ def _message_text(message: Any) -> str:
     return "\n".join(c for c in chunks if c)
 
 
-def _message_visible_text(message: Any) -> str:
-    """Return only human-visible text blocks for UI history rendering.
+def _block_value(block: Any, key: str, default: Any = None) -> Any:
+    if isinstance(block, dict):
+        return block.get(key, default)
+    return getattr(block, key, default)
 
-    Tool results are stored as user-role messages for LLM provider
-    compatibility. The extension should render them as activity entries, not
-    as user chat bubbles.
-    """
 
-    text = getattr(message, "text", "")
-    if text:
-        return str(text)
-    blocks = getattr(message, "content", []) or []
-    chunks: list[str] = []
-    for block in blocks:
-        block_text = getattr(block, "text", None)
-        if block_text is not None:
-            chunks.append(str(block_text))
-    return "\n".join(c for c in chunks if c)
+def _append_visible_chunk(chunks: list[str], value: Any) -> None:
+    if value is None:
+        return
+    text = str(value)
+    if not text:
+        return
+    if chunks and chunks[-1] == text:
+        return
+    chunks.append(text)
 
 
 def _message_to_json(message: Any) -> dict[str, Any]:
@@ -308,51 +305,53 @@ def _message_to_json(message: Any) -> dict[str, Any]:
     return {"role": getattr(message, "role", "message"), "text": _message_text(message)}
 
 
-def _tool_use_blocks(message: Any) -> list[Any]:
-    if getattr(message, "role", None) != "assistant":
-        return []
-    blocks = getattr(message, "content", []) or []
-    return [block for block in blocks if getattr(block, "type", "") == "tool_use"]
-
-
-def _tool_result_blocks(message: Any) -> list[Any]:
-    if getattr(message, "role", None) != "user":
-        return []
-    blocks = getattr(message, "content", []) or []
-    return [block for block in blocks if getattr(block, "type", "") == "tool_result"]
-
-
 def history_for_ui(messages: list[Any]) -> list[dict[str, Any]]:
     history: list[dict[str, Any]] = []
     pending_tools: dict[str, dict[str, Any]] = {}
     for msg in messages:
         role = str(getattr(msg, "role", "message"))
-        text = _message_visible_text(msg)
+        text = getattr(msg, "text", "")
+        chunks: list[str] = []
         if text:
-            history.append({"type": "message", "role": role, "text": text})
-        for tool_use in _tool_use_blocks(msg):
-            tool_use_id = str(getattr(tool_use, "id", "") or "")
-            if not tool_use_id:
+            _append_visible_chunk(chunks, text)
+        blocks = getattr(msg, "content", []) or []
+        if isinstance(blocks, str):
+            _append_visible_chunk(chunks, blocks)
+            blocks = []
+        for block in blocks:
+            if isinstance(block, str):
+                _append_visible_chunk(chunks, block)
                 continue
-            pending_tools[tool_use_id] = {
-                "tool_name": str(getattr(tool_use, "name", "") or "tool"),
-                "tool_input": getattr(tool_use, "input", {}) or {},
-            }
-        for tool_result in _tool_result_blocks(msg):
-            tool_use_id = str(getattr(tool_result, "tool_use_id", "") or "")
-            tool_info = pending_tools.pop(tool_use_id, {})
-            is_error = bool(getattr(tool_result, "is_error", False))
-            history.append(
-                {
+            block_type = str(_block_value(block, "type", ""))
+            block_text = _block_value(block, "text", None)
+            if block_text is not None:
+                _append_visible_chunk(chunks, block_text)
+                continue
+            if block_type == "tool_use":
+                tool_use_id = str(_block_value(block, "id", "") or "")
+                if tool_use_id:
+                    pending_tools[tool_use_id] = {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": str(_block_value(block, "name", "tool") or "tool"),
+                        "tool_input": _json_safe(_block_value(block, "input", {})),
+                    }
+                continue
+            if block_type == "tool_result":
+                tool_use_id = str(_block_value(block, "tool_use_id", "") or "")
+                tool = pending_tools.pop(tool_use_id, None) if tool_use_id else None
+                is_error = bool(_block_value(block, "is_error", False))
+                history.append({
                     "type": "tool",
-                    "tool_use_id": tool_use_id or None,
-                    "tool_name": tool_info.get("tool_name") or "tool",
-                    "tool_input": tool_info.get("tool_input") or {},
-                    "output": str(getattr(tool_result, "content", "") or ""),
+                    "tool_use_id": tool_use_id,
+                    "tool_name": (tool or {}).get("tool_name") or "tool_result",
+                    "tool_input": (tool or {}).get("tool_input") or {},
+                    "output": _block_value(block, "content", ""),
                     "is_error": is_error,
                     "status": "failed" if is_error else "done",
-                }
-            )
+                })
+        visible_text = "\n".join(c for c in chunks if c)
+        if visible_text:
+            history.append({"type": "message", "role": role, "text": visible_text})
     return history
 
 
@@ -435,6 +434,7 @@ class EditorRuntime:
         self.PlanPhase = PlanPhase
         self.sm = TheseusStateMachine(initial_mode=AgentMode.AGENT)
         os.environ["THESEUS_MODEL"] = self.model
+        os.environ["OPENHARNESS_MODEL"] = self.model
         client = TheseusLLMClient(self.model)
         with contextlib.redirect_stdout(sys.stderr):
             self.engine, self.full_registry = await setup_engine(
@@ -840,7 +840,7 @@ class EditorRuntime:
             events.append({"type": "StatusEvent", "message": f"세션 명령 실패: {exc}"})
         return events
 
-    def _session_changed_events(self, current: str, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _session_changed_events(self, current: str, history: list[dict[str, str]]) -> list[dict[str, Any]]:
         return [
             {
                 "type": "SessionChangedEvent",
