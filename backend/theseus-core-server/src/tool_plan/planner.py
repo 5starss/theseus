@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 
 from src.config import resolve_model_name
 from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
@@ -11,6 +11,7 @@ from src.remote_workspace.resolver import RemoteWorkspaceResolver, resolve_remot
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
+    ConversationHistoryItem,
     ToolPlanRegenerationRequestedEvent,
     ToolPlanRequestEvent,
     ToolPlanRequestedEvent,
@@ -18,6 +19,7 @@ from src.tool_plan.schemas import (
     ToolPlanSkippedResult,
 )
 from theseus_engine.engine.stream_events import extract_plan_json
+from theseus_engine.models.messages import ConversationMessage, TextBlock
 from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
 from theseus_engine.tools.core.base_tools import ToolRegistry
 from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
@@ -93,8 +95,9 @@ class ToolPlanPlanner:
         chunk_callback: ChunkCallback | None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
-        ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
+    ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
         prompt = self._build_prompt(event)
+        history_messages = self._history_messages(event)
         tool_registry = self._build_tool_registry(event, remote_workspace=remote_workspace)
         agent_loop = ToolPlanAgentLoop(
             llm_client=self.llm_client,
@@ -116,6 +119,7 @@ class ToolPlanPlanner:
         )
         loop_result = await agent_loop.run(
             initial_prompt=prompt,
+            initial_messages=history_messages,
             system_prompt=self._build_system_prompt(
                 event,
                 available_tools=tuple(tool.name for tool in tool_registry.list_tools()),
@@ -160,6 +164,70 @@ class ToolPlanPlanner:
                 f"{json.dumps(feedback, ensure_ascii=False, indent=2)}"
             )
         return event.prompt
+
+    def _history_messages(self, event: ToolPlanRequestEvent) -> list[ConversationMessage]:
+        messages: list[ConversationMessage] = []
+        for item in event.history:
+            role = self._normalize_history_role(item.role)
+            if role is None:
+                continue
+            content = self._render_history_content(item)
+            if not content.strip():
+                continue
+            messages.append(
+                ConversationMessage(
+                    role=role,
+                    content=[TextBlock(text=content)],
+                )
+            )
+        return messages
+
+    @staticmethod
+    def _normalize_history_role(role: str) -> Literal["user", "assistant"] | None:
+        normalized = str(role or "").strip().lower()
+        if normalized in {"user", "assistant"}:
+            return normalized
+        return None
+
+    def _render_history_content(self, item: ConversationHistoryItem) -> str:
+        message_type = (item.message_type or "CHAT").upper()
+        content_type = (item.content_type or "TEXT").upper()
+
+        if message_type == "TOOL_FEEDBACK" and content_type == "JSON":
+            return self._summarize_feedback_content(item.content)
+        if message_type == "TOOL_APPROVAL_REQUEST":
+            return "Requested tool approval."
+        if isinstance(item.content, str):
+            return item.content
+        if item.content is None:
+            return ""
+        return json.dumps(item.content, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _summarize_feedback_content(content: str | dict[str, Any] | list[Any] | None) -> str:
+        if isinstance(content, str):
+            try:
+                payload = json.loads(content)
+            except ValueError:
+                return content
+        else:
+            payload = content
+
+        if not isinstance(payload, dict):
+            return json.dumps(payload, ensure_ascii=False, indent=2) if payload is not None else ""
+
+        feedback_items = payload.get("feedbackItems", [])
+        if not isinstance(feedback_items, list) or not feedback_items:
+            return "Requested PLAN draft feedback changes."
+
+        lines = [f"Requested {len(feedback_items)} PLAN draft revisions:"]
+        for item in feedback_items:
+            if not isinstance(item, dict):
+                continue
+            block_id = item.get("blockId", "unknown-block")
+            comment = item.get("comment", "")
+            lines.append(f"- {block_id}: {comment}")
+        return "\n".join(lines)
 
     def _build_system_prompt(
         self,

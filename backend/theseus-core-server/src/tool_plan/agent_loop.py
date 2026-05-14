@@ -71,6 +71,7 @@ class ToolPlanAgentLoop:
         self,
         *,
         initial_prompt: str,
+        initial_messages: list[ConversationMessage] | None = None,
         system_prompt: str,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
@@ -83,7 +84,8 @@ class ToolPlanAgentLoop:
         completed_steps = self._restore_completed_steps(restored_checkpoint.get("progress"))
 
         if not messages:
-            messages = [ConversationMessage.from_user_text(initial_prompt)]
+            messages = list(initial_messages or [])
+            messages.append(ConversationMessage.from_user_text(initial_prompt))
             await self._save_checkpoint(
                 state_machine,
                 messages,
