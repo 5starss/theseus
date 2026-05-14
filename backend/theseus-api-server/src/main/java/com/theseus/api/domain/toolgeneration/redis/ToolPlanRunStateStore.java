@@ -22,11 +22,25 @@ public class ToolPlanRunStateStore {
 	private final ToolGenerationStateProperties properties;
 
 	public void saveProgress(ToolPlanRunState state) {
-		save(state);
+		ToolPlanRunState mergedState = findByRunId(state.getRunId())
+			.map(existing -> state.toBuilder()
+				.content(existing.getContent()) // Preserve existing content
+				.build())
+			.orElse(state);
+		save(mergedState);
 	}
 
 	public void saveChunk(ToolPlanRunState state) {
-		save(state);
+		ToolPlanRunState mergedState = findByRunId(state.getRunId())
+			.map(existing -> {
+				String accumulatedContent = (existing.getContent() == null ? "" : existing.getContent())
+					+ (state.getContent() == null ? "" : state.getContent());
+				return state.toBuilder()
+					.content(accumulatedContent)
+					.build();
+			})
+			.orElse(state);
+		save(mergedState);
 	}
 
 	public void saveCompleted(ToolPlanRunState state) {

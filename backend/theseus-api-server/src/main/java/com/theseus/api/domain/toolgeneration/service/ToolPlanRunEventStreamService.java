@@ -46,14 +46,6 @@ public class ToolPlanRunEventStreamService {
 			emitter,
 			ToolPlanRunSseEvent.connectedOf(projectId, chatSessionId, toolPlanRun.getRunId())
 		);
-		toolPlanRunStateStore.findByRunId(toolPlanRun.getRunId())
-			.ifPresent(state -> emitterRegistry.sendToEmitter(
-				projectId,
-				chatSessionId,
-				toolPlanRun.getRunId(),
-				emitter,
-				ToolPlanRunSseEvent.createFrom(state)
-			));
 
 		return emitter;
 	}
