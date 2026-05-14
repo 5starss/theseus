@@ -44,6 +44,12 @@
 | Project | 프로젝트 생성 | `POST` | `/api/v1/projects` |
 | Project | 프로젝트 정보 수정 | `PATCH` | `/api/v1/projects/{projectId}` |
 | Project | 프로젝트 내 본인 권한 조회 | `GET` | `/api/v1/projects/{projectId}/me` |
+| Remote Workspace | Remote Workspace 등록 | `POST` | `/api/v1/projects/{projectId}/remote-workspaces` |
+| Remote Workspace | Remote Workspace 목록 조회 | `GET` | `/api/v1/projects/{projectId}/remote-workspaces` |
+| Remote Workspace | Remote Workspace 상세 조회 | `GET` | `/api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}` |
+| Remote Workspace | Remote Workspace 수정 | `PATCH` | `/api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}` |
+| Remote Workspace | Remote Workspace 삭제 | `PATCH` | `/api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}/delete` |
+| Remote Workspace | Remote Workspace 연결 테스트 | `POST` | `/api/v1/projects/{projectId}/remote-workspaces/{remoteWorkspaceId}/test-connection` |
 | Project Member | 프로젝트 멤버 목록 조회 | `GET` | `/api/v1/projects/{projectId}/members?status=진행중` |
 | Project Member | 프로젝트 멤버 등록 | `POST` | `/api/v1/projects/{projectId}/members` |
 | Project Member | 프로젝트 멤버 권한 수정 | `PATCH` | `/api/v1/projects/{projectId}/members/{projectMemberId}` |
