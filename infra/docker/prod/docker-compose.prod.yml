@@ -126,7 +126,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/theseus-sandbox-shared:/tmp/theseus-sandbox-shared
-      - ./debug/dumps:/var/log/theseus/debug/dumps
+      - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/var/log/theseus/debug/dumps
     ports:
       - "8086:8086"
     depends_on:
