@@ -63,7 +63,6 @@ class ToolBuilder:
         progress_callback: ProgressCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
     ) -> ToolArtifactPayload:
-        await self._emit_progress(progress_callback, "TOOL_BUILD_LLM_DRAFTING", 20)
         approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
         system_prompt = build_theseus_system_prompt(
             mode=AgentMode.PLAN,
@@ -71,41 +70,67 @@ class ToolBuilder:
             plan_content=approved_plan,
             available_tools=[],
         )
-        spec = await self._generate_tool_spec(
-            self._build_tool_message(
-                approved_plan=approved_plan,
-                project_id=event.project_id,
-                chat_session_id=event.chat_session_id,
-                tool_plan_id=event.tool_plan_id,
-            ),
-            system_prompt=system_prompt,
-            chunk_callback=chunk_callback,
+        prompt = self._build_tool_message(
+            approved_plan=approved_plan,
+            project_id=event.project_id,
+            chat_session_id=event.chat_session_id,
+            tool_plan_id=event.tool_plan_id,
         )
 
+        last_spec: GeneratedToolSpec | None = None
         last_error: ToolBuildError | None = None
         for attempt in range(0, self.max_repair_attempts + 1):
+            if attempt == 0:
+                await self._emit_progress(progress_callback, "TOOL_BUILD_LLM_DRAFTING", 20)
+            else:
+                await self._emit_progress(
+                    progress_callback,
+                    "TOOL_BUILD_REPAIRING",
+                    60 + min((attempt - 1) * 5, 10),
+                )
+
             try:
-                return await self._validate_and_package_spec(event, spec, progress_callback=progress_callback)
+                spec = await self._generate_tool_spec(
+                    prompt,
+                    system_prompt=system_prompt,
+                    chunk_callback=chunk_callback,
+                )
+                last_spec = spec
+                return await self._validate_and_package_spec(
+                    event,
+                    spec,
+                    progress_callback=progress_callback,
+                )
             except ToolBuildError as exc:
                 last_error = exc
                 if attempt >= self.max_repair_attempts:
                     break
-                await self._emit_progress(progress_callback, "TOOL_BUILD_REPAIRING", 60 + min(attempt * 5, 10))
-                spec = await self._generate_tool_spec(
-                    self._build_tool_repair_message(
-                        approved_plan=approved_plan,
-                        previous_spec=spec.model_dump(mode="json", by_alias=True),
-                        error_code=exc.code,
-                        error_message=exc.message,
-                        attempt=attempt + 1,
+                prompt = self._build_tool_repair_message(
+                    approved_plan=approved_plan,
+                    previous_spec=(
+                        last_spec.model_dump(mode="json", by_alias=True)
+                        if last_spec is not None
+                        else {}
                     ),
-                    system_prompt=system_prompt,
-                    chunk_callback=chunk_callback,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                    attempt=attempt + 1,
                 )
 
         if last_error is not None:
-            raise last_error
+            raise ToolBuildError(
+                last_error.code,
+                self._format_final_failure_message(last_error),
+            ) from last_error
         raise ToolBuildError("TOOL_BUILD_FAILED", "Tool build failed without a captured error.")
+
+    def _format_final_failure_message(self, error: ToolBuildError) -> str:
+        if self.max_repair_attempts <= 0:
+            return error.message
+        return (
+            f"자동 repair {self.max_repair_attempts}회 후 실패했습니다. "
+            f"마지막 오류: {error.message}"
+        )
 
     async def _validate_and_package_spec(
         self,
@@ -196,7 +221,16 @@ class ToolBuilder:
             payload = json.loads(self._extract_json_object(final_text))
             return GeneratedToolSpec.model_validate(payload)
         except Exception as exc:
-            raise ToolBuildError("LLM_OUTPUT_INVALID", f"Invalid tool build LLM output: {exc}") from exc
+            preview = final_text.strip()
+            if len(preview) > 2000:
+                preview = preview[:2000] + "..."
+            raise ToolBuildError(
+                "LLM_OUTPUT_INVALID",
+                (
+                    f"Invalid tool build LLM output: {exc}\n"
+                    f"Raw output preview:\n{preview}"
+                ),
+            ) from exc
 
     @staticmethod
     def _build_tool_message(*, approved_plan: dict, project_id: int, chat_session_id: int, tool_plan_id: int) -> str:
@@ -207,8 +241,8 @@ class ToolBuilder:
             "Return exactly one JSON object. Do not include markdown fences or explanatory text.\n\n"
             "The JSON object must have:\n"
             "- toolName: snake_case, lowercase, 3-64 chars\n"
-            '- fileName: "<toolName>.py"\n'
-            "- moduleName: toolName\n"
+            '- fileName: "<moduleName>.py"\n'
+            "- moduleName: canonical module stem. Use '<toolName>_tool' unless toolName already ends with '_tool'.\n"
             "- displayName: short human-readable name\n"
             "- displayDescription: one sentence\n"
             "- permissionLevel: integer from 1 to 5\n"
@@ -222,11 +256,12 @@ class ToolBuilder:
             "- Implement async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult.\n"
             "- Return ToolResult(output=<string or JSON-serializable value>) on success.\n"
             "- Return ToolResult(output=<clear error>, is_error=True) on handled failures.\n"
+            "- Avoid embedding executable Python source inside another Python source string. "
+            "Prefer helper functions, constants, and JSON payloads.\n"
             "- If embedding Python code inside a Python string, use triple single quotes for the outer "
             "string when the inner code contains triple double quote docstrings.\n"
             "- Do not nest unescaped triple double quotes inside another triple double quoted string.\n"
-            "- Prefer separate helper functions, constants, or JSON data over generating nested Python "
-            "source strings when possible.\n"
+            "- If nested code is unavoidable, do not use docstrings inside the embedded code; use comments instead.\n"
             "- Do not perform network calls unless the approved plan explicitly requires them.\n"
             "- Do not read or write arbitrary local files.\n"
             "- Keep the tool deterministic and safe by default.\n\n"
@@ -256,16 +291,44 @@ class ToolBuilder:
             f"Repair attempt: {attempt}\n"
             f"Error code: {error_code}\n"
             f"Error message: {error_message}\n\n"
+            "Failure-specific repair guidance:\n"
+            f"{ToolBuilder._repair_guidance(error_code)}\n\n"
             "Approved plan payload:\n"
             f"{approved_plan}\n\n"
             "Previous generated JSON spec:\n"
             f"{previous_spec}\n\n"
             "Return a corrected complete JSON object using the same schema. "
-            "If the failure was a SyntaxError from nested triple-quoted strings, switch the outer "
-            "embedded Python string to triple single quotes or remove the nested code string. "
+            "If the error message includes numbered source context, use those exact lines to patch "
+            "the pythonCode. If the failure was a SyntaxError from nested triple-quoted strings, "
+            "switch the outer embedded Python string to triple single quotes or remove the nested "
+            "code string. "
             "Preserve the approved plan intent. Prefer keeping the same toolName unless "
             "the name itself caused the failure. Return only JSON."
         )
+
+    @staticmethod
+    def _repair_guidance(error_code: str) -> str:
+        normalized = error_code.upper()
+        if normalized == "LLM_OUTPUT_INVALID":
+            return (
+                "- Return one valid JSON object only.\n"
+                "- Escape newlines and quotes correctly inside pythonCode.\n"
+                "- Do not include markdown fences or explanatory text."
+            )
+        if normalized == "VALIDATION_FAILED":
+            return (
+                "- Fix Python syntax, BaseTool subclass attributes, Pydantic input model naming, "
+                "and execute(self, arguments, context) signature.\n"
+                "- If syntax context is present, repair the exact numbered lines."
+            )
+        if normalized == "SANDBOX_FAILED":
+            return (
+                "- Use the sandbox summary in the error message, including errorType, exitCode, "
+                "timedOut, and resourceLimited.\n"
+                "- Keep execution deterministic, avoid unavailable files/network access, and return "
+                "ToolResult(output=<clear error>, is_error=True) for handled runtime failures."
+            )
+        return "- Correct the generated JSON spec and pythonCode while preserving the approved plan."
 
     def _artifact_path(self, module_path: Path) -> str:
         try:

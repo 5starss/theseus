@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
 import uuid
-import ast
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -195,6 +195,46 @@ def _safe_tool_name(tool_name: str) -> str:
         return tool_name.strip().lower().replace("-", "_")
 
 
+def canonical_tool_module_stem(tool_name: str) -> str:
+    """Return the persisted module stem for a logical tool name."""
+    normalized = normalize_tool_name(tool_name)
+    if normalized.endswith("_tool"):
+        return normalized
+    return f"{normalized}_tool"
+
+
+def _safe_tool_file_name(value: Any, *, fallback_stem: str) -> str:
+    file_name = Path(str(value or "")).name
+    if not file_name.endswith(".py") or file_name.startswith("_"):
+        return f"{fallback_stem}.py"
+    return file_name
+
+
+def _paths_from_project_metadata(
+    project_dir: Path,
+    metadata_path: Path,
+) -> tuple[ServerToolArtifactPaths, dict[str, Any]]:
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    fallback_stem = metadata_path.stem.replace(".meta", "")
+    file_name = _safe_tool_file_name(
+        metadata.get("fileName"),
+        fallback_stem=fallback_stem,
+    )
+    module_path = project_dir / file_name
+    module_name = str(metadata.get("moduleName") or module_path.stem).strip()
+    if not module_name:
+        module_name = module_path.stem
+    return (
+        ServerToolArtifactPaths(
+            project_dir=project_dir,
+            module_path=module_path,
+            metadata_path=metadata_path,
+            module_name=module_name,
+        ),
+        metadata,
+    )
+
+
 def build_tool_paths(
     project_id: str,
     tool_name: str,
@@ -202,15 +242,15 @@ def build_tool_paths(
     storage_root: Path = PROJECT_TOOLS_DIR,
 ) -> ServerToolArtifactPaths:
     safe_project_id = _slugify_segment(project_id)
+    module_stem = canonical_tool_module_stem(tool_name)
     project_dir = storage_root / safe_project_id
-    module_path = project_dir / f"{tool_name}.py"
-    metadata_path = project_dir / f"{tool_name}.meta.json"
-    module_name = f"{safe_project_id}__{tool_name}"
+    module_path = project_dir / f"{module_stem}.py"
+    metadata_path = project_dir / f"{module_stem}.meta.json"
     return ServerToolArtifactPaths(
         project_dir=project_dir,
         module_path=module_path,
         metadata_path=metadata_path,
-        module_name=module_name,
+        module_name=module_stem,
     )
 
 
@@ -684,18 +724,11 @@ def load_active_tools_for_project(
 
     loaded: list[str] = []
     for metadata_path in sorted(project_dir.glob("*.meta.json")):
-        tool_name = metadata_path.stem.replace(".meta", "")
-        paths = ServerToolArtifactPaths(
-            project_dir=project_dir,
-            module_path=project_dir / f"{tool_name}.py",
-            metadata_path=metadata_path,
-            module_name=f"{_slugify_segment(project_id)}__{tool_name}",
-        )
-        if not paths.module_path.exists():
-            continue
         try:
-            metadata = read_tool_metadata(paths)
+            paths, metadata = _paths_from_project_metadata(project_dir, metadata_path)
         except Exception:
+            continue
+        if not paths.module_path.exists():
             continue
         if not _is_tool_active_metadata(metadata):
             continue

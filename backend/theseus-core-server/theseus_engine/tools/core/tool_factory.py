@@ -32,6 +32,14 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 DEFAULT_PERMISSION_LEVEL = 1
 
 
+def canonical_tool_module_stem(tool_name: str) -> str:
+    """Return the persisted module stem for a logical custom tool name."""
+    normalized = tool_name.strip().lower().replace("-", "_")
+    if normalized.endswith("_tool"):
+        return normalized
+    return f"{normalized}_tool"
+
+
 def _custom_tool_dirs(extra_dirs: Optional[List[str | os.PathLike[str]]] = None) -> List[str]:
     """Return custom tool directories in load order, de-duplicated."""
     dirs: List[str] = []
@@ -578,65 +586,80 @@ def load_custom_tools_for_project(
         )
         return loaded
 
+    seen_files: Set[str] = set()
+    candidates: List[Tuple[str, str, Optional[Dict[str, Any]]]] = []
+
+    for filename in sorted(os.listdir(project_dir)):
+        if not filename.endswith(".meta.json") or filename.startswith("_"):
+            continue
+        meta_path = os.path.join(project_dir, filename)
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception as exc:
+            log.warning("Failed to read project tool meta %s: %s", meta_path, exc)
+            continue
+
+        fallback_stem = filename.removesuffix(".meta.json")
+        file_name = os.path.basename(str(meta.get("fileName") or f"{fallback_stem}.py"))
+        if not file_name.endswith(".py") or file_name.startswith("_"):
+            file_name = f"{fallback_stem}.py"
+        module_name = str(meta.get("moduleName") or file_name[:-3]).strip() or file_name[:-3]
+        candidates.append((module_name, file_name, meta))
+        seen_files.add(os.path.normcase(file_name))
+
     for filename in sorted(os.listdir(project_dir)):
         if not filename.endswith(".py") or filename.startswith("_"):
             continue
+        if os.path.normcase(filename) in seen_files:
+            continue
+        candidates.append((filename[:-3], filename, None))
 
-        module_name = filename[:-3]
+    for module_name, filename, meta in candidates:
         file_path = os.path.join(project_dir, filename)
-        meta_path = os.path.join(project_dir, f"{module_name}.meta.json")
+        if not os.path.exists(file_path):
+            continue
 
         # ── meta.json active 체크 ────────────────────────────
-        if os.path.exists(meta_path):
-            try:
-                with open(meta_path, encoding="utf-8") as f:
-                    meta = json.load(f)
-                if not meta.get("isActive", True):
-                    log.info("Skipped inactive project tool: %s", module_name)
-                    continue
-                if meta.get("status", "active") != "active":
-                    log.info(
-                        "Skipped non-active project tool: %s (status=%s)",
-                        module_name,
-                        meta.get("status"),
-                    )
-                    continue
-            except Exception as exc:
-                log.warning(
-                    "Failed to read project tool meta %s: %s", meta_path, exc,
+        if meta is not None:
+            if not meta.get("isActive", True):
+                log.info("Skipped inactive project tool: %s", module_name)
+                continue
+            if meta.get("status", "active") != "active":
+                log.info(
+                    "Skipped non-active project tool: %s (status=%s)",
+                    module_name,
+                    meta.get("status"),
                 )
+                continue
 
         # ── 코드 검증 + 로드 ─────────────────────────────────
         is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
-            module_name, file_path,
+            module_name,
+            file_path,
         )
-        if is_valid and tool_class is not None:
-            try:
-                instance = tool_class()
-                registry.register(instance)
-                loaded.append(tool_class.name)
+        if not is_valid or tool_class is None:
+            log.warning("Skipped invalid project tool %s: %s", filename, msg)
+            continue
 
-                level = getattr(
-                    tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL,
-                )
-                if tool_permissions is not None:
-                    tool_permissions[tool_class.name] = level
+        try:
+            instance = tool_class()
+            registry.register(instance)
+            loaded.append(tool_class.name)
 
-                log.info(
-                    "Project tool loaded: %s (project=%s level=%d file=%s)",
-                    tool_class.name,
-                    project_id,
-                    level,
-                    filename,
-                )
-            except Exception as exc:
-                log.warning(
-                    "Failed to instantiate project tool %s: %s", filename, exc,
-                )
-        else:
-            log.warning(
-                "Skipped invalid project tool %s: %s", filename, msg,
+            level = getattr(tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL)
+            if tool_permissions is not None:
+                tool_permissions[tool_class.name] = level
+
+            log.info(
+                "Project tool loaded: %s (project=%s level=%d file=%s)",
+                tool_class.name,
+                project_id,
+                level,
+                filename,
             )
+        except Exception as exc:
+            log.warning("Failed to instantiate project tool %s: %s", filename, exc)
 
     return loaded
 
@@ -683,7 +706,11 @@ class ToolCreatorInput(BaseModel):
     """Input model for the create_tool meta-tool."""
 
     tool_name: str = Field(
-        description="File name for the new tool (e.g. weather_fetcher)."
+        description=(
+            "Logical name for the new tool (e.g. weather_fetcher). The saved "
+            "module file uses the canonical '<tool_name>_tool.py' pattern unless "
+            "the name already ends with '_tool'."
+        )
     )
     python_code: str = Field(
         description=(
@@ -808,8 +835,9 @@ class ToolCreatorTool(BaseTool):
             log.error("[ToolAudit] Legacy tool creation failed at naming: %s", e.message)
             return ToolResult(output=f"❌ Naming validation failed:\n{e.message}", is_error=True)
 
-        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.py")
-        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{safe_tool_name}.meta.json")
+        module_stem = canonical_tool_module_stem(safe_tool_name)
+        file_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_stem}.py")
+        meta_path = os.path.join(CUSTOM_TOOLS_DIR, f"{module_stem}.meta.json")
 
         # 1. 권한 자동 주입 (service.py 재사용)
         try:
@@ -845,7 +873,7 @@ class ToolCreatorTool(BaseTool):
 
         # 4. 모듈 로드 및 구조(Schema) 검증
         is_valid_module, mod_msg, tool_class = ToolValidator.validate_and_load_module(
-            safe_tool_name, file_path
+            module_stem, file_path
         )
         if not is_valid_module:
             os.remove(file_path)
@@ -859,12 +887,12 @@ class ToolCreatorTool(BaseTool):
         now = datetime.now(timezone.utc).isoformat()
         metadata = {
             "toolName": tool_class.name,
-            "moduleName": safe_tool_name,
+            "moduleName": module_stem,
             "projectId": "local",
             "chatSessionId": None,
             "creatorUserId": "cli_user",
             "planId": None,
-            "fileName": f"{safe_tool_name}.py",
+            "fileName": f"{module_stem}.py",
             "createdAt": now,
             "updatedAt": now,
             "permissionLevel": getattr(tool_class, "permission_level", arguments.permission_level),
@@ -881,7 +909,7 @@ class ToolCreatorTool(BaseTool):
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
         # 5b. 생성 직후 정규화 (스키마 일관성 보장)
-        normalize_tool_meta(meta_path, tool_class, safe_tool_name)
+        normalize_tool_meta(meta_path, tool_class, module_stem)
         result_metadata = {
             "tool_name": tool_class.name,
             "module_path": file_path,
