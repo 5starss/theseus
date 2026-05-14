@@ -32,6 +32,12 @@ public interface ToolPlanRepository extends JpaRepository<ToolPlan, Long> {
 		ToolPlanStatus status
 	);
 
+	Optional<ToolPlan> findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
+		Project project,
+		ChatSession chatSession,
+		List<ToolPlanStatus> statuses
+	);
+
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("""
 		select toolPlan

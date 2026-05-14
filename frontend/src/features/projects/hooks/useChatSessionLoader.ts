@@ -2,19 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { chatApi } from '../api/chat';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { useToolGenerationSSE } from './useToolGenerationSSE';
-import type { CurrentPlanRecovery, DraftPhase, StructuredPlan } from '../types/chat';
-
-function parseStructuredPlan(structuredPlanJson?: string | null): StructuredPlan | null {
-  if (!structuredPlanJson) return null;
-
-  try {
-    const parsed = JSON.parse(structuredPlanJson) as StructuredPlan;
-    return Array.isArray(parsed.blocks) ? parsed : null;
-  } catch (error) {
-    console.warn('Failed to parse structuredPlanJson:', error);
-    return null;
-  }
-}
+import { parseStructuredPlanJson } from '../utils/structuredPlan';
+import type { CurrentPlanRecovery, DraftPhase } from '../types/chat';
 
 function phaseFromStatus(status?: string | null): DraftPhase {
   switch (status) {
@@ -68,7 +57,7 @@ export function useChatSessionLoader(projectId?: string, sessionId?: string) {
 
     try {
       const detail = await chatApi.getToolPlanDetail(projId, sessId, String(toolPlanId));
-      return parseStructuredPlan(detail.structuredPlanJson);
+      return parseStructuredPlanJson(detail.structuredPlanJson, 'ChatLoader');
     } catch (error) {
       console.warn('Failed to load ToolPlan detail:', error);
       return null;
