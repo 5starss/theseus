@@ -167,6 +167,19 @@ already present in local files or the user has provided authoritative documentat
 it is available because it handles search, scraping, and parsing in a single turn.\
 """
 
+_GENERATED_CUSTOM_TOOL_SECURITY_RULES = """\
+Generated Theseus custom tool security rules:
+ - Do not import or call subprocess, os.system, os.popen, shutil, socket, ctypes, \
+multiprocessing, signal, pty, resource, tempfile, webbrowser, pickle, or shelve.
+ - Do not execute shell commands or arbitrary local programs from generated custom tools.
+ - Do not read or write arbitrary local files unless the approved plan explicitly names \
+safe read-only paths.
+ - For system metrics, prefer psutil and read-only /proc or /sys data. Do not call \
+nvidia-smi directly from a generated custom tool.
+ - If a core requirement depends on a prohibited command or module, expose the limitation \
+and propose a safe alternative instead of silently removing that capability.\
+"""
+
 _CREATE_TOOL_CAPABILITY_PROMPT = """\
 # create_tool Capability
  - Tool creation (`create_tool`) is ONLY available in Plan mode's Executing phase. Do not attempt it in Agent, Ask, Drafting, Review, or Verifying mode.
@@ -463,7 +476,8 @@ summaries, explanations) MUST be written in the same language the user used in t
 Main task required fields: `id`, `parent_id` (null), `tier`, `title`, `problem`, `solution`, \
 `target_files`, `expected_effect`, `description`, `status`
 Sub-task required fields: `id`, `parent_id`, `title`, `description`, `target_files`, `status`
-Optional fields (omit if not applicable): `integration_points`, `sequential_dependencies`
+Optional fields (omit if not applicable): `integration_points`, `sequential_dependencies`, \
+`plan_b`, `safe_alternative`, top-level `alternatives`
 
 ```json
 {
@@ -474,6 +488,14 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
     "affected_files": ["List of primary affected file paths"],
     "risks": "Potential risks and caveats"
   },
+  "alternatives": [
+    {
+      "title": "Safe Plan B option when the ideal implementation is blocked by generated-tool policy",
+      "reason": "Why this safer option is needed",
+      "tradeoffs": "Accuracy, scope, permission, or operational tradeoffs",
+      "when_to_use": "Condition for selecting this alternative"
+    }
+  ],
   "tasks": [
     {
       "id": "task-1",
@@ -484,6 +506,7 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
       "solution": "Solution summary (implementation approach, patterns/libraries to use)",
       "target_files": ["File paths to modify or create"],
       "expected_effect": "Expected effect (performance, quality, cost improvements)",
+      "plan_b": "Optional safe fallback if the ideal implementation is blocked by tool security policy",
       "description": "Engineering spec: target class/function names, key library calls with options, data flow, error handling strategy",
       "status": "pending"
     },
@@ -529,8 +552,20 @@ the plan must describe creating a Theseus custom tool during the Executing phase
 In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>_tool.py` \
 and the generated `theseus_engine/custom_tools/<tool_name>_tool.meta.json` unless \
 the logical tool name already ends with `_tool`. Do not use legacy framework paths or \
-generic source-file fallbacks for new Theseus tools.\
-"""
+generic source-file fallbacks for new Theseus tools.
+ - CRITICAL — custom tool implementation plans must respect the generated-tool \
+security rules below. Do not plan subprocess/nvidia-smi/shell execution inside generated \
+custom tool code; use read-only APIs or identify the requirement as needing a trusted core adapter.
+ - If the user's requested custom tool would naturally use a prohibited import, command, or \
+local executable, the main task solution MUST avoid that prohibited implementation. Add a \
+user-visible `alternatives` entry that explains Plan B options and tradeoffs, such as:
+   - use `psutil`, `/proc`, `/sys`, or other read-only APIs where possible;
+   - use an existing trusted Core adapter or Remote Workspace adapter for privileged checks;
+   - ask the user/admin to approve a separate trusted adapter when safe generated code cannot \
+fully satisfy the requirement.
+ - Do NOT silently remove a requested capability just to pass validation. If a capability is \
+limited by generated-tool policy, state the limitation and recommend the safest Plan B.\
+""" + "\n" + _GENERATED_CUSTOM_TOOL_SECURITY_RULES
 
 _PLAN_REVIEW_PROMPT = """\
 # Current Mode: PLAN — Phase: REVIEW

@@ -26,6 +26,35 @@ from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
 
+_CUSTOM_TOOL_SECURITY_RULES = """\
+Generated Theseus custom tool security rules:
+- Do not import or call subprocess, os.system, os.popen, shutil, socket, ctypes,
+  multiprocessing, signal, pty, resource, tempfile, webbrowser, pickle, or shelve.
+- Do not execute shell commands or arbitrary local programs from generated custom tools.
+- Do not read or write arbitrary local files unless the approved plan explicitly names
+  safe read-only paths.
+- For system metrics, prefer psutil and read-only /proc or /sys data. Do not call
+  nvidia-smi directly from a generated custom tool.
+- If a core requirement depends on a prohibited command or module, expose the limitation
+  and propose a safe alternative instead of silently removing that capability.
+"""
+
+_CUSTOM_TOOL_SAFETY_CONTEXT = f"""\
+Generated custom tool safety context:
+- If the request involves creating a Theseus custom tool, the plan must not rely on
+  imports, commands, or implementation patterns that generated custom tools are not
+  allowed to use.
+- If the requested capability appears to require a prohibited import, shell command,
+  or local program execution, do not hide that limitation. Keep the main plan safe
+  and add a user-visible `alternatives` section with Plan B options such as read-only
+  APIs, existing trusted core adapters, Remote Workspace adapters, or explicit
+  user/admin approval for a trusted adapter.
+- Do not plan subprocess, nvidia-smi, os.system, shell execution, or direct arbitrary
+  local program execution inside generated custom tool code.
+
+{_CUSTOM_TOOL_SECURITY_RULES}
+"""
+
 
 class ToolPlanPlannerError(RuntimeError):
     pass
@@ -157,9 +186,10 @@ class ToolPlanPlanner:
                 "Base plan:\n"
                 f"{json.dumps(event.base_plan.model_dump(mode='json', by_alias=True), ensure_ascii=False, indent=2)}\n\n"
                 "Feedback:\n"
-                f"{json.dumps(feedback, ensure_ascii=False, indent=2)}"
+                f"{json.dumps(feedback, ensure_ascii=False, indent=2)}\n\n"
+                f"{_CUSTOM_TOOL_SAFETY_CONTEXT}"
             )
-        return event.prompt
+        return f"{event.prompt}\n\n{_CUSTOM_TOOL_SAFETY_CONTEXT}"
 
     def _build_system_prompt(
         self,
@@ -248,6 +278,7 @@ class ToolPlanPlanner:
             "inputs": self._list_of_dicts(plan_json.get("inputs")),
             "outputs": self._list_of_dicts(plan_json.get("outputs")),
             "constraints": self._constraints_from_plan(plan_json),
+            "alternatives": self._alternatives_from_plan(plan_json),
             "verification": self._verification_from_plan(plan_json),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -308,6 +339,7 @@ class ToolPlanPlanner:
             ("Solution", task.get("solution")),
             ("Description", task.get("description")),
             ("Expected effect", task.get("expected_effect")),
+            ("Plan B", task.get("plan_b") or task.get("safe_alternative")),
             ("Target files", task.get("target_files")),
             ("Integration points", task.get("integration_points")),
             ("Dependencies", task.get("sequential_dependencies")),
@@ -348,6 +380,19 @@ class ToolPlanPlanner:
         return []
 
     @staticmethod
+    def _alternatives_from_plan(plan_json: dict[str, Any]) -> list[dict[str, Any]]:
+        alternatives = plan_json.get("alternatives")
+        if not isinstance(alternatives, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in alternatives:
+            if isinstance(item, dict):
+                result.append(dict(item))
+            elif str(item or "").strip():
+                result.append({"title": str(item).strip()})
+        return result
+
+    @staticmethod
     def _verification_from_plan(plan_json: dict[str, Any]) -> dict[str, Any]:
         verification = plan_json.get("verification")
         if isinstance(verification, dict):
@@ -373,6 +418,11 @@ class ToolPlanPlanner:
             lines.extend(["", "### 주의 사항"])
             lines.extend(f"- {item}" for item in constraints)
 
+        alternative_lines = self._display_alternatives(snapshot.get("alternatives") or [])
+        if alternative_lines:
+            lines.extend(["", "### 대안 / Plan B"])
+            lines.extend(f"- {line}" for line in alternative_lines)
+
         verification_lines = self._display_verification(snapshot.get("verification") or {})
         if verification_lines:
             lines.extend(["", "### 검증 기준"])
@@ -386,6 +436,7 @@ class ToolPlanPlanner:
             "Solution": "해결 방향",
             "Description": "구현 내용",
             "Expected effect": "기대 효과",
+            "Plan B": "대안",
             "Target files": "영향 파일",
             "Integration points": "연동 지점",
             "Dependencies": "의존 관계",
@@ -402,6 +453,33 @@ class ToolPlanPlanner:
                     lines.append(f"**{display_label}**: {value.strip()}")
                     continue
             lines.append(line)
+        return lines
+
+    @staticmethod
+    def _display_alternatives(alternatives: list[dict[str, Any]]) -> list[str]:
+        lines: list[str] = []
+        for index, alternative in enumerate(alternatives, start=1):
+            title = str(
+                alternative.get("title")
+                or alternative.get("name")
+                or f"대안 {index}"
+            ).strip()
+            reason = str(
+                alternative.get("reason")
+                or alternative.get("why")
+                or alternative.get("description")
+                or ""
+            ).strip()
+            tradeoffs = alternative.get("tradeoffs") or alternative.get("tradeoff")
+            when_to_use = alternative.get("when_to_use") or alternative.get("whenToUse")
+            parts = [f"**{title}**"]
+            if reason:
+                parts.append(reason)
+            if tradeoffs:
+                parts.append(f"트레이드오프: {tradeoffs}")
+            if when_to_use:
+                parts.append(f"적용 조건: {when_to_use}")
+            lines.append(" - ".join(str(part) for part in parts if str(part).strip()))
         return lines
 
     @staticmethod
