@@ -201,3 +201,26 @@ TUI 및 CLI 인터페이스에서 B2B 에이전트 서비스로서의 완성도�
     - `TheseusLLMClient`에 `generate` 메서드를 추가하여 `AuditLLM` 호출 시 발생하는 `AttributeError` 해결.
     - VSCode Extension UI 개선을 통해 툴 실행 가시성 및 루프 상태 확인 편의성 확보.
 
+- **🟢 7.8. VSCode Extension Architecture Refactoring (완료, 2026-05-14)**:
+    - WebView 메시지 디스패처를 `media/dispatcher.js`로 분리하고, HTML 템플릿을 `media/index.html` 정적 파일로 분리.
+    - `protocol.ts` 이벤트 타입을 세분화하고, Activity Log가 실제 툴 호출/로그 발생 시에만 표시되도록 UX 정리.
+    - 좁은 폭 사이드바 대응을 위한 반응형 CSS 규칙 추가.
+
+- **🟢 7.9. VSCode Extension 인라인 편집 기능 (완료, 2026-05-14)**:
+    - `Ctrl+I` / `Cmd+I` 기반 인라인 편집 명령과 에디터 본문 스트리밍 삽입 흐름 구현.
+    - `InlineInputProvider`, `InlineDiffManager`, `InlineEditController`로 입력/디프 표시/세션 제어 책임 분리.
+
+- **🟢 7.10. Core Remote Workspace 및 Tool context 안정화 (완료, 2026-05-14)**:
+    - Remote Workspace SSH config 검증, 민감정보 redaction, runtime key 기반 원본 config 조회 구조 보강.
+    - ASK/PLAN/AGENT 모드별 remote tool 노출 정책과 local/remote tool 판정을 정리.
+    - PLAN prompt에 active custom tool context를 주입하고, ToolBuild 실패 notice가 모델 history에 요약 projection되도록 보강.
+    - LLM debug dump와 provider wire payload dump에 tool schema/history 관측 필드를 추가.
+
+- **🟢 7.11. VSCode Extension UX 및 성능 Polish (완료, 2026-05-14)**:
+    - `persistState()` 디바운싱과 `AssistantTextDelta` 렌더링 스로틀링으로 스트리밍 UI 병목 완화.
+    - Shimmer 애니메이션, running 상태 강조, 메시지/컴포저 스타일 개선으로 Agentic Loop 진행 상태 가시화.
+
+- **🟢 7.12. VSCode Extension 프리미엄 UI/UX 전면 개선 (완료, 2026-05-14)**:
+    - 커스텀 스크롤바, 역할 아바타, Empty State 웰컴 화면, 마크다운 타이포그래피, 모드별 칩 색상, 팝업 트랜지션 적용.
+    - 히스토리 복원/프롬프트 전송 시 Empty State 표시와 제거 흐름을 정리.
+

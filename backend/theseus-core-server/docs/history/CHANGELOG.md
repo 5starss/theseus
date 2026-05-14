@@ -4,6 +4,137 @@
 
 ## [Unreleased]
 
+### ✨ Session 111 — VSCode Extension 프리미엄 UI/UX 전면 개선 (2026-05-14)
+
+#### `vscode-extension/media/styles.css`
+- 커스텀 스크롤바(6px, 반투명, 라운드) 적용으로 Windows 기본 스크롤바 투박함 제거
+- 역할별 아바타 아이콘(✦/●/⚙) + 원형 배경 CSS 추가로 메시지 발화자 즉시 식별
+- Empty State(웰컴 화면) 디자인: 빈 채팅 시 로고 + 안내 + 예시 프롬프트 카드 표시
+- 메시지 호버 시 미세한 배경 전환으로 터치 포인트 명확화
+- 팝업 메뉴/모드 팝업에 `scale+opacity` 등장 애니메이션 추가
+- 마크다운 타이포그래피 전면 정의 (h1~h6, ul/ol, blockquote, table, hr, link)
+- 컴포저 영역 상단 그림자로 메시지/입력 영역 위계 분리
+- 모드별 칩 색상 분기 (Agent=파랑, Ask=초록, Plan=주황) via `data-mode` 속성
+- 단축키 힌트(`kbd.shortcut-hint`) 스타일 정의
+
+#### `vscode-extension/media/main.js`
+- `_appendMessageEl`에 역할별 아바타 아이콘 DOM 삽입 로직 추가
+- `applyMode`에서 `modeChipBtn.dataset.mode` 설정으로 CSS 색상 연동
+- 히스토리 복원 후 메시지 0개 시 Empty State 자동 렌더링 + 프롬프트 카드 클릭 연동
+- `sendPromptText` 시 Empty State 자동 제거
+
+#### `vscode-extension/media/components/MessageList.js`
+- `createTypingIndicator`에 어시스턴트 아바타 아이콘 추가
+
+#### `vscode-extension/media/index.html`
+- 모드 옵션에 `/agent`, `/ask`, `/plan` 단축키 힌트(`<kbd>`) 삽입
+
+---
+
+### 🐛 Session 110 — Core Tool context / history 관측성 보강 (2026-05-14)
+
+#### `src/tool_plan` / `src/history`
+
+- PLAN 생성 전에 프로젝트 active custom tool `.meta.json`만 읽어 `toolName`, 표시 이름/설명, 입력/출력, 제약 요약을 prompt context에 주입하도록 보강
+- 기존 active custom tool이 요청과 겹치면 중복 생성 대신 reuse / extend / rename 전략을 계획하도록 PLAN prompt 지침 추가
+- API history에 `TOOL_RESULT` / `TOOL_CALL` 계열 record가 들어오는 경우 구조화 복원이 불가능하더라도 assistant-context 요약으로 projection되도록 mapper 보강
+
+#### `theseus_engine`
+
+- LLM debug dump에 `availableToolNames`, `toolSchemaCount`, `historyToolUseCount`, `historyToolResultCount`, `historyToolNames`를 추가해 tool schema 제공 여부와 실제 tool history 포함 여부를 구분 가능하게 함
+- OpenAI-compatible provider 최종 요청 변환 후 `messages/tools` summary dump를 추가해 provider wire payload 기준의 tool call/result 존재 여부를 확인할 수 있게 함
+
+#### 검증
+
+- `scratch/test_tool_context_debug.py` smoke 테스트 추가
+- `python -m py_compile src/tool_plan/planner.py src/history/mapper.py theseus_engine/wrappers/llm_clients/debug_dump.py theseus_engine/wrappers/llm_clients/theseus_client.py theseus_engine/wrappers/llm_clients/openai_compat_client.py scratch/test_tool_context_debug.py` 성공
+- `$env:PYTHONPATH=(Get-Location).Path; C:\Users\SSAFY\miniforge3\envs\tt\python.exe scratch\test_tool_context_debug.py` 성공
+
+---
+
+### ✨ Session 110 — VSCode Extension UI 세련화 (2026-05-14)
+
+#### `vscode-extension/media/styles.css`
+- 파일 끝에 붙어있던 UTF-16 깨진 바이트 제거 (CSS 파싱 오류 원인)
+- 메시지 영역 여백 확대 및 유저 메시지에 투명 버블 배경 추가로 역할 구분 시각화
+- Activity Group 좌우 마진(48px→4px) 수정으로 사이드바 폭에 맞는 레이아웃 확보
+- 컴포저 입력창 `border-radius` 12px 확대 및 포커스 시 글로우 쉐도우 추가
+- 전송 버튼 라운딩/클릭 피드백(`scale`), 코드블록 `border-radius` 8px으로 통일
+- `loop-status.running` 뱃지에 부드러운 pulse 애니메이션 추가
+- 메시지 등장 시 `msg-slide-in` 애니메이션으로 자연스러운 진입 효과
+- 전반적 font-smoothing 및 anti-aliasing 적용
+
+### ✨ Session 109 — Theseus Agent UX Refinement (Phase 4: UX & Performance Polish) (2026-05-14)
+
+#### `vscode-extension`
+- `media/main.js`의 `persistState()` 디바운싱을 통해 VSCode 상태 저장 디스크 I/O 병목 제거
+- `media/dispatcher.js`의 `AssistantTextDelta` 마크다운 렌더링을 `requestAnimationFrame`으로 스로틀링하여 스트리밍 UI 블로킹 최적화
+- `media/styles.css` 및 컴포넌트에 Shimmer(빛 번짐) 애니메이션 추가로 Agentic Loop 대기 시간의 체감 속도 향상
+- 툴 스택 실행 중 상태를 시각적으로 강조하는 회전(Spinning) 아이콘 CSS (`.tool-icon.spin`) 적용
+
+
+### 🐛 Session 108 — Core Remote Workspace 안정화 (2026-05-14)
+
+#### `src/remote_workspace`
+
+- Remote Workspace SSH config에 Core-side 검증을 추가해 비활성 상태, `basePath="/"`, 상대 경로, 인증 정보 누락을 Core 내부에서 거부하도록 보강
+- `password` / `privateKeyPath`는 실행용 원본 config와 metadata/log/debug용 redacted config를 분리하고, redacted dump helper를 통해 민감정보가 `tool_metadata`에 남지 않도록 정리
+- 생성 Tool runtime helper가 직접 metadata를 파싱하지 않고 process-local runtime key로 원본 config를 조회하도록 보강해, 사용자/LLM 노출 metadata에는 redacted 값만 유지
+- `remote_read_file`, `remote_glob`, `remote_grep`, `remote_tail_log`, `remote_check_*`, `remote_write_file`, `remote_edit_file`, `remote_run_command`의 SSH/SFTP 호출을 `asyncio.to_thread()`로 감싸 event loop blocking 위험을 줄임
+- `remote_run_command`의 command policy를 보강해 shell chaining, command substitution, pipe-to-shell, basePath 밖 path argument를 Core에서 차단
+
+#### `src/builder` / `src/tool_plan` / `theseus_engine`
+
+- ASK/PLAN/AGENT mode별 Remote Workspace 도구 노출 정책을 redacted metadata와 runtime key 기반으로 정리하고, ASK/PLAN에서는 write/command 도구가 노출되지 않도록 고정
+- `QueryEngine`의 remote tool 판정을 실제 `remote_*` 도구명 기준으로 정리해 local `read_file` / `grep` / `bash` / `write_file` / `edit_file`을 remote 작업으로 오인하지 않도록 보정
+- remote 도구 실행 결과는 local workspace file snapshot/carryover로 기록하지 않도록 분리
+- sandbox validation stub에 remote runtime helper 상수를 추가해 생성 Tool이 remote helper를 import해도 검증 단계에서 실제 SSH 실행 없이 구조 검증을 통과할 수 있도록 정리
+
+#### 검증
+
+- `scratch/test_remote_workspace_core_only.py` smoke 테스트 추가
+- `python -m py_compile src/remote_workspace/schemas.py src/remote_workspace/runtime.py src/remote_workspace/read_primitives.py src/remote_workspace/write_primitives.py src/remote_workspace/resolver.py src/builder/engine.py src/tool_plan/planner.py src/tooling/sandbox_gate_runner.py theseus_engine/engine/query_engine.py scratch/test_remote_workspace_core_only.py` 성공
+- `$env:PYTHONPATH=(Get-Location).Path; C:\Users\SSAFY\miniforge3\envs\tt\python.exe scratch\test_remote_workspace_core_only.py` 성공
+
+---
+
+### ✨ Session 107 — VSCode Extension 인라인 편집(Inline Edit) 기능 구현 (2026-05-14)
+
+#### `vscode-extension`
+
+- 인라인 스트리밍 통신 제어: `SessionManager`의 `AssistantTextDelta` 이벤트를 수신하여 사이드바가 아닌 에디터 본문 커서 위치에 실시간으로 코드를 스트리밍(`TextEditor.edit`)하는 오케스트레이션 로직 추가
+- UI 인터페이스 추상화: `src/inline/InlineInputProvider.ts`를 신설하여 향후 Webview 패널 방식으로의 확장을 고려한 `NativeInputProvider` (Native InputBox 기반) 구현
+- Diff Decorator: `src/inline/InlineDiffManager.ts`를 추가해 삽입된 코드 영역 배경을 초록색(`diffEditor.insertedTextBackground`)으로 강조
+- 명령어 등록: `package.json`에 `theseus.inlineEdit` 명령어 추가 및 `Ctrl+I` / `Cmd+I` 단축키 바인딩
+
+---
+
+### 🐛 Session 107 — ToolBuild 실패 context history projection 보강 (2026-05-14)
+
+#### `theseus-api-server` / `src/history`
+
+- ToolBuild/Tool PLAN 실패 `SYSTEM_NOTICE`는 UI/감사용 저장 타입을 유지하되, PLAN Kafka history 생성 시에만 assistant-context 요약으로 projection되도록 보강
+- Core `/stream` history mapper도 같은 정책을 적용해 일반 `SYSTEM` 메시지는 계속 제외하고, ToolBuild/Tool PLAN 실패 notice만 ASK/AGENT 모델 입력에 이전 실패 요약으로 반영
+- 실패 요약에는 `code`, 핵심 원인, 가능한 대안을 포함하고 `task_id`나 내부 저장 타입 변경 없이 기존 API/Kafka schema를 유지
+
+#### 검증
+
+- `ToolPlanGenerationServiceTest`에 ToolBuild 실패 notice projection 회귀 테스트 추가
+
+---
+
+### ✨ Session 106 — VSCode Extension Architecture Refactoring (2026-05-14)
+
+#### `vscode-extension`
+
+- WebView 메시지 디스패처 분리: `media/main.js`의 방대한 `switch` 문을 `media/dispatcher.js`로 분리하여 유지보수성 향상
+- HTML 템플릿 분리: `src/providers/ChatViewHtml.ts`에 하드코딩된 HTML 문자열을 `media/index.html`로 분리하여 로직과 뷰를 분리
+- 프로토콜 타입 고도화: `src/shared/protocol.ts`에 `PermissionApprovalEvent`, `RunnerReconnectEvent`, `RunnerReplayEvent`, `RunnerCancelEvent` 등 신규 이벤트 타입을 명시적으로 추가하여 타입 안정성 확보
+- Activity Log UX 개선: 툴 호출이 없을 때에도 표시되던 툴 스택 아코디언이 툴 호출 또는 관련 로그가 발생할 때만 화면에 표시되도록 `media/components/ActivityLog.js` 개선
+- CSS 레이아웃 구조화: `media/styles.css` 하단에 좁은 폭 화면(480px 이하)에서의 Grid/Flex 래핑 파편화를 방지하기 위한 반응형 규칙을 추가
+
+---
+
 ### 🐛 Session 105 — VSCode Extension turn 단위 Activity/Session UX 복구 (2026-05-14)
 
 #### `vscode-extension`
