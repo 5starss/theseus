@@ -9,6 +9,7 @@ param(
     [string]$SettingsDir = "",
     [string]$ExtensionsDir = "",
     [string]$VsixPath = "",
+    [string]$RunnerPath = "",
     [switch]$SkipRequirements,
     [switch]$SkipExtension,
     [switch]$SkipSettings,
@@ -347,6 +348,7 @@ $requirementsPath = Join-Path $CorePath "requirements.txt"
 if (-not (Test-Path -LiteralPath $requirementsPath)) {
     throw "requirements.txt was not found: $requirementsPath"
 }
+$browserRequirementsPath = Join-Path $CorePath "requirements-browser.txt"
 
 $venvPath = Join-Path $CorePath ".venv"
 if (-not (Test-Path -LiteralPath $venvPath)) {
@@ -366,6 +368,11 @@ if (-not $SkipSettings -or -not $SkipExtension) {
 }
 
 if (-not $SkipSettings) {
+    $resolvedRunnerPath = ""
+    if (-not [string]::IsNullOrWhiteSpace($RunnerPath)) {
+        $resolvedRunnerPath = Resolve-ExistingPath -PathValue $RunnerPath -Label "Runner"
+    }
+
     $settingsPath = Get-SettingsPath `
         -IdeTarget $DetectedIde `
         -WorkspaceRoot $WorkspacePath `
@@ -377,6 +384,10 @@ if (-not $SkipSettings) {
     $settings["theseus.corePath"] = $CorePath
     $settings["theseus.pythonPath"] = (Resolve-Path -LiteralPath $venvPython).Path
     $settings["theseus.workspacePath"] = $WorkspacePath
+    if (-not [string]::IsNullOrWhiteSpace($resolvedRunnerPath)) {
+        $settings["theseus.runnerPath"] = $resolvedRunnerPath
+        $settings["theseus.runtimeMode"] = "bundled-runner"
+    }
     if (-not $settings.Contains("theseus.serverUrl")) {
         $settings["theseus.serverUrl"] = ""
     }
@@ -398,6 +409,12 @@ if (-not $SkipRequirements) {
 }
 
 if ($InstallPlaywright) {
+    if (Test-Path -LiteralPath $browserRequirementsPath) {
+        & $venvPython -m pip install -r $browserRequirementsPath
+    }
+    else {
+        & $venvPython -m pip install playwright
+    }
     & $venvPython -m playwright install chromium
 }
 
@@ -450,4 +467,7 @@ if (-not [string]::IsNullOrWhiteSpace($extensionInstallDir)) {
 }
 Write-Host "CorePath: $CorePath"
 Write-Host "PythonPath: $venvPython"
+if (-not [string]::IsNullOrWhiteSpace($resolvedRunnerPath)) {
+    Write-Host "RunnerPath: $resolvedRunnerPath"
+}
 Write-Host "WorkspacePath: $WorkspacePath"

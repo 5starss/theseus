@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+case "$SCRIPT_PATH" in
+  */*) SCRIPT_DIR_RAW="${SCRIPT_PATH%/*}" ;;
+  *) SCRIPT_DIR_RAW="." ;;
+esac
+SCRIPT_DIR="$(cd -- "$SCRIPT_DIR_RAW" && pwd)"
 CORE_PATH="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKSPACE_PATH="$(cd "$CORE_PATH/../.." && pwd)"
 PYTHON_BIN="${PYTHON:-python3}"
@@ -10,40 +15,165 @@ IDE_TARGET="${THESEUS_IDE:-auto}"
 SETTINGS_DIR_NAME="${THESEUS_SETTINGS_DIR:-}"
 EXTENSIONS_DIR_PATH="${THESEUS_EXTENSIONS_DIR:-}"
 VSIX_PATH="${VSIX_PATH:-}"
+RUNNER_PATH="${THESEUS_RUNNER_PATH:-}"
 SKIP_REQUIREMENTS=0
 SKIP_EXTENSION=0
 SKIP_SETTINGS=0
 INSTALL_PLAYWRIGHT=0
 
-usage() {
-  cat <<'EOF'
-Usage: scripts/install-vscode-extension.sh [options]
+lowercase() {
+  local value="${1:-}"
+  local result=""
+  local char
+  local index
+  for ((index = 0; index < ${#value}; index += 1)); do
+    char="${value:index:1}"
+    case "$char" in
+      A) char=a ;;
+      B) char=b ;;
+      C) char=c ;;
+      D) char=d ;;
+      E) char=e ;;
+      F) char=f ;;
+      G) char=g ;;
+      H) char=h ;;
+      I) char=i ;;
+      J) char=j ;;
+      K) char=k ;;
+      L) char=l ;;
+      M) char=m ;;
+      N) char=n ;;
+      O) char=o ;;
+      P) char=p ;;
+      Q) char=q ;;
+      R) char=r ;;
+      S) char=s ;;
+      T) char=t ;;
+      U) char=u ;;
+      V) char=v ;;
+      W) char=w ;;
+      X) char=x ;;
+      Y) char=y ;;
+      Z) char=z ;;
+    esac
+    result="${result}${char}"
+  done
+  printf '%s\n' "$result"
+}
 
-Options:
-  --core-path PATH        theseus-core-server path
-  --workspace-path PATH   VSCode workspace path
-  --python PATH           Python executable for venv creation
-  --ide NAME              IDE target: auto, vscode, antigravity
-  --code PATH             IDE CLI executable (overrides --ide)
-  --settings-dir NAME     Workspace settings folder name
-  --extensions-dir PATH   IDE extension storage directory
-  --vsix PATH             VSIX package path
-  --skip-requirements     Do not install requirements.txt
-  --skip-extension        Do not install the VSIX package
-  --skip-settings         Do not write IDE settings.json
-  --install-playwright    Install Chromium browser binaries for Playwright tools
-  -h, --help              Show this help
-EOF
+uppercase_drive() {
+  case "$1" in
+    a) printf 'A' ;;
+    b) printf 'B' ;;
+    c) printf 'C' ;;
+    d) printf 'D' ;;
+    e) printf 'E' ;;
+    f) printf 'F' ;;
+    g) printf 'G' ;;
+    h) printf 'H' ;;
+    i) printf 'I' ;;
+    j) printf 'J' ;;
+    k) printf 'K' ;;
+    l) printf 'L' ;;
+    m) printf 'M' ;;
+    n) printf 'N' ;;
+    o) printf 'O' ;;
+    p) printf 'P' ;;
+    q) printf 'Q' ;;
+    r) printf 'R' ;;
+    s) printf 'S' ;;
+    t) printf 'T' ;;
+    u) printf 'U' ;;
+    v) printf 'V' ;;
+    w) printf 'W' ;;
+    x) printf 'X' ;;
+    y) printf 'Y' ;;
+    z) printf 'Z' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+is_windows_path() {
+  [[ "$1" =~ ^[A-Za-z]:[\\/] || "$1" == \\\\* ]]
+}
+
+windows_to_posix_path() {
+  local value="${1//\\//}"
+  if [[ "$value" =~ ^([A-Za-z]):/(.*)$ ]]; then
+    printf '/%s/%s\n' "$(lowercase "${BASH_REMATCH[1]}")" "${BASH_REMATCH[2]}"
+  elif [[ "$value" =~ ^([A-Za-z]):$ ]]; then
+    printf '/%s\n' "$(lowercase "${BASH_REMATCH[1]}")"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+to_posix_path() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    printf '\n'
+    return 0
+  fi
+  if is_windows_path "$value"; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -u "$value"
+    elif [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v wslpath >/dev/null 2>&1; then
+      wslpath -u "$value"
+    else
+      windows_to_posix_path "$value"
+    fi
+  else
+    printf '%s\n' "$value"
+  fi
+}
+
+resolve_dir_arg() {
+  local value
+  value="$(to_posix_path "$1")"
+  cd "$value" && pwd
+}
+
+normalize_path_arg() {
+  to_posix_path "$1"
+}
+
+normalize_command_arg() {
+  if is_windows_path "$1"; then
+    to_posix_path "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+usage() {
+  printf '%s\n' \
+    "Usage: scripts/install-vscode-extension.sh [options]" \
+    "" \
+    "Options:" \
+    "  --core-path PATH        theseus-core-server path" \
+    "  --workspace-path PATH   VSCode workspace path" \
+    "  --python PATH           Python executable for venv creation" \
+    "  --ide NAME              IDE target: auto, vscode, antigravity" \
+    "  --code PATH             IDE CLI executable (overrides --ide)" \
+    "  --settings-dir NAME     Workspace settings folder name" \
+    "  --extensions-dir PATH   IDE extension storage directory" \
+    "  --vsix PATH             VSIX package path" \
+    "  --runner-path PATH      Packaged Theseus runner binary path" \
+    "  --skip-requirements     Do not install requirements.txt" \
+    "  --skip-extension        Do not install the VSIX package" \
+    "  --skip-settings         Do not write IDE settings.json" \
+    "  --install-playwright    Install Chromium browser binaries for Playwright tools" \
+    "  -h, --help              Show this help"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --core-path)
-      CORE_PATH="$(cd "$2" && pwd)"
+      CORE_PATH="$(resolve_dir_arg "$2")"
       shift 2
       ;;
     --workspace-path)
-      WORKSPACE_PATH="$(cd "$2" && pwd)"
+      WORKSPACE_PATH="$(resolve_dir_arg "$2")"
       shift 2
       ;;
     --python)
@@ -55,7 +185,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --code)
-      CODE_BIN="$2"
+      CODE_BIN="$(normalize_command_arg "$2")"
       shift 2
       ;;
     --settings-dir)
@@ -63,11 +193,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --extensions-dir)
-      EXTENSIONS_DIR_PATH="$2"
+      EXTENSIONS_DIR_PATH="$(normalize_path_arg "$2")"
       shift 2
       ;;
     --vsix)
-      VSIX_PATH="$2"
+      VSIX_PATH="$(normalize_path_arg "$2")"
+      shift 2
+      ;;
+    --runner-path)
+      RUNNER_PATH="$(normalize_path_arg "$2")"
       shift 2
       ;;
     --skip-requirements)
@@ -97,10 +231,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-lowercase() {
-  printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'
-}
 
 command_path() {
   command -v "$1" 2>/dev/null
@@ -169,8 +299,11 @@ detect_ide_from_processes() {
   process_name="$(
     powershell.exe -NoProfile -Command \
       "\$p = Get-Process Antigravity,Code -ErrorAction SilentlyContinue | Sort-Object StartTime -Descending | Select-Object -First 1 -ExpandProperty ProcessName; if (\$p) { \$p.ToLowerInvariant() }" \
-      2>/dev/null | tr -d '\r' | head -n 1
+      2>/dev/null || true
   )"
+  process_name="${process_name//$'\r'/}"
+  process_name="${process_name%%$'\n'*}"
+  process_name="$(lowercase "$process_name")"
   case "$process_name" in
     antigravity)
       printf 'antigravity\n'
@@ -199,7 +332,14 @@ resolve_ide_target() {
         target="$(detect_ide_from_processes || true)"
       fi
       if [[ -z "$target" ]]; then
-        target="vscode"
+        local antigravity_cli vscode_cli
+        antigravity_cli="$(cli_for_ide antigravity || true)"
+        vscode_cli="$(cli_for_ide vscode || true)"
+        if [[ -n "$antigravity_cli" && -z "$vscode_cli" ]]; then
+          target="antigravity"
+        else
+          target="vscode"
+        fi
       fi
       ;;
     vscode|code)
@@ -251,10 +391,6 @@ user_settings_path_for_ide() {
       return 1
       ;;
   esac
-}
-
-is_windows_path() {
-  [[ "$1" =~ ^[A-Za-z]:[\\/] || "$1" == \\\\* ]]
 }
 
 home_path() {
@@ -344,11 +480,35 @@ to_vscode_path() {
     printf '%s\n' "$path_value"
   elif command -v cygpath >/dev/null 2>&1; then
     cygpath -w "$path_value"
-  elif command -v wslpath >/dev/null 2>&1; then
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v wslpath >/dev/null 2>&1; then
     wslpath -w "$path_value"
   else
-    printf '%s\n' "$path_value"
+    case "$path_value" in
+      /[A-Za-z]/*)
+        local drive="${path_value:1:1}"
+        local rest="${path_value:3}"
+        rest="${rest//\//\\}"
+        printf '%s:\\%s\n' "$(uppercase_drive "$drive")" "$rest"
+        ;;
+      *)
+        printf '%s\n' "$path_value"
+        ;;
+    esac
   fi
+}
+
+find_latest_vsix() {
+  local extension_dir="$1"
+  local latest=""
+  local candidate
+  shopt -s nullglob
+  for candidate in "$extension_dir"/*.vsix; do
+    if [[ -z "$latest" || "$candidate" -nt "$latest" ]]; then
+      latest="$candidate"
+    fi
+  done
+  shopt -u nullglob
+  printf '%s\n' "$latest"
 }
 
 if [[ ! -f "$CORE_PATH/requirements.txt" ]]; then
@@ -380,10 +540,20 @@ fi
 
 if [[ "$SKIP_SETTINGS" -eq 0 ]]; then
   SETTINGS_PATH="$(settings_path_for_ide "$DETECTED_IDE")"
+  SETTINGS_PATH_FOR_PYTHON="$(to_vscode_path "$SETTINGS_PATH")"
+  RUNNER_SETTING=""
+  if [[ -n "$RUNNER_PATH" ]]; then
+    if [[ ! -f "$RUNNER_PATH" ]]; then
+      echo "Runner binary was not found: $RUNNER_PATH" >&2
+      exit 1
+    fi
+    RUNNER_SETTING="$(to_vscode_path "$RUNNER_PATH")"
+  fi
 
-  SETTINGS_PATH="$SETTINGS_PATH" \
+  SETTINGS_PATH="$SETTINGS_PATH_FOR_PYTHON" \
   CORE_SETTING="$(to_vscode_path "$CORE_PATH")" \
   PYTHON_SETTING="$(to_vscode_path "$VENV_PYTHON")" \
+  RUNNER_SETTING="$RUNNER_SETTING" \
   WORKSPACE_SETTING="$(to_vscode_path "$WORKSPACE_PATH")" \
   "$VENV_PYTHON" - <<'PY'
 import json
@@ -415,6 +585,9 @@ if settings_path.exists():
 data["theseus.corePath"] = os.environ["CORE_SETTING"]
 data["theseus.pythonPath"] = os.environ["PYTHON_SETTING"]
 data["theseus.workspacePath"] = os.environ["WORKSPACE_SETTING"]
+if os.environ.get("RUNNER_SETTING"):
+    data["theseus.runnerPath"] = os.environ["RUNNER_SETTING"]
+    data["theseus.runtimeMode"] = "bundled-runner"
 data.setdefault("theseus.serverUrl", "")
 
 settings_path.write_text(
@@ -434,37 +607,53 @@ if [[ "$SKIP_REQUIREMENTS" -eq 0 ]]; then
 fi
 
 if [[ "$INSTALL_PLAYWRIGHT" -eq 1 ]]; then
+  if [[ -f "$CORE_PATH/requirements-browser.txt" ]]; then
+    "$VENV_PYTHON" -m pip install -r "$CORE_PATH/requirements-browser.txt"
+  else
+    "$VENV_PYTHON" -m pip install playwright
+  fi
   "$VENV_PYTHON" -m playwright install chromium
 fi
 
 if [[ "$SKIP_EXTENSION" -eq 0 ]]; then
   resolve_ide_cli
   if [[ -z "$VSIX_PATH" ]]; then
-    VSIX_PATH="$(find "$CORE_PATH/vscode-extension" -maxdepth 1 -name '*.vsix' -print | sort | tail -n 1)"
+    VSIX_PATH="$(find_latest_vsix "$CORE_PATH/vscode-extension")"
   fi
   if [[ -z "$VSIX_PATH" || ! -f "$VSIX_PATH" ]]; then
     echo "VSIX package was not found: $VSIX_PATH" >&2
     exit 1
   fi
-  if ! command -v "$CODE_BIN" >/dev/null 2>&1; then
+  CODE_BIN_EXEC="$(command_path "$CODE_BIN" || true)"
+  if [[ -z "$CODE_BIN_EXEC" && -f "$(to_posix_path "$CODE_BIN")" ]]; then
+    CODE_BIN_EXEC="$(to_posix_path "$CODE_BIN")"
+  fi
+  if [[ -z "$CODE_BIN_EXEC" ]]; then
     echo "IDE CLI was not found: $CODE_BIN" >&2
     exit 1
   fi
   EXTENSIONS_DIR="$(extensions_dir_for_ide "$DETECTED_IDE" || true)"
   if [[ -n "$EXTENSIONS_DIR" ]]; then
+    mkdir -p "$(to_posix_path "$EXTENSIONS_DIR")"
     CLI_EXTENSIONS_DIR="$(to_vscode_path "$EXTENSIONS_DIR")"
+    CLI_VSIX_PATH="$(to_vscode_path "$VSIX_PATH")"
     echo "Installing VSIX into IDE target: $DETECTED_IDE ($CODE_BIN)"
     echo "ExtensionsDir: $CLI_EXTENSIONS_DIR"
-    "$CODE_BIN" --extensions-dir "$CLI_EXTENSIONS_DIR" --install-extension "$VSIX_PATH" --force
+    "$CODE_BIN_EXEC" --extensions-dir "$CLI_EXTENSIONS_DIR" --install-extension "$CLI_VSIX_PATH" --force
   else
+    CLI_VSIX_PATH="$(to_vscode_path "$VSIX_PATH")"
     echo "Installing VSIX into IDE target: $DETECTED_IDE ($CODE_BIN)"
-    "$CODE_BIN" --install-extension "$VSIX_PATH" --force
+    "$CODE_BIN_EXEC" --install-extension "$CLI_VSIX_PATH" --force
   fi
 fi
 
 echo "Theseus VSCode extension setup complete."
 if [[ "${DETECTED_IDE:-}" ]]; then
-  echo "IDE: $DETECTED_IDE ($CODE_BIN)"
+  if [[ -n "${CODE_BIN:-}" ]]; then
+    echo "IDE: $DETECTED_IDE ($CODE_BIN)"
+  else
+    echo "IDE: $DETECTED_IDE"
+  fi
 fi
 if [[ "$SKIP_SETTINGS" -eq 0 ]]; then
   echo "SettingsPath: $(to_vscode_path "$SETTINGS_PATH")"
@@ -474,4 +663,7 @@ if [[ "${CLI_EXTENSIONS_DIR:-}" ]]; then
 fi
 echo "CorePath: $(to_vscode_path "$CORE_PATH")"
 echo "PythonPath: $(to_vscode_path "$VENV_PYTHON")"
+if [[ "${RUNNER_SETTING:-}" ]]; then
+  echo "RunnerPath: $RUNNER_SETTING"
+fi
 echo "WorkspacePath: $(to_vscode_path "$WORKSPACE_PATH")"

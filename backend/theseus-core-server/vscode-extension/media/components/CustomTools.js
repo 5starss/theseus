@@ -15,7 +15,14 @@ export function renderCustomTools(tools, {
   onViewChange,
   onToggleCollapsed,
   onPermissionChange,
+  // 엔진이 dynamic tool retrieval로 이번 턴에 노출한 tool 이름 집합 (옵션)
+  activeToolNames = null,
 }) {
+  const activeSet = activeToolNames instanceof Set
+    ? activeToolNames
+    : Array.isArray(activeToolNames)
+      ? new Set(activeToolNames)
+      : null;
   if (!containerEl) return;
   containerEl.innerHTML = '';
   containerEl.classList.toggle('collapsed', collapsed);
@@ -60,6 +67,26 @@ export function renderCustomTools(tools, {
   containerEl.appendChild(header);
 
   if (collapsed) return;
+
+  // 정적 등록 목록과 실제 턴별 활성 tool이 다를 수 있음을 명시
+  const notice = document.createElement('div');
+  notice.className = 'custom-tools-notice';
+  if (activeSet && activeSet.size) {
+    const registeredNames = new Set(
+      visibleTools.map(t => t.toolName).filter(Boolean),
+    );
+    const matchedInPanel = [...activeSet].filter(name => registeredNames.has(name)).length;
+    const externalActive = activeSet.size - matchedInPanel;
+    const parts = [`이번 응답에 ${activeSet.size}개 활성화 · ✓ = 모델에 노출됨`];
+    if (externalActive > 0) {
+      // 정적 패널에 없지만 활성된 tool (core/built-in일 가능성)
+      parts.push(`(이 패널 밖 ${externalActive}개 포함)`);
+    }
+    notice.textContent = parts.join(' ');
+  } else {
+    notice.textContent = '전체 등록 목록 (응답마다 모델에 노출되는 tool은 다를 수 있음)';
+  }
+  containerEl.appendChild(notice);
 
   const controls = document.createElement('div');
   controls.className = 'custom-tools-controls';
@@ -111,13 +138,18 @@ export function renderCustomTools(tools, {
   list.className = 'custom-tools-list';
   visibleTools.forEach(tool => {
     const item = document.createElement('details');
+    const isInActiveTurn = activeSet ? activeSet.has(tool.toolName) : null;
     item.className = `custom-tool-item ${tool.isActive ? 'active' : 'inactive'}`;
+    if (isInActiveTurn === true) item.classList.add('turn-active');
+    if (isInActiveTurn === false) item.classList.add('turn-inactive');
     item.title = tool.modulePath || tool.metadataPath || '';
 
     const summary = document.createElement('summary');
     const name = document.createElement('span');
     name.className = 'custom-tool-name';
-    name.textContent = tool.toolName || tool.fileName || 'unknown';
+    // 동적 retrieval에서 활성된 tool은 ✓ 마커로 표시
+    const turnMarker = isInActiveTurn === true ? '✓ ' : '';
+    name.textContent = `${turnMarker}${tool.toolName || tool.fileName || 'unknown'}`;
 
     const meta = document.createElement('span');
     meta.className = 'custom-tool-meta';
@@ -138,7 +170,12 @@ export function renderCustomTools(tools, {
     permInput.disabled = !tool.metadataPath;
     permInput.addEventListener('change', () => {
       if (!tool.metadataPath) return;
-      onPermissionChange(tool.metadataPath, Number(permInput.value));
+      // 의미적 식별자(toolName)와 경로(metadataPath)를 함께 전달 →
+      // 백엔드가 permission_provider를 도입하면 toolName 기반으로 처리하고,
+      // 미도입 환경에서는 기존처럼 metadataPath fallback으로 동작
+      onPermissionChange(tool.metadataPath, Number(permInput.value), {
+        toolName: tool.toolName || tool.fileName || null,
+      });
     });
 
     const validation = tool.validationResult || {};

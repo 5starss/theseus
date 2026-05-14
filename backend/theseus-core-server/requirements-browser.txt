@@ -1,0 +1,11 @@
+# Optional dependencies for browser automation tools.
+#
+# Playwright is intentionally not part of requirements.txt because it is heavy
+# and may require separate browser binary installation. Browser binaries are
+# installed with:
+#   python -m playwright install chromium
+#
+# Do not add playwright-stealth here by default. It has a permissive license,
+# but its bot-detection bypass purpose creates service-policy risk.
+
+playwright

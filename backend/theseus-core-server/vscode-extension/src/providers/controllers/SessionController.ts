@@ -48,11 +48,12 @@ export class SessionController {
       this.sessionManager.send(`/session new ${JSON.stringify(sessionName)}`);
       return;
     }
-    if (this.canHandleLocally()) {
-      this.withLocalSnapshot(() => createLocalSession(this.localSessionWorkspace(), sessionName));
+    if (this.isBlockedByActiveRun()) {
+      this.waitForReadyThenSend(`/session new ${JSON.stringify(sessionName)}`);
       return;
     }
-    this.postBusyNotice();
+    this.withLocalSnapshot(() => createLocalSession(this.localSessionWorkspace(), sessionName));
+    this.waitForReadyThenSwitch(sessionName);
   }
 
   switchSession(name?: string): void {
@@ -61,11 +62,65 @@ export class SessionController {
       this.sessionManager.send(`/session switch ${JSON.stringify(name)}`);
       return;
     }
-    if (this.canHandleLocally()) {
-      this.withLocalSnapshot(() => switchLocalSession(this.localSessionWorkspace(), name));
+    if (this.isBlockedByActiveRun()) {
+      this.waitForReadyThenSwitch(name);
       return;
     }
-    this.postBusyNotice();
+    // process가 살아있는 비-ready 상태(starting/stale/...)에서는
+    // local snapshot을 먼저 반영하고 ready transition을 기다려 라우팅
+    if (this.sessionManager.hasProcess) {
+      this.withLocalSnapshot(() => switchLocalSession(this.localSessionWorkspace(), name));
+      this.waitForReadyThenSwitch(name);
+      return;
+    }
+    this.withLocalSnapshot(() => switchLocalSession(this.localSessionWorkspace(), name));
+  }
+
+  /**
+   * runner가 ready/waiting_input 상태가 되면 세션 전환을 실행.
+   * - busy 상태여도 interrupt하지 않음.
+   * - starting/stale 상태면 기다리기만 함
+   * 상태 transition을 이벤트로 구독해 race-free하게 대기한다.
+   * 최대 10초 후에도 ready가 안 되면 local fallback 또는 busy notice.
+   */
+  private waitForReadyThenSwitch(name: string): void {
+    this.waitForReadyThenSend(`/session switch ${JSON.stringify(name)}`, () => {
+      this.withLocalSnapshot(() => switchLocalSession(this.localSessionWorkspace(), name));
+    });
+  }
+
+  private waitForReadyThenSend(command: string, fallback?: () => void): void {
+    let settled = false;
+    const finishWithFallback = () => {
+      if (this.canRouteToRunner()) this.sessionManager.send(command);
+      else fallback?.();
+    };
+
+    const disposable = this.sessionManager.onEvent(() => {
+      if (settled) return;
+      if (this.canRouteToRunner()) {
+        settled = true;
+        clearTimeout(timer);
+        disposable.dispose();
+        this.sessionManager.send(command);
+      }
+    });
+
+    // 안전망: 10초 후에도 ready가 안 되면 fallback
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      disposable.dispose();
+      finishWithFallback();
+    }, 10000);
+
+    // 즉시 ready로 transition한 경우 대비
+    if (this.canRouteToRunner()) {
+      settled = true;
+      clearTimeout(timer);
+      disposable.dispose();
+      this.sessionManager.send(command);
+    }
   }
 
   deleteSession(name?: string): void {
@@ -75,11 +130,17 @@ export class SessionController {
       this.sessionManager.send(`/session delete ${JSON.stringify(name)}`);
       return;
     }
-    if (this.canHandleLocally()) {
-      this.withLocalSnapshot(() => deleteLocalSession(this.localSessionWorkspace(), name, current));
+    if (this.isBlockedByActiveRun()) {
+      this.waitForReadyThenSend(`/session delete ${JSON.stringify(name)}`);
       return;
     }
-    this.postBusyNotice();
+    try {
+      const snapshot = deleteLocalSession(this.localSessionWorkspace(), name, current);
+      this.postLocalSessionSnapshot(snapshot);
+      if (name === current) this.waitForReadyThenSwitch(snapshot.current);
+    } catch (err) {
+      this.postLocalSessionError(err);
+    }
   }
 
   renameSession(oldName?: string, newName?: string): void {
@@ -88,36 +149,29 @@ export class SessionController {
       this.sessionManager.send(`/session rename ${JSON.stringify(oldName)} ${JSON.stringify(newName)}`);
       return;
     }
-    if (this.canHandleLocally()) {
-      this.withLocalSnapshot(() => renameLocalSession(this.localSessionWorkspace(), oldName, newName, this.currentSessionName()));
+    if (this.isBlockedByActiveRun()) {
+      this.waitForReadyThenSend(`/session rename ${JSON.stringify(oldName)} ${JSON.stringify(newName)}`);
       return;
     }
-    this.postBusyNotice();
+    const wasCurrent = oldName === this.currentSessionName();
+    this.withLocalSnapshot(() => renameLocalSession(this.localSessionWorkspace(), oldName, newName, this.currentSessionName()));
+    if (wasCurrent) this.waitForReadyThenSwitch(newName);
   }
 
   exportSession(name?: string, format?: string): void {
     if (!name || !format) return;
-    if (this.canRouteToRunner()) {
-      this.sessionManager.send(`/session export ${JSON.stringify(name)} ${format}`);
-      return;
+    try {
+      this.postRunnerEvent({
+        type: 'SessionExportedEvent',
+        ...exportLocalSession(this.localSessionWorkspace(), name, format),
+      });
+    } catch (err) {
+      this.postLocalSessionError(err);
     }
-    if (this.canHandleLocally()) {
-      try {
-        this.postRunnerEvent({
-          type: 'SessionExportedEvent',
-          ...exportLocalSession(this.localSessionWorkspace(), name, format),
-        });
-      } catch (err) {
-        this.postLocalSessionError(err);
-      }
-      return;
-    }
-    this.postBusyNotice();
   }
 
   private currentSessionName(): string {
-    const status = this.sessionManager.status;
-    return typeof status.session === 'string' && status.session ? status.session : 'default';
+    return this.sessionManager.preferredSessionName;
   }
 
   private localSessionWorkspace(): string | undefined {
@@ -126,11 +180,15 @@ export class SessionController {
   }
 
   private canRouteToRunner(): boolean {
-    return this.sessionManager.hasProcess && ['ready', 'waiting_input'].includes(this.sessionManager.currentState);
+    const status = this.sessionManager.status;
+    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
+    return !!status.processRunning && ['ready', 'waiting_input'].includes(state);
   }
 
-  private canHandleLocally(): boolean {
-    return !this.sessionManager.hasProcess || ['stopped', 'error', 'exited', 'stale'].includes(this.sessionManager.currentState);
+  private isBlockedByActiveRun(): boolean {
+    const status = this.sessionManager.status;
+    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
+    return !!status.processRunning && (state === 'busy' || this.sessionManager.currentState === 'busy');
   }
 
   private withLocalSnapshot(action: () => LocalSessionActionResult): void {
@@ -167,12 +225,4 @@ export class SessionController {
     });
   }
 
-  private postBusyNotice(): void {
-    this.postRunnerEvent({
-      type: 'RunnerDiagnostic',
-      code: 'session_busy',
-      message: 'Session changes are available after the current run finishes or the runner is stopped.',
-      state: this.sessionManager.currentState,
-    });
-  }
 }

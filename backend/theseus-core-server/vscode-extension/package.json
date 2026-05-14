@@ -15,6 +15,7 @@
     "onCommand:theseus.start",
     "onCommand:theseus.stop",
     "onCommand:theseus.showLogs",
+    "onCommand:theseus.selectWorktree",
     "onCommand:theseus.moveToSecondarySidebar",
     "onCommand:theseus.moveToPanel",
     "onCommand:theseus.askSelected",
@@ -37,6 +38,21 @@
           "type": "string",
           "default": "python",
           "description": "Python executable used to start Theseus. Use the full path if 'python' is not on PATH (e.g. C:\\Python311\\python.exe or /usr/bin/python3)."
+        },
+        "theseus.runtimeMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "source-python",
+            "bundled-runner"
+          ],
+          "default": "auto",
+          "description": "Runtime startup mode. auto uses theseus.runnerPath when configured, otherwise the source Python runtime."
+        },
+        "theseus.runnerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to a packaged Theseus runner binary. When set, the extension starts this binary instead of python -m theseus_engine.daemon."
         },
         "theseus.serverUrl": {
           "type": "string",
@@ -62,6 +78,10 @@
       {
         "command": "theseus.showLogs",
         "title": "Theseus: Show Logs"
+      },
+      {
+        "command": "theseus.selectWorktree",
+        "title": "Theseus: Select Workspace (Worktree)"
       },
       {
         "command": "theseus.moveToSecondarySidebar",
@@ -156,6 +176,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "package:vsix": "npm run compile && npx @vscode/vsce package",
+    "package:test": "npm run package:vsix && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\package-test-distribution.ps1",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

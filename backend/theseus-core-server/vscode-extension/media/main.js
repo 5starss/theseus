@@ -16,12 +16,14 @@ import {
 import { renderHealthPanel as renderHealthPanelComponent } from './components/HealthPanel.js';
 import {
   appendRetryBanner,
+  clearRetryBanners,
+  clearTransientSystemMessages,
   createTypingIndicator,
   isTransientSystemText,
   maybeAddFold,
   shouldPersistMessage,
 } from './components/MessageList.js';
-import { renderPlanPanel as renderPlanPanelComponent } from './components/PlanPanel.js';
+import { planToInlineMarkdown, renderPlanPanel as renderPlanPanelComponent } from './components/PlanPanel.js';
 import {
   applyRunnerStatusEvent,
   formatAgentLoopStatus,
@@ -163,6 +165,9 @@ import { createEventDispatcher } from './dispatcher.js';
   let inputHistoryIdx         = -1;
   const transientNotices      = new Map();
   let lastActiveSkillsKey     = '';
+  // 엔진이 dynamic tool retrieval로 이번 턴 활성 tool을 알려줄 때 채워짐
+  // (event.metadata.active_tools 또는 active_tool_names를 수용)
+  let activeTurnTools         = null;
 
   // ── Persistence ───────────────────────────────────────────────────
   let persistStateTimeout = null;
@@ -517,6 +522,87 @@ import { createEventDispatcher } from './dispatcher.js';
       onCancel: () => cancelCurrentPlan('cancel'),
       onDelete: () => cancelCurrentPlan('delete'),
     });
+    // 패널은 stepper + 액션만, plan의 가독성 좋은 MD는 메인 채팅 흐름 안에 별도 메시지로 노출
+    renderPlanInChat(plan);
+  }
+
+  // 메인 채팅에 표시되는 plan MD 메시지 (단일 인스턴스, 변경 시 in-place 업데이트)
+  let planChatArticleEl = null;
+  let planChatIdentity = '';  // 마지막으로 렌더한 plan의 식별자 (startedAt/goal 기반)
+
+  function planIdentity(plan) {
+    if (!plan) return '';
+    return String(plan.startedAt || '') + '|' + String(plan.goal || plan.title || plan.pendingTitle || '');
+  }
+
+  function removePlanChatArticle() {
+    if (planChatArticleEl?.parentNode) planChatArticleEl.parentNode.removeChild(planChatArticleEl);
+    planChatArticleEl = null;
+    planChatIdentity = '';
+  }
+
+  function renderPlanInChat(plan) {
+    if (!plan) {
+      removePlanChatArticle();
+      return;
+    }
+    const md = planToInlineMarkdown(plan);
+    if (!md) {
+      removePlanChatArticle();
+      return;
+    }
+
+    // 기존 article이 DOM에서 분리되었으면(/clear 등) 다시 만들어 추가
+    if (planChatArticleEl && !planChatArticleEl.isConnected) {
+      planChatArticleEl = null;
+      planChatIdentity = '';
+    }
+
+    // 새 plan(다른 startedAt/goal)이면 이전 article 제거 후 새 위치에 재생성 →
+    // 사용자의 가장 최근 질문 아래에 plan이 보이도록 보장
+    const identity = planIdentity(plan);
+    if (planChatArticleEl && planChatIdentity && identity !== planChatIdentity) {
+      removePlanChatArticle();
+    }
+
+    if (!planChatArticleEl) {
+      const article = document.createElement('article');
+      article.className = 'message system plan-chat-message';
+
+      const labelRow = document.createElement('div');
+      labelRow.className = 'label-row';
+
+      const avatar = document.createElement('span');
+      avatar.className = 'role-avatar system-avatar';
+      avatar.textContent = '📋';
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = 'PLAN';
+      labelRow.append(avatar, label);
+
+      const body = document.createElement('div');
+      body.className = 'body plan-chat-body';
+
+      article.append(labelRow, body);
+
+      // 현재 활성 .turn(가장 최근 사용자 메시지가 속한 턴) 안에 삽입 → 사용자 질문 직후 위치
+      const activeTurn = messagesEl.querySelector('.turn:last-of-type');
+      const lastUser = activeTurn?.querySelector('.message.user');
+      if (activeTurn && lastUser) {
+        // user 메시지 바로 다음에 plan article 삽입
+        activeTurn.insertBefore(article, lastUser.nextSibling);
+      } else {
+        messagesEl.appendChild(article);
+      }
+      planChatArticleEl = article;
+    }
+    planChatIdentity = identity;
+
+    const body = planChatArticleEl.querySelector('.plan-chat-body');
+    if (body) {
+      body.innerHTML = renderMarkdown(md);
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function normalizePlanPhase(phase) {
@@ -584,6 +670,9 @@ import { createEventDispatcher } from './dispatcher.js';
   function beginPlanDraft(text) {
     const currentState = normalizePlanPhase(savedPlan?.reviewState || savedPlan?.phase);
     if (['wait', 'executing', 'verifying'].includes(currentState)) return;
+    // 새 plan을 시작하므로 이전 plan article(이전 턴에 위치)을 제거 →
+    // 새 article은 현재 사용자 메시지/턴 직후에 생성되도록 함
+    removePlanChatArticle();
     setSavedPlan({
       goal: text,
       phase: 'drafting',
@@ -600,22 +689,14 @@ import { createEventDispatcher } from './dispatcher.js';
     renderPlanPanel(savedPlan);
   }
 
-  function classifyPlanReviewText(text) {
-    const normalized = text.trim().replace(/^["'`]+|["'`]+$/g, '').toLowerCase()
-      .replace(/[.!?。！？]+$/g, '')
-      .replace(/\s+/g, ' ');
-    const approvals = new Set([
-      'approve', 'approved', 'accept', 'accepted', 'ok', 'okay', 'yes', 'y',
-      'go', 'proceed', 'continue', 'looks good',
-      '승인', '승인해', '승인해줘', '승인합니다', '허가', '허가해',
-      '좋아', '좋습니다', '진행', '진행해', '진행해줘', '계속', '계속해',
-    ]);
-    const rejections = new Set([
-      'reject', 'rejected', 'deny', 'denied', 'cancel', 'no', 'n',
-      '거부', '반려', '취소', '중단', '안돼', '아니', '아니요',
-    ]);
-    if (approvals.has(normalized)) return 'approve';
-    if (rejections.has(normalized)) return 'reject';
+  /*
+   * Plan review 의사 분류는 엔진/플랜 가드에 위임한다.
+   * - 명시적 의사 표현은 PlanPanel의 [승인]/[거부] 버튼이나
+   *   `/plan approve`, `/plan reject` 슬래시 명령으로 처리한다.
+   * - 일반 텍스트는 분류 없이 그대로 엔진에 전달해 엔진이 해석하도록 한다.
+   *   (익스텐션이 사용자 의도를 가로채지 않도록)
+   */
+  function classifyPlanReviewText(_text) {
     return null;
   }
 
@@ -640,7 +721,10 @@ import { createEventDispatcher } from './dispatcher.js';
     messagesEl.innerHTML = '';
     toolPanel.clear();
     savedHistory = [];
+    planChatArticleEl = null; // DOM이 비워졌으므로 다음 renderPlanInChat에서 재생성
     persistState();
+    // 빈 상태가 되었으므로 welcome 화면 복원
+    if (typeof ensureWelcomeState === 'function') ensureWelcomeState();
   }
 
   function renderCustomTools(tools) {
@@ -650,6 +734,7 @@ import { createEventDispatcher } from './dispatcher.js';
       toolStats,
       collapsed: customToolsCollapsed,
       view: customToolsView,
+      activeToolNames: activeTurnTools,
       onViewChange: view => {
         customToolsView = view;
         persistState();
@@ -660,10 +745,40 @@ import { createEventDispatcher } from './dispatcher.js';
         persistState();
         renderCustomTools(customTools);
       },
-      onPermissionChange: (metadataPath, permissionLevel) => {
-        vscode.postMessage({ type: 'updateToolPermission', metadataPath, permissionLevel });
+      onPermissionChange: (metadataPath, permissionLevel, opts = {}) => {
+        vscode.postMessage({
+          type: 'updateToolPermission',
+          metadataPath,
+          permissionLevel,
+          // permission_provider 추상화를 위한 의미적 정보
+          toolName: opts.toolName || null,
+          session: currentSession,
+        });
       },
     });
+  }
+
+  // 엔진 이벤트에서 active tool 정보를 추출 (여러 후보 키 수용)
+  function extractActiveTools(event) {
+    const meta = event?.metadata;
+    if (!meta || typeof meta !== 'object') return null;
+    const candidates = meta.active_tools || meta.active_tool_names || meta.retrieved_tools;
+    if (!candidates) return null;
+    const arr = Array.isArray(candidates) ? candidates : [];
+    const names = arr
+      .map(item => (typeof item === 'string' ? item : item?.name || item?.tool_name))
+      .map(String)
+      .map(s => s.trim())
+      .filter(Boolean);
+    return names.length ? new Set(names) : null;
+  }
+
+  function maybeUpdateActiveTurnTools(event) {
+    const next = extractActiveTools(event);
+    if (!next) return false;
+    activeTurnTools = next;
+    renderCustomTools(customTools);
+    return true;
   }
 
   function clearPromptAfterCommand() {
@@ -784,8 +899,12 @@ import { createEventDispatcher } from './dispatcher.js';
   renderContextBar();
   renderChangeReviewPanel();
 
-  // ── Empty state (welcome screen) ──
-  if (messagesEl && messagesEl.querySelectorAll('.message').length === 0) {
+  // ── Empty state (welcome screen) ─────────────────────────────────
+  function ensureWelcomeState() {
+    if (!messagesEl) return;
+    if (messagesEl.querySelector('#empty-state')) return;          // 이미 있음
+    if (messagesEl.querySelectorAll('.message').length > 0) return; // 대화 중
+
     const emptyState = document.createElement('div');
     emptyState.className = 'empty-state';
     emptyState.id = 'empty-state';
@@ -810,6 +929,7 @@ import { createEventDispatcher } from './dispatcher.js';
       });
     });
   }
+  ensureWelcomeState();
 
   vscode.postMessage({ type: 'init' });
   vscode.postMessage({ type: 'getActiveFile' });
@@ -888,13 +1008,38 @@ import { createEventDispatcher } from './dispatcher.js';
   });
 
   // ── 모드 팝업 ─────────────────────────────────────────────────────
-  function applyMode(mode) {
+  function applyMode(mode, { fromUserGesture = false } = {}) {
+    const prevMode = currentMode;
     currentMode = mode;
     if (modeChipLabel) modeChipLabel.textContent = MODE_LABELS[mode] || mode.toUpperCase();
     if (modeChipBtn) modeChipBtn.dataset.mode = mode;
     document.querySelectorAll('.mode-option').forEach(b => {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
+
+    // plan → 다른 모드 전환 시 PLAN 상태별 처리
+    if (fromUserGesture && prevMode === 'plan' && mode !== 'plan') {
+      const planState = normalizePlanPhase(savedPlan?.reviewState || savedPlan?.phase);
+      if (planState === 'wait' || planState === 'drafting') {
+        // 검토 대기 / 작성 중 단계만 자동 취소 (실행 단계 cancel은 race 위험)
+        cancelCurrentPlan('cancel');
+        appendTransientMessage(
+          'system',
+          `${MODE_LABELS[mode] || mode} 모드로 전환했습니다. 검토 대기 중이던 PLAN을 취소했습니다.`,
+          'hint',
+          3500,
+        );
+      } else if (planState === 'executing' || planState === 'verifying') {
+        // 실행 중인 plan은 자동 취소 위험 → 사용자에게 안내만, plan은 그대로 유지
+        appendTransientMessage(
+          'system',
+          `${MODE_LABELS[mode] || mode} 모드로 전환했습니다. 실행 중인 PLAN은 그대로 유지됩니다. 중지하려면 PLAN 패널의 [Cancel]을 사용하세요.`,
+          'warn',
+          5000,
+        );
+      }
+    }
+
     persistState();
   }
 
@@ -909,7 +1054,7 @@ import { createEventDispatcher } from './dispatcher.js';
 
   document.querySelectorAll('.mode-option').forEach(btn => {
     btn.addEventListener('click', () => {
-      applyMode(btn.dataset.mode);
+      applyMode(btn.dataset.mode, { fromUserGesture: true });
       closePopup(modePopupEl);
       promptEl.focus();
     });
@@ -981,8 +1126,9 @@ import { createEventDispatcher } from './dispatcher.js';
     if (savedPlan) planBySession[currentSession] = savedPlan;
     switchSavedPlanForSession(name || 'default');
     if (sessionEl) {
-      sessionEl.textContent = `${sessionDisplayName(currentSession)} ▾`;
-      sessionEl.title = `Session: ${currentSession}`;
+      // 버튼 텍스트는 항상 "▾" 고정, 세션명은 tooltip으로만 표시
+      sessionEl.textContent = '▾';
+      sessionEl.title = `세션: ${sessionDisplayName(currentSession)}`;
     }
     persistState();
     renderSessionMenu();
@@ -1044,6 +1190,12 @@ import { createEventDispatcher } from './dispatcher.js';
       if (inputHistory.length > 50) inputHistory.pop();
     }
     inputHistoryIdx = -1;
+
+    // 새 턴 시작 → 이전 턴의 active tool 표시를 초기화
+    if (activeTurnTools) {
+      activeTurnTools = null;
+      renderCustomTools(customTools);
+    }
 
     // Remove welcome screen if present
     const emptyEl = document.getElementById('empty-state');
@@ -1129,7 +1281,10 @@ import { createEventDispatcher } from './dispatcher.js';
       return;
     }
 
-    const reviewAction = savedPlan?.reviewState === 'wait' ? classifyPlanReviewText(text) : null;
+    // plan review는 plan 모드일 때만 트리거 (다른 모드에서 plan 잔여 상태가 남아도 무시)
+    const reviewAction = (currentMode === 'plan' && savedPlan?.reviewState === 'wait')
+      ? classifyPlanReviewText(text)
+      : null;
     if (reviewAction) {
       submitPlanReviewText(text, reviewAction);
       return;
@@ -1242,6 +1397,11 @@ import { createEventDispatcher } from './dispatcher.js';
 
   document.getElementById('clear-history')?.addEventListener('click', _clearChat);
 
+  // 워크트리(작업 폴더) 빠른 선택 — host의 quickPick으로 위임
+  document.getElementById('select-worktree')?.addEventListener('click', () => {
+    vscode.postMessage({ type: 'selectWorktree' });
+  });
+
   function insertMentionPath(path) {
     insertMentionPathInPrompt(promptEl, path, resizeTextarea);
   }
@@ -1257,6 +1417,12 @@ import { createEventDispatcher } from './dispatcher.js';
   function _appendRetryBanner() {
     appendRetryBanner(messagesEl, () => vscode.postMessage({ type: 'launchSession' }));
   }
+  function _clearRetryBanners() {
+    clearRetryBanners(messagesEl);
+  }
+  function _clearTransientSystemMessages() {
+    clearTransientSystemMessages(messagesEl);
+  }
 
   function replayHistorySnapshot(events) {
     if (!Array.isArray(events) || !events.length) return;
@@ -1269,6 +1435,15 @@ import { createEventDispatcher } from './dispatcher.js';
       'RunnerStopped',
       'RunnerError',
     ]);
+
+    /*
+     * 보수적 정책:
+     * - 로컬 savedHistory가 비어 있으면(=cold start) 전체 재생
+     * - 그렇지 않으면 상태 이벤트만 재생해 현재 표시된 대화 보호
+     *
+     * (이전 "snapshot authoritative" 정책은 visibility change 같은 정상 케이스에서도
+     *  대화 내역을 wipe해서 UX를 망가뜨렸음. 동기화는 명시적 `clearHistory` 이벤트로만 처리)
+     */
     const replayAll = savedHistory.length === 0;
     for (const event of events) {
       if (!event || typeof event !== 'object') continue;
@@ -1326,6 +1501,8 @@ import { createEventDispatcher } from './dispatcher.js';
     applyRunnerStatus,
     formatRunnerDiagnostic,
     appendRetryBanner: _appendRetryBanner,
+    clearRetryBanners: _clearRetryBanners,
+    clearTransientSystemMessages: _clearTransientSystemMessages,
     appendMessageEl: _appendMessageEl,
     compactStatusFromMessage,
     clearSavedPlan,
@@ -1366,6 +1543,9 @@ import { createEventDispatcher } from './dispatcher.js';
 
     const event = data.event;
     if (!event) return;
+
+    // 엔진이 dynamic tool retrieval로 active tool 정보를 보내면 패널에 반영
+    maybeUpdateActiveTurnTools(event);
 
     eventDispatcher(event);
   });

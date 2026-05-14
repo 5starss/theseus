@@ -221,7 +221,9 @@ export function createActivityLogController({
     const text = String(label || '').trim();
     if (!text) return null;
     const request = ensureRequest();
-    request.groupEl.hidden = false;
+    // 실제 툴 호출이 1개 이상 있을 때만 아코디언 표시
+    const hasTools = request.groupEl.querySelectorAll('details.tool').length > 0;
+    if (hasTools) request.groupEl.hidden = false;
     const noteKey = key ? `${request.id || 'request'}:${key}` : '';
     let item = noteKey ? noteEls.get(noteKey) : null;
     if (!item || item.dataset.requestPrompt !== (request.prompt || '')) {
