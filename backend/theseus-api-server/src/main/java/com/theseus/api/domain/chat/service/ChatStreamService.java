@@ -128,8 +128,12 @@ public class ChatStreamService {
 			}
 
 			try (InputStream body = response.body()) {
-				body.transferTo(outputStream);
-				outputStream.flush();
+				byte[] buffer = new byte[8192];
+				int read;
+				while ((read = body.read(buffer)) != -1) {
+					outputStream.write(buffer, 0, read);
+					outputStream.flush();
+				}
 			}
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
