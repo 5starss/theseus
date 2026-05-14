@@ -122,6 +122,7 @@ services:
       SPRING_BOOT_BILLING_USAGE_URL: http://theseus-api-server:8080/api/internal/billing/usage
       SPRING_BOOT_TOOL_PLAN_URL: http://theseus-api-server:8080/api/internal/tool-plan/save
       SPRING_BOOT_INTERNAL_HISTORY_MESSAGES_URL: http://theseus-api-server:8080/api/internal/history/messages
+      SPRING_BOOT_REMOTE_WORKSPACE_CONFIG_URL: http://theseus-api-server:8080/api/internal/remote-workspaces/connection-config
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/theseus-sandbox-shared:/tmp/theseus-sandbox-shared
