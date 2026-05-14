@@ -1,8 +1,7 @@
-"""Theseus-native conversation message types — OpenHarness 완전 독립.
+"""Theseus-native conversation message types.
 
-OH openharness.engine.messages 의존을 제거하고 동일한 Pydantic 구조를
-Theseus 자체 정의로 제공합니다.  QueryEngine / LLM Client 전환 시 이 모듈만
-변경하면 됩니다.
+외부 에이전트 프레임워크 의존 없이 동일한 Pydantic 구조를 제공합니다.
+QueryEngine / LLM Client 전환 시 이 모듈만 변경하면 됩니다.
 """
 
 from __future__ import annotations

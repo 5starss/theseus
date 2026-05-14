@@ -1,6 +1,6 @@
-"""Theseus Anthropic API 클라이언트 — OpenHarness 완전 독립.
+"""Theseus Anthropic API 클라이언트.
 
-OH AnthropicApiClient를 Theseus-native로 재구현합니다.
+Anthropic streaming/client 변환을 Theseus-native로 구현합니다.
 OAuth/Claude Code 전용 기능은 제거하고, 표준 API 키 인증만 지원합니다.
 """
 

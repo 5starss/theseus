@@ -1,8 +1,8 @@
 """Analysis Validator: AST 기반 보안 정적 분석기.
 
 tool_factory.py의 ToolValidator에서 보안 검사 로직을 독립 모듈로
-분리·고도화한 검증기입니다. OpenHarness의 CommandHookDefinition을
-래핑하여 PRE_TOOL_USE 이벤트와 결합할 수 있도록 설계되었습니다.
+분리·고도화한 검증기입니다. PRE_TOOL_USE 이벤트와 결합할 수 있도록
+설계되었습니다.
 
 주요 검증 항목:
   - 금지된 모듈 임포트 차단 (subprocess, shutil, ctypes 등)

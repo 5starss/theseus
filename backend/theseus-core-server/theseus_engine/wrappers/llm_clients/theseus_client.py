@@ -4,7 +4,7 @@ Selects the correct Theseus-native API client based on the model name
 and delegates streaming to it.  Gemini-specific quirks (thought_signature
 preservation) are handled by ``gemini_compat``.
 
-OpenHarness 의존 없음 — 모든 타입을 Theseus-native 모듈에서 import합니다.
+모든 타입을 Theseus-native 모듈에서 import합니다.
 """
 
 import os

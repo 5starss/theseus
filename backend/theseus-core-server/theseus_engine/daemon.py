@@ -458,9 +458,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def resolve_model(arg_model: str) -> str:
-    model = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or arg_model
+    model = os.getenv("THESEUS_MODEL") or arg_model
     os.environ["THESEUS_MODEL"] = model
-    os.environ["OPENHARNESS_MODEL"] = model
     return model
 
 

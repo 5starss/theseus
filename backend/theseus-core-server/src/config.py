@@ -101,7 +101,6 @@ class Settings(BaseSettings):
     
     # AI / Tools Settings (Optional for now)
     THESEUS_MODEL: Optional[str] = None
-    OPENHARNESS_MODEL: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     LANGSMITH_API_KEY: Optional[str] = None
     LANGSMITH_TRACING: bool = False
@@ -203,4 +202,4 @@ settings = get_settings()
 def resolve_model_name(explicit_model: str | None = None) -> str:
     if explicit_model:
         return explicit_model
-    return settings.THESEUS_MODEL or settings.OPENHARNESS_MODEL or "gpt-4o"
+    return settings.THESEUS_MODEL or "gpt-4o"

@@ -49,7 +49,7 @@ def _permission_response_decision(
 
 
 async def run_json_mode(args: argparse.Namespace) -> int:
-    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or args.model
+    model_name = os.getenv("THESEUS_MODEL") or args.model
 
     async def permission_prompt(tool_name: str, prompt_msg: str) -> bool:
         request_id = _permission_request_id()

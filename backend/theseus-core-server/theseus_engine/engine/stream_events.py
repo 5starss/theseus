@@ -1,7 +1,7 @@
 """Theseus-native stream event types.
 
 QueryEngine(theseus_engine.engine.query_engine)이 yield하는 이벤트 타입입니다.
-OpenHarness 의존이 없는 순수 Theseus 정의입니다.
+순수 Theseus 정의입니다.
 """
 
 from __future__ import annotations

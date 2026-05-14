@@ -1,10 +1,9 @@
-"""Theseus-native QueryEngine — OpenHarness 완전 독립.
+"""Theseus-native QueryEngine.
 
-OH openharness.engine.query_engine + openharness.engine.query (run_query)를
-Theseus 자체 구현으로 대체합니다.
+기존 QueryEngine 호환 인터페이스를 Theseus 자체 구현으로 제공합니다.
 
 설계 원칙:
-- OH QueryEngine과 동일한 public 인터페이스 유지 (duck-typing 호환)
+- QueryEngine public 인터페이스 유지 (duck-typing 호환)
 - Theseus-native 타입만 사용 (messages, api_types, stream_events, base_tools)
 - Auto-compact는 theseus_engine.core.context_compressor 위임
 - Tool artifact 오프로드, permission 체크, hook 실행 파이프라인 자체 구현
@@ -660,12 +659,13 @@ async def run_query(
         # Auto-compact 체크
         if needs_compression(messages, max_messages=max_compact_messages):
             yield StatusEvent(message="Auto-compacting conversation memory…"), None
-            messages, _ = await maybe_compress(
+            compacted_messages, _ = await maybe_compress(
                 messages,
                 max_messages=max_compact_messages,
                 api_client=context.api_client,
                 model=context.model,
             )
+            messages[:] = compacted_messages
 
         final_message: ConversationMessage | None = None
         usage = UsageSnapshot()
@@ -707,12 +707,13 @@ async def run_query(
             if not reactive_compact_attempted and _is_prompt_too_long_error(exc):
                 reactive_compact_attempted = True
                 yield StatusEvent(message="Prompt too long; compacting and retrying…"), None
-                messages, _ = await maybe_compress(
+                compacted_messages, _ = await maybe_compress(
                     messages,
                     keep_recent=4,
                     api_client=context.api_client,
                     model=context.model,
                 )
+                messages[:] = compacted_messages
                 continue
             error_msg = str(exc)
             if any(kw in error_msg.lower() for kw in ("connect", "timeout", "network")):
@@ -900,7 +901,7 @@ async def run_query(
 class QueryEngine:
     """Theseus-native 대화 엔진.
 
-    OH QueryEngine과 동일한 public 인터페이스를 유지합니다.
+    QueryEngine public 인터페이스를 유지합니다.
     """
 
     def __init__(
