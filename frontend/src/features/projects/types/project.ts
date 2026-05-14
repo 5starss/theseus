@@ -41,7 +41,6 @@ export interface RemoteWorkspaceResponse {
   host: string;
   port: number;
   username: string;
-  privateKeyPath: string | null;
   basePath: string;
   allowWriteExecution: boolean;
   status: 'ACTIVE' | 'DELETED';

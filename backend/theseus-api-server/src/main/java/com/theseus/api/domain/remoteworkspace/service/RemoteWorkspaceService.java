@@ -1,16 +1,21 @@
 package com.theseus.api.domain.remoteworkspace.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
+import com.theseus.api.domain.chat.config.CoreStreamProperties;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
 import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
+import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceConnectionConfigRequest;
 import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceCreateRequest;
 import com.theseus.api.domain.remoteworkspace.dto.request.RemoteWorkspaceUpdateRequest;
+import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceConnectionConfigResponse;
 import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceConnectionTestResponse;
 import com.theseus.api.domain.remoteworkspace.dto.response.RemoteWorkspaceResponse;
 import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspace;
@@ -18,23 +23,45 @@ import com.theseus.api.domain.remoteworkspace.entity.RemoteWorkspaceStatus;
 import com.theseus.api.domain.remoteworkspace.repository.RemoteWorkspaceRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
+import java.io.IOException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 @Service
 public class RemoteWorkspaceService {
 
-	private static final String CONNECTION_TEST_DISABLED_MESSAGE =
-		"Remote Workspace connection test is not enabled until secure secret resolution is ready.";
+	private static final Duration CORE_CONNECTION_TEST_TIMEOUT = Duration.ofSeconds(20);
+	private static final String INTERNAL_API_KEY_HEADER = "X-Internal-Api-Key";
+	private static final String CONNECTION_TEST_FAILED_MESSAGE = "Remote Workspace connection test failed.";
 
 	private final RemoteWorkspaceRepository remoteWorkspaceRepository;
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
+	private final CoreStreamProperties coreStreamProperties;
+	private final ObjectMapper objectMapper;
+	private final HttpClient httpClient = HttpClient.newBuilder()
+		.connectTimeout(Duration.ofSeconds(5))
+		.build();
+
+	@Value("${internal.api-key:}")
+	private String internalApiKey;
 
 	/**
 	 * 프로젝트 ADMIN 권한으로 외부 실행 대상 서버 정보를 등록합니다.
@@ -139,7 +166,7 @@ public class RemoteWorkspaceService {
 	}
 
 	/**
-	 * Core SSH Connector 연동 전까지 연결 테스트 API의 응답 틀만 제공합니다.
+	 * Core Server에 Remote Workspace 연결 테스트를 요청합니다.
 	 */
 	public RemoteWorkspaceConnectionTestResponse testConnection(
 		AuthenticatedUser currentUser,
@@ -152,11 +179,20 @@ public class RemoteWorkspaceService {
 		validateProjectAdmin(projectMember);
 		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceEntity(project, remoteWorkspaceId);
 
-		return RemoteWorkspaceConnectionTestResponse.createFrom(
-			remoteWorkspace,
-			false,
-			CONNECTION_TEST_DISABLED_MESSAGE
-		);
+		return requestCoreConnectionTest(project, remoteWorkspace);
+	}
+
+	/**
+	 * Core Server가 Remote Workspace SSH 연결 직전에 사용할 내부 접속 설정을 조회합니다.
+	 */
+	public RemoteWorkspaceConnectionConfigResponse getConnectionConfig(RemoteWorkspaceConnectionConfigRequest request) {
+		if (request == null || request.getProjectId() == null || request.getRemoteWorkspaceId() == null) {
+			throw BusinessException.of(ErrorCode.REMOTE_WORKSPACE_PAYLOAD_INVALID);
+		}
+
+		Project project = getProjectEntity(request.getProjectId());
+		RemoteWorkspace remoteWorkspace = getRemoteWorkspaceEntity(project, request.getRemoteWorkspaceId());
+		return RemoteWorkspaceConnectionConfigResponse.createFrom(remoteWorkspace);
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
@@ -225,5 +261,63 @@ public class RemoteWorkspaceService {
 
 	private boolean isBlank(String value) {
 		return value == null || value.isBlank();
+	}
+
+	private RemoteWorkspaceConnectionTestResponse requestCoreConnectionTest(
+		Project project,
+		RemoteWorkspace remoteWorkspace
+	) {
+		try {
+			String requestBody = objectMapper.writeValueAsString(Map.of(
+				"projectId", project.getId(),
+				"remoteWorkspaceId", remoteWorkspace.getId()
+			));
+			HttpRequest coreRequest = HttpRequest.newBuilder(coreStreamProperties.remoteWorkspaceConnectionTestUri())
+				.timeout(CORE_CONNECTION_TEST_TIMEOUT)
+				.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+				.header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+				.header(INTERNAL_API_KEY_HEADER, internalApiKey == null ? "" : internalApiKey)
+				.POST(BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+				.build();
+
+			HttpResponse<String> response = httpClient.send(coreRequest, HttpResponse.BodyHandlers.ofString());
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				log.warn(">>>> Core Remote Workspace connection test failed. status={}", response.statusCode());
+				return RemoteWorkspaceConnectionTestResponse.createFrom(
+					remoteWorkspace,
+					false,
+					CONNECTION_TEST_FAILED_MESSAGE
+				);
+			}
+
+			JsonNode result = unwrapResult(objectMapper.readTree(response.body()));
+			return RemoteWorkspaceConnectionTestResponse.createFrom(
+				remoteWorkspace,
+				result.path("available").asBoolean(false),
+				result.path("message").asText(CONNECTION_TEST_FAILED_MESSAGE)
+			);
+		} catch (IOException exception) {
+			log.warn(">>>> Core Remote Workspace connection test request failed.", exception);
+			return RemoteWorkspaceConnectionTestResponse.createFrom(
+				remoteWorkspace,
+				false,
+				CONNECTION_TEST_FAILED_MESSAGE
+			);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			log.warn(">>>> Core Remote Workspace connection test was interrupted.", exception);
+			return RemoteWorkspaceConnectionTestResponse.createFrom(
+				remoteWorkspace,
+				false,
+				CONNECTION_TEST_FAILED_MESSAGE
+			);
+		}
+	}
+
+	private JsonNode unwrapResult(JsonNode responseBody) {
+		if (responseBody.has("isSuccess") && responseBody.has("result")) {
+			return responseBody.path("result");
+		}
+		return responseBody;
 	}
 }
