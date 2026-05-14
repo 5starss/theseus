@@ -122,7 +122,11 @@ export function useToolGenerationSSE() {
 
             case 'chunk':
               if (data.content) {
-                store.updateLastMessageContent(data.content);
+                if (data.replay) {
+                  store.replaceLastMessageContent(data.content);
+                } else {
+                  store.updateLastMessageContent(data.content);
+                }
               }
               break;
 
