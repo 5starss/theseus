@@ -70,6 +70,7 @@ class ToolBuilder:
             plan_content=approved_plan,
             available_tools=[],
         )
+        debug_context = self._debug_context_for_event(event)
         prompt = self._build_tool_message(
             approved_plan=approved_plan,
             project_id=event.project_id,
@@ -93,6 +94,7 @@ class ToolBuilder:
                 spec = await self._generate_tool_spec(
                     prompt,
                     system_prompt=system_prompt,
+                    debug_context=debug_context,
                     chunk_callback=chunk_callback,
                 )
                 last_spec = spec
@@ -196,6 +198,7 @@ class ToolBuilder:
         prompt: str,
         *,
         system_prompt: str,
+        debug_context: dict[str, object] | None = None,
         chunk_callback: ChunkCallback | None = None,
     ) -> GeneratedToolSpec:
         request = ApiMessageRequest(
@@ -204,6 +207,7 @@ class ToolBuilder:
             system_prompt=system_prompt,
             max_tokens=8192,
             tools=[],
+            debug_context=debug_context or {},
         )
 
         final_text = ""
@@ -335,6 +339,17 @@ class ToolBuilder:
             return str(module_path.relative_to(CUSTOM_TOOLS_DIR))
         except ValueError:
             return str(module_path)
+
+    @staticmethod
+    def _debug_context_for_event(event: ToolBuildRequestedEvent) -> dict[str, object]:
+        return {
+            "run_id": event.run_id,
+            "project_id": event.project_id,
+            "chat_session_id": event.chat_session_id,
+            "user_id": event.approved_by_project_member_id,
+            "plan_id": event.tool_plan_id,
+            "agent_mode": "TOOL_BUILD",
+        }
 
     @staticmethod
     def _extract_json_object(text: str) -> str:

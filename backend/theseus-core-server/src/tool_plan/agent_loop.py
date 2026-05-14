@@ -51,6 +51,22 @@ class ToolPlanAgentLoop:
     max_turns: int = field(default_factory=lambda: settings.CORE_TOOL_PLAN_MAX_AGENT_TURNS)
     cwd: Path = field(default_factory=lambda: Path.cwd())
 
+    def _llm_debug_context(self) -> dict[str, Any]:
+        allowed_keys = {
+            "session_id",
+            "project_id",
+            "user_id",
+            "chat_session_id",
+            "run_id",
+            "agent_mode",
+            "remote_workspace_id",
+        }
+        return {
+            key: value
+            for key, value in self.tool_metadata.items()
+            if key in allowed_keys and value is not None and not isinstance(value, (dict, list, tuple, set))
+        }
+
     async def run(
         self,
         *,
@@ -94,6 +110,7 @@ class ToolPlanAgentLoop:
                     system_prompt=system_prompt,
                     max_tokens=4096,
                     tools=self.tool_registry.to_api_schema(),
+                    debug_context=self._llm_debug_context(),
                 )
             ):
                 if isinstance(llm_event, ApiTextDeltaEvent):

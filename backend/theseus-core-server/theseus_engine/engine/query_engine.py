@@ -374,6 +374,33 @@ def _record_tool_carryover(
             _remember_verified_work(meta, f"Ran web search for {query[:180]}")
 
 
+_LLM_DEBUG_CONTEXT_KEYS = {
+    "session_id",
+    "project_id",
+    "user_id",
+    "actor_user_id",
+    "chat_session_id",
+    "plan_id",
+    "run_id",
+    "tool_draft_id",
+    "agent_mode",
+    "plan_phase",
+    "remote_workspace_id",
+}
+
+
+def _llm_debug_context(tool_metadata: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(tool_metadata, dict):
+        return {}
+    debug_context: dict[str, object] = {}
+    for key in _LLM_DEBUG_CONTEXT_KEYS:
+        value = tool_metadata.get(key)
+        if value is None or isinstance(value, (dict, list, tuple, set)):
+            continue
+        debug_context[key] = value
+    return debug_context
+
+
 # ── QueryContext ──────────────────────────────────────────────
 
 @dataclass
@@ -678,6 +705,7 @@ async def run_query(
                     system_prompt=context.system_prompt,
                     max_tokens=effective_max_tokens,
                     tools=context.tool_registry.to_api_schema(),
+                    debug_context=_llm_debug_context(context.tool_metadata),
                 )
             ):
                 if isinstance(event, ApiTextDeltaEvent):
