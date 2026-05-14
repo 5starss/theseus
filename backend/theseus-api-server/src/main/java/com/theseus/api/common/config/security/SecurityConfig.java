@@ -1,6 +1,7 @@
 package com.theseus.api.common.config.security;
 
 import com.theseus.api.domain.auth.token.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -53,6 +54,7 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
 				.authorizeHttpRequests(auth -> auth
+						.dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
 						.requestMatchers(SWAGGER_PATHS).permitAll()
 						.requestMatchers(AUTH_PATHS).permitAll()
 						.requestMatchers("/api/internal/**").hasRole("INTERNAL")
