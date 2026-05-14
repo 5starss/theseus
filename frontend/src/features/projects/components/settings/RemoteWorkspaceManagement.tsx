@@ -20,6 +20,7 @@ const EMPTY_FORM = {
   password: '',
   privateKeyPath: '',
   basePath: '/',
+  allowWriteExecution: false,
 };
 
 export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManagementProps) {
@@ -71,6 +72,7 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
         password: form.password || undefined,
         privateKeyPath: form.privateKeyPath || undefined,
         basePath: form.basePath.trim(),
+        allowWriteExecution: form.allowWriteExecution,
       });
       setForm(EMPTY_FORM);
       toast.success('Remote Workspace를 등록했습니다.');
@@ -142,6 +144,14 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
                   <div className="font-semibold text-slate-100">{workspace.name}</div>
                   <div className="mt-1 text-xs text-slate-400">
                     {workspace.username}@{workspace.host}:{workspace.port} · {workspace.basePath}
+                  </div>
+                  <div className="mt-2 text-xs">
+                    <span className={`rounded border px-2 py-1 ${workspace.allowWriteExecution
+                      ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
+                      : 'border-blue-400/30 bg-blue-400/10 text-blue-200'
+                      }`}>
+                      {workspace.allowWriteExecution ? 'Write/command enabled' : 'Read-only'}
+                    </span>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -240,6 +250,20 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
               className="bg-slate-950/50 border-slate-800 text-slate-200"
             />
           </div>
+          <label className="flex items-start gap-3 rounded border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.allowWriteExecution}
+              onChange={(event) => setForm({ ...form, allowWriteExecution: event.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-950"
+            />
+            <span>
+              <span className="block font-semibold text-slate-100">Allow write/command execution</span>
+              <span className="block text-xs text-slate-400">
+                ASK/PLAN stay read-only. AGENT and approved Tool execution can write or run commands.
+              </span>
+            </span>
+          </label>
           <Button
             type="button"
             disabled={isSaving}

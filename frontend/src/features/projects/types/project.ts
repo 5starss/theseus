@@ -43,6 +43,7 @@ export interface RemoteWorkspaceResponse {
   username: string;
   privateKeyPath: string | null;
   basePath: string;
+  allowWriteExecution: boolean;
   status: 'ACTIVE' | 'DELETED';
   createdAt: string;
   updatedAt: string;
@@ -56,6 +57,7 @@ export interface RemoteWorkspaceCreateRequest {
   password?: string;
   privateKeyPath?: string;
   basePath: string;
+  allowWriteExecution?: boolean;
 }
 
 export interface RemoteWorkspaceConnectionTestResponse {
