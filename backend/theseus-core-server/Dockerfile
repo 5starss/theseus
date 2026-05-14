@@ -19,17 +19,22 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 FROM python:3.11-slim as runtime
 
 # 보안: non-root 사용자 생성
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
 
 WORKDIR /app
 
 # 빌더 스테이지에서 설치된 패키지 복사
-COPY --from=builder /root/.local /home/appuser/.local
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # PATH 업데이트
 ENV PATH=/home/appuser/.local/bin:$PATH \
+    HOME=/home/appuser \
+    THESEUS_DATA_DIR=/home/appuser/.theseus/data \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+RUN mkdir -p /home/appuser/.theseus/data /tmp/theseus-sandbox-shared \
+    && chown -R appuser:appuser /home/appuser/.theseus /tmp/theseus-sandbox-shared
 
 # 소스 코드 복사
 COPY --chown=appuser:appuser src/ ./src/
