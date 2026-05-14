@@ -56,7 +56,10 @@ export function renderHealthPanel({
   meta.className = 'health-meta';
   const settings = health?.settings || {};
   const runner = health?.runner || {};
+  const extension = settings.extension || {};
   meta.textContent = [
+    extension.version ? `extension: ${extension.version}` : '',
+    extension.builtAt ? `builtAt: ${extension.builtAt}` : '',
     settings.corePath ? `corePath: ${settings.corePath}` : 'corePath: not configured',
     settings.workspacePath ? `workspacePath: ${settings.workspacePath}` : '',
     Array.isArray(settings.customToolRoots) && settings.customToolRoots.length

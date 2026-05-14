@@ -325,7 +325,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   }
 
   send(text: string, mode?: string): void {
-    const normalized = text.replace(/\r?\n/g, ' ').trim();
+    const normalized = text.trim();
     if (!normalized) return;
     if (this.daemon) {
       if (this.state === 'starting' || this.state === 'stale') {

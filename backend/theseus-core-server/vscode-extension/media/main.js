@@ -30,6 +30,12 @@ import {
 } from './components/RunnerStatus.js';
 import { renderSessionMenu as renderSessionMenuComponent } from './components/SessionMenu.js';
 import { createActivityLogController } from './components/ActivityLog.js';
+import {
+  findSlashCommand,
+  normalizeSlashCommand,
+  slashCommandRemainder,
+  SLASH_COMMANDS,
+} from './components/SlashCommands.js';
 import { createInitialState, persistWebviewState } from './state.js';
 
 (function () {
@@ -78,21 +84,13 @@ import { createInitialState, persistWebviewState } from './state.js';
   const FOLD_THRESHOLD = 25;
   const LONG_RUNNING_MS = 30000;
   const MODE_LABELS    = { agent: 'AGENT', ask: 'ASK', plan: 'PLAN' };
-  const MODE_SLASH_COMMANDS = new Set(['/agent', '/ask', '/plan', '/coordinator']);
   const MODE_SWITCH_GUIDANCE = '모드 전환은 입력창 아래 모드 선택을 사용하세요.';
   const LOCAL_HELP_TEXT = [
     '사용 가능한 명령어:',
-    '/tools         - Custom Tools 패널 새로고침',
-    '/tools custom  - Custom Tools 패널 새로고침',
-    '/session       - 세션 목록 새로고침',
-    '/session list  - 세션 목록 새로고침',
-    '/session delete <name> - 세션 삭제',
-    '/stats, /cost  - 실행 중인 runner 세션 통계',
-    '/validate      - 실행 중인 runner에서 커스텀 도구 검증',
-    '/plan cancel   - 현재 세션 PLAN 취소',
-    '/plan delete   - 현재 세션 PLAN 삭제',
-    '/clear         - 현재 채팅 화면 지우기',
-    '/quit, /exit   - runner 중지',
+    ...SLASH_COMMANDS
+      .filter(command => command.kind !== 'mode')
+      .map(command => `${command.value.padEnd(18, ' ')} - ${command.description}`),
+    '/agent, /ask, /plan - 모드 선택 UI를 사용하세요',
   ].join('\n');
 
   // ── State ─────────────────────────────────────────────────────────
@@ -210,6 +208,18 @@ import { createInitialState, persistWebviewState } from './state.js';
         ? 'idle'
         : 'running';
     return { state, text: event.message || labels[phase] || phase };
+  }
+
+  function compactStatusFromMessage(message) {
+    const text = String(message || '').trim();
+    if (!text) return null;
+    if (/Auto-compacting conversation memory/i.test(text)) {
+      return { state: 'running', label: 'compacting memory', detail: text };
+    }
+    if (/Prompt too long; compacting and retrying/i.test(text)) {
+      return { state: 'running', label: 'compacting and retrying', detail: text };
+    }
+    return null;
   }
 
   function _maybeAddFold(article, body, text) {
@@ -502,7 +512,6 @@ import { createInitialState, persistWebviewState } from './state.js';
 
   function cancelCurrentPlan(action) {
     clearSavedPlan();
-    vscode.postMessage({ type: 'interruptSession' });
     vscode.postMessage({ type: 'reviewPlan', action });
     appendTransientMessage('system', action === 'delete' ? 'PLAN을 삭제했습니다.' : 'PLAN을 취소했습니다.', 'hint');
   }
@@ -604,6 +613,38 @@ import { createInitialState, persistWebviewState } from './state.js';
     return isGenerating || runnerState.state === 'busy' || runnerState.lifecycle === 'busy';
   }
 
+  function showRunnerRequired(command) {
+    appendTransientMessage(
+      'system',
+      `${command} 명령은 실행 중인 runner가 필요합니다. Start 또는 Reconnect 후 다시 전송하세요.`,
+      'warn',
+      4000,
+    );
+  }
+
+  function showRunnerBusy(command) {
+    appendTransientMessage(
+      'system',
+      `${command} 명령은 현재 응답이 끝난 뒤 사용할 수 있습니다. 중단하려면 Stop 버튼을 사용하세요.`,
+      'hint',
+      4000,
+    );
+  }
+
+  function ensureRunnerCommandReady(command) {
+    if (!runnerState.running) {
+      if (isRunnerStatusStale()) requestRunnerStatus();
+      if (runnerState.processRunning) requestRunnerAttach();
+      showRunnerRequired(command);
+      return false;
+    }
+    if (isAgentBusy()) {
+      showRunnerBusy(command);
+      return false;
+    }
+    return true;
+  }
+
   function renderContextBar() {
     renderContextBarComponent({
       containerEl: contextBarEl,
@@ -693,6 +734,13 @@ import { createInitialState, persistWebviewState } from './state.js';
 
   // ── Code block copy (delegated) ───────────────────────────────────
   document.addEventListener('click', (e) => {
+    const link = e.target.closest?.('a[data-external-url]');
+    if (link) {
+      e.preventDefault();
+      vscode.postMessage({ type: 'openExternal', url: link.dataset.externalUrl || link.href || '' });
+      return;
+    }
+
     if (!e.target.matches('.copy-btn')) return;
     const pre = document.getElementById(e.target.dataset.id);
     if (!pre) return;
@@ -886,6 +934,10 @@ import { createInitialState, persistWebviewState } from './state.js';
   stopGenBtn?.addEventListener('click', () => vscode.postMessage({ type: 'interruptSession' }));
 
   function setGenerating(v) {
+    if (v && isGenerating && currentAssistantEl) {
+      renderRunnerStatus();
+      return;
+    }
     isGenerating = v;
     if (stopGenBtn) stopGenBtn.hidden = !v;
     if (v) {
@@ -930,55 +982,7 @@ import { createInitialState, persistWebviewState } from './state.js';
     const text = promptEl.value.trim();
     if (!text) return;
 
-    const cmdLower = text.toLowerCase();
-
-    // 로컬 전용 명령어 (runner 없이도 동작)
-    if (cmdLower === '/clear') {
-      _clearChat();
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/quit' || cmdLower === '/exit') {
-      vscode.postMessage({ type: 'stopSession' });
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/help' || cmdLower === '/?') {
-      _appendMessageEl('system', LOCAL_HELP_TEXT, 'info');
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/tools' || cmdLower === '/tools custom') {
-      customToolsCollapsed = false;
-      persistState();
-      renderCustomTools(customTools);
-      vscode.postMessage({ type: 'getCustomTools' });
-      _appendMessageEl('system', 'Custom Tools 패널을 새로고침했습니다.', 'info');
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/plan cancel' || cmdLower === '/plan clear') {
-      cancelCurrentPlan('cancel');
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/plan delete' || cmdLower === '/plan remove') {
-      cancelCurrentPlan('delete');
-      clearPromptAfterCommand();
-      return;
-    }
-    if (cmdLower === '/session' || cmdLower === '/sessions' || cmdLower === '/session list') {
-      renderSessionMenu();
-      openPopup(sessionMenuEl);
-      vscode.postMessage({ type: 'getSessions' });
-      clearPromptAfterCommand();
-      return;
-    }
-    if (MODE_SLASH_COMMANDS.has(cmdLower)) {
-      _appendMessageEl('system', MODE_SWITCH_GUIDANCE, 'hint');
-      clearPromptAfterCommand();
-      return;
-    }
+    if (text.startsWith('/') && handleSlashCommand(text)) return;
 
     if (!runnerState.running) {
       if (isRunnerStatusStale()) {
@@ -1015,6 +1019,16 @@ import { createInitialState, persistWebviewState } from './state.js';
       return;
     }
 
+    if (isAgentBusy()) {
+      appendTransientMessage(
+        'system',
+        '현재 응답이 진행 중입니다. 완료 후 다시 전송하세요. 입력 내용은 유지됩니다.',
+        'hint',
+        4000,
+      );
+      return;
+    }
+
     const reviewAction = savedPlan?.reviewState === 'wait' ? classifyPlanReviewText(text) : null;
     if (reviewAction) {
       submitPlanReviewText(text, reviewAction);
@@ -1022,6 +1036,105 @@ import { createInitialState, persistWebviewState } from './state.js';
     }
 
     sendPromptText(text);
+  }
+
+  function handleSlashCommand(text) {
+    const command = findSlashCommand(text);
+    const normalized = normalizeSlashCommand(text);
+    if (!command) {
+      appendTransientMessage('system', `지원하지 않는 명령어입니다: ${normalized}\n/help로 사용 가능한 명령어를 확인하세요.`, 'warn', 5000);
+      return true;
+    }
+
+    if (command.kind === 'mode') {
+      _appendMessageEl('system', MODE_SWITCH_GUIDANCE, 'hint');
+      clearPromptAfterCommand();
+      return true;
+    }
+
+    if (normalized === '/clear') {
+      _clearChat();
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/quit' || normalized === '/exit') {
+      vscode.postMessage({ type: 'stopSession' });
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/help' || normalized === '/?') {
+      _appendMessageEl('system', LOCAL_HELP_TEXT, 'info');
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/tools' || normalized === '/tools custom') {
+      customToolsCollapsed = false;
+      persistState();
+      renderCustomTools(customTools);
+      vscode.postMessage({ type: 'getCustomTools' });
+      _appendMessageEl('system', 'Custom Tools 패널을 새로고침했습니다.', 'info');
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/session' || normalized === '/sessions' || normalized === '/session list') {
+      renderSessionMenu();
+      openPopup(sessionMenuEl);
+      vscode.postMessage({ type: 'getSessions' });
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized.startsWith('/session new')) {
+      if (isAgentBusy()) {
+        showRunnerBusy('/session new');
+        return true;
+      }
+      vscode.postMessage({ type: 'newSession', name: slashCommandRemainder(text, '/session new') || undefined });
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized.startsWith('/session delete')) {
+      const name = slashCommandRemainder(text, '/session delete');
+      if (!name) {
+        renderSessionMenu();
+        openPopup(sessionMenuEl);
+        vscode.postMessage({ type: 'getSessions' });
+        appendTransientMessage('system', '삭제할 세션을 목록의 x 버튼으로 선택하세요.', 'hint', 4000);
+      } else if (isAgentBusy()) {
+        showRunnerBusy('/session delete');
+      } else {
+        vscode.postMessage({ type: 'deleteSession', name });
+        clearPromptAfterCommand();
+      }
+      return true;
+    }
+    if (normalized === '/plan cancel' || normalized === '/plan clear') {
+      cancelCurrentPlan('cancel');
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/plan delete' || normalized === '/plan remove') {
+      cancelCurrentPlan('delete');
+      clearPromptAfterCommand();
+      return true;
+    }
+    if (normalized === '/plan approve' || normalized === '/plan reject') {
+      const action = normalized.endsWith('approve') ? 'approve' : 'reject';
+      if (savedPlan?.reviewState !== 'wait') {
+        appendTransientMessage('system', '승인/거부 가능한 PLAN이 없습니다.', 'warn', 4000);
+        clearPromptAfterCommand();
+        return true;
+      }
+      submitPlanReviewText(text, action);
+      return true;
+    }
+
+    if (command.kind === 'runner') {
+      if (!ensureRunnerCommandReady(command.value)) return true;
+      sendPromptText(text);
+      return true;
+    }
+
+    return false;
   }
 
   // form submit은 항상 preventDefault (JS 크래시 시 폼 기본동작 방지)
@@ -1045,6 +1158,27 @@ import { createInitialState, persistWebviewState } from './state.js';
     appendRetryBanner(messagesEl, () => vscode.postMessage({ type: 'launchSession' }));
   }
 
+  function replayHistorySnapshot(events) {
+    if (!Array.isArray(events) || !events.length) return;
+    const statusOnly = new Set([
+      'RunnerReady',
+      'RunnerStarting',
+      'RunnerStatus',
+      'RunnerDiagnostic',
+      'RunnerExited',
+      'RunnerStopped',
+      'RunnerError',
+    ]);
+    const replayAll = savedHistory.length === 0;
+    for (const event of events) {
+      if (!event || typeof event !== 'object') continue;
+      if (!replayAll && !statusOnly.has(event.type)) continue;
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'runnerEvent', event: { ...event, replay: true } },
+      }));
+    }
+  }
+
   // ── Event handler ─────────────────────────────────────────────────
   window.addEventListener('message', ({ data }) => {
     data = normalizeHostMessage(data);
@@ -1057,6 +1191,7 @@ import { createInitialState, persistWebviewState } from './state.js';
       _appendMessageEl('system', data.message || '', data.tone || 'info', false);
       return;
     } else if (data?.type === 'historySnapshot') {
+      replayHistorySnapshot(data.history);
       return;
     }
 
@@ -1198,9 +1333,26 @@ import { createInitialState, persistWebviewState } from './state.js';
           setGenerating(false);
           break;
         }
+        {
+          const compactStatus = compactStatusFromMessage(event.message);
+          if (compactStatus) {
+            setLoopStatus(compactStatus.state, compactStatus.label);
+            toolPanel.note({
+              key: 'compact',
+              label: compactStatus.label,
+              detail: compactStatus.detail,
+              state: compactStatus.state,
+            });
+            break;
+          }
+        }
         setGenerating(false);
         if (/PLAN 승인\/거부는 WAIT_FOR_REVIEW 상태에서만 가능합니다\./.test(event.message || '')) {
           clearSavedPlan();
+          break;
+        }
+        if (/^(세션 목록|세션 전환|세션 삭제|세션 이름 변경|새 세션으로 전환):/.test(event.message || '')) {
+          appendTransientMessage('system', event.message || '', 'hint', 4000);
           break;
         }
         _appendMessageEl('system', event.message || '', 'info');

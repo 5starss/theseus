@@ -38,6 +38,7 @@
     'savePastedImage',
     'revertChangedFile',
     'openFile',
+    'openExternal',
     'openGeneratedTool',
     'openDiff',
   ]);

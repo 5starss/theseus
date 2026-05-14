@@ -3,15 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { resolveReadableUri, saveAssetToWorkspace } from '../assets/AssetStore';
-import {
-  createLocalSession,
-  deleteLocalSession,
-  exportLocalSession,
-  listLocalSessionSummaries,
-  renameLocalSession,
-  switchLocalSession,
-  type LocalSessionActionResult,
-} from '../session/LocalSessionStore';
 import { TheseusSessionManager } from '../session/SessionManager';
 import {
   asHostToWebviewMessage,
@@ -28,12 +19,13 @@ import {
   findMentionFiles,
   getActiveCursorContext,
   getCoreRoot,
-  getCustomToolSearchRoots,
   getWorkspaceCwd,
   injectCursorContext,
 } from '../workspace/WorkspaceContext';
 import { getChangedFile, TheseusDiffContentProvider } from './DiffProvider';
 import { renderChatViewHtml } from './ChatViewHtml';
+import { SessionController } from './controllers/SessionController';
+import { HealthController } from './controllers/HealthController';
 
 async function openChangedFileDiff(
   diffProvider: TheseusDiffContentProvider,
@@ -70,21 +62,6 @@ function scalarText(value: unknown): string {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return JSON.stringify(value, null, 2);
-}
-
-function makeUntitledSessionName(): string {
-  const now = new Date();
-  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
-  return [
-    'session',
-    now.getFullYear(),
-    pad(now.getMonth() + 1),
-    pad(now.getDate()),
-    pad(now.getHours()),
-    pad(now.getMinutes()),
-    pad(now.getSeconds()),
-    pad(now.getMilliseconds(), 3),
-  ].join('');
 }
 
 function isInsidePath(child: string, parent: string): boolean {
@@ -233,6 +210,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'theseus.chatView';
   private view: vscode.WebviewView | undefined;
   private readonly messageQueue = new WebviewMessageQueue(() => this.view?.webview);
+  private readonly sessionController: SessionController;
+  private readonly healthController: HealthController;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -240,6 +219,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     private readonly diffProvider: TheseusDiffContentProvider,
     private readonly onStartRunner: () => void,
   ) {
+    this.sessionController = new SessionController(this.sessionManager, event => this.postRunnerEvent(event));
+    this.healthController = new HealthController(this.context, this.sessionManager, event => this.postRunnerEvent(event));
     this.sessionManager.onEvent((event) => {
       this.postRunnerEvent(event);
       if (event.type === 'RunnerDiagnostic') {
@@ -264,59 +245,6 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     this.messageQueue.post({ type: 'runnerEvent', event });
   }
 
-  private localSessionWorkspace(): string | undefined {
-    const status = this.sessionManager.status;
-    return typeof status.workspaceCwd === 'string' ? status.workspaceCwd : getWorkspaceCwd();
-  }
-
-  private currentSessionName(): string {
-    const status = this.sessionManager.status;
-    return typeof status.session === 'string' && status.session ? status.session : 'default';
-  }
-
-  private postLocalSessionSnapshot(snapshot: LocalSessionActionResult): void {
-    this.sessionManager.setPreferredSession(snapshot.current);
-    this.postRunnerEvent({
-      type: 'SessionListEvent',
-      source: 'local',
-      current: snapshot.current,
-      sessions: snapshot.sessions,
-    });
-    this.postRunnerEvent({
-      type: 'SessionChangedEvent',
-      source: 'local',
-      current: snapshot.current,
-      history: snapshot.history,
-      planState: snapshot.planState,
-    });
-  }
-
-  private postLocalSessionError(error: unknown): void {
-    this.postRunnerEvent({
-      type: 'RunnerDiagnostic',
-      code: 'session_error',
-      message: error instanceof Error ? error.message : String(error),
-      state: this.sessionManager.currentState,
-    });
-  }
-
-  private canRouteSessionCommandToRunner(): boolean {
-    return this.sessionManager.hasProcess && ['ready', 'waiting_input'].includes(this.sessionManager.currentState);
-  }
-
-  private canHandleSessionLocally(): boolean {
-    return !this.sessionManager.hasProcess || ['stopped', 'error', 'exited', 'stale'].includes(this.sessionManager.currentState);
-  }
-
-  private postSessionBusyNotice(): void {
-    this.postRunnerEvent({
-      type: 'RunnerDiagnostic',
-      code: 'session_busy',
-      message: 'Session changes are available after the current run finishes or the runner is stopped.',
-      state: this.sessionManager.currentState,
-    });
-  }
-
   refreshActiveCursor(): void {
     const cursor = getActiveCursorContext();
     this.messageQueue.post({
@@ -334,68 +262,6 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     this.messageQueue.post({
       type: 'runnerEvent',
       event: { type: 'customToolsLoaded', tools },
-    });
-  }
-
-  private postHealthStatus(): void {
-    const coreRoot = getCoreRoot(this.context) || '';
-    const workspaceCwd = getWorkspaceCwd() || '';
-    const config = vscode.workspace.getConfiguration('theseus');
-    const pythonExec = config.get<string>('pythonPath') || 'python';
-    const serverUrl = config.get<string>('serverUrl') || '';
-    const status = this.sessionManager.status;
-    const customToolRoots = getCustomToolSearchRoots();
-    this.postRunnerEvent({
-      type: 'healthStatus',
-      settings: {
-        corePath: coreRoot,
-        pythonPath: pythonExec,
-        serverUrl,
-        workspacePath: workspaceCwd,
-        coreRoot,
-        workspaceCwd,
-        pythonExec,
-        customToolRoots,
-      },
-      runner: {
-        running: status.running,
-        processRunning: status.processRunning,
-        lifecycle: status.lifecycle,
-        runtimeMode: status.runtimeMode,
-        daemonPid: status.daemonPid,
-        daemonPort: status.daemonPort,
-        sessionId: status.sessionId,
-        lastDiagnostic: status.lastDiagnostic,
-      },
-      checks: [
-        {
-          label: 'Core path',
-          status: coreRoot ? 'ok' : 'error',
-          detail: coreRoot || 'theseus.corePath를 설정하세요.',
-        },
-        {
-          label: 'Workspace',
-          status: workspaceCwd ? 'ok' : 'warn',
-          detail: workspaceCwd || '워크스페이스 폴더를 열거나 theseus.workspacePath를 설정하세요.',
-        },
-        {
-          label: 'Python',
-          status: pythonExec ? 'ok' : 'warn',
-          detail: pythonExec,
-        },
-        {
-          label: 'Runner',
-          status: status.lifecycle === 'error' ? 'error' : status.running ? 'ok' : 'warn',
-          detail: String(status.lifecycle || 'stopped'),
-        },
-        {
-          label: 'Custom tools',
-          status: customToolRoots.length ? 'ok' : 'warn',
-          detail: customToolRoots.length
-            ? customToolRoots.join(' | ')
-            : 'corePath 또는 workspacePath를 확인하세요.',
-        },
-      ],
     });
   }
 
@@ -488,7 +354,6 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = renderChatViewHtml(webviewView.webview, this.context.extensionUri);
     this.context.subscriptions.push(
       webviewView.onDidChangeVisibility(() => {
-        this.messageQueue.post({ type: 'visibilityChanged', visible: webviewView.visible });
         if (!webviewView.visible) return;
         this.postSessionState();
         this.refreshActiveCursor();
@@ -506,7 +371,24 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           this.postSessionState();
           break;
         case 'visibilityChanged':
-          this.messageQueue.post({ type: 'visibilityChanged', visible: !!msg.visible });
+          if (msg.visible) this.postSessionState();
+          break;
+        case 'openExternal':
+          if (typeof msg.url === 'string') {
+            try {
+              const uri = vscode.Uri.parse(msg.url);
+              if (uri.scheme === 'http' || uri.scheme === 'https') {
+                await vscode.env.openExternal(uri);
+              }
+            } catch (err) {
+              this.postRunnerEvent({
+                type: 'RunnerDiagnostic',
+                code: 'open_external_failed',
+                message: err instanceof Error ? err.message : String(err),
+                state: this.sessionManager.currentState,
+              });
+            }
+          }
           break;
         case 'send':
         case 'sendInput':
@@ -524,95 +406,22 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'getSessions':
-          {
-            const current = this.currentSessionName();
-            const workspaceCwd = this.localSessionWorkspace();
-            this.postRunnerEvent({
-              type: 'SessionListEvent',
-              source: 'local',
-              current,
-              sessions: listLocalSessionSummaries(workspaceCwd, current),
-            });
-          }
+          this.sessionController.postList();
           break;
         case 'newSession':
-          {
-            const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName();
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session new ${JSON.stringify(name)}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postLocalSessionSnapshot(createLocalSession(this.localSessionWorkspace(), name));
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
-            }
-          }
+          this.sessionController.newSession(msg.name);
           break;
         case 'switchSession':
-          if (typeof msg.name === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postLocalSessionSnapshot(switchLocalSession(this.localSessionWorkspace(), msg.name));
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
-            }
-          }
+          this.sessionController.switchSession(msg.name);
           break;
         case 'deleteSession':
-          if (typeof msg.name === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postLocalSessionSnapshot(deleteLocalSession(this.localSessionWorkspace(), msg.name, this.currentSessionName()));
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
-            }
-          }
+          this.sessionController.deleteSession(msg.name);
           break;
         case 'renameSession':
-          if (typeof msg.oldName === 'string' && typeof msg.newName === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postLocalSessionSnapshot(renameLocalSession(this.localSessionWorkspace(), msg.oldName, msg.newName, this.currentSessionName()));
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
-            }
-          }
+          this.sessionController.renameSession(msg.oldName, msg.newName);
           break;
         case 'exportSession':
-          if (typeof msg.name === 'string' && typeof msg.format === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session export ${JSON.stringify(msg.name)} ${msg.format}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postRunnerEvent({
-                  type: 'SessionExportedEvent',
-                  ...exportLocalSession(this.localSessionWorkspace(), msg.name, msg.format),
-                });
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
-            }
-          }
+          this.sessionController.exportSession(msg.name, msg.format);
           break;
         case 'reviewPlan':
           if (msg.action === 'approve') this.sessionManager.send('/plan approve');
@@ -644,7 +453,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand('workbench.action.openSettings', 'theseus');
           break;
         case 'getHealth':
-          this.postHealthStatus();
+          this.healthController.postHealthStatus();
           break;
         case 'explainProblem':
           vscode.commands.executeCommand('theseus.explainProblem');
