@@ -5,19 +5,8 @@ import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useChatSessionStore } from '../stores/useChatSessionStore';
 import { chatApi } from '../api/chat';
-import type { DraftPhase, StructuredPlan, ToolGenerationSseEvent } from '../types/chat';
-
-function parseStructuredPlan(structuredPlanJson?: string | null): StructuredPlan | null {
-  if (!structuredPlanJson) return null;
-
-  try {
-    const parsed = JSON.parse(structuredPlanJson) as StructuredPlan;
-    return Array.isArray(parsed.blocks) ? parsed : null;
-  } catch (error) {
-    console.warn('[SSE] Failed to parse ToolPlan detail:', error);
-    return null;
-  }
-}
+import { parseStructuredPlanJson } from '../utils/structuredPlan';
+import type { DraftPhase, ToolGenerationSseEvent } from '../types/chat';
 
 function normalizeEventType(eventName?: string, payloadEventType?: string) {
   const rawEventType = eventName || payloadEventType || '';
@@ -176,7 +165,7 @@ export function useToolGenerationSSE() {
 
                   store.initSession({
                     messages: details.messages || [],
-                    plan: parseStructuredPlan(detail?.structuredPlanJson) || store.currentPlan,
+                    plan: parseStructuredPlanJson(detail?.structuredPlanJson, 'SSE') || store.currentPlan,
                     phase,
                     toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
                     toolPlanGroupId: toolPlanGroupId ? String(toolPlanGroupId) : null,
@@ -244,7 +233,7 @@ export function useToolGenerationSSE() {
 
                   store.initSession({
                     messages: details.messages || [],
-                    plan: parseStructuredPlan(detail?.structuredPlanJson) || null,
+                    plan: parseStructuredPlanJson(detail?.structuredPlanJson, 'SSE') || null,
                     phase,
                     toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
                     toolPlanGroupId: details.currentPlan?.toolPlanGroupId ? String(details.currentPlan.toolPlanGroupId) : null,

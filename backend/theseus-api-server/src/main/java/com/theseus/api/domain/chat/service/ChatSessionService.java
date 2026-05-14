@@ -39,6 +39,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ChatSessionService {
 
+	private static final List<ToolPlanStatus> DISPLAYABLE_TOOL_PLAN_STATUSES = List.of(
+		ToolPlanStatus.REVIEW,
+		ToolPlanStatus.PENDING,
+		ToolPlanStatus.APPROVED,
+		ToolPlanStatus.REJECTED
+	);
+
 	private final ChatSessionRepository chatSessionRepository;
 	private final ChatMessageRepository chatMessageRepository;
 	private final ProjectRepository projectRepository;
@@ -186,17 +193,17 @@ public class ChatSessionService {
 				List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)
 			)
 			.map(ChatSessionDetailResponse.CurrentPlanResponse::createFrom)
-			.orElseGet(() -> resolveReviewPlan(project, chatSession));
+			.orElseGet(() -> resolveDisplayablePlan(project, chatSession));
 	}
 
 	/**
-	 * 진행 중인 run이 없을 때 검토 가능한 최신 PLAN을 복구 대상으로 선택합니다.
+	 * 진행 중인 run이 없을 때 패널에 표시할 수 있는 최신 PLAN을 복구 대상으로 선택합니다.
 	 */
-	private ChatSessionDetailResponse.CurrentPlanResponse resolveReviewPlan(Project project, ChatSession chatSession) {
-		return toolPlanRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+	private ChatSessionDetailResponse.CurrentPlanResponse resolveDisplayablePlan(Project project, ChatSession chatSession) {
+		return toolPlanRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
 				project,
 				chatSession,
-				ToolPlanStatus.REVIEW
+				DISPLAYABLE_TOOL_PLAN_STATUSES
 			)
 			.map(ChatSessionDetailResponse.CurrentPlanResponse::createFrom)
 			.orElse(null);
