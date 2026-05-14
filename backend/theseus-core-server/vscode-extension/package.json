@@ -20,7 +20,8 @@
     "onCommand:theseus.askSelected",
     "onCommand:theseus.explainProblem",
     "onCommand:theseus.fixProblem",
-    "onCommand:theseus.explainSelected"
+    "onCommand:theseus.explainSelected",
+    "onCommand:theseus.inlineEdit"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -85,6 +86,10 @@
       {
         "command": "theseus.explainSelected",
         "title": "Theseus: Explain Selection"
+      },
+      {
+        "command": "theseus.inlineEdit",
+        "title": "Theseus: Inline Edit"
       }
     ],
     "menus": {
@@ -138,7 +143,15 @@
           "name": "Chat"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "theseus.inlineEdit",
+        "key": "ctrl+i",
+        "mac": "cmd+i",
+        "when": "editorTextFocus"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

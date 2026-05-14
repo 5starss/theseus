@@ -112,7 +112,7 @@ export async function findMentionFiles(query: string): Promise<string[]> {
     }
   }
 
-  return uris
+  const fileResults = uris
     .map(uri => relativeToRoot(root, uri))
     .filter(file => !normalizedQuery || normalizeMentionPath(file).includes(normalizedQuery))
     .sort((a, b) => {
@@ -127,6 +127,12 @@ export async function findMentionFiles(query: string): Promise<string[]> {
       return aScore - bScore || a.length - b.length || a.localeCompare(b);
     })
     .slice(0, FILE_SUGGESTION_LIMIT);
+
+  const specialMentions = ['terminal', 'folder', 'problems'].filter(m =>
+    !normalizedQuery || m.includes(normalizedQuery)
+  );
+
+  return [...specialMentions, ...fileResults];
 }
 
 export function getCustomToolSearchRoots(): string[] {
@@ -184,4 +190,38 @@ function makeFileSearchPattern(query: string): string {
   const segments = normalized.split('/').filter(Boolean);
   const last = segments[segments.length - 1] || normalized;
   return `**/*${escapeGlobSegment(last)}*`;
+}
+
+export async function resolveContextMentions(text: string): Promise<string> {
+  let resolvedText = text;
+
+  if (resolvedText.includes('@problems')) {
+    const diagnostics = vscode.languages.getDiagnostics();
+    const problems = diagnostics.flatMap(([uri, diags]) =>
+      diags.map(d => `${vscode.workspace.asRelativePath(uri)}:${d.range.start.line + 1} - ${d.message} [${d.source || 'unknown'}]`)
+    ).slice(0, 50).join('\n');
+
+    resolvedText = resolvedText.replace(/@problems/g, problems ? `\n--- VSCode Problems ---\n${problems}\n-----------------------\n` : '\n--- No Problems found ---\n');
+  }
+
+  if (resolvedText.includes('@folder')) {
+    const root = getWorkspaceCwd();
+    let tree = 'No workspace opened.';
+    if (root) {
+      try {
+        // Very simple flat list of top-level files for brevity
+        const files = await vscode.workspace.findFiles(new vscode.RelativePattern(root, '**/*'), FILE_SEARCH_EXCLUDE, 100);
+        tree = files.map(f => relativeToRoot(root, f)).sort().join('\n');
+      } catch (err) {
+        tree = 'Error reading folder structure.';
+      }
+    }
+    resolvedText = resolvedText.replace(/@folder/g, `\n--- Folder Structure ---\n${tree}\n------------------------\n`);
+  }
+
+  if (resolvedText.includes('@terminal')) {
+    resolvedText = resolvedText.replace(/@terminal/g, `\n--- Terminal ---\n(Terminal reading is not directly supported by VSCode API. Please copy-paste the logs manually.)\n----------------\n`);
+  }
+
+  return resolvedText;
 }

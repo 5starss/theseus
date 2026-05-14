@@ -31,6 +31,7 @@ import {
   getCustomToolSearchRoots,
   getWorkspaceCwd,
   injectCursorContext,
+  resolveContextMentions,
 } from '../workspace/WorkspaceContext';
 import { getChangedFile, TheseusDiffContentProvider } from './DiffProvider';
 import { renderChatViewHtml } from './ChatViewHtml';
@@ -229,10 +230,13 @@ class WebviewMessageQueue {
   }
 }
 
+import { ComposerPanel } from '../composer/ComposerPanel';
+
 export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'theseus.chatView';
   private view: vscode.WebviewView | undefined;
   private readonly messageQueue = new WebviewMessageQueue(() => this.view?.webview);
+  private activeChanges: any[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -245,6 +249,14 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       if (event.type === 'RunnerDiagnostic') {
         this.messageQueue.post({ type: 'diagnostic', diagnostic: event });
       }
+
+      const changed = getChangedFile(event);
+      if (changed) {
+        this.activeChanges.push(changed);
+        ComposerPanel.createOrShow(this.context.extensionUri);
+        ComposerPanel.updateChanges(this.activeChanges);
+      }
+
       void openChangedFileDiff(this.diffProvider, event);
     });
   }
@@ -510,15 +522,19 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'send':
         case 'sendInput':
-          if (typeof msg.text === 'string') this.sessionManager.send(this.withOptionalCursorContext(msg.text, msg.skipCursorContext));
+          if (typeof msg.text === 'string') {
+            const resolvedText = await resolveContextMentions(msg.text);
+            this.sessionManager.send(this.withOptionalCursorContext(resolvedText, msg.skipCursorContext));
+          }
           break;
         case 'setMode':
           if (typeof msg.mode === 'string') this.sessionManager.setMode(msg.mode);
           break;
         case 'sendWithMode':
           if (typeof msg.text === 'string') {
+            const resolvedText = await resolveContextMentions(msg.text);
             this.sessionManager.send(
-              this.withOptionalCursorContext(msg.text, msg.skipCursorContext),
+              this.withOptionalCursorContext(resolvedText, msg.skipCursorContext),
               typeof msg.mode === 'string' ? msg.mode : undefined,
             );
           }
