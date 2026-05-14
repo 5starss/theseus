@@ -29,7 +29,11 @@ from theseus_engine.wrappers.llm_clients.openai_compat_client import (
     _strip_think_blocks,
 )
 from theseus_engine.models.messages import (
-    ConversationMessage, ContentBlock, TextBlock, ToolUseBlock,
+    ConversationMessage,
+    ContentBlock,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 
 from theseus_engine.wrappers.llm_clients.gemini_compat import (
@@ -315,24 +319,35 @@ class TheseusLLMClient(SupportsStreamingMessages):
         }, debug_context=request.debug_context)
         # ----------------------------------------------
 
-        # Patch messages to make tool errors extremely explicit for open-source models
-        patched_messages = []
+        # Patch a copy of messages to make tool errors explicit for open-source
+        # models without mutating canonical conversation history.
+        patched_messages: list[ConversationMessage] = []
         for msg in request.messages:
-            if msg.role == "user" and isinstance(msg.content, list):
-                for block in msg.content:
-                    if getattr(block, "type", None) == "tool_result" and getattr(block, "is_error", False):
-                        orig = getattr(block, "content", "")
-                        if isinstance(orig, str) and not orig.startswith("[TOOL EXECUTION ERROR]"):
-                            prefix = "[TOOL EXECUTION ERROR] The tool failed with the following output:\n"
-                            try:
-                                setattr(block, "content", f"{prefix}{orig}")
-                            except (AttributeError, TypeError):
-                                # Frozen Pydantic model — use object.__setattr__
-                                try:
-                                    object.__setattr__(block, "content", f"{prefix}{orig}")
-                                except Exception:
-                                    pass
-            patched_messages.append(msg)
+            if msg.role != "user" or not isinstance(msg.content, list):
+                patched_messages.append(msg)
+                continue
+            patched_blocks: list[ContentBlock] = []
+            changed = False
+            for block in msg.content:
+                if (
+                    isinstance(block, ToolResultBlock)
+                    and block.is_error
+                    and isinstance(block.content, str)
+                    and not block.content.startswith("[TOOL EXECUTION ERROR]")
+                ):
+                    prefix = (
+                        "[TOOL EXECUTION ERROR] "
+                        "The tool failed with the following output:\n"
+                    )
+                    patched_blocks.append(
+                        block.model_copy(update={"content": f"{prefix}{block.content}"})
+                    )
+                    changed = True
+                else:
+                    patched_blocks.append(block)
+            patched_messages.append(
+                msg.model_copy(update={"content": patched_blocks}) if changed else msg
+            )
 
         # Smart Model Routing: 최근 도구 호출 기반 모델 선택
         routed_model = self._model_router.select_model(

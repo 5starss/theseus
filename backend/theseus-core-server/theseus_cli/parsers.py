@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 from theseus_cli.ui import display_plan
 
 if TYPE_CHECKING:
-    from theseus_engine.models.state import TheseusStateMachine, PlanPhase
+    from theseus_engine.models.modes import PlanPhase
+    from theseus_engine.models.state import TheseusStateMachine
 
 
 _TASK_FIELDS = {
@@ -129,7 +130,7 @@ def handle_plan_draft(sm: "TheseusStateMachine", response_text: str) -> bool:
         True  — JSON 계획 파싱 성공, WAIT_FOR_REVIEW로 전환됨.
         False — JSON 없음 (탐색/중간 턴), 상태 전환 없음.
     """
-    from theseus_engine.models.state import PlanPhase
+    from theseus_engine.models.modes import PlanPhase
 
     plan_data = extract_plan_json(response_text)
     if plan_data:

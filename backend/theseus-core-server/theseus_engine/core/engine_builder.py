@@ -6,16 +6,22 @@ from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.tools.core.base_tools import ToolRegistry
 
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
-from theseus_engine.models.state import TheseusStateMachine, AgentMode, PlanPhase
+from theseus_engine.models.modes import AgentMode
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.tools.core import (
     ALL_CORE_TOOLS,
-    build_filtered_registry,
     load_custom_tools,
     load_custom_tools_for_project,
     ToolSearchTool,
 )
 from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.core.tool_retriever import ESSENTIAL_TOOL_NAMES
+from theseus_engine.core.tool_visibility import (
+    ToolVisibilityPolicy,
+    active_tool_names,
+    build_visible_registry,
+    can_create_tool_for_state,
+)
 from theseus_engine.models.rbac import TheseusPermissionChecker
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
     TheseusHookExecutor,
@@ -171,34 +177,34 @@ async def setup_engine(
     enable_hooks = os.getenv("THESEUS_ENABLE_AGENT_HOOK", "false").lower() == "true"
     hook_executor = None
 
-    # create_tool은 PLAN EXECUTING 단계에서만 활성화
-    # 서버 모드(project_id 있음): ADMIN 역할 필수
-    # standalone 모드(project_id 없음): 로컬 사용자이므로 역할 제한 없음
-    is_plan_executing = (
-        sm.mode == AgentMode.PLAN
-        and getattr(sm, "plan_phase", None) == PlanPhase.EXECUTING
+    can_create_tool = can_create_tool_for_state(
+        mode=sm.mode,
+        plan_phase=getattr(sm, "plan_phase", None),
+        project_id=project_id,
+        actor_role=actor_role,
     )
-    is_admin_or_standalone = (project_id is None) or (actor_role.upper() == "ADMIN")
-    can_create_tool = is_plan_executing and is_admin_or_standalone
     if can_create_tool and current_registry.get("create_tool") is None:
         creator = full_registry.get("create_tool")
         if creator is not None:
             current_registry.register(creator)
-    exclude = set() if can_create_tool else {"create_tool"}
 
-    # 프로젝트 단위 비활성 툴을 제외 집합에 합산
-    if project_disabled_tools:
-        exclude = exclude | set(project_disabled_tools)
-
-    active_registry = build_filtered_registry(
-        current_registry, project_tool_permissions, user_level, exclude_tools=exclude
+    active_registry = build_visible_registry(
+        current_registry,
+        ToolVisibilityPolicy(
+            mode=sm.mode,
+            plan_phase=getattr(sm, "plan_phase", None),
+            user_level=user_level,
+            tool_permissions=project_tool_permissions,
+            can_create_tool=can_create_tool,
+            disabled_tools=frozenset(project_disabled_tools or set()),
+        ),
     )
 
     if rag_failed and active_registry.get("tool_search") is None:
         active_registry.register(ToolSearchTool())
         print("🔧 ToolSearchTool이 폴백으로 활성화되었습니다.")
 
-    active_tool_names = tuple(tool.name for tool in active_registry.list_tools())
+    active_tool_names_tuple = active_tool_names(active_registry)
     if enable_hooks:
         hook_executor = TheseusHookExecutor(
             active_registry=active_registry,
@@ -219,7 +225,7 @@ async def setup_engine(
         cwd=resolved_cwd,
         model=model_name,
         system_prompt=(
-            sm.get_system_prompt(available_tools=active_tool_names)
+            sm.get_system_prompt(available_tools=active_tool_names_tuple)
             + ("\n\n" + memory_context if memory_context else "")
         ),
         max_turns=30,

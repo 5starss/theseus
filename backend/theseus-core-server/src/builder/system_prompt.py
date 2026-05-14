@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable
 
-from theseus_engine.models.state import (
+from theseus_engine.models.modes import (
     AgentMode,
     CoordinatorPhase,
     PlanPhase,
+)
+from theseus_engine.models.state import (
     TheseusStateMachine,
 )
 

@@ -1,6 +1,11 @@
 from theseus_engine.engine.query_engine import QueryEngine
-from theseus_engine.models.state import TheseusStateMachine, AgentMode
-from theseus_engine.tools.core import build_filtered_registry
+from theseus_engine.models.modes import AgentMode
+from theseus_engine.models.state import TheseusStateMachine
+from theseus_engine.core.tool_visibility import (
+    ToolVisibilityPolicy,
+    build_visible_registry,
+    can_create_tool_for_state,
+)
 from theseus_engine.models.sessions import list_sessions, get_session_path, save_session_history, load_session_history
 
 class TheseusCommandHandler:
@@ -23,28 +28,17 @@ class TheseusCommandHandler:
 
         if cmd == "/ask":
             self.sm.switch_mode(AgentMode.ASK)
-            self.engine.set_system_prompt(self.sm.get_system_prompt())
-            # In ASK mode, restrict all tools
-            self.engine._tool_registry = build_filtered_registry(
-                self.full_registry, self.project_tool_permissions, self.user_level, exclude_tools=set([t.name for t in self.full_registry.list_tools()])
-            )
+            self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to ASK mode (Read-only)."
             
         elif cmd == "/agent":
             self.sm.switch_mode(AgentMode.AGENT)
-            self.engine._tool_registry = build_filtered_registry(
-                self.full_registry, self.project_tool_permissions, self.user_level, exclude_tools={"create_tool"}
-            )
-            self.engine.set_system_prompt(self.sm.get_system_prompt())
+            self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to AGENT mode."
             
         elif cmd == "/plan":
             self.sm.switch_mode(AgentMode.PLAN)
-            self.engine.set_system_prompt(self.sm.get_system_prompt())
-            # Plan mode: allow all tools
-            self.engine._tool_registry = build_filtered_registry(
-                self.full_registry, self.project_tool_permissions, self.user_level, exclude_tools=set()
-            )
+            self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to PLAN mode (Drafting phase)."
             
         elif cmd == "/clear":
@@ -90,3 +84,27 @@ class TheseusCommandHandler:
                 return True, f"\n[Session] Unknown command: {sub_cmd}. Use list, new, or switch."
                 
         return False, "Unknown command."
+
+    def _sync_engine_tool_visibility(self) -> None:
+        can_create_tool = can_create_tool_for_state(
+            mode=self.sm.mode,
+            plan_phase=getattr(self.sm, "plan_phase", None),
+            project_id=None,
+            actor_role="ADMIN",
+        )
+        registry = build_visible_registry(
+            self.full_registry,
+            ToolVisibilityPolicy(
+                mode=self.sm.mode,
+                plan_phase=getattr(self.sm, "plan_phase", None),
+                user_level=self.user_level,
+                tool_permissions=self.project_tool_permissions,
+                can_create_tool=can_create_tool,
+            ),
+        )
+        self.engine.set_tool_registry(registry)
+        self.engine.set_system_prompt(
+            self.sm.get_system_prompt(
+                available_tools=tuple(tool.name for tool in registry.list_tools())
+            )
+        )

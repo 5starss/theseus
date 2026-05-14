@@ -6,19 +6,25 @@ from theseus_engine.models.messages import ConversationMessage
 
 # Session History Management
 SESSION_DIR = Path(".theseus_sessions")
-SESSION_DIR.mkdir(exist_ok=True)
+
+
+def ensure_session_dir() -> Path:
+    """Create and return the local session directory on first real use."""
+    SESSION_DIR.mkdir(exist_ok=True)
+    return SESSION_DIR
 
 
 def get_session_path(session_name: str) -> Path:
     """Get the file path for a given session name."""
     if not session_name or not session_name.isalnum():
         raise ValueError("Session name must be alphanumeric.")
-    return SESSION_DIR / f"{session_name}.json"
+    return ensure_session_dir() / f"{session_name}.json"
 
 
 def list_sessions() -> List[str]:
     """List all available session names."""
-    return [p.stem for p in SESSION_DIR.glob("*.json")]
+    session_dir = ensure_session_dir()
+    return [p.stem for p in session_dir.glob("*.json")]
 
 
 def load_session_metadata(session_name: str) -> dict:
