@@ -47,6 +47,7 @@ class ApiMessageRequest:
     system_prompt: str | None = None
     max_tokens: int = 4096
     tools: list[dict[str, Any]] = field(default_factory=list)
+    debug_context: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Stream Events ─────────────────────────────────────────────

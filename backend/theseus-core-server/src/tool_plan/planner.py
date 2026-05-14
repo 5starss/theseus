@@ -101,6 +101,11 @@ class ToolPlanPlanner:
             model_name=self.model_name,
             tool_registry=tool_registry,
             tool_metadata={
+                "run_id": event.run_id,
+                "project_id": event.project_id,
+                "chat_session_id": event.chat_session_id,
+                "user_id": getattr(event, "requested_by_user_id", None),
+                "agent_mode": event.mode,
                 "remote_workspace_id": event.remote_workspace_id,
                 "remote_workspace": (
                     remote_workspace.model_dump(mode="json", by_alias=True)
