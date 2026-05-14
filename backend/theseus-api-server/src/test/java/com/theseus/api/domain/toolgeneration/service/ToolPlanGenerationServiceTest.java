@@ -202,6 +202,85 @@ class ToolPlanGenerationServiceTest {
 	}
 
 	@Test
+	@DisplayName("ToolBuild 실패 SYSTEM_NOTICE는 PLAN Kafka history에서 assistant 요약으로 변환된다")
+	void generatePlanProjectsToolBuildFailureNoticeIntoAssistantHistory() {
+		ProjectFixture fixture = createProjectFixture(true, ProjectMemberStatus.IN_PROGRESS);
+		ChatSession chatSession = createChatSession(30L, fixture.project(), fixture.projectMember(), false);
+		ToolPlanGenerationRequest request = createRequest(ToolPlanMode.PLAN, "그 실패 원인을 반영해서 다시 만들어줘.");
+		List<ChatMessage> history = List.of(
+			createChatMessage(
+				chatSession,
+				1,
+				ChatMessageSenderType.SYSTEM,
+				ChatMessageType.SYSTEM_NOTICE,
+				ChatMessageContentType.TEXT,
+				"Tool build에 실패했습니다. code=SANDBOX_FAILED, message=자동 repair 2회 내에서 안전한 "
+					+ "대체 구현을 찾지 못했습니다. psutil 라이브러리가 샌드박스 환경에 설치되어 있지 않아 "
+					+ "시스템 메트릭을 수집할 수 없습니다. 가능한 대안: 표준 라이브러리와 /proc 파일을 "
+					+ "읽어 기본 CPU/RAM 정보를 수집합니다. 마지막 오류: No module named 'psutil'"
+			),
+			createChatMessage(
+				chatSession,
+				2,
+				ChatMessageSenderType.SYSTEM,
+				ChatMessageType.SYSTEM_NOTICE,
+				ChatMessageContentType.TEXT,
+				"일반 시스템 공지"
+			)
+		);
+		ChatMessage savedUserMessage = createChatMessage(
+			chatSession,
+			3,
+			ChatMessageSenderType.USER,
+			request.getPrompt()
+		);
+		ReflectionTestUtils.setField(savedUserMessage, "id", 400L);
+
+		when(userRepository.findById(fixture.user().getId())).thenReturn(Optional.of(fixture.user()));
+		when(projectRepository.findById(fixture.project().getId())).thenReturn(Optional.of(fixture.project()));
+		when(projectMemberRepository.findByProjectAndUser(fixture.project(), fixture.user()))
+			.thenReturn(Optional.of(fixture.projectMember()));
+		when(chatSessionRepository.findByIdAndProjectAndProjectMemberForUpdate(
+			chatSession.getId(),
+			fixture.project(),
+			fixture.projectMember()
+		)).thenReturn(Optional.of(chatSession));
+		when(chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(chatSession)).thenReturn(history);
+		when(toolPlanRunRepository.save(any(ToolPlanRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		when(chatMessageService.saveUserToolPlanRunMessage(
+			same(chatSession),
+			any(ToolPlanRun.class),
+			eq(ChatMessageType.TOOL_PLAN_REQUEST),
+			eq(ChatMessageContentType.TEXT),
+			eq(request.getPrompt())
+		)).thenReturn(savedUserMessage);
+
+		toolPlanGenerationService.generatePlan(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			chatSession.getId(),
+			request
+		);
+
+		ArgumentCaptor<ToolPlanKafkaPublishEvent> eventCaptor =
+			ArgumentCaptor.forClass(ToolPlanKafkaPublishEvent.class);
+		verify(eventPublisher).publishEvent(eventCaptor.capture());
+		ToolPlanGenerationRequestEvent payload = (ToolPlanGenerationRequestEvent) eventCaptor.getValue().payload();
+
+		assertThat(payload.history()).hasSize(2);
+		assertThat(payload.history().get(0).role()).isEqualTo("assistant");
+		assertThat(payload.history().get(0).messageType()).isEqualTo(ChatMessageType.SYSTEM_NOTICE);
+		assertThat(payload.history().get(0).content())
+			.startsWith("이전 Tool build 실패:")
+			.contains("code=SANDBOX_FAILED")
+			.contains("원인=자동 repair 2회")
+			.contains("가능한 대안=표준 라이브러리와 /proc 파일")
+			.doesNotContain("마지막 오류");
+		assertThat(payload.history().get(1).role()).isEqualTo("system");
+		assertThat(payload.history().get(1).content()).isEqualTo("일반 시스템 공지");
+	}
+
+	@Test
 	@DisplayName("PLAN 모드가 아니면 PLAN 생성 요청을 거부한다")
 	void generatePlanFailsWhenModeIsNotPlan() {
 		ToolPlanGenerationRequest request = createRequest(ToolPlanMode.ASK, "그냥 질문");
@@ -673,12 +752,30 @@ class ToolPlanGenerationServiceTest {
 		ChatMessageSenderType senderType,
 		String content
 	) {
+		return createChatMessage(
+			chatSession,
+			messageOrder,
+			senderType,
+			ChatMessageType.CHAT,
+			ChatMessageContentType.TEXT,
+			content
+		);
+	}
+
+	private ChatMessage createChatMessage(
+		ChatSession chatSession,
+		Integer messageOrder,
+		ChatMessageSenderType senderType,
+		ChatMessageType messageType,
+		ChatMessageContentType contentType,
+		String content
+	) {
 		return ChatMessage.builder()
 			.chatSession(chatSession)
 			.messageOrder(messageOrder)
 			.senderType(senderType)
-			.messageType(ChatMessageType.CHAT)
-			.contentType(ChatMessageContentType.TEXT)
+			.messageType(messageType)
+			.contentType(contentType)
 			.content(content)
 			.build();
 	}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import posixpath
 import shlex
 
@@ -94,7 +95,12 @@ class RemoteWriteFileTool(RemoteWritableToolMixin, BaseTool):
         try:
             remote_path = connector.resolve_path(arguments.path)
             content = self.strip_code_markdown_links(arguments.path, arguments.content)
-            self.write_remote_text(connector, remote_path, content)
+            await asyncio.to_thread(
+                self.write_remote_text,
+                connector,
+                remote_path,
+                content,
+            )
             return ToolResult(
                 output=f"Successfully wrote {len(content.encode('utf-8'))} bytes to remote:{arguments.path}",
                 metadata={"remote_path": remote_path},
@@ -122,7 +128,11 @@ class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
         connector = self.create_connector()
         try:
             remote_path = connector.resolve_path(arguments.path)
-            content = self.read_remote_text(connector, remote_path)
+            content = await asyncio.to_thread(
+                self.read_remote_text,
+                connector,
+                remote_path,
+            )
             old_string = self.strip_code_markdown_links(arguments.path, arguments.old_str)
             new_string = self.strip_code_markdown_links(arguments.path, arguments.new_str)
             if old_string not in content:
@@ -136,7 +146,12 @@ class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
 
             replace_count = -1 if arguments.replace_all else 1
             updated_content = content.replace(old_string, new_string, replace_count)
-            self.write_remote_text(connector, remote_path, updated_content)
+            await asyncio.to_thread(
+                self.write_remote_text,
+                connector,
+                remote_path,
+                updated_content,
+            )
             actual_replaces = content.count(old_string) if arguments.replace_all else 1
             return ToolResult(
                 output=f"Successfully updated remote:{arguments.path} ({actual_replaces} replacements made).",
@@ -195,6 +210,8 @@ class RemoteRunCommandTool(RemoteWorkspaceToolMixin, BaseTool):
         "`",
         "$(",
     )
+    DENIED_RAW_OPERATORS = ("&&", "||", ";", "\n", "`", "$(")
+    SHELL_COMMANDS = frozenset({"bash", "fish", "sh", "zsh"})
 
     def is_read_only(self, arguments) -> bool:
         return False
@@ -207,7 +224,8 @@ class RemoteRunCommandTool(RemoteWorkspaceToolMixin, BaseTool):
 
         connector = self.create_connector()
         try:
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 arguments.command,
                 working_directory=arguments.cwd or ".",
                 timeout_seconds=min(arguments.timeout_seconds, DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS),
@@ -239,24 +257,50 @@ class RemoteRunCommandTool(RemoteWorkspaceToolMixin, BaseTool):
             return f"Remote bash command '{first_command}' is not allowed."
 
         lowered_command = f" {stripped_command.lower()} "
+        for operator in self.DENIED_RAW_OPERATORS:
+            if operator in stripped_command:
+                return f"Remote bash command contains a denied operator: {operator}"
+        if "|" in stripped_command:
+            pipe_segments = [segment.strip() for segment in stripped_command.split("|")]
+            for segment in pipe_segments[1:]:
+                if not segment:
+                    return "Remote bash command contains an empty pipe segment."
+                try:
+                    segment_command = shlex.split(segment)[0]
+                except (IndexError, ValueError):
+                    return "Remote bash command contains an invalid pipe segment."
+                if segment_command in self.SHELL_COMMANDS:
+                    return "Remote bash command cannot pipe content into a shell."
+            if " curl " in lowered_command or " wget " in lowered_command:
+                return "Remote bash command cannot pipe downloaded content into another command."
         for pattern in self.DENIED_PATTERNS:
             if pattern in lowered_command:
                 return f"Remote bash command contains a denied pattern: {pattern.strip()}"
-        if "|" in lowered_command and (" curl " in lowered_command or " wget " in lowered_command):
-            return "Remote bash command cannot pipe downloaded content into another command."
 
         for part in command_parts[1:]:
             if part.startswith("~"):
                 return "Remote bash command path must not use home-directory expansion."
-            if part.startswith("/") and not self.is_under_base_path(part):
+            if not self.is_allowed_command_path_argument(part):
                 return "Remote bash command path must stay under the Remote Workspace basePath."
         return None
 
+    def is_allowed_command_path_argument(self, argument: str) -> bool:
+        if argument.startswith("-") or "://" in argument:
+            return True
+        if not (argument.startswith("/") or argument.startswith(".") or "/" in argument):
+            return True
+        if argument.startswith("/"):
+            candidate = argument
+        else:
+            candidate = posixpath.join(self.config.base_path, argument)
+        return self.is_under_base_path(candidate)
+
     def is_under_base_path(self, path: str) -> bool:
-        base_path = self.config.base_path.rstrip("/")
+        base_path = posixpath.normpath(self.config.base_path).rstrip("/")
+        normalized_path = posixpath.normpath(path)
         if not base_path:
-            return path.startswith("/")
-        return path == base_path or path.startswith(f"{base_path}/")
+            return normalized_path.startswith("/")
+        return normalized_path == base_path or normalized_path.startswith(f"{base_path}/")
 
 
 def build_remote_write_execution_tools(

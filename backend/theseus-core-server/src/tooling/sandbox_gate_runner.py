@@ -77,9 +77,16 @@ def _install_stubs() -> type:
         del args, kwargs
         raise RemoteWorkspaceRuntimeError("Remote Workspace command execution is disabled in sandbox validation.")
 
+    def register_remote_workspace_config(config):
+        del config
+        return "sandbox-remote-workspace"
+
+    runtime_module.REMOTE_WORKSPACE_METADATA_KEY = "remote_workspace"
+    runtime_module.REMOTE_WORKSPACE_RUNTIME_KEY = "remote_workspace_runtime_key"
     runtime_module.RemoteWorkspaceRuntimeError = RemoteWorkspaceRuntimeError
     runtime_module.get_remote_workspace_config = get_remote_workspace_config
     runtime_module.require_remote_workspace = require_remote_workspace
+    runtime_module.register_remote_workspace_config = register_remote_workspace_config
     runtime_module.run_remote_command = run_remote_command
     remote_workspace_module.runtime = runtime_module
     src_module.remote_workspace = remote_workspace_module
