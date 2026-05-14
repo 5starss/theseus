@@ -96,7 +96,7 @@ async def setup_engine(
     scoped_memory.ensure_gitignore()
     memory_context = scoped_memory.read_context()
 
-    model_name = os.getenv("THESEUS_MODEL") or os.getenv("OPENHARNESS_MODEL") or "gpt-4o"
+    model_name = os.getenv("THESEUS_MODEL") or "gpt-4o"
     if api_client is None:
         api_client = TheseusLLMClient(model_name)
 
@@ -159,7 +159,7 @@ async def setup_engine(
             rag_failed = True
     # --------------------------------------------------------------
 
-    # Theseus 자체 PermissionSettings — OpenHarness PermissionSettings 제거
+    # Theseus 자체 PermissionSettings 사용
     from theseus_engine.models.rbac import TheseusPermissionSettings
     settings = TheseusPermissionSettings()
     permission_checker = TheseusPermissionChecker(

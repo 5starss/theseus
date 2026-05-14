@@ -1,6 +1,5 @@
 """Theseus lightweight background task manager.
 
-OpenHarness의 tasks.manager에 의존하지 않고,
 asyncio 네이티브로 백그라운드 셸 프로세스를 관리합니다.
 """
 

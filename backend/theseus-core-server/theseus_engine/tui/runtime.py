@@ -1,6 +1,6 @@
-"""Theseus-native TUI runtime — OpenHarness build_runtime/start_runtime/handle_line 대체.
+"""Theseus-native TUI runtime.
 
-OH 의존 없는 순수 Theseus 런타임 번들과 헬퍼 함수를 제공합니다.
+순수 Theseus 런타임 번들과 헬퍼 함수를 제공합니다.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class AppState:
 class TheseusBundle:
     """TUI가 사용하는 런타임 번들.
 
-    OH bundle 인터페이스와 호환 유지:
+    Runtime bundle 인터페이스와 호환 유지:
       - bundle.engine          → QueryEngine
       - bundle.tool_registry   → ToolRegistry
       - bundle.api_client      → TheseusLLMClient

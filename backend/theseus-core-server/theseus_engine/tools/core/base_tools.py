@@ -1,4 +1,4 @@
-"""Theseus Tool Primitives — OpenHarness 완전 독립.
+"""Theseus Tool Primitives.
 
 BaseTool, ToolExecutionContext, ToolResult, ToolRegistry를
 Theseus 자체 정의로 제공합니다.  모든 theseus_engine 코드는
