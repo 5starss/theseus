@@ -23,7 +23,8 @@ from theseus_engine.engine.stream_events import (
 from theseus_engine.core.engine_builder import setup_engine
 from theseus_engine.core.tool_usage_logger import record_tool_call_async as record_tool_call
 from theseus_engine.core.context_compressor import maybe_compress
-from theseus_engine.models.state import TheseusStateMachine, AgentMode, PlanPhase
+from theseus_engine.models.modes import AgentMode, PlanPhase
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.engine.cost_tracker import CostTracker
 from theseus_engine.models.sessions import (
     save_session_history_async as save_session_history,

@@ -8,6 +8,7 @@ import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.chat.entity.ChatMessage;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
+import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.entity.ChatSession;
 import com.theseus.api.domain.chat.repository.ChatMessageRepository;
@@ -58,6 +59,13 @@ public class ToolPlanGenerationService {
 
 	private static final String TOOL_PLAN_REQUESTED = "TOOL_PLAN_REQUESTED";
 	private static final String TOOL_PLAN_REGENERATION_REQUESTED = "TOOL_PLAN_REGENERATION_REQUESTED";
+	private static final String TOOL_BUILD_FAILED_NOTICE_PREFIX = "Tool build에 실패했습니다";
+	private static final String TOOL_PLAN_FAILED_NOTICE_PREFIX = "Tool PLAN 생성에 실패했습니다";
+	private static final String FAILURE_MESSAGE_MARKER = ", message=";
+	private static final String FAILURE_CODE_MARKER = "code=";
+	private static final String FAILURE_ALTERNATIVES_MARKER = "가능한 대안:";
+	private static final String FAILURE_LAST_ERROR_MARKER = "마지막 오류:";
+	private static final int FAILURE_CONTEXT_LIMIT = 700;
 	private static final int HISTORY_LIMIT = 30;
 
 	private final ToolPlanRunRepository toolPlanRunRepository;
@@ -295,12 +303,115 @@ public class ToolPlanGenerationService {
 	}
 
 	private ToolPlanHistoryMessagePayload createHistoryMessageFrom(ChatMessage chatMessage) {
+		String projectedFailureNotice = projectFailureNotice(chatMessage);
+		if (projectedFailureNotice != null) {
+			return new ToolPlanHistoryMessagePayload(
+				"assistant",
+				chatMessage.getMessageType(),
+				chatMessage.getContentType(),
+				projectedFailureNotice
+			);
+		}
+
 		return new ToolPlanHistoryMessagePayload(
 			chatMessage.getSenderType().name().toLowerCase(Locale.ROOT),
 			chatMessage.getMessageType(),
 			chatMessage.getContentType(),
 			chatMessage.getContent()
 		);
+	}
+
+	private String projectFailureNotice(ChatMessage chatMessage) {
+		if (!ChatMessageSenderType.SYSTEM.equals(chatMessage.getSenderType())
+			|| !ChatMessageType.SYSTEM_NOTICE.equals(chatMessage.getMessageType())
+			|| !ChatMessageContentType.TEXT.equals(chatMessage.getContentType())) {
+			return null;
+		}
+
+		String content = chatMessage.getContent();
+		if (content == null || content.isBlank()) {
+			return null;
+		}
+
+		if (content.startsWith(TOOL_BUILD_FAILED_NOTICE_PREFIX)) {
+			return summarizeFailureNotice("Tool build", content);
+		}
+		if (content.startsWith(TOOL_PLAN_FAILED_NOTICE_PREFIX)) {
+			return summarizeFailureNotice("Tool PLAN", content);
+		}
+		return null;
+	}
+
+	private String summarizeFailureNotice(String failureKind, String content) {
+		String code = extractFailureCode(content);
+		String message = extractFailureMessage(content);
+		String alternatives = extractMarkedSection(message, FAILURE_ALTERNATIVES_MARKER);
+		String reason = trimMarkedSection(message, FAILURE_ALTERNATIVES_MARKER);
+		reason = trimMarkedSection(reason, FAILURE_LAST_ERROR_MARKER);
+		if (reason.isBlank()) {
+			reason = content;
+		}
+
+		StringBuilder summary = new StringBuilder("이전 ")
+			.append(failureKind)
+			.append(" 실패:");
+		if (!code.isBlank()) {
+			summary.append(" code=").append(code);
+		}
+		if (!reason.isBlank()) {
+			summary.append(", 원인=").append(limitFailureContext(reason));
+		}
+		if (!alternatives.isBlank()) {
+			summary.append(", 가능한 대안=").append(limitFailureContext(alternatives));
+		}
+		return summary.toString();
+	}
+
+	private String extractFailureCode(String content) {
+		int codeStart = content.indexOf(FAILURE_CODE_MARKER);
+		if (codeStart < 0) {
+			return "";
+		}
+
+		int valueStart = codeStart + FAILURE_CODE_MARKER.length();
+		int valueEnd = content.indexOf(FAILURE_MESSAGE_MARKER, valueStart);
+		if (valueEnd < 0) {
+			valueEnd = content.length();
+		}
+		return content.substring(valueStart, valueEnd).trim();
+	}
+
+	private String extractFailureMessage(String content) {
+		int markerIndex = content.indexOf(FAILURE_MESSAGE_MARKER);
+		if (markerIndex < 0) {
+			return content.trim();
+		}
+		return content.substring(markerIndex + FAILURE_MESSAGE_MARKER.length()).trim();
+	}
+
+	private String extractMarkedSection(String content, String marker) {
+		int markerIndex = content.indexOf(marker);
+		if (markerIndex < 0) {
+			return "";
+		}
+
+		String section = content.substring(markerIndex + marker.length()).trim();
+		return trimMarkedSection(section, FAILURE_LAST_ERROR_MARKER);
+	}
+
+	private String trimMarkedSection(String content, String marker) {
+		int markerIndex = content.indexOf(marker);
+		if (markerIndex < 0) {
+			return content.trim();
+		}
+		return content.substring(0, markerIndex).trim();
+	}
+
+	private String limitFailureContext(String content) {
+		if (content.length() <= FAILURE_CONTEXT_LIMIT) {
+			return content;
+		}
+		return content.substring(0, FAILURE_CONTEXT_LIMIT).trim() + "...";
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {

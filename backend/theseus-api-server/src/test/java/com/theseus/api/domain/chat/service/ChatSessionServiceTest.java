@@ -117,7 +117,7 @@ class ChatSessionServiceTest {
 		assertThat(response.getCurrentPlan().getRunId()).isEqualTo("run-256");
 		assertThat(response.getCurrentPlan().getStatus()).isEqualTo("GENERATING");
 		assertThat(response.getCreatedTool()).isNull();
-		verify(toolPlanRepository, never()).findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		verify(toolPlanRepository, never()).findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
 			any(),
 			any(),
 			any()
@@ -138,10 +138,10 @@ class ChatSessionServiceTest {
 			fixture.chatSession(),
 			List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)
 		)).thenReturn(Optional.empty());
-		when(toolPlanRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		when(toolPlanRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
 			fixture.project(),
 			fixture.chatSession(),
-			ToolPlanStatus.REVIEW
+			displayableToolPlanStatuses()
 		)).thenReturn(Optional.of(toolPlan));
 
 		// When
@@ -175,10 +175,10 @@ class ChatSessionServiceTest {
 			fixture.chatSession(),
 			List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)
 		)).thenReturn(Optional.empty());
-		when(toolPlanRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		when(toolPlanRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
 			fixture.project(),
 			fixture.chatSession(),
-			ToolPlanStatus.REVIEW
+			displayableToolPlanStatuses()
 		)).thenReturn(Optional.empty());
 		when(toolPlanGroupRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
 			fixture.project(),
@@ -201,6 +201,47 @@ class ChatSessionServiceTest {
 		assertThat(response.getCreatedTool().getStatus()).isEqualTo("APPROVED");
 	}
 
+	@Test
+	@DisplayName("빌드 실패 상태에서도 승인된 ToolPlan을 패널 복구 대상으로 포함한다.")
+	void getChatSessionWithApprovedToolPlanAfterBuildFailure() {
+		// Given
+		ToolPlanGroup planGroup = createToolPlanGroup(fixture, ToolPlanGroupStatus.FAILED);
+		ToolPlan toolPlan = createToolPlan(fixture, planGroup, 3L, ToolPlanStatus.APPROVED);
+		stubAccessibleSession();
+		when(chatMessageRepository.findByChatSessionOrderByMessageOrderAsc(fixture.chatSession()))
+			.thenReturn(List.of());
+		when(toolPlanRunRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
+			fixture.project(),
+			fixture.chatSession(),
+			List.of(ToolPlanRunStatus.REQUESTED, ToolPlanRunStatus.GENERATING)
+		)).thenReturn(Optional.empty());
+		when(toolPlanRepository.findFirstByProjectAndChatSessionAndStatusInOrderByUpdatedAtDesc(
+			fixture.project(),
+			fixture.chatSession(),
+			displayableToolPlanStatuses()
+		)).thenReturn(Optional.of(toolPlan));
+
+		// When
+		ChatSessionDetailResponse response = service.getChatSession(
+			createAuthenticatedUser(),
+			PROJECT_ID,
+			CHAT_SESSION_ID
+		);
+
+		// Then
+		assertThat(response.getCurrentPlan()).isNotNull();
+		assertThat(response.getCurrentPlan().getToolPlanGroupId()).isEqualTo(70L);
+		assertThat(response.getCurrentPlan().getToolPlanId()).isEqualTo(80L);
+		assertThat(response.getCurrentPlan().getPlanVersion()).isEqualTo(3L);
+		assertThat(response.getCurrentPlan().getStatus()).isEqualTo("APPROVED");
+		assertThat(response.getCreatedTool()).isNull();
+		verify(toolPlanGroupRepository, never()).findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+			any(),
+			any(),
+			any()
+		);
+	}
+
 	private void stubAccessibleSession() {
 		when(userRepository.findById(USER_ID)).thenReturn(Optional.of(fixture.user()));
 		when(projectRepository.findById(PROJECT_ID)).thenReturn(Optional.of(fixture.project()));
@@ -211,6 +252,15 @@ class ChatSessionServiceTest {
 			fixture.project(),
 			fixture.projectMember()
 		)).thenReturn(Optional.of(fixture.chatSession()));
+	}
+
+	private List<ToolPlanStatus> displayableToolPlanStatuses() {
+		return List.of(
+			ToolPlanStatus.REVIEW,
+			ToolPlanStatus.PENDING,
+			ToolPlanStatus.APPROVED,
+			ToolPlanStatus.REJECTED
+		);
 	}
 
 	private AuthenticatedUser createAuthenticatedUser() {

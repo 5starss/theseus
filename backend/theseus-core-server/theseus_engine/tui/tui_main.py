@@ -42,6 +42,11 @@ from theseus_engine.core.plan_flow import (
     contains_execution_complete,
     contains_verification_complete,
 )
+from theseus_engine.core.tool_visibility import (
+    ToolVisibilityPolicy,
+    build_visible_registry,
+    can_create_tool_for_state,
+)
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -60,7 +65,8 @@ from theseus_engine.models.sessions import (
     save_plan_state,
     save_session_history,
 )
-from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
+from theseus_engine.models.modes import AgentMode, PlanPhase
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.observability.tracer import tracing_context
 from theseus_engine.tui.autocomplete import AutocompleteHelper
 from theseus_engine.tui.commands import CommandRegistry, CommandResult, SlashCommand
@@ -346,12 +352,7 @@ class TheseusTUI(App):
             verification_complete = False
 
             # PLAN DRAFTING 여부를 엔진에 동기화 — JSON 감지 활성화
-            self._bundle.engine.set_plan_drafting(
-                self.theseus_sm.is_plan_drafting
-            )
-            self._bundle.engine.set_system_prompt(
-                self.theseus_sm.get_system_prompt()
-            )
+            self._sync_engine_tool_visibility()
 
             model_name = getattr(self._bundle.engine, "_model", self._model)
             tags     = get_tracing_tags(self.user_level, model_name, self.current_session)
@@ -463,8 +464,7 @@ class TheseusTUI(App):
         self.theseus_sm.plan = event.raw_markdown
         self.theseus_sm.plan_document = event.structured_plan
         self.theseus_sm.set_plan_phase(PlanPhase.WAIT_FOR_REVIEW)
-        self._bundle.engine.set_plan_drafting(False)
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
+        self._sync_engine_tool_visibility()
         self._append_line(
             "system> 📋 계획이 생성되었습니다. "
             "[bold]approve[/bold] 입력 시 실행 단계로 전환합니다."
@@ -477,9 +477,7 @@ class TheseusTUI(App):
         if phase == PlanPhase.EXECUTING:
             if contains_execution_complete(text):
                 self.theseus_sm.set_plan_phase(PlanPhase.VERIFYING)
-                self._bundle.engine.set_system_prompt(
-                    self.theseus_sm.get_system_prompt()
-                )
+                self._sync_engine_tool_visibility()
                 self._append_line("system> ✅ 실행 완료 — 자동 검증을 시작합니다.")
                 self._refresh_sidebars(force=True)
                 return True
@@ -605,53 +603,29 @@ class TheseusTUI(App):
 
     def action_switch_plan(self) -> None:
         if not self._bundle: return
-        from theseus_engine.tools.core.tool_factory import build_filtered_registry
         self.theseus_sm.switch_mode(AgentMode.PLAN)
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, self.user_level, exclude_tools=set()
-        )
-        self._sync_permission_mode()
+        self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold yellow]PLAN[/bold yellow] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_agent(self) -> None:
         if not self._bundle: return
-        from theseus_engine.tools.core.tool_factory import build_filtered_registry
         self.theseus_sm.switch_mode(AgentMode.AGENT)
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, self.user_level,
-            exclude_tools={"create_tool"}
-        )
-        self._sync_permission_mode()
+        self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold green]AGENT[/bold green] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_ask(self) -> None:
         if not self._bundle: return
-        from theseus_engine.tools.core.tool_factory import build_filtered_registry
         self.theseus_sm.switch_mode(AgentMode.ASK)
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        all_names = {t.name for t in self._bundle.tool_registry.list_tools()}
-        self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, self.user_level,
-            exclude_tools=all_names
-        )
-        self._sync_permission_mode()
+        self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold blue]ASK[/bold blue] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_coordinator(self) -> None:
         if not self._bundle: return
-        from theseus_engine.tools.core.tool_factory import build_filtered_registry
         self.theseus_sm.switch_mode(AgentMode.COORDINATOR)
-        self._bundle.engine.set_system_prompt(self.theseus_sm.get_system_prompt())
-        self._bundle.engine._tool_registry = build_filtered_registry(
-            self._bundle.tool_registry, self.project_tool_permissions, self.user_level,
-            exclude_tools={"create_tool"}
-        )
-        self._sync_permission_mode()
+        self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold magenta]COORDINATOR[/bold magenta] mode.")
         self._refresh_sidebars(force=True)
 
@@ -673,6 +647,33 @@ class TheseusTUI(App):
         if hasattr(checker, "_settings"):
             checker._settings.mode = target
         self._bundle.app_state.permission_mode = target.value
+
+    def _sync_engine_tool_visibility(self) -> None:
+        if not self._bundle:
+            return
+        can_create_tool = can_create_tool_for_state(
+            mode=self.theseus_sm.mode,
+            plan_phase=getattr(self.theseus_sm, "plan_phase", None),
+            project_id=None,
+            actor_role=self.actor_role,
+        )
+        active_registry = build_visible_registry(
+            self._bundle.tool_registry,
+            ToolVisibilityPolicy(
+                mode=self.theseus_sm.mode,
+                plan_phase=getattr(self.theseus_sm, "plan_phase", None),
+                user_level=self.user_level,
+                tool_permissions=self.project_tool_permissions,
+                can_create_tool=can_create_tool,
+            ),
+        )
+        self._bundle.engine.set_tool_registry(active_registry)
+        active_names = tuple(tool.name for tool in active_registry.list_tools())
+        self._bundle.engine.set_system_prompt(
+            self.theseus_sm.get_system_prompt(available_tools=active_names)
+        )
+        self._bundle.engine.set_plan_drafting(self.theseus_sm.is_plan_drafting)
+        self._sync_permission_mode()
 
     # ── UI 렌더링 헬퍼 ──────────────────────────────────────────
 

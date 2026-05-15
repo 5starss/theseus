@@ -31,6 +31,11 @@ from theseus_engine.core.plan_flow import (
     contains_execution_complete,
     contains_verification_complete,
 )
+from theseus_engine.core.tool_visibility import (
+    ToolVisibilityPolicy,
+    build_visible_registry,
+    can_create_tool_for_state,
+)
 
 
 DEFAULT_TOOL_PERMISSIONS = {
@@ -427,7 +432,8 @@ class EditorRuntime:
         if self.initialized:
             return []
         from theseus_engine.core.engine_builder import setup_engine
-        from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
+        from theseus_engine.models.modes import AgentMode, PlanPhase
+        from theseus_engine.models.state import TheseusStateMachine
         from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
         self.AgentMode = AgentMode
@@ -497,21 +503,22 @@ class EditorRuntime:
         """Synchronize the active tool schema with the current mode/PLAN phase."""
         if self.engine is None or self.full_registry is None or self.sm is None:
             return
-        can_create_tool = (
-            self.sm.mode == self.AgentMode.PLAN
-            and self.sm.plan_phase == self.PlanPhase.EXECUTING
+        can_create_tool = can_create_tool_for_state(
+            mode=self.sm.mode,
+            plan_phase=getattr(self.sm, "plan_phase", None),
+            project_id=None,
+            actor_role="ADMIN",
         )
-        exclude = set() if can_create_tool else {"create_tool"}
-        active_registry = self.full_registry.__class__()
-        for tool in self.full_registry.list_tools():
-            if tool.name in exclude:
-                continue
-            required = self.tool_permissions.get(
-                tool.name,
-                getattr(tool, "permission_level", 1),
-            )
-            if self.user_level >= required:
-                active_registry.register(tool)
+        active_registry = build_visible_registry(
+            self.full_registry,
+            ToolVisibilityPolicy(
+                mode=self.sm.mode,
+                plan_phase=getattr(self.sm, "plan_phase", None),
+                user_level=self.user_level,
+                tool_permissions=self.tool_permissions,
+                can_create_tool=can_create_tool,
+            ),
+        )
         if hasattr(self.engine, "set_tool_registry"):
             self.engine.set_tool_registry(active_registry)
         else:

@@ -56,6 +56,7 @@ interface ChatSessionState {
   addMessage: (msg: ChatMessage) => void;
   completeAssistantPlaceholder: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
+  replaceLastMessageContent: (content: string) => void;
   setCurrentPlan: (plan: StructuredPlan | null) => void;
   setDraftPhase: (phase: DraftPhase) => void;
   setPlanStatus: (status: string | null) => void;
@@ -182,6 +183,27 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
       messageType: 'TOOL_PLAN_RESPONSE',
       contentType: 'MARKDOWN',
       content: chunk,
+      createdAt: new Date().toISOString()
+    };
+    return { messages: [...messages, newMsg] };
+  }),
+
+  replaceLastMessageContent: (content) => set((state) => {
+    const messages = [...state.messages];
+    if (messages.length > 0) {
+      const last = messages[messages.length - 1];
+      if (last.senderType === 'ASSISTANT') {
+        messages[messages.length - 1] = { ...last, content };
+        return { messages };
+      }
+    }
+
+    const newMsg: ChatMessage = {
+      messageId: crypto.randomUUID(),
+      senderType: 'ASSISTANT',
+      messageType: 'TOOL_PLAN_RESPONSE',
+      contentType: 'MARKDOWN',
+      content,
       createdAt: new Date().toISOString()
     };
     return { messages: [...messages, newMsg] };

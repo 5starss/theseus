@@ -111,6 +111,7 @@ export function createActivityLogController({
 
     const groupEl = document.createElement('div');
     groupEl.className = 'activity-group open';
+    groupEl.hidden = true;
 
     const summary = document.createElement('button');
     summary.type = 'button';
@@ -220,6 +221,7 @@ export function createActivityLogController({
     const text = String(label || '').trim();
     if (!text) return null;
     const request = ensureRequest();
+    request.groupEl.hidden = false;
     const noteKey = key ? `${request.id || 'request'}:${key}` : '';
     let item = noteKey ? noteEls.get(noteKey) : null;
     if (!item || item.dataset.requestPrompt !== (request.prompt || '')) {
@@ -305,6 +307,7 @@ export function createActivityLogController({
 
   function appendTool(toolName, toolInput, output, isError, save = true, eventData = null) {
     const request = ensureRequest();
+    request.groupEl.hidden = false;
     const isRunning = eventData?.status === 'running'
       || eventData?.type === 'ToolExecutionStarted'
       || (!eventData && output === undefined && !isError);
@@ -317,9 +320,9 @@ export function createActivityLogController({
     if (toolName) item.dataset.tool = toolName;
 
     const summary = document.createElement('summary');
-    summary.textContent = isRunning
-      ? `${toolName} running...`
-      : `${toolName} ${isError ? 'failed' : 'done'}`;
+    summary.innerHTML = isRunning
+      ? `<span class="tool-icon spin">⚙</span> ${toolName} running...`
+      : `<span class="tool-icon">${isError ? '✗' : '✓'}</span> ${toolName} ${isError ? 'failed' : 'done'}`;
 
     const pre = document.createElement('pre');
     pre.textContent = formatToolPayload(isRunning ? toolInput : output);
@@ -347,7 +350,7 @@ export function createActivityLogController({
       const elapsed = Math.floor((Date.now() - startedAt) / 1000);
       toolEl.classList.toggle('running-long', Date.now() - startedAt >= longRunningMs);
       const summary = toolEl.querySelector('summary');
-      if (summary) summary.textContent = `${event.tool_name} running... ${elapsed}s`;
+      if (summary) summary.innerHTML = `<span class="tool-icon spin">⚙</span> ${event.tool_name} running... ${elapsed}s`;
     }, 1000);
     runningTools.set(key, timer);
     runningToolEls.set(key, { toolEl, request: currentRequest });
@@ -374,8 +377,8 @@ export function createActivityLogController({
       existing.className = event.is_error ? 'tool error' : 'tool';
       existing.open = true;
       existing.dataset.status = event.is_error ? 'failed' : 'done';
-      existing.querySelector('summary').textContent =
-        `${event.tool_name} ${event.is_error ? 'failed' : 'done'}`;
+      existing.querySelector('summary').innerHTML =
+        `<span class="tool-icon">${event.is_error ? '✗' : '✓'}</span> ${event.tool_name} ${event.is_error ? 'failed' : 'done'}`;
       existing.querySelector('pre').textContent = formatToolPayload(event.output);
       appendDiffAction(existing, event);
       runningToolEls.delete(key);

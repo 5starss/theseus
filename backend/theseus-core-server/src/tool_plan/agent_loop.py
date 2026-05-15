@@ -7,8 +7,9 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel
 
 from src.config import settings
+from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, ToolResultBlock
-from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.wrappers.llm_clients.api_types import (
     ApiMessageCompleteEvent,
     ApiMessageRequest,

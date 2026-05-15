@@ -8,10 +8,7 @@ preservation) are handled by ``gemini_compat``.
 """
 
 import os
-import sys
 import json
-import re
-from pathlib import Path
 from typing import AsyncIterator, Any
 
 from theseus_engine.wrappers.llm_clients.api_types import (
@@ -32,7 +29,11 @@ from theseus_engine.wrappers.llm_clients.openai_compat_client import (
     _strip_think_blocks,
 )
 from theseus_engine.models.messages import (
-    ConversationMessage, ContentBlock, TextBlock, ToolUseBlock,
+    ConversationMessage,
+    ContentBlock,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 
 from theseus_engine.wrappers.llm_clients.gemini_compat import (
@@ -40,84 +41,12 @@ from theseus_engine.wrappers.llm_clients.gemini_compat import (
     rebuild_tool_call_dict,
     patch_assistant_tool_calls,
 )
-from theseus_engine.engine.model_router import get_model_router
-
-# --- DEBUG: Payload Dump Configuration ---
-# ── Debug Dump 설정 ──────────────────────────────────────────────
-# THESEUS_DEBUG_DUMP=true  → 덤프 활성화 (기본: 비활성)
-# THESEUS_DEBUG_DUMP_DIR   → 저장 경로 오버라이드 (기본: ~/.theseus/debug_dumps)
-_DEBUG_DUMP_ENABLED: bool = os.getenv("THESEUS_DEBUG_DUMP", "false").lower() == "true"
-DEBUG_DUMP_DIR = Path(
-    os.getenv("THESEUS_DEBUG_DUMP_DIR", Path.home() / ".theseus" / "debug_dumps")
+from theseus_engine.wrappers.llm_clients.debug_dump import (
+    dump_debug_payload,
+    summarize_api_message_request,
+    summarize_openai_params,
 )
-
-
-def _sanitize_debug_path_part(value: Any, *, default: str) -> str:
-    text = str(value).strip() if value is not None else ""
-    if not text:
-        text = default
-    text = re.sub(r"[^A-Za-z0-9._=-]+", "_", text).strip("._")
-    return (text or default)[:120]
-
-
-def _debug_scope_name(debug_context: dict[str, Any] | None) -> str:
-    context = debug_context if isinstance(debug_context, dict) else {}
-    explicit = context.get("debug_dump_scope")
-    if explicit:
-        return _sanitize_debug_path_part(explicit, default="session_unscoped")
-
-    project_id = context.get("project_id")
-    chat_session_id = context.get("chat_session_id")
-    session_id = context.get("session_id")
-    run_id = context.get("run_id")
-
-    if project_id is not None and chat_session_id is not None:
-        return _sanitize_debug_path_part(
-            f"project_{project_id}_chat_{chat_session_id}",
-            default="session_unscoped",
-        )
-    if session_id is not None:
-        return _sanitize_debug_path_part(f"session_{session_id}", default="session_unscoped")
-    if run_id is not None:
-        return _sanitize_debug_path_part(f"run_{run_id}", default="session_unscoped")
-    return "session_unscoped"
-
-
-def _dump_debug_payload(
-    name: str,
-    data: Any,
-    *,
-    debug_context: dict[str, Any] | None = None,
-) -> None:
-    """페이로드를 JSON 파일로 덤프합니다.
-
-    THESEUS_DEBUG_DUMP=true 일 때만 실행됩니다.
-    저장 경로: THESEUS_DEBUG_DUMP_DIR/<session-scope>/<payload-name>.json
-    """
-    if not _DEBUG_DUMP_ENABLED:
-        return
-    try:
-        scope_name = _debug_scope_name(debug_context)
-        dump_dir = DEBUG_DUMP_DIR / scope_name
-        dump_dir.mkdir(parents=True, exist_ok=True)
-        file_name = f"{_sanitize_debug_path_part(name, default='payload')}.json"
-        dump_path = dump_dir / file_name
-        tmp_path = dump_path.with_name(f".{dump_path.stem}.{os.getpid()}.{id(data)}.tmp")
-
-        def _serializer(obj):
-            if hasattr(obj, "model_dump"):
-                return obj.model_dump()
-            if hasattr(obj, "__dict__"):
-                return obj.__dict__
-            return str(obj)
-
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=_serializer)
-        tmp_path.replace(dump_path)
-        print(f"\n[DEBUG] Dumped {name} to {dump_path}\n", file=sys.stderr)
-    except Exception as e:
-        print(f"\n[DEBUG] Failed to dump {name}: {e}\n", file=sys.stderr)
-# -----------------------------------------
+from theseus_engine.engine.model_router import get_model_router
 
 
 def _required_api_key(provider: str, *env_names: str) -> str:
@@ -193,9 +122,14 @@ class TheseusGeminiClient(TheseusOpenAICompatClient):
             params.pop("stream_options", None)
 
         # --- DEBUG: Dump final params sent to Gemini ---
-        _dump_debug_payload(
+        dump_debug_payload(
             "gemini_final_params",
             params,
+            debug_context=request.debug_context,
+        )
+        dump_debug_payload(
+            "gemini_final_params_summary",
+            summarize_openai_params(params),
             debug_context=request.debug_context,
         )
         # -----------------------------------------------
@@ -377,30 +311,43 @@ class TheseusLLMClient(SupportsStreamingMessages):
     ) -> AsyncIterator[ApiStreamEvent]:
         """Strip provider prefixes and delegate to the backend client."""
         # --- DEBUG: Dump incoming request to Router ---
-        _dump_debug_payload("router_incoming_request", {
+        request_tool_summary = summarize_api_message_request(request)
+        dump_debug_payload("router_incoming_request", {
             "target_model": self.model_name,
             "request": request,
+            **request_tool_summary,
         }, debug_context=request.debug_context)
         # ----------------------------------------------
 
-        # Patch messages to make tool errors extremely explicit for open-source models
-        patched_messages = []
+        # Patch a copy of messages to make tool errors explicit for open-source
+        # models without mutating canonical conversation history.
+        patched_messages: list[ConversationMessage] = []
         for msg in request.messages:
-            if msg.role == "user" and isinstance(msg.content, list):
-                for block in msg.content:
-                    if getattr(block, "type", None) == "tool_result" and getattr(block, "is_error", False):
-                        orig = getattr(block, "content", "")
-                        if isinstance(orig, str) and not orig.startswith("[TOOL EXECUTION ERROR]"):
-                            prefix = "[TOOL EXECUTION ERROR] The tool failed with the following output:\n"
-                            try:
-                                setattr(block, "content", f"{prefix}{orig}")
-                            except (AttributeError, TypeError):
-                                # Frozen Pydantic model — use object.__setattr__
-                                try:
-                                    object.__setattr__(block, "content", f"{prefix}{orig}")
-                                except Exception:
-                                    pass
-            patched_messages.append(msg)
+            if msg.role != "user" or not isinstance(msg.content, list):
+                patched_messages.append(msg)
+                continue
+            patched_blocks: list[ContentBlock] = []
+            changed = False
+            for block in msg.content:
+                if (
+                    isinstance(block, ToolResultBlock)
+                    and block.is_error
+                    and isinstance(block.content, str)
+                    and not block.content.startswith("[TOOL EXECUTION ERROR]")
+                ):
+                    prefix = (
+                        "[TOOL EXECUTION ERROR] "
+                        "The tool failed with the following output:\n"
+                    )
+                    patched_blocks.append(
+                        block.model_copy(update={"content": f"{prefix}{block.content}"})
+                    )
+                    changed = True
+                else:
+                    patched_blocks.append(block)
+            patched_messages.append(
+                msg.model_copy(update={"content": patched_blocks}) if changed else msg
+            )
 
         # Smart Model Routing: 최근 도구 호출 기반 모델 선택
         routed_model = self._model_router.select_model(

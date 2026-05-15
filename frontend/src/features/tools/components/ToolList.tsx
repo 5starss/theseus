@@ -80,7 +80,7 @@ export function ToolList() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {currentTools.map((tool) => (
                   <ToolCard
-                    key={tool.id}
+                    key={tool.toolId}
                     tool={tool}
                     onClick={() => handleToolClick(tool)}
                   />

@@ -8,47 +8,34 @@ interface ToolCardProps {
 }
 
 export function ToolCard({ tool, onClick }: ToolCardProps) {
-  // 색상 테마에 따른 스타일 분기
-  const getColorClasses = (type: ToolItem['type']) => {
-    switch (type) {
-      case 'BLUE':
-        return { gradient: 'from-blue-500/5 to-blue-500/0' };
-      case 'AMBER':
-        return { gradient: 'from-amber-500/5 to-amber-500/0' };
-      case 'ROSE':
-        return { gradient: 'from-rose-500/5 to-rose-500/0' };
-      default:
-        return { gradient: 'from-slate-500/5 to-slate-500/0' };
-    }
-  };
-
-  const colors = getColorClasses(tool.type);
+  // 통일된 디자인 테마 적용 (BLUE 기반)
+  const colors = { gradient: 'from-blue-500/5 to-blue-500/0' };
 
   return (
-    <div 
+    <div
       className="group bg-slate-900/50 border border-slate-800 rounded-xl p-5 flex flex-col justify-between h-[160px] relative overflow-hidden transition-all duration-300 hover:border-slate-700 hover:shadow-lg cursor-pointer"
       onClick={onClick}
     >
       {/* 백그라운드 그라데이션 (Hover 시 더 진해짐) */}
-      <div 
+      <div
         className={cn(
           "absolute inset-0 bg-gradient-to-br opacity-50 transition-opacity duration-300 group-hover:opacity-100",
           colors.gradient
-        )} 
+        )}
       />
 
       <div className="relative z-10 flex flex-col h-full">
         {/* 상단 타이틀 */}
         <div className="mb-2">
-          <h3 className="text-lg font-bold text-slate-200 group-hover:text-white transition-colors">
-            {tool.name}
+          <h3 className="text-lg font-bold text-slate-200 group-hover:text-white transition-colors line-clamp-1">
+            {tool.displayName}
           </h3>
         </div>
 
         {/* 텍스트 영역 */}
         <div className="flex-1">
           <p className="text-sm text-slate-400 leading-relaxed line-clamp-2">
-            {tool.description}
+            {tool.displayDescription}
           </p>
         </div>
 

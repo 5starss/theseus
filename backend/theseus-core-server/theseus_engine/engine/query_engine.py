@@ -48,6 +48,7 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionStarted,
     extract_plan_json,
 )
+from theseus_engine.engine.tool_execution_state import is_remote_workspace_tool
 from theseus_engine.skills.injection import (
     SkillInjectionConfig,
     apply_skill_injection,
@@ -339,7 +340,30 @@ def _record_tool_carryover(
         return
     if resolved_file_path:
         _remember_active_artifact(meta, resolved_file_path)
-    if tool_name == "read_file" and resolved_file_path:
+    if tool_name == "remote_read_file":
+        remote_path = str(tool_input.get("path") or "").strip()
+        if remote_path:
+            _remember_verified_work(meta, f"Inspected remote file {remote_path}")
+            _remember_work_log(meta, entry=f"Read remote file {remote_path}")
+    elif tool_name == "remote_grep":
+        pattern = str(tool_input.get("query") or tool_input.get("pattern") or "").strip()
+        _remember_verified_work(meta, f"Checked remote matches for pattern {pattern[:180]}")
+        _remember_work_log(meta, entry=f"Searched remote pattern={pattern[:160]}")
+    elif tool_name == "remote_glob":
+        pattern = str(tool_input.get("pattern") or "").strip()
+        _remember_verified_work(meta, f"Expanded remote glob pattern {pattern[:180]}")
+        _remember_work_log(meta, entry=f"Expanded remote glob pattern={pattern[:160]}")
+    elif tool_name == "remote_run_command":
+        command = str(tool_input.get("command") or "").strip()
+        command_name = command.split(maxsplit=1)[0] if command else "unknown"
+        summary = (tool_output.splitlines()[0].strip() if tool_output.strip() else "no output")
+        _remember_verified_work(meta, f"Ran remote command {command_name} [{summary[:120]}]")
+        _remember_work_log(meta, entry=f"Ran remote command: {command_name} [{summary[:120]}]")
+    elif tool_name.startswith("remote_check_"):
+        summary = (tool_output.splitlines()[0].strip() if tool_output.strip() else "no output")
+        _remember_verified_work(meta, f"Checked remote resource state with {tool_name} [{summary[:120]}]")
+        _remember_work_log(meta, entry=f"Checked remote resource: {tool_name}")
+    elif tool_name == "read_file" and resolved_file_path:
         offset = int(tool_input.get("offset") or 0)
         limit = int(tool_input.get("limit") or 200)
         _remember_read_file(meta, path=resolved_file_path,
@@ -349,13 +373,8 @@ def _record_tool_carryover(
     elif tool_name == "bash":
         command = str(tool_input.get("command") or "").strip()
         summary = (tool_output.splitlines()[0].strip() if tool_output.strip() else "no output")
-        if isinstance(meta, dict) and meta.get("remote_workspace") is not None:
-            command_name = command.split(maxsplit=1)[0] if command else "unknown"
-            _remember_verified_work(meta, f"Ran remote bash command {command_name} [{summary[:120]}]")
-            _remember_work_log(meta, entry=f"Ran remote bash: {command_name} [{summary[:120]}]")
-        else:
-            _remember_verified_work(meta, f"Ran bash command {command[:160]} [{summary[:120]}]")
-            _remember_work_log(meta, entry=f"Ran bash: {command[:160]} [{summary[:120]}]")
+        _remember_verified_work(meta, f"Ran bash command {command[:160]} [{summary[:120]}]")
+        _remember_work_log(meta, entry=f"Ran bash: {command[:160]} [{summary[:120]}]")
     elif tool_name == "grep":
         pattern = str(tool_input.get("pattern") or "").strip()
         _remember_verified_work(meta, f"Checked repository matches for grep pattern {pattern[:180]}")
@@ -387,8 +406,6 @@ _LLM_DEBUG_CONTEXT_KEYS = {
     "plan_phase",
     "remote_workspace_id",
 }
-
-
 def _llm_debug_context(tool_metadata: dict[str, object] | None) -> dict[str, object]:
     if not isinstance(tool_metadata, dict):
         return {}
@@ -454,7 +471,15 @@ async def _execute_tool_call(
         return _result(f"Invalid input for {tool_name}: {exc}", True)
 
     # Permission check
-    _file_path = _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
+    is_remote_tool = is_remote_workspace_tool(
+        context.tool_metadata,
+        tool_name,
+    )
+    _file_path = (
+        None
+        if is_remote_tool
+        else _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
+    )
     _command = _extract_permission_command(tool_input, parsed_input)
     decision = context.permission_checker.evaluate(
         tool_name,
@@ -488,14 +513,9 @@ async def _execute_tool_call(
             return _result(pre.reason or f"pre_tool_use hook blocked {tool_name}", True)
 
     # 실행
-    is_remote_workspace_tool = (
-        isinstance(context.tool_metadata, dict)
-        and context.tool_metadata.get("remote_workspace") is not None
-        and tool_name in {"read_file", "glob", "grep", "bash", "write_file", "edit_file"}
-    )
     pre_change_metadata = (
         {}
-        if is_remote_workspace_tool
+        if is_remote_tool
         else _capture_file_change_snapshot(
             context.cwd,
             tool_name,
@@ -577,7 +597,7 @@ async def _execute_tool_call(
         tool_input=tool_input,
         tool_output=tool_result.content,
         is_error=tool_result.is_error,
-        resolved_file_path=None if is_remote_workspace_tool else _file_path,
+        resolved_file_path=None if is_remote_tool else _file_path,
     )
     return ExecutedToolCall(result=tool_result, metadata=event_metadata)
 

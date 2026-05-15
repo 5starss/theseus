@@ -7,10 +7,12 @@ import com.theseus.api.domain.toolgeneration.dto.ToolPlanRunSseEvent;
 import com.theseus.api.domain.toolgeneration.redis.ToolPlanRunStateStore;
 import com.theseus.api.domain.toolgeneration.sse.ToolPlanRunSseEmitterRegistry;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 @Service
@@ -46,7 +48,29 @@ public class ToolPlanRunEventStreamService {
 			emitter,
 			ToolPlanRunSseEvent.connectedOf(projectId, chatSessionId, toolPlanRun.getRunId())
 		);
+		sendLatestStateIfPresent(projectId, chatSessionId, toolPlanRun.getRunId(), emitter);
 
 		return emitter;
+	}
+
+	private void sendLatestStateIfPresent(Long projectId, Long chatSessionId, String runId, SseEmitter emitter) {
+		try {
+			toolPlanRunStateStore.findByRunId(runId)
+				.ifPresent(state -> emitterRegistry.sendToEmitter(
+					projectId,
+					chatSessionId,
+					runId,
+					emitter,
+					ToolPlanRunSseEvent.createReplayFrom(state)
+				));
+		} catch (RuntimeException exception) {
+			log.warn(
+				">>>> Failed to replay latest ToolPlanRun state. projectId={}, chatSessionId={}, runId={}",
+				projectId,
+				chatSessionId,
+				runId,
+				exception
+			);
+		}
 	}
 }

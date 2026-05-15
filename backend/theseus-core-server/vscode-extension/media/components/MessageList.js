@@ -45,14 +45,17 @@ export function createTypingIndicator(messagesEl) {
 
   const labelRow = document.createElement('div');
   labelRow.className = 'label-row';
+  const avatar = document.createElement('span');
+  avatar.className = 'role-avatar assistant-avatar';
+  avatar.textContent = '✦';
   const label = document.createElement('span');
   label.className = 'label';
   label.textContent = 'assistant';
-  labelRow.appendChild(label);
+  labelRow.append(avatar, label);
 
   const body = document.createElement('div');
   body.className = 'body';
-  body.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+  body.innerHTML = '<div class="typing-indicator"></div>';
 
   article.append(labelRow, body);
   messagesEl.appendChild(article);

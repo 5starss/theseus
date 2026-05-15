@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 async def handle_slash_command(
     cmd: str, args: list[str], ctx: CLIContext
 ) -> tuple[bool, str | None]:
-    from theseus_engine.models.state import AgentMode, PlanPhase
     from theseus_engine.core.engine_builder import setup_engine
+    from theseus_engine.models.modes import AgentMode, PlanPhase
 
     # ── 세션 관리 ──────────────────────────────────────────────
     if cmd == "/clear":

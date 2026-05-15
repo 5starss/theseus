@@ -3,11 +3,16 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
 from src.config import resolve_model_name
 from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
 from src.remote_workspace.resolver import RemoteWorkspaceResolver, resolve_remote_workspace_config
+from src.remote_workspace.runtime import (
+    REMOTE_WORKSPACE_RUNTIME_KEY,
+    register_remote_workspace_config,
+)
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
 from src.tool_plan.schemas import (
@@ -19,14 +24,21 @@ from src.tool_plan.schemas import (
     ToolPlanSkippedResult,
 )
 from theseus_engine.engine.stream_events import extract_plan_json
+from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, TextBlock
-from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.tools.core.base_tools import ToolRegistry
 from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
+
+PROJECT_CUSTOM_TOOLS_DIR = (
+    Path(__file__).resolve().parents[2] / "theseus_engine" / "custom_tools" / "projects"
+)
+MAX_EXISTING_CUSTOM_TOOLS_IN_PROMPT = 20
+MAX_EXISTING_TOOL_FIELD_LENGTH = 800
 
 _CUSTOM_TOOL_SECURITY_RULES = """\
 Generated Theseus custom tool security rules:
@@ -56,6 +68,94 @@ Generated custom tool safety context:
 
 {_CUSTOM_TOOL_SECURITY_RULES}
 """
+
+
+def _slugify_project_id(project_id: int | str | None) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(project_id or "")).strip("_").lower()
+    return slug or "default"
+
+
+def _load_existing_custom_tool_summaries(project_id: int | str | None) -> list[dict[str, Any]]:
+    if project_id is None:
+        return []
+
+    project_dir = PROJECT_CUSTOM_TOOLS_DIR / _slugify_project_id(project_id)
+    if not project_dir.is_dir():
+        return []
+
+    summaries: list[dict[str, Any]] = []
+    for metadata_path in sorted(project_dir.glob("*.meta.json")):
+        if len(summaries) >= MAX_EXISTING_CUSTOM_TOOLS_IN_PROMPT:
+            break
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not _is_active_custom_tool_metadata(metadata):
+            continue
+        summary = _custom_tool_metadata_summary(metadata)
+        if summary:
+            summaries.append(summary)
+    return summaries
+
+
+def _is_active_custom_tool_metadata(metadata: dict[str, Any]) -> bool:
+    if metadata.get("isActive", True) is False:
+        return False
+    return str(metadata.get("status", "active")).strip().lower() == "active"
+
+
+def _custom_tool_metadata_summary(metadata: dict[str, Any]) -> dict[str, Any]:
+    tool_name = str(metadata.get("toolName") or "").strip()
+    if not tool_name:
+        return {}
+
+    return {
+        "toolName": tool_name,
+        "displayName": _trim_prompt_value(metadata.get("displayName")),
+        "displayDescription": _trim_prompt_value(
+            metadata.get("displayDescription") or metadata.get("description")
+        ),
+        "inputs": _compact_prompt_json(metadata.get("inputs") or metadata.get("inputSchema")),
+        "outputs": _compact_prompt_json(metadata.get("outputs") or metadata.get("outputSchema")),
+        "constraints": _compact_prompt_json(metadata.get("constraints")),
+    }
+
+
+def _existing_custom_tool_context(project_id: int | str | None) -> str:
+    summaries = _load_existing_custom_tool_summaries(project_id)
+    if not summaries:
+        return ""
+
+    return (
+        "Existing active Theseus custom tools for this project:\n"
+        f"{json.dumps(summaries, ensure_ascii=False, indent=2)}\n\n"
+        "Before planning a new custom tool, compare the user request with the existing "
+        "active tool metadata above. If an existing tool already satisfies the request, "
+        "do not propose creating a duplicate tool. Instead, propose using the existing "
+        "tool. If the existing tool is close but incomplete, propose extending or "
+        "renaming it and explain why. Only propose a new tool when no active tool "
+        "reasonably covers the requested capability."
+    )
+
+
+def _trim_prompt_value(value: Any) -> str:
+    text = str(value or "").strip()
+    if len(text) <= MAX_EXISTING_TOOL_FIELD_LENGTH:
+        return text
+    return f"{text[:MAX_EXISTING_TOOL_FIELD_LENGTH].rstrip()}..."
+
+
+def _compact_prompt_json(value: Any) -> Any:
+    if value in (None, "", [], {}):
+        return None
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return _trim_prompt_value(value)
+    if len(text) <= MAX_EXISTING_TOOL_FIELD_LENGTH:
+        return value
+    return f"{text[:MAX_EXISTING_TOOL_FIELD_LENGTH].rstrip()}..."
 
 
 class ToolPlanPlannerError(RuntimeError):
@@ -93,7 +193,6 @@ class ToolPlanPlanner:
             event,
             remote_workspace=remote_workspace,
             chunk_callback=chunk_callback,
-            progress_callback=progress_callback,
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
         )
@@ -123,13 +222,17 @@ class ToolPlanPlanner:
         *,
         remote_workspace: RemoteWorkspaceConnectionConfig | None,
         chunk_callback: ChunkCallback | None,
-        progress_callback: ProgressCallback | None = None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> tuple[str, dict[str, Any]] | ToolPlanSkippedResult:
         prompt = self._build_prompt(event)
         history_messages = self._history_messages(event)
         tool_registry = self._build_tool_registry(event, remote_workspace=remote_workspace)
+        remote_workspace_runtime_key = (
+            register_remote_workspace_config(remote_workspace)
+            if remote_workspace is not None
+            else None
+        )
         agent_loop = ToolPlanAgentLoop(
             llm_client=self.llm_client,
             model_name=self.model_name,
@@ -141,8 +244,9 @@ class ToolPlanPlanner:
                 "user_id": getattr(event, "requested_by_user_id", None),
                 "agent_mode": event.mode,
                 "remote_workspace_id": event.remote_workspace_id,
+                REMOTE_WORKSPACE_RUNTIME_KEY: remote_workspace_runtime_key,
                 "remote_workspace": (
-                    remote_workspace.model_dump(mode="json", by_alias=True)
+                    remote_workspace.redacted_model_dump(by_alias=True)
                     if remote_workspace is not None
                     else None
                 ),
@@ -157,8 +261,10 @@ class ToolPlanPlanner:
             ),
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
-            chunk_callback=chunk_callback,
-            progress_callback=progress_callback,
+            # PLAN drafts contain machine-readable JSON. Publish only the
+            # parsed display Markdown after validation so users do not see
+            # internal IDs or raw JSON while generation is still streaming.
+            chunk_callback=None,
         )
 
         payload = extract_plan_json(loop_result.final_text)
@@ -179,6 +285,10 @@ class ToolPlanPlanner:
         return loop_result.final_text, payload
 
     def _build_prompt(self, event: ToolPlanRequestEvent) -> str:
+        existing_tool_context = _existing_custom_tool_context(event.project_id)
+        existing_tool_section = (
+            f"\n\n{existing_tool_context}" if existing_tool_context else ""
+        )
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
             feedback = [
                 item.model_dump(mode="json", by_alias=True)
@@ -192,8 +302,9 @@ class ToolPlanPlanner:
                 "Feedback:\n"
                 f"{json.dumps(feedback, ensure_ascii=False, indent=2)}\n\n"
                 f"{_CUSTOM_TOOL_SAFETY_CONTEXT}"
+                f"{existing_tool_section}"
             )
-        return f"{event.prompt}\n\n{_CUSTOM_TOOL_SAFETY_CONTEXT}"
+        return f"{event.prompt}\n\n{_CUSTOM_TOOL_SAFETY_CONTEXT}{existing_tool_section}"
 
     def _history_messages(self, event: ToolPlanRequestEvent) -> list[ConversationMessage]:
         messages: list[ConversationMessage] = []

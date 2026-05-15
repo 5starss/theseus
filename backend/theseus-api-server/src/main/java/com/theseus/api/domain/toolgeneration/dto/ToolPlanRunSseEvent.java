@@ -5,7 +5,7 @@ import lombok.Builder;
 import lombok.Getter;
 
 @Getter
-@Builder
+@Builder(toBuilder = true)
 public class ToolPlanRunSseEvent {
 
 	private static final String EVENT_TYPE_CONNECTED = "connected";
@@ -21,6 +21,7 @@ public class ToolPlanRunSseEvent {
 	private Integer progressRate;
 	private String message;
 	private String content;
+	private Boolean replay;
 	private String errorCode;
 	private String errorMessage;
 	private LocalDateTime updatedAt;
@@ -52,6 +53,12 @@ public class ToolPlanRunSseEvent {
 			.errorCode(state.getErrorCode())
 			.errorMessage(state.getErrorMessage())
 			.updatedAt(state.getUpdatedAt())
+			.build();
+	}
+
+	public static ToolPlanRunSseEvent createReplayFrom(ToolPlanRunState state) {
+		return ToolPlanRunSseEvent.createFrom(state).toBuilder()
+			.replay(true)
 			.build();
 	}
 }

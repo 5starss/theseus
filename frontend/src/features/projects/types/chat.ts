@@ -175,6 +175,7 @@ export interface ToolGenerationSseEvent {
   progressRate?: number;
   message?: string;
   content?: string;
+  replay?: boolean;
   planVersion?: number;
   draftVersion?: number;
   errorCode?: string;

@@ -8,6 +8,7 @@ import {
   getCoreRoot,
   getWorkspaceCwd,
 } from './workspace/WorkspaceContext';
+import { InlineEditController } from './inline/InlineEditController';
 
 function startRunner(context: vscode.ExtensionContext, sessionManager: TheseusSessionManager): void {
   const coreRoot = getCoreRoot(context);
@@ -115,6 +116,8 @@ export function activate(context: vscode.ExtensionContext): void {
     () => startRunner(context, sessionManager),
   );
 
+  const inlineEditController = new InlineEditController(sessionManager);
+
   const customToolWatchers = createCustomToolWatchers(({ action, file, validation }) => {
     provider.postToWebview({ type: 'customToolsChanged', action, file, validation });
     const validationMessage = `Theseus custom tool ${action}: ${validation.message}`;
@@ -128,6 +131,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     sessionManager,
+    inlineEditController,
     ...customToolWatchers,
     vscode.workspace.registerTextDocumentContentProvider('theseus-diff', diffProvider),
     vscode.window.registerWebviewViewProvider(TheseusChatViewProvider.viewType, provider, {

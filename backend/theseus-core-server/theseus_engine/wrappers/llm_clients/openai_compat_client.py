@@ -36,6 +36,10 @@ from theseus_engine.wrappers.llm_clients.api_types import (
     TheseusApiError,
     UsageSnapshot,
 )
+from theseus_engine.wrappers.llm_clients.debug_dump import (
+    dump_debug_payload,
+    summarize_openai_params,
+)
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +279,12 @@ class TheseusOpenAICompatClient:
             params["tools"] = openai_tools
             params.pop("stream_options", None)
 
+        dump_debug_payload(
+            "openai_compat_final_params_summary",
+            summarize_openai_params(params),
+            debug_context=request.debug_context,
+        )
+
         collected_content = ""
         collected_reasoning = ""
         collected_tool_calls: dict[int, dict[str, Any]] = {}
@@ -341,13 +351,31 @@ class TheseusOpenAICompatClient:
                 continue
             try:
                 args = json.loads(tc["arguments"])
-            except (json.JSONDecodeError, TypeError):
-                args = {}
+            except (json.JSONDecodeError, TypeError) as parse_err:
+                raw_args = str(tc.get("arguments") or "")
+                log.warning(
+                    "OpenAI-compatible tool arguments could not be parsed: "
+                    "tool=%s id=%s error=%s",
+                    tc["name"],
+                    tc["id"],
+                    parse_err,
+                )
+                dump_debug_payload(
+                    "openai_compat_tool_arg_parse_error",
+                    {
+                        "tool_name": tc["name"],
+                        "tool_call_id": tc["id"],
+                        "error": str(parse_err),
+                        "raw_arguments_preview": raw_args[:500],
+                    },
+                    debug_context=request.debug_context,
+                )
+                args = {"_parse_error": str(parse_err), "_raw": raw_args[:200]}
             content.append(ToolUseBlock(id=tc["id"], name=tc["name"], input=args))
 
         final_message = ConversationMessage(role="assistant", content=content)
         if collected_reasoning:
-            final_message._reasoning = collected_reasoning  # type: ignore[attr-defined]
+            object.__setattr__(final_message, "_reasoning", collected_reasoning)
 
         yield ApiMessageCompleteEvent(
             message=final_message,

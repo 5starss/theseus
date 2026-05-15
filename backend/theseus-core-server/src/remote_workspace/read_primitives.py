@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import shlex
-from fnmatch import fnmatch
 from collections.abc import Callable
+from fnmatch import fnmatch
 
 from pydantic import BaseModel, Field
 from src.remote_workspace.exceptions import RemoteWorkspaceError
@@ -19,6 +20,7 @@ ConnectorFactory = Callable[[RemoteWorkspaceConnectionConfig], SshRemoteWorkspac
 REMOTE_READ_ANALYSIS_TOOL_NAMES = frozenset(
     {
         "remote_read_file",
+        "remote_glob",
         "remote_grep",
         "remote_tail_log",
         "remote_check_cpu",
@@ -95,7 +97,8 @@ class RemoteReadFileTool(RemoteWorkspaceToolMixin, BaseTool):
                     ),
                 ]
             )
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 command,
                 working_directory=".",
                 timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
@@ -131,7 +134,8 @@ class RemoteGlobTool(RemoteWorkspaceToolMixin, BaseTool):
             root = connector.resolve_path(arguments.root)
             pattern = arguments.pattern.strip() or "*"
             command = f"find {shlex.quote(root)} -type f | sort | head -n 2000"
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 command,
                 working_directory=".",
                 timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
@@ -192,7 +196,8 @@ class RemoteGrepTool(RemoteWorkspaceToolMixin, BaseTool):
                 f"grep {grep_flags} {case_flag} --binary-files=without-match "
                 f"-E -- {shlex.quote(arguments.query)} {shlex.quote(search_path)} | head -n 300"
             )
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 command,
                 working_directory=".",
                 timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
@@ -222,7 +227,8 @@ class RemoteTailLogTool(RemoteWorkspaceToolMixin, BaseTool):
         connector = self.create_connector()
         try:
             remote_path = connector.resolve_path(arguments.path)
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 f"tail -n {arguments.lines} {shlex.quote(remote_path)}",
                 working_directory=".",
                 timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
@@ -250,7 +256,8 @@ class RemoteResourceCheckTool(RemoteWorkspaceToolMixin, BaseTool):
         del arguments, context
         connector = self.create_connector()
         try:
-            result = connector.run_command(
+            result = await asyncio.to_thread(
+                connector.run_command,
                 self.command,
                 working_directory=".",
                 timeout_seconds=DEFAULT_REMOTE_COMMAND_TIMEOUT_SECONDS,
@@ -289,6 +296,7 @@ def build_remote_read_analysis_tools(
 
     return [
         RemoteReadFileTool(config, connector_factory=connector_factory),
+        RemoteGlobTool(config, connector_factory=connector_factory),
         RemoteGrepTool(config, connector_factory=connector_factory),
         RemoteTailLogTool(config, connector_factory=connector_factory),
         RemoteCheckCpuTool(config, connector_factory=connector_factory),
