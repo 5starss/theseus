@@ -45,18 +45,31 @@ export function ChatArea() {
   const [input, setInput] = useState('');
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspaceResponse[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottom = useRef(true);
+
   const { connectSSE } = useToolGenerationSSE();
   const { connectChatStream } = useChatStreamSSE();
   const selectedRemoteWorkspace = remoteWorkspaces.find(
     workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
   );
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const handleScroll = () => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    // 하단에서 100px 이내면 바닥에 있는 것으로 간주
+    const atBottom = scrollHeight - scrollTop - clientHeight < 100;
+    isAtBottom.current = atBottom;
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   useEffect(() => {
-    scrollToBottom();
+    if (isAtBottom.current) {
+      scrollToBottom(isGenerating ? 'auto' : 'smooth');
+    }
   }, [messages, isGenerating, progressInfo]);
 
   useEffect(() => {
@@ -154,6 +167,7 @@ export function ChatArea() {
 
     const userMessage = input.trim();
     setInput('');
+    isAtBottom.current = true;
 
     try {
       if (mode === ToolPlanMode.ASK) {
@@ -201,7 +215,11 @@ export function ChatArea() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent"
+      >
         {messages.length > 0 ? (
           <div className="space-y-6">
             {messages.map((msg, idx) => {
