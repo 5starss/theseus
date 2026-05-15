@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 149 — PLAN draft 검증/Tool 생성 실패 처리 완화 (2026-05-15)
+
+#### `src` / `theseus_engine`
+- PLAN draft execution spec 검증을 block/warning/recovery feedback 성격으로 분리하고, `commands`, `required_result_fields`, `json_mapping`, `failure_policy`, `parse_strategy`, `mvp_exclusions` 누락은 hard fail 대신 `validationWarnings`로 남기도록 조정
+- Tool build/runtime `create_tool`에서 같은 fileName/moduleName 충돌을 `tool_name_conflict` recoverable failure로 분류하고 `retry_policy=do_not_retry_same_input` 안내를 포함하도록 보강
+- `permissionLevel`/`permission_level`은 정수 `1~5`만 허용하도록 Core 내부 validator와 ToolBuild schema를 강화
+- ToolBuild 실패 fallback 메시지와 history projection이 recoverable/retry_policy 정보를 agent-readable context로 유지하도록 정리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 block/warning/recovery feedback 기준과 Tool 생성 실패 recovery policy를 추가
+
+---
+
 ### 📝 Session 148 — Core Server 아키텍처 관계도 문서 추가 (2026-05-15)
 
 #### 문서
