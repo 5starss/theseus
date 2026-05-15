@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation feedback 반영
+> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation/failure feedback 반영
 
 ---
 
@@ -300,8 +300,8 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 | `src` 경로 | 주입 모드/단계 | 요청별 입력 계약 |
 |---|---|---|
 | `src/routes/stream.py` → `src/builder/engine.py` | `ASK`, `AGENT`, `PLAN/DRAFTING`, `PLAN/EXECUTING` | `/stream`의 `mode=ASK\|AGENT\|PLAN`을 `models/modes.py` runtime mode로 해석하고, 사용자 prompt와 Spring history를 `QueryEngine` 메시지로 전달합니다. |
-| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | API/Kafka 계약명은 ToolPlan이지만, LLM 입력과 설명은 `PLAN draft`, `plan JSON`, `approved plan` 용어를 사용합니다. PLAN JSON은 `prompts/plan.py`의 DRAFTING 스키마를 따릅니다. 운영/remote/generated tool 요청은 `execution_spec`를 검증합니다. 검증 실패 시 원문 오류를 그대로 종료하지 않고 `_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT`로 실패 원인/대안/다음 요청 예시를 assistant 메시지로 정리합니다. |
-| `src/tool_build/builder.py` | `PLAN/EXECUTING` | 승인된 plan을 기반으로 custom tool artifact JSON/code schema와 검증 실패 repair context를 user message에 포함합니다. |
+| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | API/Kafka 계약명은 ToolPlan이지만, LLM 입력과 설명은 `PLAN draft`, `plan JSON`, `approved plan` 용어를 사용합니다. PLAN JSON은 `prompts/plan.py`의 DRAFTING 스키마를 따릅니다. 운영/remote/generated tool 요청은 `execution_spec`를 검증합니다. 검증 실패 시 원문 오류를 그대로 종료하지 않고 `_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT`로 실패 원인/대안/다음 요청 예시를 assistant 메시지로 정리합니다. worker 예외 종료도 `_PLAN_FAILURE_FEEDBACK_SYSTEM_PROMPT`로 raw exception을 사용자 실행 가능한 설명으로 바꿉니다. |
+| `src/tool_build/builder.py` | `PLAN/EXECUTING` | 승인된 plan을 기반으로 custom tool artifact JSON/code schema와 검증 실패 repair context를 user message에 포함합니다. 최종 build 실패는 `_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT`로 원인, 실패 단계, 안전한 다음 선택지, Plan B를 설명하는 메시지로 변환합니다. |
 | `src/tool_generation/processor.py` | legacy 요청을 `PLAN/DRAFTING` 또는 `PLAN/WAIT_FOR_REVIEW`로 변환 | 기존 `theseus.tool-generation.*` 통신을 임시 유지하기 위한 adapter입니다. |
 
 레거시 ToolGeneration consumer는 최종 PLAN draft markdown을 여러 `chunk` 이벤트로 나누어 기존 UI의 스트리밍형 표시를 유지합니다. API 서버가 새 `tool-plan`/`tool-build` 토픽으로 전환되기 전까지는 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=true`, `CORE_TOOL_PLAN_CONSUMER_ENABLED=false`가 기본 운영 조합입니다. 전환 후에는 `CORE_TOOL_PLAN_CONSUMER_ENABLED=true`로 신규 API/Kafka ToolPlan consumer를 켜고, 필요 시 `CORE_LEGACY_TOOL_GENERATION_CONSUMER_ENABLED=false`로 legacy adapter를 끕니다.
@@ -327,9 +327,11 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 | `theseus.tool-plan.request` generate | API/Kafka 계약명은 ToolPlan, LLM 출력은 `prompts/plan.py` PLAN DRAFTING JSON | `structuredPlanJson`은 `goal`, `context`, `tasks`, `verification`, `action_plan` 중심의 canonical PLAN JSON을 보존합니다. API 표시용 `blocks`, `schemaVersion`, `planVersion`은 `planSnapshot` 같은 projection에 둡니다. |
 | PLAN draft execution spec | generated tool, Remote Workspace, 운영 점검, Docker/API/log/resource 진단 | `execution_spec` 부재와 위험 명령/API write method는 피드백으로 전환합니다. 세부 품질 필드 누락은 PLAN draft를 차단하지 않고 후속 보완 대상으로 둡니다. |
 | PLAN draft validation feedback | `src/tool_plan/planner.py::_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT` | 검증 실패 메시지, redacted remote context, 거부된 PLAN draft 요약을 LLM에 다시 전달해 한국어 Markdown 설명/안전한 Plan B/다음 요청 예시로 변환합니다. 실패한 draft는 저장하지 않고 `TOOL_PLAN_SKIPPED`의 assistant message로 내려보냅니다. |
+| PLAN worker failure feedback | `src/tool_plan/planner.py::_PLAN_FAILURE_FEEDBACK_SYSTEM_PROMPT` | PLAN worker가 예외로 종료될 때 raw exception만 노출하지 않고 원본 요청, 실패 code/stage/message를 LLM에 전달해 원인과 재요청 방향을 설명합니다. API/Kafka schema는 그대로 두고 `TOOL_PLAN_FAILED.message`만 설명형으로 만듭니다. |
 | `theseus.tool-plan.request` regenerate | base plan과 feedback을 user message로 전달 | 별도 schema를 새로 강제하지 말고 `prompts/plan.py` PLAN REVIEW 흐름에서 전체 plan JSON을 다시 제시하게 합니다. feedback payload는 LLM 입력 전에 필요한 최소 내용만 요약합니다. |
 | `theseus.tool-build.request` | 승인된 plan → custom tool artifact JSON spec 생성 | `system_prompt`는 `prompts/plan.py` PLAN EXECUTING을 사용하되, user message의 출력 계약은 generated artifact 파싱을 위한 JSON spec으로 제한합니다. prompt 문구에서는 ToolPlan 대신 approved plan/custom tool artifact 용어를 사용합니다. |
 | Tool build repair | 이전 spec, error code/message, sandbox/validation failure context | 실패 원인을 충분히 주되 비밀값, 원격 workspace credential, 불필요한 파일 내용을 넣지 않습니다. repair 결과도 동일 JSON spec으로 검증합니다. |
+| Tool build failure feedback | `src/tool_build/builder.py::_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT` | 자동 repair 이후에도 실패하면 기존 `TOOL_BUILD_FAILED code/message` 계약은 유지하고, `message`를 raw error가 아닌 한국어 원인 분석/대안/재요청 방향으로 정리합니다. 파일명/moduleName 중복은 기존 Tool 재사용, 확장, 승인 기반 대체, 새 이름 생성 중 하나를 선택하도록 안내합니다. |
 | Remote workspace context | `remoteWorkspaceId` 또는 `remote_workspace_id` | LLM prompt에 원격 접속 비밀을 직접 넣지 않습니다. Core `tool_metadata`에는 식별자 중심으로 전달하고, 실제 접속/검증은 서버가 허용한 tool/service 경계에서 처리합니다. |
 
 주의해서 볼 점:

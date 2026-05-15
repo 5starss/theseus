@@ -151,12 +151,12 @@ public class ToolBuildEventService {
 		String fileName = requireText(artifact.getFileName());
 		if (toolRepository.existsByProjectAndFileName(toolPlan.getProject(), fileName)) {
 			String code = ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode();
-			String message = ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage();
+			String message = createDuplicateFileNameFailureMessage(fileName);
 			failBuildRun(
 				toolPlanRun,
 				event,
-				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode(),
-				ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage(),
+				code,
+				message,
 				parseCompletedAt(event)
 			);
 			toolPlanRunStatePublisher.publishFailedAfterCommit(
@@ -410,6 +410,16 @@ public class ToolBuildEventService {
 
 	private String createFailedNoticeMessage(String code, String message) {
 		return DEFAULT_FAILED_MESSAGE + " code=" + code + ", message=" + message;
+	}
+
+	private String createDuplicateFileNameFailureMessage(String fileName) {
+		return ErrorCode.DUPLICATE_TOOL_FILE_NAME.getMessage() + "\n\n"
+			+ "원인: 같은 프로젝트에 `" + fileName + "` 파일명을 사용하는 Tool이 이미 있습니다.\n"
+			+ "의미: 기존 Tool artifact를 실수로 덮어쓰지 않도록 API Server가 저장을 차단했습니다.\n"
+			+ "다음 선택지: 기존 Tool을 재사용하거나, 기존 Tool을 개선하는 승인 흐름으로 전환하거나, "
+			+ "새 toolName/moduleName/fileName으로 다시 생성해야 합니다.\n"
+			+ "재요청 예시: `기존 Tool과 충돌하지 않도록 새 이름으로 생성해줘. "
+			+ "기존 Tool이 있으면 재사용/확장 여부도 같이 제안해줘.`";
 	}
 
 	private String resolveDisplayName(ToolBuildArtifactPayload artifact, String fileName) {

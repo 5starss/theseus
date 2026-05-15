@@ -100,6 +100,25 @@ Rules:
 - Keep the response concise and practical.
 """
 
+_PLAN_FAILURE_FEEDBACK_SYSTEM_PROMPT = """\
+You are Theseus in PLAN mode.
+
+A PLAN generation worker failed before it could produce a valid assistant
+response. Your job is to convert the raw worker failure into a helpful Korean
+assistant response.
+
+Rules:
+- Do not output JSON.
+- Do not use the user-facing term "ToolPlan"; say "PLAN draft", "실행 스펙",
+  "승인된 plan", or "생성할 Tool" instead.
+- Explain the likely stage and root cause in user-actionable terms.
+- Give a safe retry instruction and at least one Plan B.
+- If the failure is about existing tool artifacts, suggest reuse, extension,
+  replacement via approval, or a different toolName/moduleName/fileName.
+- Do not claim that remote analysis, tool execution, or file writing succeeded.
+- Keep the response concise and practical.
+"""
+
 _EXECUTION_SPEC_KEYWORDS = (
     "tool",
     "custom tool",
@@ -672,6 +691,115 @@ class ToolPlanPlanner:
             "다음 요청 예시:\n"
             "`허용된 remote read-only 도구만 사용해서 서비스별 코드 분석 PLAN draft를 다시 작성해줘. md 저장은 제외하고 Markdown 보고서 출력만 포함해줘.`"
             f"{remote_line}"
+        )
+
+    async def explain_failure(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None = None,
+    ) -> str:
+        """Convert a raw PLAN worker failure into assistant-readable feedback."""
+
+        prompt = self._build_failure_feedback_prompt(
+            event,
+            code=code,
+            message=message,
+            stage=stage,
+        )
+        try:
+            final_text = ""
+            collected_text: list[str] = []
+            async for llm_event in self.llm_client.stream_message(
+                ApiMessageRequest(
+                    model=self.model_name,
+                    messages=[ConversationMessage.from_user_text(prompt)],
+                    system_prompt=_PLAN_FAILURE_FEEDBACK_SYSTEM_PROMPT,
+                    max_tokens=1200,
+                    tools=[],
+                    debug_context={
+                        "run_id": event.run_id,
+                        "project_id": event.project_id,
+                        "chat_session_id": event.chat_session_id,
+                        "agent_mode": event.mode,
+                        "remote_workspace_id": event.remote_workspace_id,
+                        "purpose": "plan_failure_feedback",
+                        "failure_code": code,
+                        "failure_stage": stage,
+                    },
+                )
+            ):
+                if isinstance(llm_event, ApiTextDeltaEvent):
+                    collected_text.append(llm_event.text)
+                elif isinstance(llm_event, ApiMessageCompleteEvent):
+                    final_text = llm_event.message.text
+            response = self._plain_chat_response(final_text or "".join(collected_text))
+            if response:
+                return response
+        except Exception as exc:
+            logger.warning(
+                "PLAN failure feedback generation failed. runId=%s code=%s error=%s",
+                event.run_id,
+                code,
+                exc,
+                exc_info=True,
+            )
+        return self._fallback_plan_failure_feedback(code=code, message=message, stage=stage)
+
+    def _build_failure_feedback_prompt(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None,
+    ) -> str:
+        request_text = (
+            self._regeneration_request_summary(event)
+            if isinstance(event, ToolPlanRegenerationRequestedEvent)
+            else event.prompt
+        )
+        return (
+            "A PLAN generation worker failed. Explain it to the user in Korean and suggest a safe retry path.\n\n"
+            f"runId={event.run_id}\n"
+            f"projectId={event.project_id}\n"
+            f"chatSessionId={event.chat_session_id}\n"
+            f"mode={event.mode}\n"
+            f"remoteWorkspaceId={event.remote_workspace_id}\n"
+            f"failureCode={code}\n"
+            f"failureStage={stage or 'unknown'}\n\n"
+            "Original user request or regeneration feedback:\n"
+            f"{request_text}\n\n"
+            "Raw failure message:\n"
+            f"{message}\n"
+        )
+
+    @staticmethod
+    def _fallback_plan_failure_feedback(*, code: str, message: str, stage: str | None) -> str:
+        lowered = message.lower()
+        duplicate_hint = any(
+            needle in lowered
+            for needle in (
+                "이미 존재",
+                "already exists",
+                "duplicate",
+                "filename",
+                "modulename",
+            )
+        )
+        next_step = (
+            "기존 Tool을 재사용/확장할지, 새 toolName/moduleName/fileName으로 다시 생성할지 선택해 다시 요청해야 합니다."
+            if duplicate_hint
+            else "오류 원인을 반영해 더 좁은 범위의 PLAN draft로 다시 요청하거나, 필요한 승인/환경 조건을 먼저 정리해야 합니다."
+        )
+        return (
+            "PLAN 생성 작업이 실패했습니다.\n\n"
+            f"- code: {code}\n"
+            f"- stage: {stage or 'unknown'}\n"
+            f"- 원인: {message}\n"
+            f"- 다음 단계: {next_step}"
         )
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:
