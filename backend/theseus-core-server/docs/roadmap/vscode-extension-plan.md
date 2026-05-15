@@ -1,8 +1,21 @@
 # VSCode Extension 구현 계획
 
 > 작성일: 2026-05-08
+> 최근 갱신: 2026-05-14 (Session 118)
 > 배경: Theseus의 핵심 타겟은 "개발에 익숙하지만 에이전트에 익숙하지 않은 사용자"다.
 > 이 사용자가 이미 있는 곳(VSCode)에 에이전트를 가져가는 것이 목표.
+
+---
+
+## 최근 적용된 변경 (Session 118 기준)
+
+> 상세 내역은 `docs/history/CHANGELOG.md` Session 118 참고, 기능 명세는 `docs/architecture/vscode_extension_features.md` 참고.
+
+- **툴바/UI**: 반응형 그리드 레이아웃, `Tools`/`Logs` 버튼은 Health 패널로 이동, 세션은 ▾ 아이콘 + tooltip, 📁 워크트리 빠른 선택 버튼/명령 추가
+- **Activity Log**: 툴 호출이 있을 때만 노출, sticky 고정 제거, 내부 스크롤로 변경
+- **Plan 패널**: 본문을 마크다운으로 렌더(JSON은 토글), Plan review 의사 분류는 엔진에 위임
+- **세션·모드 안정화**: SessionManager `lastSentMode` 도입으로 mode 알림 스팸 제거, busy 상태에서도 세션 전환 가능(이벤트 기반 대기), history snapshot 보수적 재생
+- **엔진 정합성**: dynamic tool retrieval 메타 자동 반영(✓ 마커), permission 메시지에 `toolName`/`session` 추가
 
 ---
 

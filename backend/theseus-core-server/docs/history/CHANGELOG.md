@@ -4,6 +4,288 @@
 
 ## [Unreleased]
 
+### 📝 Session 125 — `usage.md` Extension 설치 가이드 강조 및 상세화 (2026-05-14)
+
+#### 문서
+- `usage.md`의 VSCode Extension 설치 섹션을 “먼저 여기부터 실행” 구조로 재작성해 Windows 더블클릭, PowerShell, Git Bash/Linux/macOS, packaged runner, 테스트 zip 배포 흐름을 한눈에 구분할 수 있게 함
+- 설치기가 처리하는 작업, IDE별 extension/settings 저장 위치, 설치 후 실행 확인 순서, 주요 옵션 표, 자주 발생하는 설치 문제 진단 표를 추가
+- `unrecognized arguments: --session default`, 잘못된 `corePath`, 다른 checkout 실행, runner import 오류처럼 최근 설치/실행 과정에서 실제로 나온 문제를 빠른 진단 항목으로 반영
+
+#### 검증
+- `git diff --check -- backend\theseus-core-server\usage.md backend\theseus-core-server\docs\history\CHANGELOG.md` 성공
+
+---
+
+### 🐛 Session 124 — daemon `--session` 인자 버전 불일치 호환성 보강 (2026-05-14)
+
+#### `vscode-extension`
+- `DaemonRunnerClient`가 local daemon 시작 시 `--session` CLI 인자를 직접 넘기지 않고 `THESEUS_INITIAL_SESSION` 환경변수로 초기 세션을 전달하도록 변경
+- 오래된 `theseus_engine.daemon`이 `--session`을 지원하지 않는 source tree에 연결되어도 argparse `unrecognized arguments: --session default`로 즉시 종료되지 않도록 호환성 보강
+
+#### `theseus_engine`
+- 최신 daemon은 `--session` 기본값을 `THESEUS_INITIAL_SESSION`에서 읽도록 해 Extension의 env 기반 초기 세션 전달을 유지
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\daemon.py` 성공
+- `.venv\Scripts\python.exe -m theseus_engine.daemon --help`에서 `--session` 지원 확인 성공
+- `npx.cmd @vscode/vsce package` 성공, `vscode-extension\theseus-vscode-0.0.1.vsix` 재생성
+- packaged JS 확인 결과 `DaemonRunnerClient.js`의 daemon launch 경로에서 `--session` CLI 인자가 제거되고 `THESEUS_INITIAL_SESSION` env 전달만 남은 것 확인
+
+---
+
+### 🛠️ Session 123 — Windows 원클릭 Extension wrapper 인자 처리 보강 (2026-05-14)
+
+#### 설치 / 배포
+- 저장소 루트 `Install-Theseus-Extension.cmd`에 `-Help`/`--help`/`/?` 도움말을 추가해 주요 PowerShell 설치 옵션과 기본 core/workspace 경로를 바로 확인할 수 있게 함
+- wrapper가 `powershell.exe`/`pwsh.exe`를 명시적으로 탐색하고 실행 경로를 출력하도록 보강
+- 사용자가 `-CorePath` 또는 `-WorkspacePath`를 직접 넘긴 경우 wrapper 기본값을 중복으로 붙이지 않도록 수정
+- README와 `usage.md`에 `Install-Theseus-Extension.cmd -Help`와 core/workspace override 동작을 문서화
+
+#### 검증
+- `cmd.exe /c "Install-Theseus-Extension.cmd -Help"` 호출 검증 성공
+- `cmd.exe /c "echo. | Install-Theseus-Extension.cmd -SkipRequirements -SkipExtension -SkipSettings"` wrapper 호출 검증 성공
+- `-WorkspacePath`를 직접 넘긴 wrapper 호출 검증으로 기본 workspace 인자 중복 방지 확인 성공
+- `git diff --check -- Install-Theseus-Extension.cmd ...` 성공
+
+---
+
+### 🛠️ Session 122 — Git Bash용 Extension 설치 스크립트 경로 처리 강화 (2026-05-14)
+
+#### 설치 / 배포
+- `scripts/install-vscode-extension.sh`의 script dir 계산과 usage 출력을 Bash 내장 기능 중심으로 바꿔 최소 Git Bash PATH에서도 `dirname`, `cat`, `tr`, `find/sort/tail/head` 의존으로 깨지지 않게 함
+- `--core-path`, `--workspace-path`, `--vsix`, `--runner-path`, `--extensions-dir`, `--code`가 Git Bash `/c/...` 경로와 Windows `C:\...` 경로를 모두 처리하도록 정규화 로직 추가
+- Git Bash에서 Windows Python으로 `settings.json`을 쓸 때 POSIX 경로가 잘못 해석되지 않도록 `SETTINGS_PATH`도 Windows 경로로 변환해 전달
+- VSIX 자동 탐색을 Bash glob 기반 최신 파일 선택으로 바꾸고, IDE CLI 호출 시 VSIX와 extensions dir를 Windows 경로로 넘기도록 정리
+- WSL이 아닌 Git Bash에서 `wslpath`가 PATH에 잡혀도 호출하지 않도록 제한
+- macOS 기본 Bash까지 고려해 `${var,,}` 같은 Bash 4 전용 문법 없이 ASCII lowercase/drive uppercase 변환을 수행하도록 정리
+- `usage.md`에 Git Bash 경로 입력/설정 기록 동작을 보강
+
+#### 검증
+- Git Bash parser로 `scripts\install-vscode-extension.sh` 구문 검증 성공
+- `scripts\install-vscode-extension.sh --help` 호출 검증 성공
+- `--skip-requirements --skip-extension` smoke test로 workspace settings 생성 및 Windows 경로 기록 검증 성공
+- `git diff --check -- scripts\install-vscode-extension.sh` 성공
+
+---
+
+### 🐛 Session 121 — VSCode Extension 실행 중 세션 전환과 retry banner 정리 (2026-05-14)
+
+#### `vscode-extension`
+- 실제 WebView message router가 `SessionController`의 wait/switch 로직을 사용하지 않아 runner busy/stale 상태에서 세션 변경이 `Session changes are available...` 진단으로 막히던 경로를 보정
+- `newSession` / `switchSession` / current `deleteSession` / current `renameSession`은 runner가 즉시 명령을 받을 수 없더라도 local `.theseus_sessions` snapshot을 먼저 반영하고, runner가 ready가 되면 `/session switch`를 뒤에서 동기화하도록 변경
+- 세션 변경은 현재 실행 중인 runner turn을 중단하거나 runner를 재시작하지 않도록 `interrupt()` 호출을 제거하고, ready transition 대기만 수행하도록 보정
+- active run이 실제로 `busy`인 동안에는 old session의 응답/tool event가 새 session UI에 섞이지 않도록 즉시 local snapshot 전환을 하지 않고, 현재 응답 완료 후 session command를 실행하도록 예약
+- `theseus.runtimeMode=source-python` 설정이 `runnerPath`보다 우선하도록 `SessionManager`의 daemon/stdio runtime 선택을 보정해, packaged runner 경로가 남아 있어도 source Python 방식으로 실행 가능하게 함
+- WebView `RunnerStatus` reducer가 `runtimeMode`, `runnerPath`, daemon pid/port, model, session metadata를 보존하도록 수정해 toolbar/Health 표시가 실제 runner 상태와 어긋나지 않게 함
+- daemon send 실패/409 busy 경로에서 `lastSentMode`가 잘못 고정되지 않도록 `sendDaemon()` 성공 여부를 반환하고 mode dedupe 상태를 rollback하도록 보강
+- 워크트리 변경 중 `stop('worktree_changed')`가 child process abort를 유발할 때 `The operation was aborted`를 `spawn_failed`로 잘못 표시하지 않도록 expected stop reason과 abort 순서를 보정
+- session label/list의 current 기준을 stale `RunnerReady.session`보다 Extension Host의 `preferredSessionName` 기준으로 맞춰, runner 상태가 뒤늦게 회복되어도 UI 세션 선택이 되돌아가지 않도록 보강
+- runner가 ready 상태로 확인되면 채팅에 남아 있던 retry banner와 transient runner diagnostic system message를 정리하도록 `RunnerReady`뿐 아니라 ready `RunnerStatus`에서도 cleanup을 수행
+- daemon fallback 과정의 `Local daemon failed to start. Falling back to stdio runner.` 오류는 최종 runner ready 상태에서 자동 제거되도록 retry banner 중복/잔존 처리를 보정
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `node --check media\main.js` 성공
+- `node --check media\dispatcher.js` 성공
+- `node --check media\components\MessageList.js` 성공
+
+---
+
+### 🧰 Session 120 — VSIX 재빌드 후 테스트 zip 자동 생성 흐름 추가 (2026-05-14)
+
+#### 설치 / 배포
+- `scripts/package-test-distribution.ps1`를 추가해 최신 VSIX, 더블클릭 설치 wrapper, 설치 PowerShell 스크립트, `theseus-runner` binary 폴더를 `Theseus-TestPackage/` 구조로 staging하고 zip으로 압축하도록 함
+- `scripts/test-package-README.md`를 추가하고 packager가 이를 테스트 패키지 루트의 `README.md`로 복사해 Theseus 소개, 폴더 구성, 더블클릭 실행법, CLI override 예시를 함께 배포하도록 함
+- `build-runner-binary.ps1`, `package-test-distribution.ps1`의 기본 core path 계산을 `$PSScriptRoot` 기준으로 고정해 어떤 cwd에서 호출해도 scripts 폴더의 상위 core root를 찾도록 함
+- 저장소 루트에 `Package-Theseus-TestPackage.cmd`를 추가해 VSIX 재빌드와 테스트 패키지 생성을 더블클릭으로 실행할 수 있게 함
+- 저장소 루트 `Package-Theseus-TestPackage.sh`와 `scripts/package-test-distribution.sh`를 추가해 Git Bash에서도 같은 테스트 패키지 압축 흐름을 실행할 수 있게 함
+- `vscode-extension/package.json`에 `package:vsix`, `package:test` 스크립트를 추가해 `npm.cmd run package:test` 한 번으로 VSIX 재빌드 후 테스트 zip 생성을 이어서 수행
+- README와 `usage.md`에 재빌드/압축 명령과 결과 zip 위치를 추가
+
+#### 검증
+- PowerShell parser로 `scripts\package-test-distribution.ps1`, `scripts\build-runner-binary.ps1` 구문 검증 성공
+- `Package-Theseus-TestPackage.cmd -Help` wrapper 호출 경로 검증 성공
+- Git Bash parser로 `Package-Theseus-TestPackage.sh`, `scripts\package-test-distribution.sh` 구문 검증 성공
+- `Package-Theseus-TestPackage.sh --help` 호출 검증 성공
+- fake runner 경로를 주입한 smoke test로 `Theseus-TestPackage/README.md` 포함 staging과 zip 내부 구성 검증 성공
+- Git Bash wrapper에서 fake runner 경로를 주입한 smoke test로 동일한 zip 내부 구성 검증 성공
+- `npm.cmd run package:test -- -RunnerPath ...`로 VSIX 재빌드 후 테스트 zip 생성 흐름 검증 성공
+
+---
+
+### 🧰 Session 119 — 테스트 패키지 더블클릭 설치기 추가 (2026-05-14)
+
+#### 설치 / 배포
+- 저장소 루트에 `Install-Theseus-TestPackage.cmd`를 추가해 테스트 배포 zip 안에서 더블클릭으로 설치를 시작할 수 있게 함
+- `scripts/install-test-package.ps1`를 추가해 package root에서 VSIX와 `theseus-runner.exe`를 자동 탐색하고, IDE CLI 감지, VSIX 설치, `theseus.runtimeMode=bundled-runner`, `theseus.runnerPath`, `theseus.workspacePath` 설정 기록, workspace 열기를 처리
+- README와 `usage.md`에 테스트 zip 구성과 더블클릭 설치 흐름을 추가
+
+#### 검증
+- PowerShell parser로 `scripts\install-test-package.ps1` 구문 검증 성공
+- `cmd.exe /c "echo. | Install-Theseus-TestPackage.cmd -Help"`로 wrapper 호출 경로 검증 성공
+
+---
+
+### 🧭 Session 118 — VSCode Extension UX 안정화 및 엔진 정합성 정리 (2026-05-14)
+
+#### `vscode-extension` — 툴바·UI 정리
+- 툴바 그리드 레이아웃을 `1fr auto` 2열 구조로 재구성하고 좁은 너비에서 단계적으로 메타 정보를 숨기는 반응형(400/320/260px) 적용
+- `Tools` 버튼을 툴바에서 제거하고 `Logs`는 Health 패널 내부로 통합 (Health에서 `Settings/Restart/Logs/Refresh/Close` 일괄 노출)
+- 세션 라벨을 22×22px 아이콘 버튼(▾)으로 축소 — 세션명은 hover tooltip으로 표시, dropdown click 이벤트 정상 동작 보장 (`toolbar-meta` overflow 클리핑 제거)
+- `active-file-label`은 표시에서 제거(DOM은 호환 유지), `workspace-label` 최대 너비를 72px로 축소해 Start/Stop 버튼 가림 현상 해결
+- 워크트리 빠른 선택 📁 버튼 신설 — VSCode 작업 폴더 목록 + Browse + Clear quickPick, `theseus.selectWorktree` 명령으로 command palette에서도 호출 가능
+- 워크트리 변경 시 실행 중인 runner가 있으면 "Restart Runner" 경고 모달 표시
+
+#### `vscode-extension` — 활동 로그(Tool Stack) 정리
+- `.turn` 컨테이너를 `grid-template-areas` → `display: flex; flex-direction: column`으로 변경해 동일 grid-area에 중복 배치되어 글자가 겹치던 버그 수정
+- 활동 그룹의 `position: sticky` 제거 — 응답 스트리밍 중 툴 콜링 패널이 화면 상단에 고정되어 콘텐츠를 가리는 문제 해결
+- `activity-list`에 `max-height: 180px` 적용 — 툴 목록이 길어져도 내부 스크롤로 처리
+- 툴 호출이 1개 이상 발생할 때만 활동 그룹을 노출(status-only 메모 단독으로는 아코디언 미표시)
+
+#### `vscode-extension` — Plan 패널 MD 렌더링
+- 서버 측 `formatPlanMarkdown`과 동일한 로직을 `media/components/PlanPanel.js`에 미러링해 패널 본문을 마크다운으로 렌더 (이전: 구조화된 task 리스트)
+- `goal/title` → heading, tasks → 번호 매긴 굵은 항목 + 상태 이탤릭 + 들여쓴 하위 메타, 기타 plan 필드는 `appendMarkdownValue`로 재귀 변환
+- JSON 토글은 기본 숨김으로 유지, [Open MD] 버튼은 외부 에디터에서 전체 마크다운 문서 보기 용도로 분리
+
+#### `vscode-extension` — 엔진 정합성(신념 충돌 해소)
+- Plan review 의사 분류기(`classifyPlanReviewText`)를 no-op으로 변경 — 한국어/영어 키워드 가로채기 제거, 명시적 의사 표현은 PlanPanel 버튼 또는 `/plan approve`·`/plan reject` 슬래시 명령으로 위임
+- `submitPrompt`의 plan review 분기에 `currentMode === 'plan'` 가드 추가
+- `updateToolPermission` 메시지에 `toolName`, `session` 필드 추가 — 백엔드 `PermissionProvider` 도입 시 의미적 식별자 기반으로 처리하고 metadataPath는 fallback
+- Custom Tools 패널에 "전체 등록 목록 (응답마다 모델에 노출되는 tool은 다를 수 있음)" 안내 표시, 엔진 이벤트의 `metadata.active_tools`/`active_tool_names`/`retrieved_tools`를 자동 추출해 활성 tool에 ✓ 마커 + 좌측 강조 테두리 부여
+- 활성 tool 중 정적 패널에 없는 것(core/built-in 가능성)은 `(이 패널 밖 N개 포함)`으로 별도 카운트 표시
+
+#### `vscode-extension` — 세션·모드·히스토리 안정화
+- `SessionManager`에 `lastSentMode` 도입 — `send`, `setMode`, `flushPendingInput` 모두에서 동일 mode 재전송 시 runner에 보내지 않아 "✅ Agent 모드로 전환됐습니다." 알림 스팸 제거
+- daemon `sendDaemon` 실패 시 `lastSentMode` rollback, `setState('error')` 시 `lastSentMode = undefined`로 강제 재동기화
+- runner stop 시 `lastSentMode`도 함께 리셋해 재시작 후 첫 send에서 mode 재동기화 보장
+- `replayHistorySnapshot`을 보수적 정책으로 복귀 — 로컬 `savedHistory`가 비어 있으면 전체 재생, 그렇지 않으면 상태 이벤트만 재생해 visibility change 등 정상 케이스에서 대화 내역이 wipe되던 문제 해결
+- 세션 전환을 busy 상태에서도 허용 — `SessionController.waitForReadyThenSwitch()`로 인터럽트 후 `sessionManager.onEvent()`로 ready transition 감지(5초 안전망 fallback)
+- Plan 모드에서 다른 모드로 전환 시 `wait/drafting`만 자동 cancel, `executing/verifying`은 사용자 경고만 표시하고 plan 유지
+
+#### `vscode-extension` — 기타 UX
+- `/clear` 또는 휴지통 클릭 후 welcome 화면(추천 프롬프트) 복원 — 생성 로직을 `ensureWelcomeState()`로 추출
+- `applyMode`가 plan→다른 모드 전환을 사용자 제스처(`fromUserGesture`)로만 자동 처리하도록 변경
+- **Plan 표시 위치 재배치**: 상단 plan 패널은 stepper + phase badge + 액션 버튼 + JSON 토글 + 한 줄 요약만 유지하고, 가독성 좋은 plan MD는 **메인 채팅 흐름 안에 단일 PLAN 메시지**(in-place 업데이트)로 노출. plan 변경 시 같은 article을 업데이트하므로 채팅 중복 없음
+- **Retry banner dedupe & 자동 제거**: 동일 retry banner 중복 추가 방지(`appendRetryBanner`가 기존 배너 감지 시 no-op), runner가 `RunnerReady` 상태가 되면 `clearRetryBanners()`로 누적 banner 일괄 제거 — daemon 실패 → stdio fallback 성공 케이스에서 "Restart Agent" 버튼이 잔존하던 문제 해결
+- **세션 전환 범위 확대**: `switchSession`이 `'busy'` 외에도 `'starting'`/`'stale'` 등 process가 살아있는 모든 비-ready 상태에서 `waitForReadyThenSwitch`로 라우팅. busy일 때만 `interrupt()` 호출, 그 외는 대기만 함. 타임아웃 5초→10초 확장 및 대기 시 "세션 전환 대기 중" 안내 표시
+- **Plan 메시지 위치 보정**: `planChatIdentity`로 plan을 식별해 다른 plan으로 갱신될 때만 기존 article을 제거하고 가장 최근 `.turn` 안의 사용자 메시지 바로 다음에 재삽입 → 이전 세션의 plan이 채팅 상단에 잔존하던 문제와 "PLAN → user → assistant" 순서 문제 동시 해결. `beginPlanDraft`도 새 plan 시작 시 article을 즉시 제거
+- **긴 답변 fold 기본 동작 반전**: 25줄 이상 답변에 대해 기본 **펼친 상태**로 노출하고 사용자가 원하면 [▲ 접기]로 수동 접기. 반대로 접힌 답변은 [▼ 펼치기]로 다시 펼침 (이전에는 기본 접힘 + 더 보기라 매번 클릭이 필요했음)
+
+#### `protocol.ts`
+- `selectWorktree`, `updateToolPermission`에 `toolName`/`session` 필드를 추가하고 `WEBVIEW_TO_HOST_MESSAGE_TYPES` 집합 갱신
+
+#### 검증
+- `npx tsc --noEmit` 통과 (vscode-extension 전체)
+
+---
+
+### 🧪 Session 117 — 테스트 배포용 packaged runner 경로 추가 (2026-05-14)
+
+#### `theseus_engine`
+- `theseus_engine/runner_entry.py`를 추가해 packaged binary가 `daemon`과 `stdio` 명령을 기존 `theseus_engine.daemon`, `theseus_engine.cli_runner`에 위임할 수 있게 함
+- runner entrypoint가 workspace, `THESEUS_CORE_ROOT`, binary 인접 `.env`를 순서대로 읽어 source tree 없이도 테스트 배포 환경 변수를 주입할 수 있게 함
+
+#### `vscode-extension`
+- `theseus.runtimeMode`와 `theseus.runnerPath` 설정을 추가하고, `runnerPath`가 있으면 `python -m theseus_engine.daemon` 대신 runner binary를 실행하도록 local daemon/stdio client를 분기
+- source-python 경로는 기존 `theseus.corePath` / `theseus.pythonPath` 방식으로 유지하고, binary runner 경로는 `bundled-daemon` / `bundled-stdio` runtime mode로 상태와 Health panel에 노출
+- source tree가 없어도 `runnerPath`가 설정되어 있으면 Start Agent가 core path 오류로 막히지 않게 함
+
+#### 설치 / 배포
+- `scripts/build-runner-binary.ps1`를 추가해 PyInstaller 기반 `theseus-runner.exe` 테스트 빌드를 만들 수 있게 함
+- `install-vscode-extension.ps1` / `.sh`에 runner binary 경로를 설정하는 `-RunnerPath` / `--runner-path` 옵션을 추가
+- README와 `usage.md`에 테스트 배포용 runner 빌드 및 설치 예시를 추가
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `python -m py_compile theseus_engine\runner_entry.py` 성공
+- PowerShell parser로 `scripts\build-runner-binary.ps1` 구문 검증 성공
+- `node --check vscode-extension\media\components\HealthPanel.js` 성공
+- `C:\Program Files\Git\bin\bash.exe -n backend/theseus-core-server/scripts/install-vscode-extension.sh` 성공
+- `npx.cmd @vscode/vsce package` 성공, `vscode-extension\theseus-vscode-0.0.1.vsix` 재생성
+
+---
+
+### 🧰 Session 116 — Windows 원클릭 Extension 설치 진입점 추가 (2026-05-14)
+
+#### 설치
+- 저장소 루트에 `Install-Theseus-Extension.cmd`를 추가해 Windows에서 더블클릭만으로 Extension 로컬 실행 환경을 준비할 수 있게 함
+- wrapper가 `backend\theseus-core-server\scripts\install-vscode-extension.ps1`을 호출해 `.venv` 생성, `requirements.txt` 설치, VSIX 설치, `theseus.corePath` / `theseus.pythonPath` / `theseus.workspacePath` 설정 기록을 수행
+- 기본 workspace path는 저장소 루트, core path는 `backend\theseus-core-server`로 지정하고, 필요 시 `-Ide antigravity` 또는 `-Ide vscode` 인자를 그대로 전달할 수 있게 함
+
+#### 문서
+- README Quick Start에 `Install-Theseus-Extension.cmd` 더블클릭 및 IDE target 명시 예시를 추가
+- `usage.md`의 VSCode Extension 설치 섹션에도 같은 원클릭 설치 흐름을 추가
+
+#### 검증
+- `cmd.exe /c "echo. | Install-Theseus-Extension.cmd -SkipRequirements -SkipExtension -SkipSettings"`로 wrapper 경로 해석과 PowerShell 설치기 호출 성공
+
+---
+
+### 📝 Session 115 — README 최신 구조/운영 철학 현행화 (2026-05-14)
+
+#### 문서
+- `README.md`의 최종 반영 기준을 Session 114로 갱신하고, `src` 서버 오케스트레이션과 `theseus_engine` 공통 런타임 경계를 최신 구조에 맞게 수정
+- system prompt source of truth가 `theseus_engine/prompts` 패키지이고 `state.py`는 façade/호환 import 경계라는 점을 명시
+- Remote Workspace id 기반 resolver, redacted metadata, mode별 remote tool 노출 정책, command 제한 원칙을 README 핵심 기능/보안 항목에 추가
+- `/health/details`, `POST /api/v1/stream`, `remote-workspaces/test-connection` endpoint와 optional requirements 운영 기준을 README에 반영
+- 다음 우선순위를 Remote Workspace secret/capability/audit, RAG 경계, tool history schema, license/SBOM, Extension 회귀 검증 중심으로 정리
+
+---
+
+### 🧹 Session 114 — Core 기본 의존성에서 sample custom tool 패키지 분리 (2026-05-14)
+
+#### 의존성
+- `requirements.txt`에는 Core 기본 기능이 직접 사용하는 `markdownify>=1.2.2`, `beautifulsoup4>=4.12.0`을 유지
+- 현재 `theseus_engine/custom_tools` 예시 실행에만 필요한 `psutil`, `speedtest-cli`, `playwright`를 기본 설치에서 제외하고 optional requirements로 분리
+- `requirements-browser.txt`를 추가해 Playwright 기반 브라우저 자동화 의존성을 별도 관리
+- `requirements-doc-tools.txt`를 추가해 PDF/Word/Excel 분석 tool 의존성을 별도 관리
+- `requirements-custom-tools.txt`는 현재 번들 예시 custom tool 전체 실행용으로 유지하고 browser optional requirements를 참조
+- `playwright-stealth`는 현재 코드에서 직접 import하지 않고 bot-detection 우회 성격의 정책 리스크가 있어 기본/optional 의존성에서 제거
+
+#### 설치 스크립트 / 문서
+- VSCode Extension 설치 스크립트의 `-InstallPlaywright` / `--install-playwright` 옵션이 `requirements-browser.txt`를 설치한 뒤 Chromium을 설치하게 보정
+- README에 기본 의존성과 optional custom tool 의존성의 경계를 추가 설명
+
+---
+
+### ♻️ Session 113 — Theseus Prompt 패키지 분리 (2026-05-14)
+
+#### `theseus_engine`
+- `theseus_engine.models.modes`를 추가해 `AgentMode`, `PlanPhase`, `CoordinatorPhase`, `MODE_DESCRIPTIONS`를 상태 머신에서 분리
+- `theseus_engine.prompts` 패키지를 추가해 base/environment/capability/ASK·AGENT/PLAN/Coordinator prompt 본문과 `build_system_prompt()` 조립 함수를 분리
+- `theseus_engine.models.state`는 `TheseusStateMachine` façade와 기존 enum import re-export를 유지하고, `get_system_prompt()`는 canonical prompt builder에 위임하도록 정리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 새 prompt 파일 위치, 사용 경로, 분리 이유, 수정 가이드, Extension/runtime 차이 기록 원칙을 반영
+- `docs/analysis/theseus-engine-extension-refactor-gap.md`에 prompt 분리 후 Extension/local runtime과 서버 runtime의 system prompt 조립 차이가 없음을 기록
+
+#### 검증
+- `python -m py_compile`로 `theseus_engine/models/state.py`, `theseus_engine/models/modes.py`, `theseus_engine/prompts` 하위 전체 파일, `src/builder/system_prompt.py` 검증 성공
+- `TheseusStateMachine.get_system_prompt()` 및 `prompts.builder.build_system_prompt()` ASK/AGENT/PLAN/Coordinator smoke 확인
+
+---
+
+### ♻️ Session 112 — Theseus Engine visibility/refactor 경계 정리 (2026-05-14)
+
+#### `theseus_engine`
+- ASK/PLAN/AGENT/COORDINATOR mode별 tool visibility 계산을 `theseus_engine.core.tool_visibility`로 공통화해 local runner, TUI, command handler, server builder의 중복 필터링을 줄임
+- `create_tool`의 server 전용 `src.tooling` 의존을 `tool_server_adapter.py`로 격리해 CLI/TUI/Extension import 경계를 보존
+- QueryEngine의 Remote Workspace tool 판정 기준을 `engine/tool_execution_state.py`로 분리해 local file snapshot/carryover와 remote tool 결과 경계를 명확화
+- LLM router가 tool error message를 provider 요청용 copy에만 보강하도록 수정해 canonical history mutation을 방지
+- OpenAI-compatible wrapper의 tool argument JSON parse 실패를 조용히 `{}`로 숨기지 않고 debug dump/log에 남기도록 보강
+- local session 저장소는 import 시점 side effect 없이 실제 사용 시점에 `.theseus_sessions` 디렉터리를 보장하도록 조정
+- sub-agent 실행 command 조립을 OS별 quoting 기반으로 정리해 `python -c` shell string 파손 위험을 줄임
+
+#### `src/builder`
+- 서버 builder도 공통 tool visibility policy를 사용하도록 변경
+- 서버 환경에서는 `src/knowledge`와 `theseus_engine/rag` schema 혼동을 막기 위해 engine RAG tool을 기본 비활성화하고, 필요 시 `THESEUS_ENABLE_ENGINE_RAG_TOOLS=true`로 복구 가능하게 함
+
+#### 문서
+- `docs/analysis/theseus-engine-extension-refactor-gap.md`를 추가해 Engine 리팩토링 중 Extension/local runtime과 Core Server runtime의 기능 차이를 기록
+
+---
+
 ### ✨ Session 111 — VSCode Extension 프리미엄 UI/UX 전면 개선 (2026-05-14)
 
 #### `vscode-extension/media/styles.css`
