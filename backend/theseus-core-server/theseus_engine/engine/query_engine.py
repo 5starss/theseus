@@ -530,6 +530,7 @@ async def _execute_tool_call(
                 cwd=context.cwd,
                 metadata={
                     "tool_registry": context.tool_registry,
+                    "active_registry": context.tool_registry,
                     "ask_user_prompt": context.ask_user_prompt,
                     **(context.tool_metadata or {}),
                 },

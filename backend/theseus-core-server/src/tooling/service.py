@@ -126,8 +126,8 @@ class ServerToolCreationResult:
         return asdict(self)
 
 
-def _slugify_segment(value: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()
+def _slugify_segment(value: str | int) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(value)).strip("_").lower()
     return slug or "default"
 
 
@@ -720,23 +720,48 @@ def load_active_tools_for_project(
 ) -> list[str]:
     project_dir = storage_root / _slugify_segment(project_id)
     if not project_dir.is_dir():
+        log.info(
+            "Project custom tools directory not found. projectId=%s dir=%s",
+            project_id,
+            project_dir,
+        )
         return []
 
     loaded: list[str] = []
     for metadata_path in sorted(project_dir.glob("*.meta.json")):
         try:
             paths, metadata = _paths_from_project_metadata(project_dir, metadata_path)
-        except Exception:
+        except Exception as exc:
+            log.warning("Failed to read project tool metadata. meta=%s error=%s", metadata_path, exc)
             continue
         if not paths.module_path.exists():
+            log.warning(
+                "Skipped project tool because module file is missing. projectId=%s meta=%s module=%s",
+                project_id,
+                metadata_path,
+                paths.module_path,
+            )
             continue
         if not _is_tool_active_metadata(metadata):
+            log.info(
+                "Skipped inactive or unverified project tool. projectId=%s toolName=%s status=%s isActive=%s",
+                project_id,
+                metadata.get("toolName"),
+                metadata.get("status"),
+                metadata.get("isActive"),
+            )
             continue
         is_valid, _, tool_class = _tool_validator_cls().validate_and_load_module(
             paths.module_name,
             str(paths.module_path),
         )
         if not is_valid or tool_class is None:
+            log.warning(
+                "Skipped invalid project tool. projectId=%s module=%s file=%s",
+                project_id,
+                paths.module_name,
+                paths.module_path,
+            )
             continue
         try:
             registry.register(tool_class())
@@ -747,7 +772,20 @@ def load_active_tools_for_project(
                     "permission_level",
                     DEFAULT_PERMISSION_LEVEL,
                 )
-        except Exception:
+            log.info(
+                "Loaded project custom tool. projectId=%s toolName=%s module=%s file=%s",
+                project_id,
+                tool_class.name,
+                paths.module_name,
+                paths.module_path,
+            )
+        except Exception as exc:
+            log.warning(
+                "Failed to instantiate project tool. projectId=%s module=%s error=%s",
+                project_id,
+                paths.module_name,
+                exc,
+            )
             continue
     return loaded
 
