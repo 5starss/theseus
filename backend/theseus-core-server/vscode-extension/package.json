@@ -185,6 +185,7 @@
     "watch": "tsc -watch -p ./",
     "package:vsix": "npm run compile && npx @vscode/vsce package",
     "package:test": "npm run package:vsix && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\package-test-distribution.ps1",
+    "package:local-source": "npm run package:vsix && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\package-local-extension-source.ps1",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
