@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
@@ -22,6 +22,7 @@ const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description:
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
+  const navigate = useNavigate();
   const { currentProject } = useProjectStore();
   const {
     messages,
@@ -330,34 +331,47 @@ export function ChatArea() {
           )}
         </div>
 
-        <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : isClosed ? 'border-red-900/30' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isGenerating || isClosed}
-            className="flex-1 bg-transparent border-none outline-none resize-none px-3 py-2 text-sm text-slate-300 placeholder-slate-500 min-h-[40px] max-h-[200px] disabled:opacity-50"
-            rows={1}
-            placeholder={
-              isGenerating
-                ? 'AI가 작업 중입니다...'
-                : isClosed
-                  ? '종료된 세션입니다. 새로운 세션을 시작해 주세요.'
+        {isClosed ? (
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-6 flex flex-col items-center justify-center gap-4 shadow-xl backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-red-400 font-medium">
+              <Lock size={18} className="animate-pulse" />
+              <span className="text-sm tracking-tight">이 세션은 종료되었습니다. 기록만 확인할 수 있습니다.</span>
+            </div>
+            <button
+              onClick={() => navigate(`/projects/${projectId}`, { replace: true })}
+              className="bg-blue-400 hover:bg-blue-500 text-slate-900 px-8 py-2.5 rounded font-bold transition-all hover:scale-[1.02] active:scale-[0.98] uppercase tracking-widest text-[11px] shadow-[0_0_20px_rgba(96,165,250,0.3)]"
+            >
+              새 대화 시작하기
+            </button>
+          </div>
+        ) : (
+          <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isGenerating}
+              className="flex-1 bg-transparent border-none outline-none resize-none px-3 py-2 text-sm text-slate-300 placeholder-slate-500 min-h-[40px] max-h-[200px] disabled:opacity-50"
+              rows={1}
+              placeholder={
+                isGenerating
+                  ? 'AI가 작업 중입니다...'
                   : mode === ToolPlanMode.ASK
                     ? '일반 질문을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
                     : mode === ToolPlanMode.AGENT
                       ? 'Agent에게 승인된 Tool 사용 작업을 지시하세요. (Enter 전송, Shift+Enter 줄바꿈)'
                       : 'Tool PLAN 요청 또는 피드백을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
-            }
-          />
-          <button
-            onClick={handleSend}
-            disabled={isGenerating || !input.trim() || isClosed}
-            className="bg-blue-400 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 px-6 py-2 rounded text-xs font-bold transition-colors ml-4 uppercase tracking-wider"
-          >
-            {isGenerating ? '처리중' : '보내기'}
-          </button>
-        </div>
+              }
+            />
+            <button
+              onClick={handleSend}
+              disabled={isGenerating || !input.trim()}
+              className="bg-blue-400 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 px-6 py-2 rounded text-xs font-bold transition-colors ml-4 uppercase tracking-wider"
+            >
+              {isGenerating ? '처리중' : '보내기'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -95,12 +95,8 @@ export function SessionList({ projectId, children }: SessionListProps) {
       const currentActiveSessionId = window.location.pathname.split('/').pop();
       if (currentActiveSessionId === sessionId.toString()) {
         useChatSessionStore.getState().setClosed(true);
-        useChatSessionStore.getState().addMessage({
-          messageId: crypto.randomUUID(),
-          senderType: 'SYSTEM_NOTICE',
-          content: '이 세션이 종료되었습니다.',
-          createdAt: new Date().toISOString()
-        });
+        // 종료 후 프로젝트 인덱스로 이동하여 새 세션 생성/찾기 로직 트리거
+        navigate(`/projects/${projectId}`, { replace: true });
       }
     } catch (err) {
       console.error('Failed to close session:', err);
