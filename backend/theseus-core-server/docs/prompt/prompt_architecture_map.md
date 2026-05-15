@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation/failure feedback, code editing safety 반영
+> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec validation mode, validation/failure feedback, code editing safety, remote/local worktree boundary 반영
 
 ---
 
@@ -77,6 +77,7 @@ state_machine.get_system_prompt(
 | `RBAC_PERMISSION_PROMPT` | tool capability가 있을 때 | 권한 필터링 사실과 권한 밖 요청 대응 지침 |
 | `VALIDATION_CAPABILITY_PROMPT` | tool capability가 있을 때 | validator block 결과를 읽고 수정 후 재시도하는 지침 |
 | `CODE_EDITING_SAFETY_PROMPT` | `write_file`, `edit_file`, `remote_write_file`, `remote_edit_file` 중 하나가 있을 때 | 파일 수정 전 읽기, invariant 보존, `edit_file` 우선, 기존 파일 `write_file` 덮어쓰기 제한, 검증 실패 후 재시도/보고 기준 |
+| `REMOTE_LOCAL_REPORT_PROMPT` | `local_write_report` 또는 Remote Workspace 관련 tool이 현재 schema에 있을 때 | Remote Workspace 대상은 `remote_*`, Core/local worktree 대상은 local tool로 처리하도록 경계를 안내 |
 | `WEB_CAPABILITY_PROMPT` | `web_search`, `web_fetch`, `deep_research` 중 하나가 있을 때 | 외부 명세 확인이 필요한 작업의 web research 기준 |
 | `CREATE_TOOL_CAPABILITY_PROMPT` | `create_tool`이 현재 schema에 있을 때 | Theseus custom tool 생성 코드 규약과 2턴 호출 규칙 |
 
@@ -100,11 +101,31 @@ state_machine.get_system_prompt(
 - Python 파일은 `ast.parse()` 기반 문법 검증을 통과해야 합니다.
 - 안전 검증 실패는 `ToolResult(is_error=True)`로 반환되어 다음 LLM 턴에서 원인 설명과 더 작은 패치 재시도를 유도합니다.
 
+#### 1.1.3 Remote Workspace + local worktree tool boundary
+
+Remote Workspace가 선택된 요청에서도 Core/local worktree 도구를 무조건 숨기지 않습니다. 대신 현재 mode와 `user_level >= permission_level` 기준을 유지하면서, 대상이 Remote Workspace인지 Core/local worktree인지 명확히 구분합니다.
+
+| 위치 | 역할 | 주의점 |
+|---|---|---|
+| `theseus_engine/core/tool_visibility.py` | remote context에서도 local 도구를 RBAC와 mode 기준으로 노출 | ASK와 PLAN Drafting/Review는 read-only 중심입니다. AGENT 또는 승인된 PLAN Executing에서는 local write/edit도 사용자 등급에 따라 노출될 수 있습니다. |
+| `theseus_engine/tools/core/local_report_tool.py` | remote 분석 결과를 Core worktree의 report artifact로 저장 | `.md`, `.json`, `.txt`만 허용하고, `reports/` 또는 `.theseus/reports/` 하위만 허용합니다. 기존 파일 덮어쓰기는 명시적 overwrite 사유가 필요합니다. |
+| `theseus_engine/prompts/capabilities.py::REMOTE_LOCAL_REPORT_PROMPT` | LLM에게 remote 분석은 `remote_*`, Core/local worktree 작업은 local tool을 사용하도록 안내 | 대상이 불명확하면 도구 호출 전에 remote/local 중 무엇인지 확인해야 합니다. |
+| `src/builder/engine.py` | 서버 `/stream` registry 조립 시 env와 mode/phase를 보고 `local_write_report` 노출 여부를 결정 | `THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED=false`면 remote AGENT에서도 숨깁니다. 저장 루트는 `THESEUS_LOCAL_REPORT_ROOT`를 metadata로 전달합니다. |
+
+정책 요약:
+
+- Remote Workspace의 파일/로그/리소스 읽기는 `remote_read_file`, `remote_glob`, `remote_grep`, `remote_tail_log`, `remote_check_*`를 사용합니다.
+- Core/local worktree의 파일 읽기/수정은 `read_file`, `glob`, `grep`, `write_file`, `edit_file` 같은 local tool을 사용합니다.
+- ASK와 PLAN Drafting/Review는 local/remote 읽기 중심이며 write/edit/bash는 제외됩니다.
+- AGENT와 승인된 PLAN Executing은 현재 사용자 등급이 허용하는 local tool을 사용할 수 있습니다.
+- Remote Workspace 쓰기/명령은 별도 `allowWriteExecution=true`가 있어야만 `remote_write_file`, `remote_edit_file`, `remote_run_command`가 노출됩니다.
+- remote 분석 결과를 local report artifact로 저장할 때는 `local_write_report`를 우선 사용합니다.
+
 #### 1.2 모드별 프롬프트
 
 | 프롬프트 상수 | 모드 | 역할 | 주요 규칙 |
 |---|---|---|---|
-| `ASK_PROMPT` | Ask | 질문/답변 전용 | 도구 사용 엄격 금지. 지식 기반 응답만 제공. |
+| `ASK_PROMPT` | Ask | 읽기 전용 질문/답변 | 현재 schema에 있는 read-only 도구는 사용할 수 있습니다. 상태 변경, 파일 쓰기/수정, shell 실행, tool 생성은 금지합니다. |
 | `AGENT_PROMPT` | Agent | 자율 실행 | 도구 자유 사용. 모드 전환 가이드(Plan/Ask 제안) 포함. `create_tool` 금지. |
 
 #### 1.3 Plan 모드 프롬프트 (4단계 파이프라인)
@@ -126,11 +147,13 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 
 - `steps[]`: `step_id`, `description`, `commands`, `decision_rules`, `json_mapping`
 - `commands[]`: `command`, `type=read_only`, `timeout_seconds`, `failure_policy`, `parse_strategy`
+- generated custom tool은 command 실행 검증 대신 `validation_strategy: core_sandbox_gate`
 - `decision_rules[]`: `condition`, `status`, `message`
 - `outputs.required_result_fields`: `evidence`, `sanitized_output`, `recommendation`
 - `status_values`: `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO`
 - `command_policy`: allowlist/denylist 기반 명령 제한
 - `mvp_exclusions`: write/recovery/rollback/notification 등 MVP에서 제외하는 작업
+- generated custom tool에서 `execution_spec`가 누락되면 Core가 최소 `validation_strategy: core_sandbox_gate` 스펙을 보정하고 `validationWarnings`에 남깁니다. 이는 반복 반려를 줄이기 위한 fallback이며, 승인/구현 전에는 입력/출력/의존성/제외 범위를 보완해야 합니다.
 
 특수 판정 규칙:
 
@@ -139,13 +162,28 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 - 인증 필요한 read-only API는 `expected_statuses`에 `200`, `401`, `403`을 허용할 수 있습니다.
 - POST/PUT/PATCH/DELETE, 주문 생성, rollback, restart, `docker exec`, K8s 명령은 기본 MVP에서 제외합니다.
 - log grep은 결과 없음과 명령 실패를 구분해야 하며, no-match는 PASS로 해석 가능한 `failure_policy=ignore_no_match` 또는 동등한 정책을 둡니다.
+- generated custom tool은 `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, `python3 -c ...`를 PLAN command step으로 넣지 않습니다. 승인된 `create_tool` 경로가 Core Docker sandbox gate에서 compile/import/BaseTool subclass/필수 속성/`execute` signature를 검증합니다.
 
 Core 검증 위치:
 
 - `src/tool_plan/planner.py::_validate_execution_spec_if_required()`
-- 운영/remote/tool 생성 성격의 요청에서 `execution_spec`가 완전히 없으면 피드백으로 전환합니다. 단, 상세 품질 필드(`outputs.required_result_fields`, step별 `commands`, `json_mapping`, `failure_policy` 등) 누락만으로는 실패시키지 않습니다.
-- hard fail은 command substitution/output redirection/shell chaining/denylist 명령/API write method/명백히 위험한 Docker 명령처럼 실행 안전성에 직접 영향을 주는 항목에 제한합니다.
+- `CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE`로 강도를 조절합니다.
+  - `strict`: 운영 기본값. 위험 command/API pattern은 PLAN draft 저장 전 피드백으로 전환합니다.
+  - `warn`: 검증 결과를 `planSnapshot.validationWarnings`와 Markdown의 “보완 필요” 섹션에 남기지만 PLAN draft 저장은 허용합니다.
+  - `off`: `execution_spec` 필수 여부와 command/API 검증을 건너뜁니다. 단, malformed JSON이나 빈 `planSnapshot.blocks`처럼 저장 불가능한 구조 오류는 계속 실패합니다.
+- 운영/remote 진단 성격의 요청에서 `execution_spec`가 완전히 없으면 `strict`에서는 피드백으로 전환하고, `warn`에서는 보완 필요 경고로만 남깁니다. generated custom tool 성격의 요청에서는 `execution_spec`가 누락되어도 Core가 최소 `core_sandbox_gate` 스펙을 자동 보정하고 경고로 남깁니다. 상세 품질 필드(`outputs.required_result_fields`, step별 `commands`, `json_mapping`, `failure_policy` 등) 누락만으로는 실패시키지 않습니다.
+- `strict` hard fail은 command substitution/output redirection/shell chaining/denylist 명령/API write method/명백히 위험한 Docker 명령처럼 실행 안전성에 직접 영향을 주는 항목에 제한합니다.
+- generated custom tool의 `execution_spec.validation_strategy=core_sandbox_gate`는 정상 검증 전략으로 인정합니다. 이 검증은 command allowlist가 아니라 `src/tooling/sandbox_gate.py`와 `sandbox_gate_runner.py`가 담당합니다.
+- generated custom tool은 운영체제 command plan이 아니므로 `execution_spec.steps`가 비어 있어도 정상입니다. 이 경우 `implementation_constraints`에 BaseTool import, Pydantic input model, `execute(arguments, context)`, ToolResult output, dependency/fallback 정책을 남기는 것을 권장합니다.
+- 일반 worktree 검증용 command step에서는 `python -B -m py_compile <상대경로.py>`, `python3 -B -m py_compile <상대경로.py>`, `python -m json.tool <상대경로.json>`, `node --check <상대경로.js>`, `git diff --check`만 interpreter/build 계열 예외로 허용합니다.
 - `structuredPlanJson`에는 `execution_spec` 원본을 보존하고, `planSnapshot.executionSpec`에는 표시/검토용 projection을 둡니다.
+
+Allowlist 공개 원칙:
+
+- PLAN draft 검증의 read-only command allowlist는 보안 비밀처럼 숨기지 않습니다. 사용자에게는 `docker ps/inspect/logs`, `df`, `free`, `top`, `uptime`, `curl`, `grep`, `awk`, `sed -n` 같은 범주를 설명할 수 있습니다.
+- `python3 -c`, `python3 <path>` 같은 interpreter 직접 실행은 “임의 코드 실행이라 `strict` 모드에서 차단된다”고 설명합니다.
+- generated tool 생성 요청에서는 shell command로 파일을 실행하는 계획보다, 생성할 tool의 동작/입력/출력/`core_sandbox_gate` 검증 기준 중심으로 PLAN draft를 다시 쓰도록 안내합니다.
+- “전체 허용 목록 공개 금지”처럼 과한 보안 설명은 사용하지 않습니다.
 
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
 
@@ -190,7 +228,7 @@ Runtime reminder는 모드 변경 또는 서버 요청의 현재 mode를 다음 
  - For this turn, this runtime mode has higher priority than older conversation assumptions, explanations, or instructions about ASK, AGENT, PLAN, or COORDINATOR behavior.
  - Treat older conversation instructions that imply a different Theseus runtime mode as stale for this turn; do not continue the previous mode's behavior unless it matches the current mode.
  - This does not disable Theseus security policy, RBAC, sandbox limits, command restrictions, or human approval requirements; those controls remain authoritative.
- - ASK mode is conversation-only. Do not execute tools, do not claim AGENT/PLAN actions are being performed, and answer with text. If execution, tool use, or plan creation is needed, explain the needed mode switch instead of acting.
+ - ASK mode is read-only and answer-focused. You may use read-only tools that appear in the current schema, but do not create, modify, delete, execute shell commands, or claim AGENT/PLAN actions are being performed.
 ```
 
 주입 경로:

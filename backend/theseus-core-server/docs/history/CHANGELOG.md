@@ -4,6 +4,96 @@
 
 ## [Unreleased]
 
+### 📝 Session 148 — Core Server 아키텍처 관계도 문서 추가 (2026-05-15)
+
+#### 문서
+- `docs/architecture/core-server-architecture-map.md`를 추가해 Core Server의 시스템 경계, `src`/`theseus_engine` 레이어 분리, SSE 요청 흐름, PLAN/tool 생성 pipeline, Tool Registry 권한 관계, Core DB 관계, 외부 연동 관계를 Mermaid 관계도로 정리
+- 기존 README/CHANGELOG와 현재 구현 파일 기준으로 서버 오케스트레이션, shared runtime, Spring/Kafka/PostgreSQL/Docker/Remote Workspace 관계를 한 문서에서 추적할 수 있게 함
+
+---
+
+### 🛠️ Session 147 — Generated Tool sandbox gate 검증 전략 정리 (2026-05-15)
+
+#### `src` / `theseus_engine`
+- generated custom tool PLAN draft는 직접 `python3 <tool>.py` 또는 `py_compile` command를 실행 계획에 넣지 않고 `execution_spec.validation_strategy=core_sandbox_gate`를 사용하도록 prompt를 보강
+- PLAN draft validator가 `core_sandbox_gate`를 generated Theseus custom tool의 정상 검증 전략으로 인정하도록 추가
+- generated custom tool 요청에서 `execution_spec`가 누락되면 즉시 hard fail하지 않고, 최소 `validation_strategy=core_sandbox_gate` 스펙을 자동 보정한 뒤 `validationWarnings`에 남기도록 조정
+- generated custom tool은 OS command plan이 아니므로 `steps`가 비어 있어도 정상이며, BaseTool import/Pydantic input/`execute(arguments, context)`/ToolResult/dependency fallback 같은 구현 제약을 남기도록 prompt를 보강
+- 일반 worktree 검증용 command allowlist에 `python -B -m py_compile <relative .py>`, `python -m json.tool <relative .json>`, `node --check <relative .js>`, `git diff --check`만 좁게 허용하고 직접 스크립트 실행/inline code 실행은 계속 차단
+- sandbox 실패 메시지가 “직접 실행 실패”가 아니라 Core sandbox gate의 compile/import/구조 검증 실패임을 드러내도록 정리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 generated tool sandbox 검증과 일반 command 검증 allowlist의 차이를 기록
+
+---
+
+### 🛠️ Session 146 — Remote Workspace + local worktree RBAC 노출 조정 (2026-05-15)
+
+#### `theseus_engine`
+- Remote Workspace 선택 시 local `read_file`, `glob`, `grep`, `write_file`, `edit_file`, `bash`를 일괄 숨기던 정책을 완화하고, mode와 현재 user level/RBAC 기준으로 노출되도록 조정
+- ASK와 PLAN Drafting/Review는 local/remote read-only 중심 도구만 허용하고, AGENT와 승인된 PLAN Executing에서는 현재 등급이 허용하는 local worktree 도구를 사용할 수 있게 함
+- remote write/command 도구는 기존처럼 `allowWriteExecution=true`일 때만 노출되도록 유지
+- prompt capability와 mode reminder를 갱신해 Remote Workspace 대상은 `remote_*`, Core/local worktree 대상은 local tool을 사용하도록 경계를 명확히 함
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 Remote Workspace와 local worktree 도구 경계, ASK read-only tool 허용 정책을 반영
+
+---
+
+### 🛠️ Session 145 — Local runtime registry permission 보강 (2026-05-15)
+
+#### `theseus_engine`
+- local/Extension/TUI engine assembly에서 full registry의 모든 tool `permission_level`을 `project_tool_permissions`에 채워 넣도록 보강
+- `enter_worktree`, `exit_worktree`, `local_write_report`처럼 기본 permission dict에 누락될 수 있는 core tool도 현재 user level 기준으로 가시성/실행 권한이 일관되게 적용됨
+- command handler가 mode/phase 변경 후 registry를 다시 만들 때도 같은 permission map을 재사용하도록 기존 dict를 in-place 보강
+
+---
+
+### 🛠️ Session 144 — PLAN draft execution spec validation mode 추가 (2026-05-15)
+
+#### `src`
+- `CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE` 설정을 추가해 PLAN draft execution spec 검증 강도를 `strict` / `warn` / `off`로 제어할 수 있게 함
+- `strict`는 기존처럼 위험 command/API pattern을 피드백 전환하고, `warn`은 `planSnapshot.validationWarnings`와 Markdown “보완 필요” 섹션에만 남기며 저장을 허용하고, `off`는 execution spec 필수/command/API 검증을 건너뛰도록 분리
+- malformed JSON, 빈 `planSnapshot.blocks`처럼 Core가 저장할 수 없는 최소 구조 오류는 validation mode와 무관하게 계속 실패하도록 유지
+- PLAN draft 검증 실패 피드백 prompt에 allowlist 공개 원칙을 반영하고, `python3 -c`/`python3 <path>`는 strict 모드의 임의 코드 실행 차단으로 설명하도록 정리
+
+#### 문서/설정
+- `.env.example`에 `CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE=strict`와 strict/warn/off 설명 추가
+- `docs/prompt/prompt_architecture_map.md`에 validation mode별 동작과 과한 allowlist 비공개 설명을 피하는 원칙 추가
+
+---
+
+### 🛠️ Session 143 — Remote read + local report write 지원 (2026-05-15)
+
+#### `theseus_engine`
+- `local_write_report` core tool을 추가해 Remote Workspace 분석 결과를 Core worktree의 `reports/` 또는 `.theseus/reports/` 하위 `.md`/`.json`/`.txt` 산출물로만 저장할 수 있게 함
+- 기존 파일 덮어쓰기는 `allow_overwrite=true`와 `overwrite_reason`이 있을 때만 허용하고, 기존 `edit_safety` 기반 `safetyReport` metadata를 반환하도록 구성
+- remote context tool visibility에서 local `read_file`, `glob`, `grep`, `bash`, `write_file`, `edit_file`은 계속 숨기고, AGENT 또는 승인된 PLAN Executing에서만 `local_write_report`를 예외 노출하도록 분리
+- prompt capability에 Remote Workspace report writing 지침을 추가해 읽기는 `remote_*`, 로컬 보고서 저장은 `local_write_report`를 사용하도록 명시
+
+#### `src`
+- 서버 builder가 `THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED`와 `THESEUS_LOCAL_REPORT_ROOT` 설정을 반영해 remote AGENT/PLAN Executing registry와 tool metadata를 구성하도록 보강
+- mock project permission에 `local_write_report`를 추가해 로컬 개발 환경에서도 동일 정책을 확인할 수 있게 함
+
+#### 문서/설정
+- `.env.example`에 `THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED`, `THESEUS_LOCAL_REPORT_ROOT` 선택 설정 추가
+- `docs/prompt/prompt_architecture_map.md`에 remote read/local report write 정책과 관련 prompt/tool 위치를 문서화
+
+---
+
+### 🐛 Session 142 — Core stream tool history 저장 보강 (2026-05-15)
+
+#### `src/history` / `src/routes`
+- ASK/AGENT stream에서 `ToolExecutionStarted` / `ToolExecutionCompleted` 이벤트를 Spring history에 `SYSTEM` + `SYSTEM_NOTICE` + `JSON` record로 저장하도록 추가
+- 저장된 tool history JSON의 `noticeType=TOOL_EXECUTION_*`는 mapper의 assistant-context projection을 통해 다음 turn LLM request history에 `이전 도구 호출` / `이전 도구 실행 결과` 요약으로 주입됨
+- tool history 저장 실패는 stream 자체를 중단하지 않고 warning 로그만 남기도록 처리
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\history\service.py backend\theseus-core-server\src\routes\stream.py backend\theseus-core-server\scratch\test_tool_context_debug.py` 성공
+- `PYTHONPATH=. C:\Users\SSAFY\miniforge3\envs\tt\python.exe scratch\test_tool_context_debug.py` 성공
+
+---
+
 ### 🛠️ Session 141 — Custom Tool Registry 복구 UX 추가 (2026-05-15)
 
 #### `theseus_engine`
