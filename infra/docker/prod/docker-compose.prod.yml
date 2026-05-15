@@ -129,6 +129,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
+      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/backend/theseus-core-server/theseus_engine/custom_tools/projects
       - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/var/log/theseus/debug/dumps
       - ${REMOTE_WORKSPACE_KEY_HOST_PATH:-/secure/theseus/keys/ssafy-ec2-key.pem}:/home/appuser/.ssh/ssafy-ec2-key.pem:ro
     ports:
