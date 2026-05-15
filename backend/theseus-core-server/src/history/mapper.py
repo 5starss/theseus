@@ -99,8 +99,43 @@ def _project_tool_history_notice(record: HistoryMessageRecord) -> str | None:
     if (
         record.sender_type.upper() == "SYSTEM"
         and message_type == "SYSTEM_NOTICE"
-        and any(content.startswith(prefix) for prefix in _TOOL_NOTICE_PREFIXES)
     ):
+        if content_type == "JSON":
+            projected_json_notice = _project_system_notice_json_tool_history(content)
+            if projected_json_notice is not None:
+                return projected_json_notice
+        if any(content.startswith(prefix) for prefix in _TOOL_NOTICE_PREFIXES):
+            return _limit_tool_history_context(content)
+    return None
+
+
+def _project_system_notice_json_tool_history(content: str) -> str | None:
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    notice_type = str(
+        payload.get("noticeType")
+        or payload.get("messageType")
+        or payload.get("type")
+        or ""
+    ).upper()
+    if notice_type in _TOOL_CALL_MESSAGE_TYPES:
+        return _summarize_tool_history_record(
+            "이전 도구 호출",
+            json.dumps(payload, ensure_ascii=False),
+            "JSON",
+        )
+    if notice_type in _TOOL_RESULT_MESSAGE_TYPES:
+        return _summarize_tool_history_record(
+            "이전 도구 실행 결과",
+            json.dumps(payload, ensure_ascii=False),
+            "JSON",
+        )
+    if any(content.startswith(prefix) for prefix in _TOOL_NOTICE_PREFIXES):
         return _limit_tool_history_context(content)
     return None
 
