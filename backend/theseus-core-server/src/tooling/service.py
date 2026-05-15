@@ -393,7 +393,11 @@ def _format_sandbox_failure_message(result: dict[str, Any]) -> str:
         "resourceLimited": result.get("resourceLimited", False),
     }
     details = ", ".join(f"{key}={value}" for key, value in summary.items())
-    return f"{message} ({details})"
+    return (
+        "생성된 Tool 파일을 직접 실행하지 않고 Core sandbox gate에서 "
+        "컴파일/import/구조를 검증하는 중 실패했습니다. "
+        f"{message} ({details})"
+    )
 
 
 def _is_tool_active_metadata(metadata: dict[str, Any]) -> bool:

@@ -108,6 +108,7 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
   },
   "execution_spec": {
     "tool_name": "snake_case logical tool name when the request is for a generated tool",
+    "validation_strategy": "core_sandbox_gate for generated Theseus custom tools; omit for pure remote/operator diagnostics",
     "mvp_scope": ["Concrete read-only capabilities included in the first version"],
     "mvp_exclusions": ["Write operations, recovery actions, or integrations intentionally excluded"],
     "status_values": ["PASS", "WARNING", "FAIL", "SKIPPED", "INFO"],
@@ -208,7 +209,17 @@ Classify each main task into one of three tiers:
 diagnostic, deployment check, server health check, log audit, API audit, Docker audit, or \
 resource monitoring capability, the JSON MUST include top-level `execution_spec`. This is \
 not a roadmap section; it is the build-ready spec that the next phase will use as context.
- - `execution_spec.steps[]` MUST include concrete read-only commands when the capability \
+ - Generated Theseus custom tools MUST use `execution_spec.validation_strategy: "core_sandbox_gate"`. \
+Do NOT add `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, or `python3 -c ...` \
+as execution steps for generated tools. After approval, `create_tool` runs the Core \
+Docker sandbox gate, which compiles/imports the module and checks the BaseTool subclass, \
+required attributes, and execute signature before activation.
+ - Generated Theseus custom tools are not operating-system command plans. Their \
+`execution_spec.steps[]` may be empty when validation is delegated to `core_sandbox_gate`; \
+instead, include implementation constraints such as BaseTool imports, Pydantic input model, \
+async `execute(arguments, context)`, ToolResult output shape, dependency policy, and \
+MVP exclusions.
+ - `execution_spec.steps[]` MUST include concrete read-only commands only when the capability \
 runs against an operating system, Docker host, Remote Workspace, API endpoint, or logs.
  - Every command entry MUST include `command`, `type`, `timeout_seconds`, `failure_policy`, \
 and `parse_strategy`. Use `type: "read_only"` for MVP diagnostics.
@@ -231,6 +242,10 @@ separate approved write-capable tool.
 `failure_policy` such as `ignore_no_match` and design the result so no matches means PASS.
  - Command policy MUST be allowlist-based. If a command is not in the allowlist or matches \
 the denylist, do not include it in the MVP spec; explain the safe alternative instead.
+ - Verification commands are separate from generated-tool sandbox validation. For ordinary \
+worktree verification, the only interpreter-style commands that may appear in command steps are \
+`python -B -m py_compile <relative .py>`, `python3 -B -m py_compile <relative .py>`, \
+`python -m json.tool <relative .json>`, `node --check <relative .js>`, and `git diff --check`.
  - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
 the plan must describe creating a Theseus custom tool during the Executing phase. \
 In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>_tool.py` \
