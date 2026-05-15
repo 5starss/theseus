@@ -171,7 +171,8 @@ Core 검증 위치:
   - `strict`: 운영 기본값. 위험 command/API pattern은 PLAN draft 저장 전 피드백으로 전환합니다.
   - `warn`: 검증 결과를 `planSnapshot.validationWarnings`와 Markdown의 “보완 필요” 섹션에 남기지만 PLAN draft 저장은 허용합니다.
   - `off`: `execution_spec` 필수 여부와 command/API 검증을 건너뜁니다. 단, malformed JSON이나 빈 `planSnapshot.blocks`처럼 저장 불가능한 구조 오류는 계속 실패합니다.
-- 운영/remote 진단 성격의 요청에서 `execution_spec`가 완전히 없으면 `strict`에서는 피드백으로 전환하고, `warn`에서는 보완 필요 경고로만 남깁니다. generated custom tool 성격의 요청에서는 `execution_spec`가 누락되어도 Core가 최소 `core_sandbox_gate` 스펙을 자동 보정하고 경고로 남깁니다. 상세 품질 필드(`outputs.required_result_fields`, step별 `commands`, `json_mapping`, `failure_policy` 등) 누락만으로는 실패시키지 않습니다.
+- 운영/remote 진단 성격의 요청에서 `execution_spec`가 완전히 없으면 `strict`에서는 피드백으로 전환하고, `warn`에서는 보완 필요 경고로만 남깁니다. generated custom tool 성격의 요청에서는 `execution_spec`가 누락되어도 Core가 최소 `core_sandbox_gate` 스펙을 자동 보정하고 경고로 남깁니다.
+- 검증 결과는 `block / warning / recovery feedback`으로 분리합니다. `commands`, `outputs.required_result_fields`, `json_mapping`, `failure_policy`, `parse_strategy`, `mvp_exclusions` 같은 상세 품질 필드 누락은 hard fail이 아니라 `validationWarnings`와 Markdown의 “보완 필요” 섹션으로 노출합니다.
 - `strict` hard fail은 command substitution/output redirection/shell chaining/denylist 명령/API write method/명백히 위험한 Docker 명령처럼 실행 안전성에 직접 영향을 주는 항목에 제한합니다.
 - generated custom tool의 `execution_spec.validation_strategy=core_sandbox_gate`는 정상 검증 전략으로 인정합니다. 이 검증은 command allowlist가 아니라 `src/tooling/sandbox_gate.py`와 `sandbox_gate_runner.py`가 담당합니다.
 - generated custom tool은 운영체제 command plan이 아니므로 `execution_spec.steps`가 비어 있어도 정상입니다. 이 경우 `implementation_constraints`에 BaseTool import, Pydantic input model, `execute(arguments, context)`, ToolResult output, dependency/fallback 정책을 남기는 것을 권장합니다.
@@ -184,6 +185,12 @@ Allowlist 공개 원칙:
 - `python3 -c`, `python3 <path>` 같은 interpreter 직접 실행은 “임의 코드 실행이라 `strict` 모드에서 차단된다”고 설명합니다.
 - generated tool 생성 요청에서는 shell command로 파일을 실행하는 계획보다, 생성할 tool의 동작/입력/출력/`core_sandbox_gate` 검증 기준 중심으로 PLAN draft를 다시 쓰도록 안내합니다.
 - “전체 허용 목록 공개 금지”처럼 과한 보안 설명은 사용하지 않습니다.
+
+#### 1.3.1 Tool 생성 실패 recovery feedback
+
+- Tool build/runtime `create_tool` 실패는 단순 오류 문자열로 끝내지 않고 원인, recoverable 여부, 다음 조치, retry policy를 포함합니다.
+- 같은 fileName/moduleName 충돌은 `tool_name_conflict`로 분류하고 `retry_policy=do_not_retry_same_input`으로 남깁니다. 모델은 같은 이름으로 재시도하지 말고 기존 Tool 재사용, 기존 Tool 확장, 새 이름 제안, 교체 승인 요청 중 하나를 제안해야 합니다.
+- `permissionLevel`은 정수 `1~5`만 허용합니다. 위험도/신뢰도 같은 소수점 점수는 permission과 분리해야 하며, 소수점 permission 값은 validation failure로 처리합니다.
 
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
 

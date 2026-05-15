@@ -1277,6 +1277,12 @@ class ToolPlanPlanner:
         self._validate_execution_spec_command_policy(execution_spec, errors)
         self._validate_execution_spec_api_checks(execution_spec, errors)
         self._validate_execution_spec_steps(execution_spec, errors)
+        warnings.extend(
+            self._collect_execution_spec_quality_warnings(
+                execution_spec,
+                generated_tool_request=generated_tool_request,
+            )
+        )
         if errors:
             if validation_mode == "warn":
                 return [*warnings, *errors[:20]]
@@ -1321,6 +1327,10 @@ class ToolPlanPlanner:
                 "create_tool",
                 "theseus custom tool",
                 "tool_name",
+                "tool",
+                "tool 만들",
+                "tool 생성",
+                "tool 만들어",
                 "툴",
                 "도구",
                 "생성할 tool",
@@ -1443,6 +1453,79 @@ class ToolPlanPlanner:
             if isinstance(commands, list):
                 for command_index, command_spec in enumerate(commands, start=1):
                     self._validate_command_spec(command_spec, step_index, command_index, errors)
+
+    @staticmethod
+    def _collect_execution_spec_quality_warnings(
+        execution_spec: dict[str, Any],
+        *,
+        generated_tool_request: bool,
+    ) -> list[str]:
+        """Return non-blocking PLAN draft quality warnings.
+
+        These checks improve implementation quality but do not indicate direct
+        execution risk. They should not block PLAN draft persistence.
+        """
+
+        warnings: list[str] = []
+        strategy = str(execution_spec.get("validation_strategy") or "").strip()
+        is_generated_sandbox_plan = generated_tool_request and strategy == "core_sandbox_gate"
+
+        mvp_exclusions = execution_spec.get("mvp_exclusions")
+        if not isinstance(mvp_exclusions, list) or not mvp_exclusions:
+            warnings.append("품질 보완: execution_spec.mvp_exclusions가 비어 있습니다.")
+
+        outputs = execution_spec.get("outputs")
+        required_fields: set[str] = set()
+        if isinstance(outputs, dict):
+            raw_fields = outputs.get("required_result_fields")
+            if isinstance(raw_fields, list):
+                required_fields = {str(item).strip() for item in raw_fields if str(item).strip()}
+        missing_result_fields = {"evidence", "sanitized_output", "recommendation"} - required_fields
+        if missing_result_fields:
+            warnings.append(
+                "품질 보완: execution_spec.outputs.required_result_fields에 "
+                + ", ".join(sorted(missing_result_fields))
+                + "를 포함하면 결과 검토성이 좋아집니다."
+            )
+
+        steps = execution_spec.get("steps")
+        if steps is None:
+            if not is_generated_sandbox_plan:
+                warnings.append("품질 보완: execution_spec.steps가 없어 실행 단계가 덜 구체적입니다.")
+            return warnings
+        if not isinstance(steps, list):
+            return warnings
+        if not steps:
+            if not is_generated_sandbox_plan:
+                warnings.append("품질 보완: execution_spec.steps가 비어 있습니다.")
+            return warnings
+
+        for step_index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                continue
+            commands = step.get("commands")
+            if not isinstance(commands, list) or not commands:
+                if not is_generated_sandbox_plan:
+                    warnings.append(f"품질 보완: steps[{step_index}]에 commands가 없습니다.")
+            else:
+                for command_index, command_spec in enumerate(commands, start=1):
+                    if not isinstance(command_spec, dict):
+                        continue
+                    if not command_spec.get("failure_policy"):
+                        warnings.append(
+                            f"품질 보완: steps[{step_index}].commands[{command_index}].failure_policy가 없습니다."
+                        )
+                    if not command_spec.get("parse_strategy"):
+                        warnings.append(
+                            f"품질 보완: steps[{step_index}].commands[{command_index}].parse_strategy가 없습니다."
+                        )
+            if not isinstance(step.get("json_mapping"), dict):
+                warnings.append(f"품질 보완: steps[{step_index}]에 json_mapping이 없습니다.")
+            decision_rules = step.get("decision_rules")
+            if not isinstance(decision_rules, list) or not decision_rules:
+                warnings.append(f"품질 보완: steps[{step_index}]에 decision_rules가 없습니다.")
+
+        return warnings[:20]
 
     @staticmethod
     def _validate_decision_rules(
