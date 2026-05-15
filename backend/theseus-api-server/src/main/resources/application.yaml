@@ -1,3 +1,6 @@
 spring:
   profiles:
     active: local
+  mvc:
+    async:
+      request-timeout: ${SPRING_MVC_ASYNC_REQUEST_TIMEOUT_MILLIS:1800000}
