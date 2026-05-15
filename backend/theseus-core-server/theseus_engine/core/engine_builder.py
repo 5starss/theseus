@@ -77,6 +77,7 @@ async def setup_engine(
     api_client: Optional[TheseusLLMClient] = None,
     enable_dynamic_tools: bool = THESEUS_DYNAMIC_TOOL_RETRIEVAL,
     enable_skill_injection: Optional[bool] = None,
+    runtime_reminders: Optional[tuple[str, ...]] = None,
     reset_stats: bool = False,
     # ── Kafka 실행 추적 ID (선택) ─────────────────────────
     run_id: Optional[str] = None,
@@ -225,7 +226,10 @@ async def setup_engine(
         cwd=resolved_cwd,
         model=model_name,
         system_prompt=(
-            sm.get_system_prompt(available_tools=active_tool_names_tuple)
+            sm.get_system_prompt(
+                available_tools=active_tool_names_tuple,
+                runtime_reminders=runtime_reminders,
+            )
             + ("\n\n" + memory_context if memory_context else "")
         ),
         max_turns=30,

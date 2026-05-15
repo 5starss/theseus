@@ -4,6 +4,55 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 135 — PLAN draft 실행 스펙 품질 검증 강화 (2026-05-15)
+
+#### `theseus_engine`
+- PLAN Drafting 프롬프트에 운영 점검, Remote Workspace, Docker/API/log/resource 진단, generated tool 요청에서 `execution_spec`를 작성하도록 지침을 추가
+- 실행 스펙에는 read-only 명령, 파싱 방식, 실패 정책, 판정 규칙, evidence/sanitized_output/recommendation 매핑, command allowlist/denylist, MVP 제외 범위를 포함하도록 보강
+- 사용자-facing 프롬프트에는 `ToolPlan` 용어를 추가하지 않고 `PLAN draft`, `execution spec`, `generated tool spec` 기준으로 설명 유지
+
+#### `src`
+- PLAN draft JSON 검증 단계에서 운영/remote/tool 생성 성격의 요청에 `execution_spec`가 없으면 실패하도록 보강
+- Docker inspect 필드, healthcheck `none` 처리, log grep no-match 정책, API read-only method, command allowlist/denylist를 Core 내부에서 검증
+- 사용자 표시 Markdown에는 raw JSON 대신 실행 스펙 요약, 입력값, 실행 단계, 결과 필드, MVP 제외 범위를 사람이 읽는 형태로 표시
+- API/Kafka/FE schema는 변경하지 않고 `structuredPlanJson`에 `execution_spec`를 그대로 보존
+
+#### 검증
+- `python -m py_compile src\tool_plan\planner.py theseus_engine\prompts\plan.py` 성공
+- `python -m compileall -q src theseus_engine` 성공
+- inline smoke로 정상 Docker inspect execution spec 통과 및 `docker inspect | grep unhealthy`/health `none` FAIL 계획 차단 확인
+- PLAN Drafting 프롬프트에 `ToolPlan` 용어가 새로 노출되지 않는 것 확인
+
+---
+
+### 🛠️ Session 132 — Mode runtime context 공통 reminder 주입 (2026-05-15)
+
+#### `theseus_engine`
+- `theseus_engine/core/mode_context.py`를 추가해 ASK/AGENT/PLAN/COORDINATOR 모드 전환 시 사용할 runtime reminder 문구를 공통화
+- reminder는 사용자 원문 history에 붙이지 않고 system prompt의 runtime context로만 주입되도록 정리
+- CLI, legacy CLI command handler, TUI, Extension/local daemon runtime이 모두 `pending_mode_reminders`를 replace 방식으로 관리하도록 변경
+- 사용자가 입력 없이 `ASK -> AGENT -> ASK`처럼 모드를 여러 번 바꿔도 다음 실제 입력에는 마지막 선택 모드 reminder만 1회 적용되고 즉시 clear되도록 보강
+- 기존 CLI의 `Ignore any prior restrictions` 계열 문구를 제거하고, Theseus 보안 정책/RBAC/승인 정책은 계속 유효하다는 문구로 대체
+- runtime reminder 문구를 강화해 현재 턴의 mode가 이전 대화의 ASK/AGENT/PLAN/COORDINATOR 관련 stale 지시보다 우선한다고 명시
+- ASK는 conversation-only로 도구 실행을 금지하고, AGENT는 active tool list 확인 전 tool/custom tool이 없다고 단정하지 않도록 지침을 추가
+- PLAN은 phase contract에 따라 PLAN draft/plan JSON/approved plan/verification을 처리하고 ASK/AGENT처럼 행동하지 않도록 mode assertion을 보강
+
+#### `src`
+- 서버 `/api/v1/stream` 엔진 조립 경로에서도 요청 단위 current mode assertion을 system prompt runtime context에 주입
+- API/Kafka/SSE/FE payload schema 변경 없이, 서버는 stateless 요청마다 현재 mode만 명확히 전달하는 방식으로 처리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`의 Runtime Reminders 예시와 변경 이력에 mode 우선순위 강화 내용을 반영
+
+#### 검증
+- `python -m py_compile`로 mode context helper, CLI/TUI/local daemon/server builder 관련 파일 문법 검증 성공
+- helper smoke로 ASK/AGENT/PLAN reminder 문구와 replace/consume 중복 방지 동작 확인 성공
+- system prompt smoke로 reminder 섹션이 중복 생성되지 않고, reminder 없는 다음 prompt에 이전 mode assertion이 남지 않는 것 확인
+- 강화된 AGENT reminder smoke로 이전 ASK mode 지시가 stale 처리되고, active tool list 확인 전 도구 부재를 단정하지 말라는 문구가 렌더링되는 것 확인
+- `python -m compileall -q theseus_engine src` 성공
+
+---
+
 ### 📝 Session 125 — `usage.md` Extension 설치 가이드 강조 및 상세화 (2026-05-14)
 
 #### 문서

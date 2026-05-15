@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from theseus_cli.context import CLIContext
 from theseus_cli.ui import print_help, print_status
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 
 if TYPE_CHECKING:
     pass
@@ -33,38 +34,54 @@ async def handle_slash_command(
 
     # ── 모드 전환 ───────────────────────────────────────────────
     elif cmd == "/plan":
+        previous_mode = ctx.sm.mode
         ctx.sm.switch_mode(AgentMode.PLAN)
         ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
-        ctx.pending_mode_notification = (
-            "[System: Mode switched to PLAN. Research the codebase and produce a structured JSON plan. No code execution yet.]\n\n"
+        ctx.pending_mode_reminders = build_mode_runtime_reminders(
+            ctx.sm.mode,
+            previous_mode=previous_mode,
+            plan_phase=getattr(ctx.sm, "plan_phase", None),
+            source="CLI",
+            explicit_selection=True,
         )
         print_status(ctx.sm.mode.name, ctx.user_level)
         return True, None
 
     elif cmd == "/agent":
+        previous_mode = ctx.sm.mode
         ctx.sm.switch_mode(AgentMode.AGENT)
         ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
-        ctx.pending_mode_notification = (
-            "[System: Mode switched to AGENT. All tools are now available. Ignore any prior restrictions — execute tasks directly using tools.]\n\n"
+        ctx.pending_mode_reminders = build_mode_runtime_reminders(
+            ctx.sm.mode,
+            previous_mode=previous_mode,
+            source="CLI",
+            explicit_selection=True,
         )
         print_status(ctx.sm.mode.name, ctx.user_level)
         return True, None
 
     elif cmd == "/ask":
+        previous_mode = ctx.sm.mode
         ctx.sm.switch_mode(AgentMode.ASK)
         ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
-        ctx.pending_mode_notification = (
-            "[System: Mode switched to ASK. Tool use is strictly prohibited. Answer only with text.]\n\n"
+        ctx.pending_mode_reminders = build_mode_runtime_reminders(
+            ctx.sm.mode,
+            previous_mode=previous_mode,
+            source="CLI",
+            explicit_selection=True,
         )
         print_status(ctx.sm.mode.name, ctx.user_level)
         return True, None
 
     elif cmd == "/coordinator":
+        previous_mode = ctx.sm.mode
         ctx.sm.switch_mode(AgentMode.COORDINATOR)
         ctx.engine.set_system_prompt(ctx.sm.get_system_prompt())
-        ctx.pending_mode_notification = (
-            "[System: Mode switched to COORDINATOR. Decompose the task into parallel sub-agents. "
-            "All prior mode restrictions are lifted.]\n\n"
+        ctx.pending_mode_reminders = build_mode_runtime_reminders(
+            ctx.sm.mode,
+            previous_mode=previous_mode,
+            source="CLI",
+            explicit_selection=True,
         )
         print_status(ctx.sm.mode.name, ctx.user_level)
         return True, None

@@ -69,6 +69,84 @@ Generated custom tool safety context:
 {_CUSTOM_TOOL_SECURITY_RULES}
 """
 
+_EXECUTION_SPEC_KEYWORDS = (
+    "tool",
+    "custom tool",
+    "generated tool",
+    "remote workspace",
+    "deployment",
+    "deploy",
+    "post-deploy",
+    "health check",
+    "docker",
+    "container",
+    "api check",
+    "log",
+    "resource",
+    "monitoring",
+    "monitor",
+    "툴",
+    "도구",
+    "생성",
+    "만들",
+    "원격",
+    "리모트",
+    "배포",
+    "점검",
+    "헬스",
+    "상태 조회",
+    "운영서버",
+    "운영 서버",
+    "도커",
+    "컨테이너",
+    "로그",
+    "리소스",
+    "모니터링",
+)
+_ALLOWED_EXECUTION_STATUS_VALUES = {"PASS", "WARNING", "FAIL", "SKIPPED", "INFO"}
+_READ_ONLY_API_METHODS = {"GET", "HEAD", "OPTIONS"}
+_ALLOWED_COMMAND_ROOTS = {
+    "docker",
+    "df",
+    "free",
+    "top",
+    "uptime",
+    "curl",
+    "grep",
+    "awk",
+    "sed",
+}
+_ALLOWED_DOCKER_SUBCOMMANDS = {"ps", "inspect", "logs"}
+_DENIED_COMMAND_PATTERNS = (
+    r"\bdocker\s+exec\b",
+    r"\bdocker\s+stop\b",
+    r"\bdocker\s+restart\b",
+    r"\bdocker\s+rm\b",
+    r"\bdocker\s+compose\s+up\b",
+    r"\bdocker\s+compose\s+down\b",
+    r"\bkubectl\b",
+    r"\brm\b",
+    r"\bmv\b",
+    r"\bcp\b",
+    r"\bchmod\b",
+    r"\bchown\b",
+    r"\bvi\b",
+    r"\bnano\b",
+    r"\bsystemctl\b",
+    r"\bservice\b",
+    r"\bkill\b",
+    r"\breboot\b",
+    r"\bshutdown\b",
+)
+_DOCKER_INSPECT_REQUIRED_FIELDS = (
+    ".State.Status",
+    ".RestartCount",
+    ".State.ExitCode",
+    ".State.OOMKilled",
+    ".State.Health",
+    ".State.Health.Status",
+)
+
 
 def _slugify_project_id(project_id: int | str | None) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", str(project_id or "")).strip("_").lower()
@@ -201,6 +279,7 @@ class ToolPlanPlanner:
         _raw_markdown, structured_plan = generated
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
+        self._validate_execution_spec_if_required(structured_plan, event)
         version = self._resolve_plan_version(event)
         snapshot = self._build_snapshot(structured_plan, version=version, event=event)
         structured = self._build_structured_plan(structured_plan)
@@ -458,6 +537,7 @@ class ToolPlanPlanner:
             "outputs": self._list_of_dicts(plan_json.get("outputs")),
             "constraints": self._constraints_from_plan(plan_json),
             "alternatives": self._alternatives_from_plan(plan_json),
+            "executionSpec": self._execution_spec_from_plan(plan_json),
             "verification": self._verification_from_plan(plan_json),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
@@ -572,6 +652,13 @@ class ToolPlanPlanner:
         return result
 
     @staticmethod
+    def _execution_spec_from_plan(plan_json: dict[str, Any]) -> dict[str, Any]:
+        execution_spec = plan_json.get("execution_spec")
+        if isinstance(execution_spec, dict):
+            return dict(execution_spec)
+        return {}
+
+    @staticmethod
     def _verification_from_plan(plan_json: dict[str, Any]) -> dict[str, Any]:
         verification = plan_json.get("verification")
         if isinstance(verification, dict):
@@ -601,6 +688,11 @@ class ToolPlanPlanner:
         if alternative_lines:
             lines.extend(["", "### 대안 / Plan B"])
             lines.extend(f"- {line}" for line in alternative_lines)
+
+        execution_lines = self._display_execution_spec(snapshot.get("executionSpec") or {})
+        if execution_lines:
+            lines.extend(["", "### 실행 스펙"])
+            lines.extend(f"- {line}" for line in execution_lines)
 
         verification_lines = self._display_verification(snapshot.get("verification") or {})
         if verification_lines:
@@ -662,6 +754,67 @@ class ToolPlanPlanner:
         return lines
 
     @staticmethod
+    def _display_execution_spec(execution_spec: dict[str, Any]) -> list[str]:
+        if not isinstance(execution_spec, dict) or not execution_spec:
+            return []
+
+        lines: list[str] = []
+        tool_name = str(execution_spec.get("tool_name") or "").strip()
+        if tool_name:
+            lines.append(f"도구 이름: `{tool_name}`")
+
+        status_values = execution_spec.get("status_values")
+        if isinstance(status_values, list) and status_values:
+            lines.append(
+                "상태값: "
+                + ", ".join(f"`{str(item).strip()}`" for item in status_values if str(item).strip())
+            )
+
+        inputs = execution_spec.get("inputs")
+        if isinstance(inputs, list) and inputs:
+            input_names = [
+                str(item.get("name") or item.get("key") or "").strip()
+                for item in inputs
+                if isinstance(item, dict)
+            ]
+            input_names = [name for name in input_names if name]
+            if input_names:
+                lines.append("입력값: " + ", ".join(f"`{name}`" for name in input_names[:8]))
+
+        steps = execution_spec.get("steps")
+        if isinstance(steps, list) and steps:
+            step_titles: list[str] = []
+            for step in steps[:8]:
+                if not isinstance(step, dict):
+                    continue
+                step_id = str(step.get("step_id") or step.get("id") or "").strip()
+                description = str(step.get("description") or "").strip()
+                command_count = len(step.get("commands") or []) if isinstance(step.get("commands"), list) else 0
+                label = step_id or description or "step"
+                suffix = f" ({command_count} command)" if command_count == 1 else f" ({command_count} commands)"
+                step_titles.append(f"`{label}`{suffix}")
+            if step_titles:
+                lines.append("실행 단계: " + ", ".join(step_titles))
+
+        mvp_exclusions = execution_spec.get("mvp_exclusions")
+        if isinstance(mvp_exclusions, list) and mvp_exclusions:
+            lines.append(
+                "MVP 제외: "
+                + ", ".join(str(item).strip() for item in mvp_exclusions[:8] if str(item).strip())
+            )
+
+        outputs = execution_spec.get("outputs")
+        if isinstance(outputs, dict):
+            fields = outputs.get("required_result_fields")
+            if isinstance(fields, list) and fields:
+                lines.append(
+                    "결과 필드: "
+                    + ", ".join(f"`{str(item).strip()}`" for item in fields if str(item).strip())
+                )
+
+        return lines
+
+    @staticmethod
     def _display_verification(verification: dict[str, Any]) -> list[str]:
         lines: list[str] = []
         success = verification.get("success_criteria")
@@ -673,6 +826,322 @@ class ToolPlanPlanner:
         elif manual_checks:
             lines.append(str(manual_checks))
         return lines
+
+    def _validate_execution_spec_if_required(
+        self,
+        plan_json: dict[str, Any],
+        event: ToolPlanRequestEvent,
+    ) -> None:
+        requires_spec = self._requires_execution_spec(plan_json, event)
+        execution_spec = plan_json.get("execution_spec")
+        if not requires_spec and not isinstance(execution_spec, dict):
+            return
+        if not isinstance(execution_spec, dict) or not execution_spec:
+            raise ToolPlanPlannerError(
+                "PLAN draft execution spec invalid: execution_spec is required for "
+                "generated tool, remote, deployment, health check, Docker, API, log, "
+                "resource, or operating-server diagnostic requests."
+            )
+
+        errors: list[str] = []
+        self._validate_execution_spec_shape(execution_spec, errors)
+        self._validate_execution_spec_command_policy(execution_spec, errors)
+        self._validate_execution_spec_api_checks(execution_spec, errors)
+        self._validate_execution_spec_steps(execution_spec, errors)
+        if errors:
+            details = "\n".join(f"- {item}" for item in errors[:20])
+            raise ToolPlanPlannerError(
+                "PLAN draft execution spec invalid:\n" + details
+            )
+
+    @staticmethod
+    def _requires_execution_spec(plan_json: dict[str, Any], event: ToolPlanRequestEvent) -> bool:
+        if event.remote_workspace_id is not None:
+            return True
+        searchable = [
+            getattr(event, "prompt", ""),
+            plan_json.get("goal"),
+            plan_json.get("summary"),
+            plan_json.get("title"),
+            json.dumps(plan_json.get("context") or {}, ensure_ascii=False),
+            json.dumps(plan_json.get("tasks") or [], ensure_ascii=False),
+        ]
+        text = "\n".join(str(item or "") for item in searchable).lower()
+        return any(keyword.lower() in text for keyword in _EXECUTION_SPEC_KEYWORDS)
+
+    @staticmethod
+    def _validate_execution_spec_shape(execution_spec: dict[str, Any], errors: list[str]) -> None:
+        steps = execution_spec.get("steps")
+        if not isinstance(steps, list) or not steps:
+            errors.append("execution_spec.steps must be a non-empty list.")
+
+        status_values = execution_spec.get("status_values")
+        if not isinstance(status_values, list) or not status_values:
+            errors.append("execution_spec.status_values must list PASS/WARNING/FAIL/SKIPPED/INFO.")
+        else:
+            statuses = {str(item).strip().upper() for item in status_values}
+            invalid = sorted(statuses - _ALLOWED_EXECUTION_STATUS_VALUES)
+            missing = sorted(_ALLOWED_EXECUTION_STATUS_VALUES - statuses)
+            if invalid:
+                errors.append(f"execution_spec.status_values contains unsupported statuses: {invalid}.")
+            if missing:
+                errors.append(f"execution_spec.status_values is missing statuses: {missing}.")
+
+        outputs = execution_spec.get("outputs")
+        result_fields = outputs.get("required_result_fields") if isinstance(outputs, dict) else None
+        required_fields = {"evidence", "sanitized_output", "recommendation"}
+        if not isinstance(result_fields, list) or not required_fields.issubset(
+            {str(item).strip() for item in result_fields}
+        ):
+            errors.append(
+                "execution_spec.outputs.required_result_fields must include "
+                "evidence, sanitized_output, and recommendation."
+            )
+
+        mvp_exclusions = execution_spec.get("mvp_exclusions")
+        if not isinstance(mvp_exclusions, list) or not mvp_exclusions:
+            errors.append("execution_spec.mvp_exclusions must list out-of-scope write/recovery actions.")
+
+    @staticmethod
+    def _validate_execution_spec_command_policy(execution_spec: dict[str, Any], errors: list[str]) -> None:
+        policy = execution_spec.get("command_policy")
+        if not isinstance(policy, dict):
+            errors.append("execution_spec.command_policy with allowlist and denylist is required.")
+            return
+        allowlist = policy.get("allowlist")
+        denylist = policy.get("denylist")
+        if not isinstance(allowlist, list) or not allowlist:
+            errors.append("execution_spec.command_policy.allowlist must be a non-empty list.")
+        if not isinstance(denylist, list) or not denylist:
+            errors.append("execution_spec.command_policy.denylist must be a non-empty list.")
+
+    @staticmethod
+    def _validate_execution_spec_api_checks(execution_spec: dict[str, Any], errors: list[str]) -> None:
+        api_checks = execution_spec.get("api_checks")
+        if api_checks in (None, []):
+            return
+        if not isinstance(api_checks, list):
+            errors.append("execution_spec.api_checks must be a list when present.")
+            return
+        for index, check in enumerate(api_checks, start=1):
+            if not isinstance(check, dict):
+                errors.append(f"api_checks[{index}] must be an object.")
+                continue
+            method = str(check.get("method") or "").strip().upper()
+            if method not in _READ_ONLY_API_METHODS:
+                errors.append(
+                    f"api_checks[{index}] uses non-read-only method {method or '<missing>'}; "
+                    "MVP API checks allow only GET, HEAD, or OPTIONS."
+                )
+            if check.get("read_only") is not True:
+                errors.append(f"api_checks[{index}].read_only must be true.")
+            expected = check.get("expected_statuses")
+            if not isinstance(expected, list) or not expected:
+                errors.append(f"api_checks[{index}].expected_statuses must be a non-empty list.")
+            for required in ("name", "path", "requires_auth", "timeout_seconds", "latency_warning_ms"):
+                if required not in check:
+                    errors.append(f"api_checks[{index}] missing required field: {required}.")
+
+    def _validate_execution_spec_steps(self, execution_spec: dict[str, Any], errors: list[str]) -> None:
+        steps = execution_spec.get("steps")
+        if not isinstance(steps, list):
+            return
+        for step_index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                errors.append(f"steps[{step_index}] must be an object.")
+                continue
+            for field in ("step_id", "description", "commands", "decision_rules", "json_mapping"):
+                if field not in step or step[field] in (None, "", []):
+                    errors.append(f"steps[{step_index}] missing required field: {field}.")
+
+            mapping = step.get("json_mapping")
+            if not isinstance(mapping, dict) or not {
+                "evidence",
+                "sanitized_output",
+                "recommendation",
+            }.issubset(mapping):
+                errors.append(
+                    f"steps[{step_index}].json_mapping must include evidence, "
+                    "sanitized_output, and recommendation."
+                )
+
+            decision_rules = step.get("decision_rules")
+            if isinstance(decision_rules, list):
+                self._validate_decision_rules(decision_rules, step_index, errors)
+
+            commands = step.get("commands")
+            if isinstance(commands, list):
+                for command_index, command_spec in enumerate(commands, start=1):
+                    self._validate_command_spec(command_spec, step_index, command_index, errors)
+
+    @staticmethod
+    def _validate_decision_rules(
+        decision_rules: list[Any],
+        step_index: int,
+        errors: list[str],
+    ) -> None:
+        if not decision_rules:
+            errors.append(f"steps[{step_index}].decision_rules must be non-empty.")
+            return
+        for rule_index, rule in enumerate(decision_rules, start=1):
+            if not isinstance(rule, dict):
+                errors.append(f"steps[{step_index}].decision_rules[{rule_index}] must be an object.")
+                continue
+            status = str(rule.get("status") or "").strip().upper()
+            if status not in _ALLOWED_EXECUTION_STATUS_VALUES:
+                errors.append(
+                    f"steps[{step_index}].decision_rules[{rule_index}] has unsupported status "
+                    f"{status or '<missing>'}."
+                )
+            condition = str(rule.get("condition") or "").strip().lower()
+            if not condition:
+                errors.append(f"steps[{step_index}].decision_rules[{rule_index}] missing condition.")
+            if "health" in condition and "none" in condition and status == "FAIL":
+                errors.append(
+                    f"steps[{step_index}].decision_rules[{rule_index}] treats Docker health none as FAIL; "
+                    "use SKIPPED or INFO."
+                )
+            if "healthcheck" in condition and "not configured" in condition and status == "FAIL":
+                errors.append(
+                    f"steps[{step_index}].decision_rules[{rule_index}] treats missing healthcheck as FAIL; "
+                    "use SKIPPED or INFO."
+                )
+
+    def _validate_command_spec(
+        self,
+        command_spec: Any,
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        if not isinstance(command_spec, dict):
+            errors.append(f"steps[{step_index}].commands[{command_index}] must be an object.")
+            return
+        command = str(command_spec.get("command") or "").strip()
+        if not command:
+            errors.append(f"steps[{step_index}].commands[{command_index}] missing command.")
+            return
+
+        if str(command_spec.get("type") or "").strip().lower() != "read_only":
+            errors.append(f"steps[{step_index}].commands[{command_index}].type must be read_only.")
+        for field in ("timeout_seconds", "failure_policy", "parse_strategy"):
+            if field not in command_spec or command_spec[field] in (None, ""):
+                errors.append(f"steps[{step_index}].commands[{command_index}] missing {field}.")
+
+        self._validate_command_text(command, step_index, command_index, command_spec, errors)
+
+    def _validate_command_text(
+        self,
+        command: str,
+        step_index: int,
+        command_index: int,
+        command_spec: dict[str, Any],
+        errors: list[str],
+    ) -> None:
+        lowered = command.lower()
+        for pattern in _DENIED_COMMAND_PATTERNS:
+            if re.search(pattern, lowered):
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] uses denied command pattern: {pattern}."
+                )
+
+        if "$(" in command or "`" in command:
+            errors.append(f"steps[{step_index}].commands[{command_index}] uses command substitution.")
+        without_stderr_redirect = lowered.replace("2>&1", "")
+        if ">" in without_stderr_redirect:
+            errors.append(f"steps[{step_index}].commands[{command_index}] uses output redirection.")
+        if "&&" in lowered or ";" in lowered:
+            errors.append(f"steps[{step_index}].commands[{command_index}] uses shell chaining.")
+        if "||" in lowered and "|| true" not in lowered:
+            errors.append(
+                f"steps[{step_index}].commands[{command_index}] uses unsupported shell fallback; "
+                "only `|| true` is allowed for grep no-match handling."
+            )
+
+        for segment in self._command_segments(command):
+            root = self._command_root(segment)
+            if root not in _ALLOWED_COMMAND_ROOTS:
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] command segment "
+                    f"`{segment}` is outside the read-only allowlist."
+                )
+                continue
+            if root == "docker":
+                self._validate_docker_command_segment(segment, step_index, command_index, command, errors)
+            if root == "sed" and " -n" not in f" {segment.lower()} ":
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] uses sed without -n."
+                )
+            if root == "curl":
+                self._validate_curl_command(segment, step_index, command_index, errors)
+
+        failure_policy = str(command_spec.get("failure_policy") or "").strip().lower()
+        if "grep" in lowered and ("docker logs" in lowered or "log" in lowered):
+            if failure_policy != "ignore_no_match" and "|| true" not in lowered:
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] log grep must use "
+                    "failure_policy=ignore_no_match or `|| true` so no matches are not treated as failure."
+                )
+
+    @staticmethod
+    def _command_segments(command: str) -> list[str]:
+        normalized = re.sub(r"\|\|\s*true\s*$", "", command.strip(), flags=re.IGNORECASE)
+        return [
+            segment.strip()
+            for segment in re.split(r"(?<!\|)\|(?!\|)", normalized)
+            if segment.strip()
+        ]
+
+    @staticmethod
+    def _command_root(segment: str) -> str:
+        match = re.match(r"\s*([A-Za-z0-9_.-]+)", segment)
+        return match.group(1).lower() if match else ""
+
+    @staticmethod
+    def _validate_docker_command_segment(
+        segment: str,
+        step_index: int,
+        command_index: int,
+        full_command: str,
+        errors: list[str],
+    ) -> None:
+        parts = re.split(r"\s+", segment.strip())
+        subcommand = parts[1].lower() if len(parts) > 1 else ""
+        if subcommand not in _ALLOWED_DOCKER_SUBCOMMANDS:
+            errors.append(
+                f"steps[{step_index}].commands[{command_index}] uses unsupported docker subcommand "
+                f"{subcommand or '<missing>'}."
+            )
+        if subcommand == "inspect":
+            if "grep" in full_command.lower():
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] must not infer Docker health "
+                    "by grepping raw inspect output."
+                )
+            missing = [
+                field for field in _DOCKER_INSPECT_REQUIRED_FIELDS if field not in full_command
+            ]
+            if missing:
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] docker inspect command "
+                    f"missing fields: {missing}."
+                )
+
+    @staticmethod
+    def _validate_curl_command(
+        segment: str,
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        lowered = segment.lower()
+        if re.search(r"(^|\s)-x\s*(post|put|patch|delete)\b", lowered) or re.search(
+            r"--request\s+(post|put|patch|delete)\b",
+            lowered,
+        ):
+            errors.append(
+                f"steps[{step_index}].commands[{command_index}] uses a data-changing curl method."
+            )
 
     def _validate_snapshot(self, snapshot: dict) -> None:
         required = ["schemaVersion", "planVersion", "blocks"]

@@ -22,7 +22,7 @@ class CLIContext:
     full_registry: Any = None  # 전체 ToolRegistry (커스텀 툴 조회 등에 사용)
 
     # 루프 제어 플래그
-    pending_mode_notification: str = ""
+    pending_mode_reminders: tuple[str, ...] = ()
     waiting_for_user: bool = False
 
     # 자동 재개 카운터 (턴 단위 — WAIT_FOR_REVIEW 강등 시 리셋)
