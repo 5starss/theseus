@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import Any
 
@@ -91,6 +92,86 @@ async def persist_assistant_message(
             "Assistant history save failed for project=%s session=%s: %s",
             session.project_id,
             chat_session_id,
+            exc,
+        )
+        return False
+
+
+async def persist_tool_call_message(
+    session: SessionContext,
+    chat_session_id: int,
+    *,
+    tool_name: str,
+    tool_input: dict[str, Any] | None,
+    tool_use_id: str | None = None,
+) -> bool:
+    payload = {
+        "noticeType": "TOOL_EXECUTION_STARTED",
+        "toolName": tool_name,
+        "toolUseId": tool_use_id,
+        "toolInput": tool_input or {},
+        "status": "started",
+    }
+    return await _persist_tool_history_message(
+        session,
+        chat_session_id,
+        payload=payload,
+    )
+
+
+async def persist_tool_result_message(
+    session: SessionContext,
+    chat_session_id: int,
+    *,
+    tool_name: str,
+    output: str,
+    is_error: bool,
+    tool_use_id: str | None = None,
+    tool_input: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    payload = {
+        "noticeType": "TOOL_EXECUTION_COMPLETED",
+        "toolName": tool_name,
+        "toolUseId": tool_use_id,
+        "toolInput": tool_input or {},
+        "output": output,
+        "isError": is_error,
+        "status": "completed",
+        "metadata": metadata or {},
+    }
+    return await _persist_tool_history_message(
+        session,
+        chat_session_id,
+        payload=payload,
+    )
+
+
+async def _persist_tool_history_message(
+    session: SessionContext,
+    chat_session_id: int,
+    *,
+    payload: dict[str, Any],
+) -> bool:
+    request = HistoryMessageCreateRequest(
+        project_id=session.project_id,
+        chat_session_id=chat_session_id,
+        sender_type="SYSTEM",
+        content=json.dumps(payload, ensure_ascii=False, default=str),
+        message_type="SYSTEM_NOTICE",
+        content_type="JSON",
+    )
+
+    try:
+        await history_client.save_message(session, request)
+        return True
+    except HistoryClientError as exc:
+        logger.warning(
+            "Tool history save failed for project=%s session=%s type=%s tool=%s: %s",
+            session.project_id,
+            chat_session_id,
+            payload.get("noticeType"),
+            payload.get("toolName"),
             exc,
         )
         return False
