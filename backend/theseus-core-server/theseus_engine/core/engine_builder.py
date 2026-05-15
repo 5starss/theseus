@@ -116,6 +116,7 @@ async def setup_engine(
         full_registry.register(tool_cls())
 
     # ── 커스텀 툴 로딩: project_id 유무에 따라 경로 분기 ──────
+    custom_tool_inventory: list[dict] = []
     if project_id:
         loaded_tools = load_custom_tools_for_project(
             full_registry, project_id, project_tool_permissions,
@@ -125,6 +126,7 @@ async def setup_engine(
             full_registry,
             project_tool_permissions,
             extra_dirs=_workspace_custom_tool_dirs(resolved_cwd),
+            load_report=custom_tool_inventory,
         )
     if loaded_tools:
         print(f"✅ Loaded {len(loaded_tools)} custom tools.")
@@ -241,6 +243,7 @@ async def setup_engine(
             "tool_registry": full_registry,
             "tool_permissions": project_tool_permissions,
             "active_registry": active_registry,
+            "custom_tool_inventory": custom_tool_inventory,
             "llm_client": api_client,
             "model_name": model_name,
             "tool_repair_policy": ToolRepairPolicy.from_env(),

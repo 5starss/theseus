@@ -21,7 +21,10 @@ import {
   type RunnerEvent,
 } from '../shared/protocol';
 import {
+  disableCustomTool,
+  installCustomToolDependencies,
   loadCustomToolSummaries,
+  registerCustomTool,
   updateCustomToolPermission,
 } from '../tools/CustomToolManager';
 import {
@@ -475,6 +478,15 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       type: 'runnerEvent',
       event: { type: 'customToolsLoaded', tools },
     });
+    this.messageQueue.post({
+      type: 'runnerEvent',
+      event: { type: 'customToolInventoryUpdated', source: 'host', tools },
+    });
+  }
+
+  private refreshRuntimeToolRegistry(reason: string): void {
+    this.sessionManager.refreshToolRegistry(reason);
+    void this.refreshCustomTools();
   }
 
   private postHealthStatus(): void {
@@ -865,6 +877,9 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         case 'getCustomTools':
           await this.refreshCustomTools();
           break;
+        case 'refreshToolRegistry':
+          this.refreshRuntimeToolRegistry('manual_refresh');
+          break;
         case 'updateToolPermission': {
           if (typeof msg.metadataPath === 'string') {
             const result = await updateCustomToolPermission(msg.metadataPath, Number(msg.permissionLevel));
@@ -872,6 +887,46 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
             else vscode.window.showErrorMessage(result.message);
             this.postRunnerEvent({ type: 'customToolValidation', ...result });
             await this.refreshCustomTools();
+            if (result.success) this.sessionManager.refreshToolRegistry('permission_changed');
+          }
+          break;
+        }
+        case 'installCustomToolDependencies': {
+          const result = await installCustomToolDependencies(msg.metadataPath, msg.modulePath);
+          this.postRunnerEvent({
+            type: 'customToolInstallProgress',
+            success: result.success,
+            message: result.message,
+            packages: result.packages || [],
+          });
+          if (result.success) {
+            vscode.window.showInformationMessage(result.message);
+            this.refreshRuntimeToolRegistry('dependencies_installed');
+          } else {
+            vscode.window.showWarningMessage(result.message);
+            await this.refreshCustomTools();
+          }
+          break;
+        }
+        case 'retryCustomToolLoad': {
+          this.refreshRuntimeToolRegistry('retry_load');
+          break;
+        }
+        case 'registerCustomTool': {
+          if (typeof msg.metadataPath === 'string') {
+            const result = await registerCustomTool(msg.metadataPath);
+            this.postRunnerEvent({ type: 'customToolValidation', ...result });
+            if (result.success) this.refreshRuntimeToolRegistry('register_custom_tool');
+            else await this.refreshCustomTools();
+          }
+          break;
+        }
+        case 'disableCustomTool': {
+          if (typeof msg.metadataPath === 'string') {
+            const result = await disableCustomTool(msg.metadataPath);
+            this.postRunnerEvent({ type: 'customToolValidation', ...result });
+            if (result.success) this.refreshRuntimeToolRegistry('disable_custom_tool');
+            else await this.refreshCustomTools();
           }
           break;
         }

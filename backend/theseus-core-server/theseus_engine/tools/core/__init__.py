@@ -19,6 +19,7 @@ from theseus_engine.tools.core.tool_factory import (
     build_filtered_registry,
     load_custom_tools,
     load_custom_tools_for_project,
+    scan_custom_tool_inventory,
 )
 
 # ── File Operations ──────────────────────────────────────────────

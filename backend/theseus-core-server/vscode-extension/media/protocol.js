@@ -31,10 +31,15 @@
     'getWorkspaceName',
     'getActiveFile',
     'getCustomTools',
+    'refreshToolRegistry',
     'getHealth',
     'explainProblem',
     'fixProblem',
     'updateToolPermission',
+    'installCustomToolDependencies',
+    'retryCustomToolLoad',
+    'registerCustomTool',
+    'disableCustomTool',
     'savePastedImage',
     'revertChangedFile',
     'openFile',
@@ -82,6 +87,9 @@
     'workspaceInfo',
     'activeFileChanged',
     'customToolsLoaded',
+    'customToolInventoryUpdated',
+    'customToolInstallProgress',
+    'toolRegistryUpdated',
     'customToolsChanged',
     'customToolValidation',
     'healthStatus',
@@ -168,7 +176,13 @@
       case 'activeFileChanged':
         return optionalString(event.file) && optionalNumber(event.line);
       case 'customToolsLoaded':
+      case 'customToolInventoryUpdated':
         return event.tools === undefined || Array.isArray(event.tools);
+      case 'customToolInstallProgress':
+        return optionalBoolean(event.success) && (event.packages === undefined || Array.isArray(event.packages));
+      case 'toolRegistryUpdated':
+        return (event.availableTools === undefined || Array.isArray(event.availableTools))
+          && optionalNumber(event.unavailableCount);
       case 'customToolValidation':
         return optionalBoolean(event.success) && optionalString(event.message);
       case 'healthStatus':

@@ -41,6 +41,50 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
 
+MISSING_MODULE_PACKAGE_ALIASES = {
+    "pynvml": "nvidia-ml-py",
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "yaml": "PyYAML",
+}
+MISSING_MODULE_INSTALL_DENYLIST = {"theseus_engine", "src"}
+
+
+def _safe_dependency_name(value: Any) -> str | None:
+    name = str(value or "").strip()
+    if not name:
+        return None
+    if name in MISSING_MODULE_INSTALL_DENYLIST:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        return name
+    return None
+
+
+def _extract_missing_modules(message: str) -> List[str]:
+    modules: List[str] = []
+    for match in re.finditer(r"No module named ['\"]([^'\"]+)['\"]", message):
+        module_name = match.group(1).split(".", 1)[0].strip()
+        if module_name and module_name not in modules:
+            modules.append(module_name)
+    return modules
+
+
+def _install_candidates(
+    *,
+    dependencies: List[str],
+    missing_modules: List[str],
+) -> List[str]:
+    if dependencies:
+        return dependencies
+    candidates: List[str] = []
+    for module_name in missing_modules:
+        candidate = MISSING_MODULE_PACKAGE_ALIASES.get(module_name, module_name)
+        safe = _safe_dependency_name(candidate)
+        if safe and safe not in candidates:
+            candidates.append(safe)
+    return candidates
+
 
 def canonical_tool_module_stem(tool_name: str) -> str:
     """Return the persisted module stem for a logical custom tool name."""
@@ -494,10 +538,181 @@ def normalize_tool_meta(
         log.warning("[MetaNorm] Failed to write normalized meta %s: %s", meta_path, e)
 
 
+def _read_tool_meta(meta_path: str) -> Dict[str, Any]:
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            parsed = json.load(f)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _iter_inventory_dirs(
+    extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+) -> List[str]:
+    dirs: List[str] = []
+    seen: Set[str] = set()
+    for base in _custom_tool_dirs(extra_dirs):
+        candidates = [base]
+        projects_dir = os.path.join(base, "projects")
+        if os.path.isdir(projects_dir):
+            candidates.extend(
+                os.path.join(projects_dir, name)
+                for name in sorted(os.listdir(projects_dir))
+                if os.path.isdir(os.path.join(projects_dir, name))
+            )
+        for candidate in candidates:
+            key = os.path.normcase(os.path.abspath(candidate))
+            if key in seen:
+                continue
+            seen.add(key)
+            dirs.append(os.path.abspath(candidate))
+    return dirs
+
+
+def _inventory_candidate_from_meta(
+    custom_tools_dir: str,
+    meta_file: str,
+) -> Tuple[str, str, str, Dict[str, Any]]:
+    meta_path = os.path.join(custom_tools_dir, meta_file)
+    meta = _read_tool_meta(meta_path)
+    fallback_stem = meta_file.removesuffix(".meta.json")
+    file_name = str(meta.get("fileName") or f"{fallback_stem}.py")
+    file_name = os.path.basename(file_name)
+    if not file_name.endswith(".py"):
+        file_name = f"{fallback_stem}.py"
+    module_name = str(meta.get("moduleName") or file_name[:-3]).strip() or file_name[:-3]
+    return module_name, os.path.join(custom_tools_dir, file_name), meta_path, meta
+
+
+def _tool_inventory_item(
+    *,
+    module_name: str,
+    file_path: str,
+    meta_path: str | None,
+    meta: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    meta = meta or {}
+    dependencies = [
+        dep
+        for dep in (_safe_dependency_name(item) for item in meta.get("dependencies", []) or [])
+        if dep
+    ]
+    fallback_name = os.path.splitext(os.path.basename(file_path))[0]
+    item: Dict[str, Any] = {
+        "toolName": str(meta.get("toolName") or fallback_name),
+        "fileName": os.path.basename(file_path),
+        "moduleName": module_name,
+        "modulePath": os.path.abspath(file_path),
+        "metadataPath": os.path.abspath(meta_path) if meta_path else "",
+        "permissionLevel": meta.get("permissionLevel", ""),
+        "status": str(meta.get("status") or "unknown"),
+        "isActive": bool(meta.get("isActive", True)),
+        "dependencies": dependencies,
+        "missingModules": [],
+        "installCandidates": [],
+        "importError": "",
+        "loadState": "available",
+        "canInstall": False,
+        "canRegister": False,
+    }
+
+    if not item["isActive"] or item["status"] not in {"unknown", "active"}:
+        item["loadState"] = "inactive"
+        return item
+
+    if not os.path.exists(file_path):
+        item["loadState"] = "unavailable"
+        item["importError"] = f"Missing module file: {os.path.basename(file_path)}"
+        return item
+
+    is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
+        module_name,
+        file_path,
+    )
+    if not is_valid or tool_class is None:
+        missing_modules = _extract_missing_modules(msg)
+        item["loadState"] = "unavailable"
+        item["importError"] = msg
+        item["missingModules"] = missing_modules
+        item["installCandidates"] = _install_candidates(
+            dependencies=dependencies,
+            missing_modules=missing_modules,
+        )
+        item["canInstall"] = bool(item["installCandidates"])
+        return item
+
+    item["toolName"] = getattr(tool_class, "name", item["toolName"])
+    item["permissionLevel"] = getattr(
+        tool_class,
+        "permission_level",
+        item["permissionLevel"] or DEFAULT_PERMISSION_LEVEL,
+    )
+    item["status"] = "active"
+    item["canRegister"] = True
+    return item
+
+
+def scan_custom_tool_inventory(
+    extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Return loadable and unavailable custom tools without mutating a registry."""
+    inventory: List[Dict[str, Any]] = []
+    seen_files: Set[str] = set()
+
+    for custom_tools_dir in _iter_inventory_dirs(extra_dirs):
+        if not os.path.isdir(custom_tools_dir):
+            continue
+
+        meta_files = sorted(
+            filename
+            for filename in os.listdir(custom_tools_dir)
+            if filename.endswith(".meta.json") and not filename.startswith("_")
+        )
+        for meta_file in meta_files:
+            module_name, file_path, meta_path, meta = _inventory_candidate_from_meta(
+                custom_tools_dir,
+                meta_file,
+            )
+            seen_files.add(os.path.normcase(os.path.abspath(file_path)))
+            inventory.append(
+                _tool_inventory_item(
+                    module_name=module_name,
+                    file_path=file_path,
+                    meta_path=meta_path,
+                    meta=meta,
+                )
+            )
+
+        for filename in sorted(os.listdir(custom_tools_dir)):
+            if not filename.endswith(".py") or filename.startswith("_"):
+                continue
+            file_path = os.path.abspath(os.path.join(custom_tools_dir, filename))
+            if os.path.normcase(file_path) in seen_files:
+                continue
+            inventory.append(
+                _tool_inventory_item(
+                    module_name=filename[:-3],
+                    file_path=file_path,
+                    meta_path=None,
+                    meta={},
+                )
+            )
+
+    return sorted(
+        inventory,
+        key=lambda item: (
+            str(item.get("loadState") or ""),
+            str(item.get("toolName") or item.get("fileName") or ""),
+        ),
+    )
+
+
 def load_custom_tools(
     registry: ToolRegistry,
     tool_permissions: Optional[Dict[str, int]] = None,
     extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+    load_report: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """custom_tools/ 폴더 내의 모든 .py 파일을 스캔하여 ToolRegistry에 자동 등록합니다.
 
@@ -526,6 +741,13 @@ def load_custom_tools(
 
             module_name = filename[:-3]  # .py 제거
             file_path = os.path.join(custom_tools_dir, filename)
+            meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
+            meta = _read_tool_meta(meta_path)
+            dependencies = [
+                dep
+                for dep in (_safe_dependency_name(item) for item in meta.get("dependencies", []) or [])
+                if dep
+            ]
 
             is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
                 module_name, file_path
@@ -535,6 +757,28 @@ def load_custom_tools(
                     instance = tool_class()
                     registry.register(instance)
                     loaded.append(tool_class.name)
+                    if load_report is not None:
+                        load_report.append({
+                            "toolName": tool_class.name,
+                            "fileName": filename,
+                            "moduleName": module_name,
+                            "modulePath": os.path.abspath(file_path),
+                            "metadataPath": os.path.abspath(meta_path),
+                            "permissionLevel": getattr(
+                                tool_class,
+                                "permission_level",
+                                DEFAULT_PERMISSION_LEVEL,
+                            ),
+                            "status": "active",
+                            "isActive": True,
+                            "loadState": "available",
+                            "dependencies": dependencies,
+                            "missingModules": [],
+                            "installCandidates": [],
+                            "importError": "",
+                            "canInstall": False,
+                            "canRegister": True,
+                        })
 
                     # 툴의 permission_level을 RBAC 맵에 자동 등록
                     level = getattr(
@@ -548,13 +792,57 @@ def load_custom_tools(
                         )
 
                     # meta.json 정규화 (누락·이름 오류 교정)
-                    meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
                     normalize_tool_meta(meta_path, tool_class, module_name)
 
                 except Exception as e:
                     log.warning("Failed to instantiate tool from %s: %s", file_path, e)
+                    if load_report is not None:
+                        msg = str(e)
+                        missing_modules = _extract_missing_modules(msg)
+                        load_report.append({
+                            "toolName": module_name,
+                            "fileName": filename,
+                            "moduleName": module_name,
+                            "modulePath": os.path.abspath(file_path),
+                            "metadataPath": os.path.abspath(meta_path),
+                            "permissionLevel": "",
+                            "status": "unknown",
+                            "isActive": True,
+                            "loadState": "unavailable",
+                            "dependencies": dependencies,
+                            "missingModules": missing_modules,
+                            "installCandidates": _install_candidates(
+                                dependencies=dependencies,
+                                missing_modules=missing_modules,
+                            ),
+                            "importError": msg,
+                            "canInstall": bool(missing_modules),
+                            "canRegister": False,
+                        })
             else:
                 log.warning("Skipped invalid custom tool %s: %s", file_path, msg)
+                if load_report is not None:
+                    missing_modules = _extract_missing_modules(msg)
+                    load_report.append({
+                        "toolName": module_name,
+                        "fileName": filename,
+                        "moduleName": module_name,
+                        "modulePath": os.path.abspath(file_path),
+                        "metadataPath": os.path.abspath(meta_path),
+                        "permissionLevel": "",
+                        "status": "unknown",
+                        "isActive": True,
+                        "loadState": "unavailable",
+                        "dependencies": dependencies,
+                        "missingModules": missing_modules,
+                        "installCandidates": _install_candidates(
+                            dependencies=dependencies,
+                            missing_modules=missing_modules,
+                        ),
+                        "importError": msg,
+                        "canInstall": bool(missing_modules),
+                        "canRegister": False,
+                    })
 
     return loaded
 

@@ -535,6 +535,63 @@ class EditorRuntime:
             self.engine._tool_registry = active_registry
             self.engine.tool_metadata["active_registry"] = active_registry
 
+    def _reload_custom_tool_registry(self) -> list[dict[str, Any]]:
+        """Reload custom tools into the full registry and update load inventory."""
+        if self.full_registry is None or self.engine is None:
+            return []
+        from theseus_engine.core.engine_builder import _workspace_custom_tool_dirs
+        from theseus_engine.tools.core import load_custom_tools
+
+        report: list[dict[str, Any]] = []
+        with contextlib.redirect_stdout(sys.stderr):
+            load_custom_tools(
+                self.full_registry,
+                self.tool_permissions,
+                extra_dirs=_workspace_custom_tool_dirs(self.cwd),
+                load_report=report,
+            )
+        metadata = getattr(self.engine, "tool_metadata", None)
+        if isinstance(metadata, dict):
+            metadata["custom_tool_inventory"] = report
+        self._refresh_active_tool_registry()
+        self._set_engine_system_prompt()
+        return report
+
+    def refresh_tool_registry_events(self, reason: str = "manual") -> list[dict[str, Any]]:
+        report = self._reload_custom_tool_registry()
+        available = [
+            str(item.get("toolName"))
+            for item in report
+            if item.get("loadState") == "available" and item.get("toolName")
+        ]
+        unavailable = [
+            item
+            for item in report
+            if item.get("loadState") == "unavailable"
+        ]
+        return [
+            {
+                "type": "customToolInventoryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "tools": report,
+            },
+            {
+                "type": "toolRegistryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "availableTools": available,
+                "unavailableCount": len(unavailable),
+            },
+            {
+                "type": "StatusEvent",
+                "message": (
+                    f"Tool registry refreshed: {len(available)} available"
+                    + (f", {len(unavailable)} unavailable." if unavailable else ".")
+                ),
+            },
+        ]
+
     def _active_tool_names(self) -> tuple[str, ...]:
         """Return the engine's current active tool names for prompt capability gating."""
         registry = None
@@ -662,7 +719,12 @@ class EditorRuntime:
         self.engine.set_plan_drafting(getattr(self.sm, "is_plan_drafting", False))
 
     def handle_internal_command(self, payload: dict[str, Any]) -> list[dict[str, Any]] | None:
-        if payload.get("type") != "setMode":
+        command_type = payload.get("type")
+        if command_type in {"refreshToolRegistry", "registerCustomTool", "toolRecoveryComplete"}:
+            return self.refresh_tool_registry_events(
+                reason=str(payload.get("reason") or command_type),
+            )
+        if command_type != "setMode":
             return None
         mode = payload.get("mode")
         if not isinstance(mode, str):
@@ -715,11 +777,24 @@ class EditorRuntime:
             try:
                 from theseus_engine.tools.core import load_custom_tools
                 from theseus_engine.tools.core.base_tools import ToolRegistry
+                from theseus_engine.core.engine_builder import _workspace_custom_tool_dirs
 
                 registry = ToolRegistry()
+                report: list[dict[str, Any]] = []
                 with contextlib.redirect_stdout(sys.stderr):
-                    tools = load_custom_tools(registry, dict(DEFAULT_TOOL_PERMISSIONS))
+                    tools = load_custom_tools(
+                        registry,
+                        dict(DEFAULT_TOOL_PERMISSIONS),
+                        extra_dirs=_workspace_custom_tool_dirs(self.cwd),
+                        load_report=report,
+                    )
+                unavailable = [item for item in report if item.get("loadState") == "unavailable"]
                 msg = f"✅ 유효성 검사 통과 ({len(tools)}개 도구)"
+                if unavailable:
+                    msg += "\n⚠️ import 실패 도구:\n" + "\n".join(
+                        f"  • {item.get('toolName') or item.get('fileName')}: {item.get('importError')}"
+                        for item in unavailable
+                    )
             except Exception as e:
                 msg = f"검사 오류: {e}"
             return [{"type": "StatusEvent", "message": msg}]

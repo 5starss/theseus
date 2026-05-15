@@ -755,6 +755,41 @@ import { createEventDispatcher } from './dispatcher.js';
           session: currentSession,
         });
       },
+      onInstallDependencies: tool => {
+        vscode.postMessage({
+          type: 'installCustomToolDependencies',
+          metadataPath: tool?.metadataPath,
+          modulePath: tool?.modulePath,
+          toolName: tool?.toolName || null,
+        });
+      },
+      onRetryLoad: tool => {
+        vscode.postMessage({
+          type: 'retryCustomToolLoad',
+          metadataPath: tool?.metadataPath,
+          modulePath: tool?.modulePath,
+          toolName: tool?.toolName || null,
+        });
+      },
+      onRegisterTool: tool => {
+        vscode.postMessage({
+          type: 'registerCustomTool',
+          metadataPath: tool?.metadataPath,
+          modulePath: tool?.modulePath,
+          toolName: tool?.toolName || null,
+        });
+      },
+      onDisableTool: tool => {
+        vscode.postMessage({
+          type: 'disableCustomTool',
+          metadataPath: tool?.metadataPath,
+          modulePath: tool?.modulePath,
+          toolName: tool?.toolName || null,
+        });
+      },
+      onOpenFile: tool => {
+        vscode.postMessage({ type: 'openFile', path: tool?.modulePath || tool?.metadataPath });
+      },
     });
   }
 
