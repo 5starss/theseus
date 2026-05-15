@@ -16,7 +16,7 @@ import importlib.util
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
 from theseus_engine.tools.core.tool_server_adapter import (
     create_tool_via_server,
@@ -40,6 +40,22 @@ CUSTOM_TOOLS_DIR = os.path.abspath(
 
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
+MIN_PERMISSION_LEVEL = 1
+MAX_PERMISSION_LEVEL = 5
+
+
+def _coerce_permission_level(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    if isinstance(value, int):
+        level = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        level = int(value.strip())
+    else:
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    if not (MIN_PERMISSION_LEVEL <= level <= MAX_PERMISSION_LEVEL):
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    return level
 
 MISSING_MODULE_PACKAGE_ALIASES = {
     "pynvml": "nvidia-ml-py",
@@ -1027,11 +1043,18 @@ class ToolCreatorInput(BaseModel):
     )
     permission_level: int = Field(
         default=1,
+        ge=MIN_PERMISSION_LEVEL,
+        le=MAX_PERMISSION_LEVEL,
         description=(
-            "Minimum permission level required to use this tool (positive integer). "
+            "Minimum permission level required to use this tool (integer from 1 to 5). "
             "1 = anyone can use; higher values require higher privileges."
         ),
     )
+
+    @field_validator("permission_level", mode="before")
+    @classmethod
+    def validate_permission_level(cls, value: Any) -> int:
+        return _coerce_permission_level(value)
 
 
 ToolCreatorInput.model_rebuild()
@@ -1169,7 +1192,7 @@ class ToolCreatorTool(BaseTool):
         return ToolCreatorInput(
             tool_name=str(candidate.get("toolName") or candidate.get("tool_name") or fallback.tool_name),
             python_code=str(candidate.get("pythonCode") or candidate.get("python_code") or fallback.python_code),
-            permission_level=int(
+            permission_level=_coerce_permission_level(
                 candidate.get("permissionLevel")
                 or candidate.get("permission_level")
                 or fallback.permission_level
@@ -1186,7 +1209,7 @@ class ToolCreatorTool(BaseTool):
         return {
             "toolName": str(tool_name),
             "pythonCode": str(python_code),
-            "permissionLevel": int(permission_level),
+            "permissionLevel": _coerce_permission_level(permission_level),
         }
 
     @staticmethod

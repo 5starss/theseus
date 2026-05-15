@@ -139,6 +139,32 @@ def _new_trace_id() -> str:
     return uuid.uuid4().hex
 
 
+def _coerce_permission_level(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ToolCreationError(
+            "permission_validation",
+            "permissionLevel must be an integer from 1 to 5.",
+            errors=["permission_level_not_integer"],
+        )
+    if isinstance(value, int):
+        level = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        level = int(value.strip())
+    else:
+        raise ToolCreationError(
+            "permission_validation",
+            "permissionLevel must be an integer from 1 to 5.",
+            errors=["permission_level_not_integer"],
+        )
+    if not 1 <= level <= 5:
+        raise ToolCreationError(
+            "permission_validation",
+            "permissionLevel must be an integer from 1 to 5.",
+            errors=["permission_level_out_of_range"],
+        )
+    return level
+
+
 def _audit_log(event: str, **payload: Any) -> None:
     log.info("[ToolAudit] %s %s", event, json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
@@ -251,6 +277,44 @@ def build_tool_paths(
         module_path=module_path,
         metadata_path=metadata_path,
         module_name=module_stem,
+    )
+
+
+def _assert_no_conflicting_tool_artifact(
+    request: ServerToolCreationRequest,
+    paths: ServerToolArtifactPaths,
+) -> None:
+    if not paths.module_path.exists() and not paths.metadata_path.exists():
+        return
+
+    existing_metadata: dict[str, Any] = {}
+    if paths.metadata_path.exists():
+        try:
+            existing_metadata = json.loads(paths.metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing_metadata = {}
+
+    same_plan = str(existing_metadata.get("planId") or "") == str(request.plan_id)
+    status = str(existing_metadata.get("status") or "").lower()
+    inactive_same_plan_retry = same_plan and status not in {STATUS_ACTIVE, "active"}
+    if inactive_same_plan_retry:
+        return
+
+    existing_name = existing_metadata.get("toolName") or request.tool_name
+    raise ToolCreationError(
+        "tool_name_conflict",
+        (
+            "이미 존재하는 Tool 파일명입니다. "
+            f"toolName={existing_name}, moduleName={paths.module_name}, fileName={paths.module_path.name}. "
+            "recoverable=true. retry_policy=do_not_retry_same_input. "
+            "기존 Tool 재사용, 기존 Tool 확장, 새 이름 제안, 또는 교체 승인 요청 중 하나를 선택해야 합니다."
+        ),
+        errors=[
+            "tool_name_conflict",
+            f"moduleName={paths.module_name}",
+            f"fileName={paths.module_path.name}",
+            "retry_policy=do_not_retry_same_input",
+        ],
     )
 
 
@@ -432,11 +496,13 @@ def persist_draft_tool(
     *,
     storage_root: Path = PROJECT_TOOLS_DIR,
 ) -> tuple[ServerToolArtifactPaths, dict[str, Any]]:
+    request.permission_level = _coerce_permission_level(request.permission_level)
     normalized_name = normalize_tool_name(request.tool_name)
     code = inject_permission_level(request.python_code, request.permission_level)
     code = _sanitize_generated_code(code)
     _validate_python_syntax_or_raise(code, request)
     paths = build_tool_paths(request.project_id, normalized_name, storage_root=storage_root)
+    _assert_no_conflicting_tool_artifact(request, paths)
     paths.project_dir.mkdir(parents=True, exist_ok=True)
     paths.module_path.write_text(code, encoding="utf-8")
     metadata = _base_metadata(request, paths, tool_name=normalized_name)

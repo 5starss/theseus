@@ -72,6 +72,18 @@ class ToolRepairFailure(RuntimeError):
     def is_policy_violation(self) -> bool:
         return self.code == "POLICY_VIOLATION"
 
+    @property
+    def is_tool_name_conflict(self) -> bool:
+        return self.code == "TOOL_NAME_CONFLICT"
+
+    @property
+    def is_permission_validation_failure(self) -> bool:
+        return self.code == "PERMISSION_VALIDATION_FAILED"
+
+    @property
+    def blocks_automatic_retry(self) -> bool:
+        return self.is_tool_name_conflict or self.is_permission_validation_failure
+
     def to_prompt_text(self) -> str:
         parts = [
             f"stage: {self.stage}",
@@ -102,6 +114,11 @@ class ToolRepairResult(Generic[T, S]):
     def final_message(self, policy: ToolRepairPolicy) -> str:
         if self.needs_user_feedback:
             base = self.feedback_message or "사용자 피드백이 필요합니다."
+            if self.last_failure is not None and (
+                self.last_failure.is_tool_name_conflict
+                or self.last_failure.is_permission_validation_failure
+            ):
+                return base
             if self.last_failure is not None:
                 return (
                     f"자동 repair {policy.max_attempts}회 내에서 안전한 대체 구현을 찾지 못했습니다. "
@@ -190,8 +207,8 @@ class ToolRepairLoop(Generic[T, S]):
                             success=False,
                             attempts=attempt,
                             last_failure=failure,
-                            needs_user_feedback=should_stop and failure.is_policy_violation,
-                            feedback_message=_policy_feedback_message(failure) if should_stop else None,
+                            needs_user_feedback=_needs_user_feedback(failure, should_stop),
+                            feedback_message=_recovery_feedback_message(failure) if should_stop else None,
                         )
                     prompt = self._build_repair_prompt(
                         task_context=task_context,
@@ -220,8 +237,8 @@ class ToolRepairLoop(Generic[T, S]):
                         candidate=candidate,
                         attempts=attempt,
                         last_failure=failure,
-                        needs_user_feedback=should_stop and failure.is_policy_violation,
-                        feedback_message=_policy_feedback_message(failure) if should_stop else None,
+                        needs_user_feedback=_needs_user_feedback(failure, should_stop),
+                        feedback_message=_recovery_feedback_message(failure) if should_stop else None,
                     )
 
                 prompt = self._build_repair_prompt(
@@ -245,8 +262,8 @@ class ToolRepairLoop(Generic[T, S]):
                             success=False,
                             attempts=attempt + 1,
                             last_failure=repair_failure,
-                            needs_user_feedback=should_stop and repair_failure.is_policy_violation,
-                            feedback_message=_policy_feedback_message(repair_failure) if should_stop else None,
+                            needs_user_feedback=_needs_user_feedback(repair_failure, should_stop),
+                            feedback_message=_recovery_feedback_message(repair_failure) if should_stop else None,
                             raw_response=repair_failure.metadata.get("rawResponse"),
                         )
                     continue
@@ -386,6 +403,8 @@ class ToolRepairLoop(Generic[T, S]):
 
     @staticmethod
     def _should_stop(failures: list[ToolRepairFailure]) -> bool:
+        if failures and failures[-1].blocks_automatic_retry:
+            return True
         policy_failures = [failure for failure in failures if failure.is_policy_violation]
         if len(policy_failures) < 2:
             return False
@@ -398,6 +417,19 @@ def classify_repair_failure(code: str, message: str) -> str:
     normalized = (code or "").strip().upper()
     lowered = message.lower()
     if (
+        "이미 존재" in lowered
+        or "already exists" in lowered
+        or "duplicate" in lowered
+        or "file name" in lowered
+        or "filename" in lowered
+        or "module name" in lowered
+        or "modulename" in lowered
+        or normalized in {"TOOL_NAME_CONFLICT", "NAME_CONFLICT", "DUPLICATE_TOOL"}
+    ):
+        return "TOOL_NAME_CONFLICT"
+    if "permissionlevel must be an integer" in lowered or "permission_level_not_integer" in lowered:
+        return "PERMISSION_VALIDATION_FAILED"
+    if (
         "security static analysis failed" in lowered
         or "security policy violation" in lowered
         or "module 'subprocess' is not allowed" in lowered
@@ -405,6 +437,24 @@ def classify_repair_failure(code: str, message: str) -> str:
     ):
         return "POLICY_VIOLATION"
     return normalized or "UNKNOWN"
+
+
+def _needs_user_feedback(failure: ToolRepairFailure, should_stop: bool) -> bool:
+    return should_stop and (
+        failure.is_policy_violation
+        or failure.is_tool_name_conflict
+        or failure.is_permission_validation_failure
+    )
+
+
+def _recovery_feedback_message(failure: ToolRepairFailure) -> str | None:
+    if failure.is_tool_name_conflict:
+        return _tool_name_conflict_feedback_message(failure)
+    if failure.is_permission_validation_failure:
+        return _permission_feedback_message(failure)
+    if failure.is_policy_violation:
+        return _policy_feedback_message(failure)
+    return None
 
 
 def extract_json_object(text: str) -> str:
@@ -442,6 +492,28 @@ def _policy_feedback_message(failure: ToolRepairFailure) -> str:
         f"{blocked} 때문에 같은 방식의 자동 repair를 중단했습니다. "
         "읽기 전용 API로 요구사항을 만족할 수 있는지 사용자 확인이 필요하거나, "
         "trusted core adapter로 분리해야 합니다."
+    )
+
+
+def _tool_name_conflict_feedback_message(failure: ToolRepairFailure) -> str:
+    return (
+        "같은 Tool 파일명 또는 moduleName이 이미 존재해 자동 repair를 중단했습니다. "
+        "recoverable=true. retry_policy=do_not_retry_same_input. "
+        "가능한 다음 조치: 1) 기존 Tool을 재사용합니다. "
+        "2) 기존 Tool을 읽고 확장하는 PLAN draft로 바꿉니다. "
+        "3) 새 toolName/moduleName/fileName을 제안합니다. "
+        "4) 기존 Tool 교체가 필요한지 사용자 승인을 요청합니다. "
+        f"원본 오류: {failure.message}"
+    )
+
+
+def _permission_feedback_message(failure: ToolRepairFailure) -> str:
+    return (
+        "permissionLevel 값이 정수 1~5 범위를 벗어나 자동 repair를 중단했습니다. "
+        "recoverable=true. retry_policy=requires_corrected_permission_level. "
+        "권한은 위험도나 신뢰도 점수가 아니라 실행 권한 등급입니다. "
+        "1~5 중 하나의 정수 permissionLevel로 다시 지정해야 합니다. "
+        f"원본 오류: {failure.message}"
     )
 
 
