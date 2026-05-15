@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 137 — PLAN draft 실행 스펙 검증 최소화 (2026-05-15)
+
+#### `src`
+- PLAN draft `execution_spec` 검증에서 품질 기준과 안전 기준을 분리
+- `outputs.required_result_fields`, step별 `commands`, `json_mapping`, `failure_policy`, `parse_strategy`, `mvp_exclusions`, `command_policy` 누락만으로는 PLAN draft를 실패시키지 않도록 완화
+- hard fail은 unsupported status, malformed list/object, command substitution, output redirection, shell chaining, denylist 명령, read-only가 아닌 command/API method처럼 실행 안전성에 직접 영향을 주는 항목 중심으로 제한
+- 명령이 존재할 때만 command allowlist/denylist 및 Docker/API/log 안전 검사를 수행하고, 명령이 없는 step은 후속 보완 대상으로 통과시킴
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`의 `execution_spec` 설명을 “필수 상세 스펙”에서 “권장 스펙 + 최소 안전 검증” 기준으로 정정
+
+#### 검증
+- `python -m py_compile src\tool_plan\planner.py` 성공
+- 누락 필드만 있는 execution spec은 통과하고, output redirection 같은 위험 명령은 계속 피드백 전환되는 smoke 확인 성공
+
+---
+
+### 🛠️ Session 136 — PLAN draft 검증 실패 피드백 전환 (2026-05-15)
+
+#### `src`
+- PLAN draft `execution_spec` 검증 실패 시 raw error만 `TOOL_PLAN_FAILED`로 끝내지 않고, 실패 메시지를 LLM에 다시 전달해 한국어 설명/대안/다음 요청 예시를 생성하도록 보강
+- 실패한 PLAN draft는 저장하지 않으며, 사용자가 읽을 수 있는 피드백은 기존 schema 변경 없이 `TOOL_PLAN_SKIPPED`의 assistant message로 내려보냄
+- 피드백 생성에는 원본 요청, 검증 실패 메시지, redacted Remote Workspace context, 거부된 PLAN draft 요약만 사용하고 secret이나 raw file/code payload는 넣지 않도록 제한
+- 피드백 LLM 호출 실패 시에도 deterministic fallback 메시지로 원인과 안전한 Plan B를 반환하도록 처리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 PLAN draft validation feedback 프롬프트와 서버 worker 입력 계약을 추가
+
+#### 검증
+- `python -m py_compile src\tool_plan\planner.py` 성공
+- invalid execution spec smoke로 검증 실패가 사용자-facing assistant 피드백으로 전환되는 흐름 확인
+
+---
+
 ### 🛠️ Session 135 — PLAN draft 실행 스펙 품질 검증 강화 (2026-05-15)
 
 #### `theseus_engine`

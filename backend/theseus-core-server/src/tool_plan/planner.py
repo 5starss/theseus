@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,11 +29,18 @@ from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, TextBlock
 from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.tools.core.base_tools import ToolRegistry
-from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
+from theseus_engine.wrappers.llm_clients.api_types import (
+    ApiMessageCompleteEvent,
+    ApiMessageRequest,
+    ApiTextDeltaEvent,
+    SupportsStreamingMessages,
+)
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
+
+logger = logging.getLogger(__name__)
 
 PROJECT_CUSTOM_TOOLS_DIR = (
     Path(__file__).resolve().parents[2] / "theseus_engine" / "custom_tools" / "projects"
@@ -67,6 +75,29 @@ Generated custom tool safety context:
   local program execution inside generated custom tool code.
 
 {_CUSTOM_TOOL_SECURITY_RULES}
+"""
+
+_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT = """\
+You are Theseus in PLAN mode.
+
+A PLAN draft failed Core validation before it could be saved or shown as an
+approved plan candidate. Your job is to turn the raw validation failure into a
+helpful Korean assistant response.
+
+Rules:
+- Do not output a JSON block.
+- Do not use the user-facing term "ToolPlan"; say "PLAN draft", "실행 스펙",
+  "승인된 plan", or "생성할 Tool" instead.
+- Explain why the draft was rejected in terms the user can act on.
+- Identify which requirement conflicts with Core safety rules or execution spec
+  validation.
+- Propose safe Plan B options, especially existing read-only remote tools or a
+  narrower PLAN draft.
+- Do not claim that tool execution, file writing, or remote analysis already
+  happened.
+- If writing a Markdown file is the risky part, separate "produce a Markdown
+  report in chat" from "write a file to a path with approval".
+- Keep the response concise and practical.
 """
 
 _EXECUTION_SPEC_KEYWORDS = (
@@ -279,7 +310,17 @@ class ToolPlanPlanner:
         _raw_markdown, structured_plan = generated
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
-        self._validate_execution_spec_if_required(structured_plan, event)
+        try:
+            self._validate_execution_spec_if_required(structured_plan, event)
+        except ToolPlanPlannerError as exc:
+            await self._emit_progress(progress_callback, "PLAN_FEEDBACK", 95)
+            feedback = await self._generate_validation_failure_feedback(
+                event,
+                structured_plan=structured_plan,
+                failure_message=str(exc),
+                remote_workspace=remote_workspace,
+            )
+            return ToolPlanSkippedResult(message=feedback)
         version = self._resolve_plan_version(event)
         snapshot = self._build_snapshot(structured_plan, version=version, event=event)
         structured = self._build_structured_plan(structured_plan)
@@ -482,6 +523,156 @@ class ToolPlanPlanner:
             for tool in build_remote_read_analysis_tools(remote_workspace):
                 registry.register(tool)
         return registry
+
+    async def _generate_validation_failure_feedback(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        structured_plan: dict[str, Any],
+        failure_message: str,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    ) -> str:
+        """Explain a rejected PLAN draft as an assistant response.
+
+        This keeps invalid plans out of storage while still giving the user a
+        useful next step instead of ending with a raw validation error.
+        """
+
+        prompt = self._build_validation_failure_feedback_prompt(
+            event,
+            structured_plan=structured_plan,
+            failure_message=failure_message,
+            remote_workspace=remote_workspace,
+        )
+        messages = [ConversationMessage.from_user_text(prompt)]
+        try:
+            final_text = ""
+            collected_text: list[str] = []
+            async for llm_event in self.llm_client.stream_message(
+                ApiMessageRequest(
+                    model=self.model_name,
+                    messages=messages,
+                    system_prompt=_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT,
+                    max_tokens=1400,
+                    tools=[],
+                    debug_context={
+                        "run_id": event.run_id,
+                        "project_id": event.project_id,
+                        "chat_session_id": event.chat_session_id,
+                        "agent_mode": event.mode,
+                        "remote_workspace_id": event.remote_workspace_id,
+                        "purpose": "plan_validation_feedback",
+                    },
+                )
+            ):
+                if isinstance(llm_event, ApiTextDeltaEvent):
+                    collected_text.append(llm_event.text)
+                elif isinstance(llm_event, ApiMessageCompleteEvent):
+                    final_text = llm_event.message.text
+            response = self._plain_chat_response(final_text or "".join(collected_text))
+            if response:
+                return response
+        except Exception as exc:
+            logger.warning(
+                "PLAN validation feedback generation failed. runId=%s error=%s",
+                event.run_id,
+                exc,
+                exc_info=True,
+            )
+        return self._fallback_validation_failure_feedback(
+            event,
+            failure_message=failure_message,
+            structured_plan=structured_plan,
+        )
+
+    def _build_validation_failure_feedback_prompt(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        structured_plan: dict[str, Any],
+        failure_message: str,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    ) -> str:
+        plan_summary = {
+            "goal": structured_plan.get("goal") or structured_plan.get("title"),
+            "summary": structured_plan.get("summary"),
+            "context": _compact_prompt_json(structured_plan.get("context")),
+            "tasks": _compact_prompt_json(structured_plan.get("tasks")),
+            "execution_spec": _compact_prompt_json(structured_plan.get("execution_spec")),
+            "alternatives": _compact_prompt_json(structured_plan.get("alternatives")),
+        }
+        if isinstance(event, ToolPlanRegenerationRequestedEvent):
+            request_text = self._regeneration_request_summary(event)
+        else:
+            request_text = event.prompt
+        remote_context = (
+            {
+                "remoteWorkspaceId": event.remote_workspace_id,
+                "basePath": remote_workspace.base_path if remote_workspace else None,
+                "allowWriteExecution": (
+                    remote_workspace.allow_write_execution
+                    if remote_workspace
+                    else None
+                ),
+            }
+            if event.remote_workspace_id is not None
+            else None
+        )
+        return (
+            "The previous PLAN draft was rejected by Core validation before it could be saved.\n"
+            "Analyze the failure and give the user a helpful Korean response.\n\n"
+            "Original user request:\n"
+            f"{request_text}\n\n"
+            "Validation failure:\n"
+            f"{failure_message}\n\n"
+            "Remote Workspace context, redacted:\n"
+            f"{json.dumps(remote_context, ensure_ascii=False, indent=2)}\n\n"
+            "Rejected PLAN draft summary:\n"
+            f"{json.dumps(plan_summary, ensure_ascii=False, indent=2)}\n"
+        )
+
+    @staticmethod
+    def _regeneration_request_summary(event: ToolPlanRegenerationRequestedEvent) -> str:
+        feedback = [
+            item.model_dump(mode="json", by_alias=True)
+            for item in event.feedback_items
+        ]
+        return (
+            "사용자가 기존 PLAN draft에 대한 수정 요청을 보냈습니다.\n"
+            f"Base plan version: {event.base_plan_version}\n"
+            f"Feedback: {json.dumps(feedback, ensure_ascii=False)}"
+        )
+
+    @staticmethod
+    def _fallback_validation_failure_feedback(
+        event: ToolPlanRequestEvent,
+        *,
+        failure_message: str,
+        structured_plan: dict[str, Any],
+    ) -> str:
+        title = str(
+            structured_plan.get("goal")
+            or structured_plan.get("title")
+            or "요청"
+        ).strip()
+        remote_line = (
+            "\n\n선택된 Remote Workspace가 있으므로, 다음 PLAN draft는 원격 환경을 읽기 전용으로 분석하는 범위 안에서 다시 작성해야 합니다."
+            if event.remote_workspace_id is not None
+            else ""
+        )
+        return (
+            f"생성된 PLAN draft가 Core 검증을 통과하지 못해 저장하지 않았습니다.\n\n"
+            f"대상 요청: {title}\n\n"
+            "주요 원인:\n"
+            f"{failure_message}\n\n"
+            "가능한 대안:\n"
+            "1. output redirection, shell chaining, 허용 목록 밖 명령을 제거하고 읽기 전용 명령만 사용하는 실행 스펙으로 다시 요청합니다.\n"
+            "2. 이미 검증된 remote_* 읽기 도구를 사용하는 AGENT 작업으로 전환해 분석 보고서를 작성합니다.\n"
+            "3. md 파일 저장이 꼭 필요하면 저장 위치와 쓰기 승인을 명확히 한 별도 승인 흐름으로 분리합니다.\n\n"
+            "다음 요청 예시:\n"
+            "`허용된 remote read-only 도구만 사용해서 서비스별 코드 분석 PLAN draft를 다시 작성해줘. md 저장은 제외하고 Markdown 보고서 출력만 포함해줘.`"
+            f"{remote_line}"
+        )
 
     def _resolve_plan_version(self, event: ToolPlanRequestEvent) -> int:
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
@@ -872,48 +1063,30 @@ class ToolPlanPlanner:
     @staticmethod
     def _validate_execution_spec_shape(execution_spec: dict[str, Any], errors: list[str]) -> None:
         steps = execution_spec.get("steps")
-        if not isinstance(steps, list) or not steps:
-            errors.append("execution_spec.steps must be a non-empty list.")
+        if steps is not None and not isinstance(steps, list):
+            errors.append("execution_spec.steps must be a list when present.")
 
         status_values = execution_spec.get("status_values")
-        if not isinstance(status_values, list) or not status_values:
-            errors.append("execution_spec.status_values must list PASS/WARNING/FAIL/SKIPPED/INFO.")
-        else:
+        if isinstance(status_values, list) and status_values:
             statuses = {str(item).strip().upper() for item in status_values}
             invalid = sorted(statuses - _ALLOWED_EXECUTION_STATUS_VALUES)
-            missing = sorted(_ALLOWED_EXECUTION_STATUS_VALUES - statuses)
             if invalid:
                 errors.append(f"execution_spec.status_values contains unsupported statuses: {invalid}.")
-            if missing:
-                errors.append(f"execution_spec.status_values is missing statuses: {missing}.")
-
-        outputs = execution_spec.get("outputs")
-        result_fields = outputs.get("required_result_fields") if isinstance(outputs, dict) else None
-        required_fields = {"evidence", "sanitized_output", "recommendation"}
-        if not isinstance(result_fields, list) or not required_fields.issubset(
-            {str(item).strip() for item in result_fields}
-        ):
-            errors.append(
-                "execution_spec.outputs.required_result_fields must include "
-                "evidence, sanitized_output, and recommendation."
-            )
-
-        mvp_exclusions = execution_spec.get("mvp_exclusions")
-        if not isinstance(mvp_exclusions, list) or not mvp_exclusions:
-            errors.append("execution_spec.mvp_exclusions must list out-of-scope write/recovery actions.")
 
     @staticmethod
     def _validate_execution_spec_command_policy(execution_spec: dict[str, Any], errors: list[str]) -> None:
         policy = execution_spec.get("command_policy")
+        if policy is None:
+            return
         if not isinstance(policy, dict):
-            errors.append("execution_spec.command_policy with allowlist and denylist is required.")
+            errors.append("execution_spec.command_policy must be an object when present.")
             return
         allowlist = policy.get("allowlist")
         denylist = policy.get("denylist")
-        if not isinstance(allowlist, list) or not allowlist:
-            errors.append("execution_spec.command_policy.allowlist must be a non-empty list.")
-        if not isinstance(denylist, list) or not denylist:
-            errors.append("execution_spec.command_policy.denylist must be a non-empty list.")
+        if allowlist is not None and not isinstance(allowlist, list):
+            errors.append("execution_spec.command_policy.allowlist must be a list when present.")
+        if denylist is not None and not isinstance(denylist, list):
+            errors.append("execution_spec.command_policy.denylist must be a list when present.")
 
     @staticmethod
     def _validate_execution_spec_api_checks(execution_spec: dict[str, Any], errors: list[str]) -> None:
@@ -935,12 +1108,6 @@ class ToolPlanPlanner:
                 )
             if check.get("read_only") is not True:
                 errors.append(f"api_checks[{index}].read_only must be true.")
-            expected = check.get("expected_statuses")
-            if not isinstance(expected, list) or not expected:
-                errors.append(f"api_checks[{index}].expected_statuses must be a non-empty list.")
-            for required in ("name", "path", "requires_auth", "timeout_seconds", "latency_warning_ms"):
-                if required not in check:
-                    errors.append(f"api_checks[{index}] missing required field: {required}.")
 
     def _validate_execution_spec_steps(self, execution_spec: dict[str, Any], errors: list[str]) -> None:
         steps = execution_spec.get("steps")
@@ -950,20 +1117,6 @@ class ToolPlanPlanner:
             if not isinstance(step, dict):
                 errors.append(f"steps[{step_index}] must be an object.")
                 continue
-            for field in ("step_id", "description", "commands", "decision_rules", "json_mapping"):
-                if field not in step or step[field] in (None, "", []):
-                    errors.append(f"steps[{step_index}] missing required field: {field}.")
-
-            mapping = step.get("json_mapping")
-            if not isinstance(mapping, dict) or not {
-                "evidence",
-                "sanitized_output",
-                "recommendation",
-            }.issubset(mapping):
-                errors.append(
-                    f"steps[{step_index}].json_mapping must include evidence, "
-                    "sanitized_output, and recommendation."
-                )
 
             decision_rules = step.get("decision_rules")
             if isinstance(decision_rules, list):
@@ -981,7 +1134,6 @@ class ToolPlanPlanner:
         errors: list[str],
     ) -> None:
         if not decision_rules:
-            errors.append(f"steps[{step_index}].decision_rules must be non-empty.")
             return
         for rule_index, rule in enumerate(decision_rules, start=1):
             if not isinstance(rule, dict):
@@ -994,8 +1146,6 @@ class ToolPlanPlanner:
                     f"{status or '<missing>'}."
                 )
             condition = str(rule.get("condition") or "").strip().lower()
-            if not condition:
-                errors.append(f"steps[{step_index}].decision_rules[{rule_index}] missing condition.")
             if "health" in condition and "none" in condition and status == "FAIL":
                 errors.append(
                     f"steps[{step_index}].decision_rules[{rule_index}] treats Docker health none as FAIL; "
@@ -1019,14 +1169,11 @@ class ToolPlanPlanner:
             return
         command = str(command_spec.get("command") or "").strip()
         if not command:
-            errors.append(f"steps[{step_index}].commands[{command_index}] missing command.")
             return
 
-        if str(command_spec.get("type") or "").strip().lower() != "read_only":
+        command_type = str(command_spec.get("type") or "").strip().lower()
+        if command_type not in {"", "read_only"}:
             errors.append(f"steps[{step_index}].commands[{command_index}].type must be read_only.")
-        for field in ("timeout_seconds", "failure_policy", "parse_strategy"):
-            if field not in command_spec or command_spec[field] in (None, ""):
-                errors.append(f"steps[{step_index}].commands[{command_index}] missing {field}.")
 
         self._validate_command_text(command, step_index, command_index, command_spec, errors)
 

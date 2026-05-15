@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-15 — runtime mode reminder 및 PLAN draft execution spec 반영
+> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation feedback 반영
 
 ---
 
@@ -99,9 +99,9 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 
 #### 1.3.1 PLAN draft execution spec
 
-운영 서버 점검, Remote Workspace 진단, Docker/API/log/resource audit, generated tool 생성처럼 실제 Tool build로 이어지는 요청은 PLAN draft JSON에 `execution_spec`를 포함해야 합니다. 이는 사용자가 보는 로드맵 설명이 아니라 다음 단계가 구현 컨텍스트로 사용할 실행 가능한 스펙입니다.
+운영 서버 점검, Remote Workspace 진단, Docker/API/log/resource audit, generated tool 생성처럼 실제 Tool build로 이어지는 요청은 PLAN draft JSON에 가능하면 `execution_spec`를 포함해야 합니다. 이는 사용자가 보는 로드맵 설명이 아니라 다음 단계가 구현 컨텍스트로 사용할 실행 가능한 스펙입니다.
 
-`execution_spec` 필수 방향:
+`execution_spec` 권장 방향:
 
 - `steps[]`: `step_id`, `description`, `commands`, `decision_rules`, `json_mapping`
 - `commands[]`: `command`, `type=read_only`, `timeout_seconds`, `failure_policy`, `parse_strategy`
@@ -122,7 +122,8 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 Core 검증 위치:
 
 - `src/tool_plan/planner.py::_validate_execution_spec_if_required()`
-- 운영/remote/tool 생성 성격의 요청에서 `execution_spec`가 없거나, allowlist 밖 명령/위험 명령/부정확한 Docker health 판정/API write method가 있으면 PLAN draft 생성 실패로 처리합니다.
+- 운영/remote/tool 생성 성격의 요청에서 `execution_spec`가 완전히 없으면 피드백으로 전환합니다. 단, 상세 품질 필드(`outputs.required_result_fields`, step별 `commands`, `json_mapping`, `failure_policy` 등) 누락만으로는 실패시키지 않습니다.
+- hard fail은 command substitution/output redirection/shell chaining/denylist 명령/API write method/명백히 위험한 Docker 명령처럼 실행 안전성에 직접 영향을 주는 항목에 제한합니다.
 - `structuredPlanJson`에는 `execution_spec` 원본을 보존하고, `planSnapshot.executionSpec`에는 표시/검토용 projection을 둡니다.
 
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
@@ -299,7 +300,7 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 | `src` 경로 | 주입 모드/단계 | 요청별 입력 계약 |
 |---|---|---|
 | `src/routes/stream.py` → `src/builder/engine.py` | `ASK`, `AGENT`, `PLAN/DRAFTING`, `PLAN/EXECUTING` | `/stream`의 `mode=ASK\|AGENT\|PLAN`을 `models/modes.py` runtime mode로 해석하고, 사용자 prompt와 Spring history를 `QueryEngine` 메시지로 전달합니다. |
-| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | API/Kafka 계약명은 ToolPlan이지만, LLM 입력과 설명은 `PLAN draft`, `plan JSON`, `approved plan` 용어를 사용합니다. PLAN JSON은 `prompts/plan.py`의 DRAFTING 스키마를 따릅니다. 운영/remote/generated tool 요청은 `execution_spec`를 검증합니다. |
+| `src/tool_plan/planner.py` | 생성은 `PLAN/DRAFTING`, 재생성은 `PLAN/WAIT_FOR_REVIEW` | API/Kafka 계약명은 ToolPlan이지만, LLM 입력과 설명은 `PLAN draft`, `plan JSON`, `approved plan` 용어를 사용합니다. PLAN JSON은 `prompts/plan.py`의 DRAFTING 스키마를 따릅니다. 운영/remote/generated tool 요청은 `execution_spec`를 검증합니다. 검증 실패 시 원문 오류를 그대로 종료하지 않고 `_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT`로 실패 원인/대안/다음 요청 예시를 assistant 메시지로 정리합니다. |
 | `src/tool_build/builder.py` | `PLAN/EXECUTING` | 승인된 plan을 기반으로 custom tool artifact JSON/code schema와 검증 실패 repair context를 user message에 포함합니다. |
 | `src/tool_generation/processor.py` | legacy 요청을 `PLAN/DRAFTING` 또는 `PLAN/WAIT_FOR_REVIEW`로 변환 | 기존 `theseus.tool-generation.*` 통신을 임시 유지하기 위한 adapter입니다. |
 
@@ -324,7 +325,8 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 | `/api/v1/stream` | `mode=ASK\|AGENT\|PLAN`, `prompt`, `chat_session_id`, optional `plan_id`, optional `remote_workspace_id` | `mode`가 `models/modes.py` mode로 반영되는지, `ASK`에서 tool schema가 비어도 실패하지 않는지, `PLAN`이 `plan_id` 유무에 따라 DRAFTING/EXECUTING으로 분기되는지 확인합니다. |
 | Spring history → `src/history/mapper.py` | `USER`/`ASSISTANT`만 engine `ConversationMessage`로 변환 | `SYSTEM` sender가 `role="system"`으로 들어가면 engine message 검증에서 실패할 수 있습니다. 시스템 알림은 history에서 제외하거나 user/assistant 요약으로 변환합니다. |
 | `theseus.tool-plan.request` generate | API/Kafka 계약명은 ToolPlan, LLM 출력은 `prompts/plan.py` PLAN DRAFTING JSON | `structuredPlanJson`은 `goal`, `context`, `tasks`, `verification`, `action_plan` 중심의 canonical PLAN JSON을 보존합니다. API 표시용 `blocks`, `schemaVersion`, `planVersion`은 `planSnapshot` 같은 projection에 둡니다. |
-| PLAN draft execution spec | generated tool, Remote Workspace, 운영 점검, Docker/API/log/resource 진단 | `execution_spec`가 없는 추상 계획은 차단합니다. command allowlist/denylist, Docker inspect 필드, health `none` 처리, API read-only method, log grep no-match 정책을 Core에서 검증합니다. |
+| PLAN draft execution spec | generated tool, Remote Workspace, 운영 점검, Docker/API/log/resource 진단 | `execution_spec` 부재와 위험 명령/API write method는 피드백으로 전환합니다. 세부 품질 필드 누락은 PLAN draft를 차단하지 않고 후속 보완 대상으로 둡니다. |
+| PLAN draft validation feedback | `src/tool_plan/planner.py::_PLAN_VALIDATION_FEEDBACK_SYSTEM_PROMPT` | 검증 실패 메시지, redacted remote context, 거부된 PLAN draft 요약을 LLM에 다시 전달해 한국어 Markdown 설명/안전한 Plan B/다음 요청 예시로 변환합니다. 실패한 draft는 저장하지 않고 `TOOL_PLAN_SKIPPED`의 assistant message로 내려보냅니다. |
 | `theseus.tool-plan.request` regenerate | base plan과 feedback을 user message로 전달 | 별도 schema를 새로 강제하지 말고 `prompts/plan.py` PLAN REVIEW 흐름에서 전체 plan JSON을 다시 제시하게 합니다. feedback payload는 LLM 입력 전에 필요한 최소 내용만 요약합니다. |
 | `theseus.tool-build.request` | 승인된 plan → custom tool artifact JSON spec 생성 | `system_prompt`는 `prompts/plan.py` PLAN EXECUTING을 사용하되, user message의 출력 계약은 generated artifact 파싱을 위한 JSON spec으로 제한합니다. prompt 문구에서는 ToolPlan 대신 approved plan/custom tool artifact 용어를 사용합니다. |
 | Tool build repair | 이전 spec, error code/message, sandbox/validation failure context | 실패 원인을 충분히 주되 비밀값, 원격 workspace credential, 불필요한 파일 내용을 넣지 않습니다. repair 결과도 동일 JSON spec으로 검증합니다. |
@@ -451,7 +453,7 @@ graph TB
 
 | 날짜 | 변경 내용 |
 |---|---|
-| 2026-05-15 | `core/mode_context.py` runtime reminder 주입 경로와 mode 우선순위 문구 강화 내용을 문서화. PLAN draft `execution_spec` 요구사항과 Core 검증 기준(Docker/API/log/command policy/evidence mapping)을 추가. |
+| 2026-05-15 | `core/mode_context.py` runtime reminder 주입 경로와 mode 우선순위 문구 강화 내용을 문서화. PLAN draft `execution_spec` 권장 구조, 최소 안전 검증 기준, validation feedback 프롬프트를 추가. |
 | 2026-05-14 | `state.py` prompt 모놀리스를 `theseus_engine/prompts/` 패키지로 분리. `models/modes.py`에 mode/phase enum을 두고, `state.py`는 façade/호환 import만 담당하도록 정리. 사용 경로, 수정 가이드, Extension/runtime 차이 기록 원칙 추가. |
 | 2025-05-07 | Plan JSON 스키마 대폭 확장 (tier, problem, solution, target_files, expected_effect, context, verification, action_plan). 제안서 스타일 `_display_plan` 리디자인. Plan 모드 VERIFYING 단계 추가. DRAFTING에 Research→Analyze→Plan 워크플로우 및 읽기 도구 허용. REVIEW 반복 승인 루프 적용. EXECUTING에 Tier 기반 실행 순서. Coordinator 모드 프롬프트 문서화. 도구 설명에 core 도구 추가. 컨텍스트 관리 섹션 추가. |
 | 2025-04-xx | 초기 버전. 4-Mode 아키텍처 문서화. |
