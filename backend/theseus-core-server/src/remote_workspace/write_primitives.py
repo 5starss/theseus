@@ -14,6 +14,13 @@ from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.remote_workspace.ssh_connector import SshRemoteWorkspaceConnector
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult
 from theseus_engine.tools.core.bash_tool import BashInput
+from theseus_engine.tools.core.edit_safety import (
+    build_overwrite_rejected_report,
+    merge_preserve_patterns,
+    render_blocked_message,
+    render_success_message,
+    validate_text_update,
+)
 from theseus_engine.tools.core.file_edit_tool import EditFileInput
 from theseus_engine.tools.core.file_utils import _strip_markdown_links
 from theseus_engine.tools.core.file_write_tool import WriteFileInput
@@ -73,6 +80,21 @@ class RemoteWritableToolMixin(RemoteWorkspaceToolMixin):
             return raw_content.decode("utf-8")
         return str(raw_content)
 
+    def remove_remote_file(
+        self,
+        connector: SshRemoteWorkspaceConnector,
+        remote_path: str,
+    ) -> None:
+        client = connector.connect()
+        try:
+            sftp_client = client.open_sftp()
+            try:
+                sftp_client.remove(remote_path)
+            finally:
+                sftp_client.close()
+        finally:
+            client.close()
+
     def strip_code_markdown_links(self, path: str, content: str) -> str:
         if path.endswith((".py", ".ts", ".js", ".tsx", ".jsx", ".sh")):
             return _strip_markdown_links(content)
@@ -90,20 +112,127 @@ class RemoteWriteFileTool(RemoteWritableToolMixin, BaseTool):
         return False
 
     async def execute(self, arguments: WriteFileInput, context: ToolExecutionContext) -> ToolResult:
-        del context
         connector = self.create_connector()
         try:
             remote_path = connector.resolve_path(arguments.path)
             content = self.strip_code_markdown_links(arguments.path, arguments.content)
+            preserve_patterns = merge_preserve_patterns(
+                arguments.preserve_patterns,
+                context.metadata,
+            )
+            existed_before = False
+            original_content = ""
+            try:
+                original_content = await asyncio.to_thread(
+                    self.read_remote_text,
+                    connector,
+                    remote_path,
+                )
+                existed_before = True
+            except FileNotFoundError:
+                existed_before = False
+
+            if existed_before and (
+                not arguments.allow_overwrite or not (arguments.overwrite_reason or "").strip()
+            ):
+                report = build_overwrite_rejected_report(
+                    path=f"remote:{arguments.path}",
+                    old_content=original_content,
+                    new_content=content,
+                    operation="remote_write_file",
+                )
+                return ToolResult(
+                    output=render_blocked_message(report),
+                    is_error=True,
+                    metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
+                )
+
+            report = validate_text_update(
+                path=arguments.path,
+                old_content=original_content,
+                new_content=content,
+                operation="remote_write_file",
+                expected_change="overwrite" if existed_before else "add_only",
+                preserve_patterns=preserve_patterns,
+            )
+            if not report.allowed:
+                return ToolResult(
+                    output=render_blocked_message(report),
+                    is_error=True,
+                    metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
+                )
             await asyncio.to_thread(
                 self.write_remote_text,
                 connector,
                 remote_path,
                 content,
             )
+            try:
+                written = await asyncio.to_thread(
+                    self.read_remote_text,
+                    connector,
+                    remote_path,
+                )
+                post_report = validate_text_update(
+                    path=arguments.path,
+                    old_content=original_content,
+                    new_content=written,
+                    operation="remote_write_file",
+                    expected_change="overwrite" if existed_before else "add_only",
+                    preserve_patterns=preserve_patterns,
+                )
+                if not post_report.allowed:
+                    if existed_before:
+                        await asyncio.to_thread(
+                            self.write_remote_text,
+                            connector,
+                            remote_path,
+                            original_content,
+                        )
+                    else:
+                        await asyncio.to_thread(
+                            self.remove_remote_file,
+                            connector,
+                            remote_path,
+                        )
+                    post_report.mark_rolled_back()
+                    return ToolResult(
+                        output=render_blocked_message(post_report),
+                        is_error=True,
+                        metadata={"remote_path": remote_path, "safetyReport": post_report.to_metadata()},
+                    )
+                report = post_report
+            except Exception as verify_error:
+                if existed_before:
+                    await asyncio.to_thread(
+                        self.write_remote_text,
+                        connector,
+                        remote_path,
+                        original_content,
+                    )
+                else:
+                    try:
+                        await asyncio.to_thread(
+                            self.remove_remote_file,
+                            connector,
+                            remote_path,
+                        )
+                    except Exception:
+                        pass
+                report.violations.append(f"post-write verification failed: {verify_error}")
+                report.mark_rolled_back()
+                return ToolResult(
+                    output=render_blocked_message(report),
+                    is_error=True,
+                    metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
+                )
             return ToolResult(
-                output=f"Successfully wrote {len(content.encode('utf-8'))} bytes to remote:{arguments.path}",
-                metadata={"remote_path": remote_path},
+                output=render_success_message(
+                    report=report,
+                    action=f"Successfully wrote {len(content.encode('utf-8'))} bytes to remote:{arguments.path}",
+                    detail="Existing remote file overwritten." if existed_before else "New remote file created.",
+                ),
+                metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
             )
         except RemoteWorkspaceError as exc:
             return self.format_remote_error(exc)
@@ -124,10 +253,13 @@ class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
         return False
 
     async def execute(self, arguments: EditFileInput, context: ToolExecutionContext) -> ToolResult:
-        del context
         connector = self.create_connector()
         try:
             remote_path = connector.resolve_path(arguments.path)
+            preserve_patterns = merge_preserve_patterns(
+                arguments.preserve_patterns,
+                context.metadata,
+            )
             content = await asyncio.to_thread(
                 self.read_remote_text,
                 connector,
@@ -143,19 +275,93 @@ class RemoteEditFileTool(RemoteWritableToolMixin, BaseTool):
                     ),
                     is_error=True,
                 )
+            occurrences = content.count(old_string)
+            if occurrences != 1 and not arguments.replace_all:
+                return ToolResult(
+                    output=(
+                        f"Error: The provided 'old_str' matched {occurrences} locations "
+                        f"in remote:{arguments.path}. Use a more specific old_str or set "
+                        "replace_all=true only when all matches are intended."
+                    ),
+                    is_error=True,
+                )
 
             replace_count = -1 if arguments.replace_all else 1
             updated_content = content.replace(old_string, new_string, replace_count)
+            report = validate_text_update(
+                path=arguments.path,
+                old_content=content,
+                new_content=updated_content,
+                operation="remote_edit_file",
+                expected_change=arguments.expected_change,
+                preserve_patterns=preserve_patterns,
+            )
+            if not report.allowed:
+                return ToolResult(
+                    output=render_blocked_message(report),
+                    is_error=True,
+                    metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
+                )
             await asyncio.to_thread(
                 self.write_remote_text,
                 connector,
                 remote_path,
                 updated_content,
             )
-            actual_replaces = content.count(old_string) if arguments.replace_all else 1
+            try:
+                written = await asyncio.to_thread(
+                    self.read_remote_text,
+                    connector,
+                    remote_path,
+                )
+                post_report = validate_text_update(
+                    path=arguments.path,
+                    old_content=content,
+                    new_content=written,
+                    operation="remote_edit_file",
+                    expected_change=arguments.expected_change,
+                    preserve_patterns=preserve_patterns,
+                )
+                if not post_report.allowed:
+                    await asyncio.to_thread(
+                        self.write_remote_text,
+                        connector,
+                        remote_path,
+                        content,
+                    )
+                    post_report.mark_rolled_back()
+                    return ToolResult(
+                        output=render_blocked_message(post_report),
+                        is_error=True,
+                        metadata={"remote_path": remote_path, "safetyReport": post_report.to_metadata()},
+                    )
+                report = post_report
+            except Exception as verify_error:
+                await asyncio.to_thread(
+                    self.write_remote_text,
+                    connector,
+                    remote_path,
+                    content,
+                )
+                report.violations.append(f"post-write verification failed: {verify_error}")
+                report.mark_rolled_back()
+                return ToolResult(
+                    output=render_blocked_message(report),
+                    is_error=True,
+                    metadata={"remote_path": remote_path, "safetyReport": report.to_metadata()},
+                )
+            actual_replaces = occurrences if arguments.replace_all else 1
             return ToolResult(
-                output=f"Successfully updated remote:{arguments.path} ({actual_replaces} replacements made).",
-                metadata={"remote_path": remote_path, "replace_count": actual_replaces},
+                output=render_success_message(
+                    report=report,
+                    action=f"Successfully updated remote:{arguments.path}.",
+                    detail=f"Replacements made: {actual_replaces}",
+                ),
+                metadata={
+                    "remote_path": remote_path,
+                    "replace_count": actual_replaces,
+                    "safetyReport": report.to_metadata(),
+                },
             )
         except FileNotFoundError:
             return ToolResult(output=f"File not found: remote:{arguments.path}", is_error=True)

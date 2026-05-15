@@ -4,6 +4,47 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 141 — Custom Tool Registry 복구 UX 추가 (2026-05-15)
+
+#### `theseus_engine`
+- custom tool load report를 추가해 import 실패 도구가 registry 밖에서 조용히 사라지지 않고 `available / unavailable / inactive` inventory로 남도록 보강
+- `tool_search`는 callable registry만 주입하되, 검색어와 맞는 unavailable custom tool 후보가 있으면 누락 모듈과 설치 후보를 함께 안내하도록 변경
+- local editor runtime에 `refreshToolRegistry` 내부 명령을 추가해 runner 재시작 없이 custom tool registry를 다시 로드하고 WebView에 `customToolInventoryUpdated` / `toolRegistryUpdated` 이벤트를 내려보냄
+- prompt capability에 Custom Tool Recovery 지침을 추가해 agent가 import 실패 도구를 “없는 도구”로 단정하지 않고 extension 복구 흐름을 안내하도록 정리
+
+#### `vscode-extension`
+- Custom Tools 패널이 import 실패 도구도 표시하도록 `loadState`, `importError`, `missingModules`, `installCandidates`, `dependencies`, `canInstall`, `canRegister`를 반영
+- unavailable 도구에 `View Error`, `Install Dependencies`, `Retry Load`, `Register`, `Open File`, `Disable` 액션을 추가
+- `installCustomToolDependencies`, `retryCustomToolLoad`, `registerCustomTool`, `disableCustomTool`, `refreshToolRegistry` WebView command와 관련 Host event를 추가
+- dependency 설치는 `theseus.pythonPath` 기준 `python -m pip install`로만 실행하며, `.meta.json.dependencies` 또는 `ModuleNotFoundError` 기반 안전 후보만 사용자 승인 후 설치하도록 제한
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `node --check media\main.js`, `media\dispatcher.js`, `media\protocol.js`, `media\components\CustomTools.js` 성공
+- `python -m py_compile theseus_engine\tools\core\tool_factory.py theseus_engine\tools\core\tool_search_tool.py theseus_engine\runner_runtime.py theseus_engine\core\engine_builder.py theseus_engine\prompts\capabilities.py` 성공
+
+---
+
+### 🛠️ Session 140 — Code editing safety protocol 강화 (2026-05-15)
+
+#### `theseus_engine`
+- `theseus_engine/tools/core/edit_safety.py`를 추가해 파일 경로 위험도, diff 삭제/추가 라인, Python AST 문법, import/class/function/config key 보존 여부를 공통 검증
+- `edit_file`은 기본적으로 `old_str`가 정확히 1회 매칭되어야 실행되도록 보강하고, 안전 검증 실패 시 파일을 쓰지 않고 `ToolResult(is_error=True)`와 `safetyReport` metadata를 반환
+- `write_file`은 신규 파일 생성이 기본이 되도록 좁히고, 기존 파일 덮어쓰기는 `allow_overwrite=true`와 `overwrite_reason`이 있을 때만 허용
+- 명시적 `preserve_patterns`와 QueryEngine의 최근 사용자 goal에서 추출한 “변경 금지” invariant를 함께 검증해, 사용자가 바꾸지 말라고 한 문자열이 사라지면 차단
+- local 파일 도구 실행 후 사후 검증에 실패하면 원본 content/hash 기준으로 rollback하고, 성공 메시지에는 삭제 라인/import/class/config key/Python 문법 검증 결과를 포함
+- hook executor의 Python syntax self-reflection이 실제 파일 도구 입력 키인 `path`도 인식하도록 보정
+- `CODE_EDITING_SAFETY_PROMPT`를 추가해 LLM에 patch/diff 기반 수정, invariant 보존, 기존 파일 `write_file` 금지, 실패 후 재시도/보고 규칙을 주입
+
+#### `src`
+- `remote_write_file`과 `remote_edit_file`도 같은 `edit_safety` 검증을 사용해 Remote Workspace 파일 수정 전후를 검증하고, 실패 시 원격 파일을 원본으로 복구하거나 신규 파일을 제거하도록 보강
+- API/Kafka/SSE/FE schema는 변경하지 않고 ToolResult output/metadata 안에서 안전 검증 결과를 전달
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`에 code editing safety prompt, runtime 검증 경계, local/remote 파일 도구 정책을 추가
+
+---
+
 ### 🛠️ Session 139 — Agent 작업 실패 설명 피드백 보강 (2026-05-15)
 
 #### `src`

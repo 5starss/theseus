@@ -271,9 +271,8 @@ class TheseusHookExecutor:
 
             # Self-Reflection: .py 파일 수정 후 즉시 구문 검증
             if post_tool_name in ("write_file", "edit_file"):
-                file_path = payload.get(
-                    "tool_input", {}
-                ).get("file_path", "")
+                tool_input = payload.get("tool_input", {})
+                file_path = tool_input.get("path") or tool_input.get("file_path") or ""
                 if file_path.endswith(".py"):
                     self._validate_python_syntax(
                         file_path, payload
