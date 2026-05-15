@@ -311,7 +311,70 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-vscode-ext
 설정하므로 Extension이 `python -m theseus_engine.daemon` 대신
 `theseus-runner.exe`를 실행합니다.
 
-#### 5.1.7 테스터에게 zip으로 보내기
+#### 5.1.7 back/infra 제외 로컬 소스 패키지 만들기
+
+서버 orchestration/API 코드, 프론트엔드, 인프라를 제외하고 로컬 extension
+설치와 실행에 필요한 파일만 묶으려면 source package를 생성합니다.
+
+저장소 루트에서 더블클릭합니다.
+
+```text
+Package-Theseus-LocalExtension.cmd
+```
+
+명령으로 실행하려면 다음을 사용합니다.
+
+```powershell
+Package-Theseus-LocalExtension.cmd
+```
+
+extension 폴더에서 VSIX 재빌드와 압축을 한 번에 실행할 수도 있습니다.
+
+```powershell
+cd backend\theseus-core-server\vscode-extension
+npm.cmd run package:local-source
+```
+
+Git Bash에서는 다음 wrapper를 사용합니다.
+
+```bash
+bash Package-Theseus-LocalExtension.sh
+```
+
+생성 결과는 기본적으로 다음 위치에 생깁니다.
+
+```text
+backend\theseus-core-server\dist\local-extension-package\Theseus-LocalExtensionSourcePackage.zip
+```
+
+포함되는 파일은 다음입니다.
+
+```text
+Theseus-LocalExtensionSourcePackage/
+  README.md
+  Install-Theseus-Extension.cmd
+  Uninstall-Theseus-VSCode.cmd
+  backend/theseus-core-server/
+    .env.example
+    requirements*.txt
+    usage.md
+    theseus_cli.py
+    theseus_cli/
+    theseus_engine/
+    scripts/install-vscode-extension.ps1
+    scripts/install-vscode-extension.sh
+    vscode-extension/theseus-vscode-*.vsix
+```
+
+제외되는 항목은 `src`, `frontend`, `infra`, `backend/theseus-api-server`,
+`.venv`, `build`, `dist`, `tests`, 실제 `.env`, Python cache입니다.
+
+받은 사람은 압축을 풀고 `Install-Theseus-Extension.cmd`를 더블클릭하면 됩니다.
+이 패키지는 소스 런타임 배포용이므로 핵심 Python 코드를 숨기는 목적에는
+맞지 않습니다. source-free 테스트 배포가 필요하면 아래 runner binary 패키지를
+사용합니다.
+
+#### 5.1.8 테스터에게 source-free zip으로 보내기
 
 테스터에게 source-free 테스트 패키지를 보내려면 다음 구성을 사용합니다.
 
@@ -359,7 +422,7 @@ bash Package-Theseus-TestPackage.sh --build-runner --install-pyinstaller
 backend\theseus-core-server\dist\test-package\Theseus-TestPackage.zip
 ```
 
-#### 5.1.8 설치 문제 빠른 진단
+#### 5.1.9 설치 문제 빠른 진단
 
 | 증상 | 확인할 것 |
 |---|---|

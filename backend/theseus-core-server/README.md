@@ -391,6 +391,32 @@ bash Package-Theseus-TestPackage.sh
 bash Package-Theseus-TestPackage.sh --build-runner --install-pyinstaller
 ```
 
+서버 orchestration/API, 프론트엔드, 인프라를 제외하고 로컬 extension 설치와
+실행에 필요한 source runtime만 묶으려면 별도 source package를 생성합니다.
+
+```powershell
+Package-Theseus-LocalExtension.cmd
+```
+
+또는 extension 폴더에서 VSIX 재빌드와 압축을 한 번에 실행합니다.
+
+```powershell
+cd backend\theseus-core-server\vscode-extension
+npm.cmd run package:local-source
+```
+
+Git Bash에서는 다음 wrapper를 사용할 수 있습니다.
+
+```bash
+bash Package-Theseus-LocalExtension.sh
+```
+
+결과물은 기본적으로
+`backend\theseus-core-server\dist\local-extension-package\Theseus-LocalExtensionSourcePackage.zip`에
+생성됩니다. 이 패키지는 `theseus_engine`, `theseus_cli`, requirements, VSIX,
+설치/삭제 스크립트, `usage.md`만 포함하며 `src`, `frontend`, `infra`,
+`theseus-api-server`, `.venv`, `build`, `dist`, `tests`, 실제 `.env`는 제외합니다.
+
 Windows PowerShell에서는 다음을 실행합니다.
 
 ```powershell

@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 138 — Local extension source package 자동 압축 (2026-05-15)
+
+#### 설치/패키징
+- `scripts/package-local-extension-source.ps1`를 추가해 서버 orchestration/API, 프론트엔드, 인프라를 제외하고 로컬 extension 설치/실행에 필요한 source runtime 파일만 staging 후 zip으로 압축하도록 함
+- 저장소 루트에 `Package-Theseus-LocalExtension.cmd`, `Package-Theseus-LocalExtension.sh`를 추가해 Windows 더블클릭과 Git Bash에서 같은 패키징 흐름을 실행할 수 있게 함
+- `scripts/package-local-extension-source.sh`와 `vscode-extension`의 `package:local-source` npm script를 추가해 VSIX 재빌드와 source package 생성을 자동화
+
+#### 문서
+- `README.md`, `usage.md`에 back/infra 제외 로컬 소스 패키지 생성 방법, 포함/제외 파일, 결과물 경로를 추가
+
+#### 검증
+- PowerShell parser로 `scripts\package-local-extension-source.ps1` 구문 검증 성공
+- Git Bash parser로 `Package-Theseus-LocalExtension.sh`, `scripts\package-local-extension-source.sh` 구문 검증 성공
+- `Package-Theseus-LocalExtension.cmd -Help`, `Package-Theseus-LocalExtension.sh --help` wrapper 호출 검증 성공
+- `scripts\package-local-extension-source.ps1` smoke로 staging 및 zip 생성, 제외 경로 검증 성공
+
+---
+
 ### 🛠️ Session 137 — PLAN draft 실행 스펙 검증 최소화 (2026-05-15)
 
 #### `src`
