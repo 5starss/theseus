@@ -44,6 +44,7 @@ DEFAULT_TOOL_PERMISSIONS = {
     "read_file": 1,
     "write_file": 2,
     "edit_file": 2,
+    "local_write_report": 2,
     "glob": 1,
     "grep": 1,
     "web_search": 1,

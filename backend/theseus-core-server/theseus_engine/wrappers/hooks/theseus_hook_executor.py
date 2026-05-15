@@ -114,7 +114,11 @@ class TheseusHookExecutor:
         self._enable_dynamic_tools = enable_dynamic_tools
         self._permission_prompt = permission_prompt
         self._llm_client = llm_client
-        self._audit_tools: set[str] = audit_tools or {"write_file", "edit_file"}
+        self._audit_tools: set[str] = audit_tools or {
+            "write_file",
+            "edit_file",
+            "local_write_report",
+        }
         self._retriever = (
             ToolRetriever(full_registry)
             if full_registry and enable_dynamic_tools

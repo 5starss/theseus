@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from src.auth.schemas import SessionContext
 from src.builder.system_prompt import build_theseus_system_prompt
-from src.config import resolve_model_name
+from src.config import resolve_model_name, settings
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
 from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
@@ -113,6 +113,20 @@ def _allows_remote_write_execution(
     if mode == AgentMode.AGENT:
         return bool(remote_workspace and remote_workspace.allow_write_execution)
     return False
+
+
+def _allows_local_report_write(
+    mode: AgentMode,
+    plan_phase: PlanPhase | None,
+    remote_workspace: RemoteWorkspaceConnectionConfig | None,
+) -> bool:
+    if not settings.THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED:
+        return False
+    if remote_workspace is None:
+        return False
+    if mode == AgentMode.AGENT:
+        return True
+    return mode == AgentMode.PLAN and plan_phase == PlanPhase.EXECUTING
 
 
 async def _enforce_executing_plan_guard(
@@ -223,6 +237,11 @@ def get_query_engine(
         plan_phase,
         build_context.remote_workspace,
     )
+    allow_local_report_write = _allows_local_report_write(
+        build_context.mode,
+        plan_phase,
+        build_context.remote_workspace,
+    )
     model_name = resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
@@ -286,6 +305,7 @@ def get_query_engine(
             disabled_tools=frozenset(disabled_tools),
             has_remote_workspace=build_context.remote_workspace is not None,
             allow_remote_write_execution=allow_remote_write_execution,
+            allow_local_report_write=allow_local_report_write,
         ),
     )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
@@ -348,6 +368,7 @@ def get_query_engine(
             "agent_mode": build_context.mode.value,
             "plan_phase": plan_phase.value if plan_phase is not None else None,
             "remote_workspace_id": build_context.remote_workspace_id,
+            "local_report_root": settings.THESEUS_LOCAL_REPORT_ROOT,
             REMOTE_WORKSPACE_RUNTIME_KEY: remote_workspace_runtime_key,
             "remote_workspace": (
                 build_context.remote_workspace.redacted_model_dump(by_alias=True)

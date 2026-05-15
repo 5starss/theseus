@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: Optional[str] = None
     LANGSMITH_TRACING: bool = False
     LANGSMITH_PROJECT: str = "theseus-core"
+    THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
+    THESEUS_LOCAL_REPORT_ROOT: str = "reports"
 
     # Sandbox shared workdir settings.
     # When Core runs inside a Docker container and controls the host Docker daemon,

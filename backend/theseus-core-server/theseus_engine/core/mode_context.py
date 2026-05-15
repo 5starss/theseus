@@ -75,10 +75,11 @@ def _build_mode_assertion(
 def _mode_specific_reminder(mode_name: str, phase_name: str) -> str:
     if mode_name == "ASK":
         return (
-            "ASK mode is conversation-only. Do not execute tools, do not claim "
-            "AGENT/PLAN actions are being performed, and answer with text. If "
-            "execution, tool use, or plan creation is needed, explain the needed "
-            "mode switch instead of acting."
+            "ASK mode is read-only and answer-focused. You may use read-only "
+            "tools that appear in the current schema to inspect context, but do "
+            "not create, modify, delete, execute shell commands, or claim "
+            "AGENT/PLAN actions are being performed. If state-changing execution "
+            "or plan creation is needed, explain the needed mode switch instead."
         )
     if mode_name == "AGENT":
         return (

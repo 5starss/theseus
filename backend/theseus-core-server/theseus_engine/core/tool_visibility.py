@@ -35,6 +35,8 @@ PLAN_DRAFTING_ALLOWED_TOOLS = frozenset(
     }
 )
 
+ASK_ALLOWED_TOOLS = PLAN_DRAFTING_ALLOWED_TOOLS
+
 REMOTE_READ_ANALYSIS_TOOL_NAMES = frozenset(
     {
         "remote_read_file",
@@ -55,9 +57,7 @@ REMOTE_WRITE_EXECUTION_TOOL_NAMES = frozenset(
     }
 )
 
-LOCAL_REMOTE_OVERLAP_TOOL_NAMES = frozenset(
-    {"read_file", "glob", "grep", "bash", "write_file", "edit_file"}
-)
+LOCAL_REPORT_WRITE_TOOL_NAMES = frozenset({"local_write_report"})
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,7 @@ class ToolVisibilityPolicy:
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
     has_remote_workspace: bool = False
     allow_remote_write_execution: bool = False
+    allow_local_report_write: bool = False
     default_permission_level: int = 1
 
 
@@ -119,12 +120,14 @@ def resolve_excluded_tool_names(
 
     names = all_tool_names(registry)
     excluded = set(policy.disabled_tools)
+    if not policy.has_remote_workspace or not policy.allow_local_report_write:
+        excluded.update(LOCAL_REPORT_WRITE_TOOL_NAMES)
 
     if policy.mode == AgentMode.ASK:
+        allowed = set(ASK_ALLOWED_TOOLS)
         if policy.has_remote_workspace:
-            excluded.update(names - REMOTE_READ_ANALYSIS_TOOL_NAMES)
-        else:
-            excluded.update(names)
+            allowed.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
+        excluded.update(names - allowed)
         return excluded
 
     if policy.mode == AgentMode.PLAN and policy.plan_phase in {
@@ -133,7 +136,6 @@ def resolve_excluded_tool_names(
     }:
         allowed = set(PLAN_DRAFTING_ALLOWED_TOOLS)
         if policy.has_remote_workspace:
-            allowed.difference_update(LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
             allowed.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
         excluded.update(names - allowed)
         return excluded
@@ -141,10 +143,8 @@ def resolve_excluded_tool_names(
     if not policy.can_create_tool:
         excluded.add("create_tool")
 
-    if policy.has_remote_workspace:
-        excluded.update(LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
-        if not policy.allow_remote_write_execution:
-            excluded.update(REMOTE_WRITE_EXECUTION_TOOL_NAMES)
+    if policy.has_remote_workspace and not policy.allow_remote_write_execution:
+        excluded.update(REMOTE_WRITE_EXECUTION_TOOL_NAMES)
 
     return excluded
 
