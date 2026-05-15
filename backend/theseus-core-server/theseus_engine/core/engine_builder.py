@@ -61,6 +61,28 @@ def _resolve_skill_injection_enabled(value: Optional[bool]) -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def _ensure_registry_tool_permissions(
+    registry: ToolRegistry,
+    project_tool_permissions: dict,
+) -> dict:
+    """Fill missing tool permission entries from registered tool metadata.
+
+    Server assembly already infers permission levels from the full registry.
+    Local/extension/TUI runtimes should do the same so newly added core tools
+    such as worktree helpers or report writers are governed by their declared
+    permission_level instead of falling back to an implicit level 1 at execution.
+    The input mapping is updated in place because command handlers reuse it
+    when rebuilding visible registries after mode/phase changes.
+    """
+
+    for tool in registry.list_tools():
+        project_tool_permissions.setdefault(
+            tool.name,
+            getattr(tool, "permission_level", 1),
+        )
+    return project_tool_permissions
+
+
 async def setup_engine(
     sm: TheseusStateMachine,
     user_level: int,
@@ -130,6 +152,11 @@ async def setup_engine(
         )
     if loaded_tools:
         print(f"✅ Loaded {len(loaded_tools)} custom tools.")
+
+    project_tool_permissions = _ensure_registry_tool_permissions(
+        full_registry,
+        project_tool_permissions,
+    )
 
     # --------------------------------------------------------------
     # 동적 도구 선택 (Top-K Tool Retrieval)
@@ -215,7 +242,7 @@ async def setup_engine(
             enable_dynamic_tools=enable_dynamic_tools,
             permission_prompt=permission_prompt_func,
             llm_client=api_client,
-            audit_tools={"write_file", "edit_file"},
+            audit_tools={"write_file", "edit_file", "local_write_report"},
         )
 
     # ==============================================================

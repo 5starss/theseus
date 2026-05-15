@@ -44,7 +44,8 @@ async def main():
     print("🚀 [Theseus] Starting Agent Loop with Native Permission Wrapper & Multi-turn Session Memory...")
     
     project_tool_permissions = {
-        "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2, 
+        "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
+        "local_write_report": 2,
         "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
         "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
     }

@@ -56,7 +56,7 @@ class TheseusPermissionChecker:
     동일한 메서드 시그니처를 유지합니다.
     """
 
-    SENSITIVE_TOOLS = {"bash", "write_file", "edit_file"}
+    SENSITIVE_TOOLS = {"bash", "write_file", "edit_file", "local_write_report"}
 
     def __init__(
         self,

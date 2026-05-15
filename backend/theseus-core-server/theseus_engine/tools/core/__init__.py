@@ -26,6 +26,7 @@ from theseus_engine.tools.core.tool_factory import (
 from theseus_engine.tools.core.file_read_tool import ReadFileTool
 from theseus_engine.tools.core.file_write_tool import WriteFileTool
 from theseus_engine.tools.core.file_edit_tool import EditFileTool
+from theseus_engine.tools.core.local_report_tool import LocalWriteReportTool
 from theseus_engine.tools.core.glob_tool import GlobTool
 from theseus_engine.tools.core.grep_tool import GrepTool
 
@@ -101,6 +102,7 @@ ALL_CORE_TOOLS = [
     ReadFileTool,
     WriteFileTool,
     EditFileTool,
+    LocalWriteReportTool,
     GlobTool,
     GrepTool,
     # Web

@@ -65,6 +65,15 @@ _CODE_EDITING_SAFETY_PROMPT = """\
  - Completion summaries for file edits must mention what changed and whether imports, declarations, config keys, and Python syntax were preserved.\
 """
 
+_REMOTE_LOCAL_REPORT_PROMPT = """\
+# Remote Workspace and Local Worktree Boundaries
+ - When a Remote Workspace is selected, remote files/logs/resources must be inspected with remote_* tools such as remote_read_file, remote_glob, remote_grep, remote_tail_log, and remote_check_*.
+ - Local tools such as read_file, glob, grep, write_file, and edit_file operate on the Core/local worktree, not on the Remote Workspace.
+ - If the target is ambiguous, stop and clarify whether the user means the Remote Workspace or the Core/local worktree before calling a tool.
+ - If the user asks to save a remote analysis/report locally, prefer local_write_report. It writes only report artifacts under reports/ or .theseus/reports/ with .md, .json, or .txt extensions.
+ - Use local write_file/edit_file only for intentional Core/local worktree source changes or approved plan execution, never as a substitute for remote_write_file/remote_edit_file.\
+"""
+
 _CUSTOM_TOOL_RECOVERY_PROMPT = """\
 # Custom Tool Recovery
  - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
@@ -129,6 +138,21 @@ class PromptCapabilities:
 
 
 _WEB_RESEARCH_TOOL_NAMES = frozenset({"web_search", "web_fetch", "deep_research"})
+_REMOTE_CONTEXT_TOOL_NAMES = frozenset(
+    {
+        "remote_read_file",
+        "remote_glob",
+        "remote_grep",
+        "remote_tail_log",
+        "remote_check_cpu",
+        "remote_check_memory",
+        "remote_check_disk",
+        "remote_write_file",
+        "remote_edit_file",
+        "remote_run_command",
+        "local_write_report",
+    }
+)
 _AGENT_DEFAULT_TOOL_NAMES = frozenset(
     {
         "bash",
@@ -227,6 +251,8 @@ def _render_capability_sections(capabilities: PromptCapabilities) -> str:
         )
     if capabilities.available_tools & {"write_file", "edit_file", "remote_write_file", "remote_edit_file"}:
         sections.append(_CODE_EDITING_SAFETY_PROMPT)
+    if capabilities.available_tools & _REMOTE_CONTEXT_TOOL_NAMES:
+        sections.append(_REMOTE_LOCAL_REPORT_PROMPT)
     if capabilities.has_tool("tool_search"):
         sections.append(_CUSTOM_TOOL_RECOVERY_PROMPT)
     if capabilities.available_tools & _WEB_RESEARCH_TOOL_NAMES:
@@ -252,6 +278,7 @@ WEB_CAPABILITY_PROMPT = _WEB_RESEARCH_CAPABILITY_PROMPT
 GENERATED_CUSTOM_TOOL_SECURITY_RULES = _GENERATED_CUSTOM_TOOL_SECURITY_RULES
 CREATE_TOOL_CAPABILITY_PROMPT = _CREATE_TOOL_CAPABILITY_PROMPT
 CUSTOM_TOOL_RECOVERY_PROMPT = _CUSTOM_TOOL_RECOVERY_PROMPT
+REMOTE_LOCAL_REPORT_PROMPT = _REMOTE_LOCAL_REPORT_PROMPT
 
 normalize_available_tools = _normalize_available_tools
 default_tool_names_for_mode = _default_tool_names_for_mode
@@ -269,6 +296,7 @@ __all__ = [
     "GENERATED_CUSTOM_TOOL_SECURITY_RULES",
     "CREATE_TOOL_CAPABILITY_PROMPT",
     "CUSTOM_TOOL_RECOVERY_PROMPT",
+    "REMOTE_LOCAL_REPORT_PROMPT",
     "normalize_available_tools",
     "default_tool_names_for_mode",
     "build_prompt_capabilities",

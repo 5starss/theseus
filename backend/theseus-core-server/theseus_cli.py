@@ -55,6 +55,7 @@ async def run_cli():
     actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
     project_tool_permissions = {
         "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
+        "local_write_report": 2,
         "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
         "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
         "search_knowledge_base": 1, "ingest_document": 2,

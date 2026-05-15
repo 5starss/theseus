@@ -175,6 +175,7 @@ class TheseusTUI(App):
 
         self.project_tool_permissions: dict = {
             "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
+            "local_write_report": 2,
             "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
             "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
             "search_knowledge_base": 1, "ingest_document": 2,
@@ -283,7 +284,14 @@ class TheseusTUI(App):
         if tool_name in self._always_approve_tools:
             return True
 
-        _DESTRUCTIVE = {"bash", "write_file", "edit_file", "system_reboot", "create_tool"}
+        _DESTRUCTIVE = {
+            "bash",
+            "write_file",
+            "edit_file",
+            "local_write_report",
+            "system_reboot",
+            "create_tool",
+        }
         if tool_name not in _DESTRUCTIVE:
             return True
 

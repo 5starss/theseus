@@ -25,7 +25,7 @@ FAST_TOOLS: frozenset[str] = frozenset({
 
 # 추론 집약적 도구 패턴 (고성능 모델로 라우팅)
 REASONING_TOOLS: frozenset[str] = frozenset({
-    "write_file", "edit_file", "bash", "create_tool",
+    "write_file", "edit_file", "local_write_report", "bash", "create_tool",
     "deep_research", "agent", "ingest_document",
 })
 
