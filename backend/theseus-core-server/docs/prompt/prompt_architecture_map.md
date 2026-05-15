@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation/failure feedback 반영
+> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec 최소 검증, validation/failure feedback, code editing safety 반영
 
 ---
 
@@ -26,7 +26,7 @@
 | `theseus_engine/models/state.py` | `TheseusStateMachine` 상태 전환, plan/coordinator phase 속성, 기존 import re-export | 상태 전환 동작 또는 public façade만 수정합니다. prompt 본문은 넣지 않습니다. |
 | `theseus_engine/prompts/base.py` | 모든 모드에 공통 적용되는 base prompt | Theseus 정체성, 공통 보안/작업/언어 규칙을 바꿀 때 수정합니다. |
 | `theseus_engine/prompts/environment.py` | OS, shell, cwd, Python, Git branch 등 runtime environment section | 환경 정보 주입 항목이나 비용이 큰 감지 로직을 바꿀 때 수정합니다. |
-| `theseus_engine/prompts/capabilities.py` | tool/RBAC/validation/web/create_tool capability prompt와 조건부 렌더링 | tool schema 기반 capability 조건, generated custom tool 보안 규칙 노출을 바꿀 때 수정합니다. |
+| `theseus_engine/prompts/capabilities.py` | tool/RBAC/validation/web/create_tool/code editing safety capability prompt와 조건부 렌더링 | tool schema 기반 capability 조건, generated custom tool 보안 규칙, 파일 수정 안전 규칙 노출을 바꿀 때 수정합니다. |
 | `theseus_engine/prompts/modes.py` | ASK/AGENT mode prompt | 일반 채팅/자율 실행 모드 규칙을 바꿀 때 수정합니다. |
 | `theseus_engine/prompts/plan.py` | PLAN Drafting/Review/Executing/Verifying prompt | PLAN JSON schema, 승인/실행/검증 흐름, create_tool 실행 지침을 바꿀 때 수정합니다. |
 | `theseus_engine/prompts/coordinator.py` | Coordinator Decompose/Dispatch/Synthesize/Verify prompt | 병렬 sub-agent orchestration 지침을 바꿀 때 수정합니다. |
@@ -76,8 +76,29 @@ state_machine.get_system_prompt(
 | `TOOL_USE_CAPABILITY_PROMPT` | 현재 schema에 하나 이상의 tool이 있을 때 | 존재하는 tool만 호출하고 전용 tool을 우선하도록 안내 |
 | `RBAC_PERMISSION_PROMPT` | tool capability가 있을 때 | 권한 필터링 사실과 권한 밖 요청 대응 지침 |
 | `VALIDATION_CAPABILITY_PROMPT` | tool capability가 있을 때 | validator block 결과를 읽고 수정 후 재시도하는 지침 |
+| `CODE_EDITING_SAFETY_PROMPT` | `write_file`, `edit_file`, `remote_write_file`, `remote_edit_file` 중 하나가 있을 때 | 파일 수정 전 읽기, invariant 보존, `edit_file` 우선, 기존 파일 `write_file` 덮어쓰기 제한, 검증 실패 후 재시도/보고 기준 |
 | `WEB_CAPABILITY_PROMPT` | `web_search`, `web_fetch`, `deep_research` 중 하나가 있을 때 | 외부 명세 확인이 필요한 작업의 web research 기준 |
 | `CREATE_TOOL_CAPABILITY_PROMPT` | `create_tool`이 현재 schema에 있을 때 | Theseus custom tool 생성 코드 규약과 2턴 호출 규칙 |
+
+#### 1.1.2 Code editing safety
+
+파일 수정 안전 규칙은 prompt 지침만으로 끝나지 않고 runtime tool 경계에서 함께 강제됩니다.
+
+| 위치 | 역할 | 주의점 |
+|---|---|---|
+| `theseus_engine/prompts/capabilities.py::CODE_EDITING_SAFETY_PROMPT` | LLM이 파일 수정 도구를 호출하기 전 지켜야 할 규칙을 system prompt에 주입 | 단순 주석/한 줄 수정/설정 변경은 `edit_file`을 우선 사용하고, 기존 파일 전체 덮어쓰기는 명시적 사유 없이는 금지합니다. |
+| `theseus_engine/tools/core/edit_safety.py` | diff, 위험도, Python AST, import/class/function/config key 보존 여부를 검증 | 사용자-facing prompt는 아니지만 prompt 규칙과 같은 정책의 실행 경계입니다. 규칙 변경 시 prompt와 함께 갱신합니다. |
+| `theseus_engine/tools/core/file_edit_tool.py` / `file_write_tool.py` | local 파일 수정 전후 검증, 실패 시 차단/rollback, `safetyReport` metadata 반환 | 성공 메시지는 변경 요약과 안전 검증 결과를 포함해야 합니다. |
+| `src/remote_workspace/write_primitives.py` | Remote Workspace 파일 쓰기/수정에 같은 검증 적용 | 원격 secret은 prompt에 넣지 않고, 원격 파일 content 기준으로 안전 검증 후 SFTP write를 수행합니다. |
+
+정책 요약:
+
+- `edit_file`은 `old_str`가 기본적으로 정확히 한 번만 매칭되어야 합니다.
+- `write_file`은 신규 파일 생성이 기본이며, 기존 파일 덮어쓰기는 `allow_overwrite=true`와 `overwrite_reason`이 있어야 합니다.
+- 도구가 명시적으로 받은 `preserve_patterns`와 QueryEngine의 최근 사용자 goal에서 추출한 “바꾸지 말라” 계열 invariant를 함께 보존합니다.
+- 고위험 파일(`config.py`, `.env`, `application.yml`, Docker/Jenkins/Nginx 파일 등)은 import/class/function/config key 삭제를 차단합니다.
+- Python 파일은 `ast.parse()` 기반 문법 검증을 통과해야 합니다.
+- 안전 검증 실패는 `ToolResult(is_error=True)`로 반환되어 다음 LLM 턴에서 원인 설명과 더 작은 패치 재시도를 유도합니다.
 
 #### 1.2 모드별 프롬프트
 
@@ -359,6 +380,8 @@ FastAPI `src` 계층은 Kafka/SSE 통신, 인증, checkpoint, publish를 담당�
 |---|---|
 | `agent_tool.py` | 서브 에이전트 디스패치 도구. Coordinator 모드에서 병렬 워커 생성에 사용. |
 | `bash_tool.py` | 셸 명령 실행 도구. RBAC 및 ExecutionValidator 검증 대상. |
+| `file_edit_tool.py` | 기존 파일의 특정 문자열을 좁게 교체하는 도구. `edit_safety.py` 검증과 rollback 정책을 적용합니다. |
+| `file_write_tool.py` | 신규 파일 생성 도구. 기존 파일 전체 덮어쓰기는 명시적 `allow_overwrite`/`overwrite_reason` 없이는 차단합니다. |
 | `tool_search_tool.py` | 동적 도구 검색 도구. 사용 가능한 도구 목록을 런타임에 조회. |
 
 ### `theseus_engine/tools/tools.py`

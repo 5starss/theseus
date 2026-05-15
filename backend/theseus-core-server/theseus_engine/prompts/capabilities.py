@@ -20,7 +20,7 @@ Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in yo
  - Do NOT use Bash to run commands when a relevant dedicated tool is provided:
    - Read files: use read_file instead of cat/head/tail
    - Edit files: use edit_file instead of sed/awk
-   - Write files: use write_file instead of echo/heredoc
+   - Create new files: use write_file instead of echo/heredoc
    - Search files: use glob instead of find/ls
    - Search content: use grep instead of grep/rg
    - Reserve Bash exclusively for system commands that require shell execution.
@@ -52,6 +52,17 @@ with "[TheseusHook]". When this happens:
    (2) Modify your tool arguments to remove the flagged pattern.
    (3) Retry with the corrected arguments.
    Do NOT retry with the exact same arguments — the validator will block it again.\
+"""
+
+_CODE_EDITING_SAFETY_PROMPT = """\
+# Code Editing Safety Rules
+ - Before editing a file, read the target file and confirm the exact location you will change.
+ - Treat user constraints such as "do not change APP title" as invariants. Preserve those exact strings and include them in preserve_patterns when using file tools.
+ - For comments, one-line edits, and small config changes, prefer edit_file with a unique old_str. Do not use write_file for existing files.
+ - write_file is for new files by default. Existing-file overwrite requires allow_overwrite=true and a clear overwrite_reason because it replaces the whole file.
+ - Keep edits narrowly scoped. Do not delete imports, classes, functions, or config keys unless the user explicitly requested that structural change.
+ - After a file tool reports a safety rejection or rollback, explain the cause and retry with a smaller safer patch instead of claiming success.
+ - Completion summaries for file edits must mention what changed and whether imports, declarations, config keys, and Python syntax were preserved.\
 """
 
 _WEB_RESEARCH_CAPABILITY_PROMPT = """\
@@ -206,6 +217,8 @@ def _render_capability_sections(capabilities: PromptCapabilities) -> str:
                 _VALIDATION_CAPABILITY_PROMPT,
             ]
         )
+    if capabilities.available_tools & {"write_file", "edit_file", "remote_write_file", "remote_edit_file"}:
+        sections.append(_CODE_EDITING_SAFETY_PROMPT)
     if capabilities.available_tools & _WEB_RESEARCH_TOOL_NAMES:
         sections.append(_WEB_RESEARCH_CAPABILITY_PROMPT)
     if capabilities.has_tool("create_tool"):
@@ -224,6 +237,7 @@ def _render_runtime_reminders(reminders: tuple[str, ...]) -> str:
 TOOL_USE_CAPABILITY_PROMPT = _TOOL_USE_CAPABILITY_PROMPT
 RBAC_PERMISSION_PROMPT = _RBAC_CAPABILITY_PROMPT
 VALIDATION_CAPABILITY_PROMPT = _VALIDATION_CAPABILITY_PROMPT
+CODE_EDITING_SAFETY_PROMPT = _CODE_EDITING_SAFETY_PROMPT
 WEB_CAPABILITY_PROMPT = _WEB_RESEARCH_CAPABILITY_PROMPT
 GENERATED_CUSTOM_TOOL_SECURITY_RULES = _GENERATED_CUSTOM_TOOL_SECURITY_RULES
 CREATE_TOOL_CAPABILITY_PROMPT = _CREATE_TOOL_CAPABILITY_PROMPT
@@ -239,6 +253,7 @@ __all__ = [
     "TOOL_USE_CAPABILITY_PROMPT",
     "RBAC_PERMISSION_PROMPT",
     "VALIDATION_CAPABILITY_PROMPT",
+    "CODE_EDITING_SAFETY_PROMPT",
     "WEB_CAPABILITY_PROMPT",
     "GENERATED_CUSTOM_TOOL_SECURITY_RULES",
     "CREATE_TOOL_CAPABILITY_PROMPT",
