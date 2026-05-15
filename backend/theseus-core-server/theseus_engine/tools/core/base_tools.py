@@ -7,6 +7,7 @@ Theseus 자체 정의로 제공합니다.  모든 theseus_engine 코드는
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,9 +36,33 @@ class ToolExecutionContext:
 class ToolResult:
     """Normalized tool execution result."""
 
-    output: str
+    output: Any
     is_error: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.output = stringify_tool_output(self.output)
+
+
+def stringify_tool_output(output: Any) -> str:
+    """Convert a tool output payload into provider-safe text.
+
+    Tool authors often return dict/list payloads for structured evidence. The
+    LLM message schema still requires tool_result.content to be a string, so the
+    runtime normalizes JSON-serializable values here instead of failing after a
+    tool already executed successfully.
+    """
+
+    if isinstance(output, str):
+        return output
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    try:
+        return json.dumps(output, ensure_ascii=False, indent=2, default=str)
+    except TypeError:
+        return str(output)
 
 
 class BaseTool(ABC):

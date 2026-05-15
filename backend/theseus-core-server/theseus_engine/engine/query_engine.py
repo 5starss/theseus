@@ -57,6 +57,7 @@ from theseus_engine.tools.core.base_tools import (
     ToolExecutionContext,
     ToolRegistry,
     ToolResult,
+    stringify_tool_output,
 )
 from theseus_engine.wrappers.hooks.theseus_hook_executor import HookEvent
 
@@ -553,11 +554,12 @@ async def _execute_tool_call(
             is_error=True,
         )
     elapsed = time.monotonic() - t0
+    output_text = stringify_tool_output(result.output)
     log.debug("executed %s in %.2fs err=%s output_len=%d",
-              tool_name, elapsed, result.is_error, len(result.output or ""))
+              tool_name, elapsed, result.is_error, len(output_text))
 
     inline_output, artifact_path = _offload_tool_output_if_needed(
-        tool_name=tool_name, tool_use_id=tool_use_id, output=result.output,
+        tool_name=tool_name, tool_use_id=tool_use_id, output=output_text,
     )
     if artifact_path:
         _remember_active_artifact(context.tool_metadata, str(artifact_path))
@@ -587,7 +589,7 @@ async def _execute_tool_call(
         if final_output != tool_result.content:
             tool_result = ToolResultBlock(
                 tool_use_id=tool_use_id,
-                content=str(final_output),
+                content=stringify_tool_output(final_output),
                 is_error=tool_result.is_error,
             )
 
