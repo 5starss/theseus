@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 
 import { TheseusSessionManager } from '../../session/SessionManager';
 import type { JsonObject, RunnerEvent } from '../../shared/protocol';
-import { getCoreRoot, getCustomToolSearchRoots, getRunnerPath, getRuntimeModeSetting, getWorkspaceCwd } from '../../workspace/WorkspaceContext';
+import { getCoreRoot, getCustomToolSearchRoots, getPythonPath, getRunnerPath, getRuntimeModeSetting, getWorkspaceCwd } from '../../workspace/WorkspaceContext';
 
 function getExtensionBuildInfo(context: vscode.ExtensionContext): JsonObject {
   const packageJson = context.extension.packageJSON as Record<string, unknown> | undefined;
@@ -33,7 +33,7 @@ export class HealthController {
     const coreRoot = getCoreRoot(this.context) || '';
     const workspaceCwd = getWorkspaceCwd() || '';
     const config = vscode.workspace.getConfiguration('theseus');
-    const pythonExec = config.get<string>('pythonPath') || 'python';
+    const pythonExec = getPythonPath();
     const runnerPath = getRunnerPath();
     const runtimeModeSetting = getRuntimeModeSetting();
     const usingBundledRunner = !!runnerPath && runtimeModeSetting !== 'source-python';

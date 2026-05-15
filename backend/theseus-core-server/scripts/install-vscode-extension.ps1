@@ -78,6 +78,128 @@ function Read-VSCodeSettings {
     }
 }
 
+function ConvertTo-AbsoluteSettingPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PathValue,
+        [Parameter(Mandatory = $true)]
+        [string]$WorkspaceRoot
+    )
+
+    return (Resolve-Path -LiteralPath $PathValue).Path
+}
+
+function ConvertTo-JsonLiteral {
+    param([object]$Value)
+    return ConvertTo-Json -InputObject $Value -Compress
+}
+
+function Set-TheseusSettings {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SettingsPath,
+        [Parameter(Mandatory = $true)]
+        [System.Collections.IDictionary]$Values
+    )
+
+    $settingsDirPath = Split-Path -Parent $SettingsPath
+    New-Item -ItemType Directory -Path $settingsDirPath -Force | Out-Null
+
+    if (Test-Path -LiteralPath $SettingsPath) {
+        $raw = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8
+    }
+    else {
+        $raw = "{`n}`n"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($raw) -or -not $raw.TrimStart().StartsWith("{")) {
+        if (Test-Path -LiteralPath $SettingsPath) {
+            $stamp = Get-Date -Format "yyyyMMddHHmmss"
+            Copy-Item -LiteralPath $SettingsPath -Destination "$SettingsPath.bak-$stamp" -Force
+            Write-Warning "Existing settings file was not JSON/JSONC-like. Backed up and writing fresh settings."
+        }
+        $raw = "{`n}`n"
+    }
+
+    $lines = @($raw -split "\r?\n")
+    $lines = @(
+        $lines | Where-Object {
+            $_ -notmatch '^\s*"theseus\.[^"]+"\s*:'
+        }
+    )
+
+    if (-not $lines.Count) {
+        $lines = @("{", "}")
+    }
+
+    $closingIndex = -1
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if ($lines[$i] -match '^\s*}\s*,?\s*$') {
+            $closingIndex = $i
+            break
+        }
+    }
+    if ($closingIndex -lt 0) {
+        $lines += "}"
+        $closingIndex = $lines.Count - 1
+    }
+
+    $previousIndex = $closingIndex - 1
+    while ($previousIndex -ge 0) {
+        $trimmed = $lines[$previousIndex].Trim()
+        if ($trimmed -and -not $trimmed.StartsWith("//")) {
+            break
+        }
+        $previousIndex--
+    }
+    if ($previousIndex -ge 0) {
+        $previous = $lines[$previousIndex].Trim()
+        if ($previous -and $previous -ne "{" -and -not $previous.EndsWith(",")) {
+            $lines[$previousIndex] = $lines[$previousIndex] + ","
+        }
+    }
+
+    $insertLines = @()
+    foreach ($entry in $Values.GetEnumerator()) {
+        $insertLines += "    `"$($entry.Key)`": $(ConvertTo-JsonLiteral -Value $entry.Value),"
+    }
+
+    $before = @()
+    if ($closingIndex -gt 0) {
+        $before = @($lines[0..($closingIndex - 1)])
+    }
+    $after = @($lines[$closingIndex..($lines.Count - 1)])
+    $updated = @()
+    $updated += $before
+    $updated += $insertLines
+    $updated += $after
+    $newline = [Environment]::NewLine
+    Set-Content -LiteralPath $SettingsPath -Value ($updated -join $newline) -Encoding UTF8
+}
+
+function Clear-TheseusSettings {
+    param([string]$SettingsPath)
+
+    if (-not (Test-Path -LiteralPath $SettingsPath)) {
+        return
+    }
+
+    $raw = Get-Content -LiteralPath $SettingsPath -Raw -Encoding UTF8
+    $lines = @($raw -split "\r?\n")
+    $kept = @(
+        $lines | Where-Object {
+            $_ -notmatch '^\s*"theseus\.[^"]+"\s*:'
+        }
+    )
+    if ($kept.Count -eq $lines.Count) {
+        return
+    }
+
+    $newline = [Environment]::NewLine
+    Set-Content -LiteralPath $SettingsPath -Value ($kept -join $newline) -Encoding UTF8
+    Write-Host "Removed stale workspace Theseus settings: $SettingsPath"
+}
+
 function Get-VenvPython {
     param([string]$VenvPath)
 
@@ -92,6 +214,102 @@ function Get-VenvPython {
     }
 
     throw "Python executable was not found in venv: $VenvPath"
+}
+
+function Remove-SafeChildPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$AllowedRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+    $resolvedRoot = (Resolve-Path -LiteralPath $AllowedRoot).Path
+    if (-not $resolvedPath.StartsWith($resolvedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove outside extension directory: $resolvedPath"
+    }
+
+    Remove-Item -LiteralPath $resolvedPath -Recurse -Force
+    Write-Host "Removed stale Theseus extension path: $resolvedPath"
+}
+
+function Clear-TheseusExtensionInstallState {
+    param([string]$ExtensionsRoot)
+
+    if ([string]::IsNullOrWhiteSpace($ExtensionsRoot)) {
+        return
+    }
+
+    New-Item -ItemType Directory -Path $ExtensionsRoot -Force | Out-Null
+    $resolvedRoot = (Resolve-Path -LiteralPath $ExtensionsRoot).Path
+
+    Get-ChildItem -LiteralPath $resolvedRoot -Filter "theseus.theseus-vscode*" -Force -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Remove-SafeChildPath -Path $_.FullName -AllowedRoot $resolvedRoot
+        }
+
+    $extensionsJson = Join-Path $resolvedRoot "extensions.json"
+    if (Test-Path -LiteralPath $extensionsJson) {
+        try {
+            $items = @(Get-Content -LiteralPath $extensionsJson -Raw -Encoding UTF8 | ConvertFrom-Json)
+        }
+        catch {
+            Write-Warning "Skipping unreadable extensions.json: $extensionsJson"
+            $items = $null
+        }
+
+        if ($null -ne $items) {
+            $kept = @(
+                $items | Where-Object {
+                    $identifier = $_.identifier.id
+                    $relativeLocation = $_.relativeLocation
+                    $locationPath = $_.location.path
+                    $locationFsPath = $_.location.fsPath
+                    $locationExternal = $_.location.external
+                    $text = "$identifier $relativeLocation $locationPath $locationFsPath $locationExternal"
+                    $text -notlike "*theseus.theseus-vscode*"
+                }
+            )
+
+            if ($kept.Count -ne $items.Count) {
+                ConvertTo-Json -InputObject $kept -Depth 100 -Compress |
+                    Set-Content -LiteralPath $extensionsJson -Encoding UTF8
+                Write-Host "Removed stale Theseus entry from extensions.json: $($items.Count - $kept.Count)"
+            }
+        }
+    }
+
+    $obsoletePath = Join-Path $resolvedRoot ".obsolete"
+    if (Test-Path -LiteralPath $obsoletePath) {
+        try {
+            $obsolete = Get-Content -LiteralPath $obsoletePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            Write-Warning "Skipping unreadable .obsolete: $obsoletePath"
+            $obsolete = $null
+        }
+
+        if ($null -ne $obsolete) {
+            $removed = @()
+            foreach ($property in @($obsolete.PSObject.Properties.Name)) {
+                if ($property -like "theseus.theseus-vscode*") {
+                    $removed += $property
+                    $obsolete.PSObject.Properties.Remove($property)
+                }
+            }
+
+            if ($removed.Count) {
+                $obsolete | ConvertTo-Json -Depth 32 -Compress |
+                    Set-Content -LiteralPath $obsoletePath -Encoding UTF8
+                Write-Host "Removed stale Theseus .obsolete entries: $($removed.Count)"
+            }
+        }
+    }
 }
 
 function Get-CommandSource {
@@ -231,6 +449,12 @@ function Get-UserSettingsPath {
         }
         return Join-Path $env:APPDATA "Antigravity\User\settings.json"
     }
+    if ($IdeTarget -eq "vscode") {
+        if ([string]::IsNullOrWhiteSpace($env:APPDATA)) {
+            throw "APPDATA is not set; cannot resolve VSCode user settings path."
+        }
+        return Join-Path $env:APPDATA "Code\User\settings.json"
+    }
 
     return $null
 }
@@ -329,6 +553,34 @@ function Resolve-IdeCli {
     return $cli
 }
 
+function Invoke-IdeInstallExtension {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CodePath,
+        [Parameter(Mandatory = $true)]
+        [string]$VsixFile,
+        [string]$ExtensionDirectory = ""
+    )
+
+    $installArgs = @()
+    if (-not [string]::IsNullOrWhiteSpace($ExtensionDirectory)) {
+        $installArgs += "--extensions-dir"
+        $installArgs += $ExtensionDirectory
+    }
+    $installArgs += "--install-extension"
+    $installArgs += $VsixFile
+    $installArgs += "--force"
+
+    & $CodePath @installArgs
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw (
+            "VSIX install failed (exit code $exitCode). " +
+            "Close all VS Code windows, run Uninstall-Theseus-VSCode.cmd if stale metadata remains, then retry."
+        )
+    }
+}
+
 $DetectedIde = ""
 $extensionInstallDir = ""
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -378,23 +630,25 @@ if (-not $SkipSettings) {
         -WorkspaceRoot $WorkspacePath `
         -SettingsDirOverride $SettingsDir
 
-    $settingsDirPath = Split-Path -Parent $settingsPath
-    New-Item -ItemType Directory -Path $settingsDirPath -Force | Out-Null
-    $settings = Read-VSCodeSettings -SettingsPath $settingsPath
-    $settings["theseus.corePath"] = $CorePath
-    $settings["theseus.pythonPath"] = (Resolve-Path -LiteralPath $venvPython).Path
-    $settings["theseus.workspacePath"] = $WorkspacePath
+    $settings = [ordered]@{}
+    $settings["theseus.corePath"] = ConvertTo-AbsoluteSettingPath -PathValue $CorePath -WorkspaceRoot $WorkspacePath
+    $settings["theseus.pythonPath"] = ConvertTo-AbsoluteSettingPath -PathValue (Resolve-Path -LiteralPath $venvPython).Path -WorkspaceRoot $WorkspacePath
+    $settings["theseus.workspacePath"] = ConvertTo-AbsoluteSettingPath -PathValue $WorkspacePath -WorkspaceRoot $WorkspacePath
     if (-not [string]::IsNullOrWhiteSpace($resolvedRunnerPath)) {
-        $settings["theseus.runnerPath"] = $resolvedRunnerPath
+        $settings["theseus.runnerPath"] = ConvertTo-AbsoluteSettingPath -PathValue $resolvedRunnerPath -WorkspaceRoot $WorkspacePath
         $settings["theseus.runtimeMode"] = "bundled-runner"
     }
     if (-not $settings.Contains("theseus.serverUrl")) {
         $settings["theseus.serverUrl"] = ""
     }
+    Set-TheseusSettings -SettingsPath $settingsPath -Values $settings
 
-    $settings |
-        ConvertTo-Json -Depth 32 |
-        Set-Content -LiteralPath $settingsPath -Encoding UTF8
+    if ([string]::IsNullOrWhiteSpace($SettingsDir)) {
+        $workspaceSettingsPath = Join-Path (Join-Path $WorkspacePath ".vscode") "settings.json"
+        if ($workspaceSettingsPath -ne $settingsPath) {
+            Clear-TheseusSettings -SettingsPath $workspaceSettingsPath
+        }
+    }
 }
 
 if (-not $SkipRequirements) {
@@ -445,13 +699,19 @@ if (-not $SkipExtension) {
     $extensionInstallDir = Get-ExtensionsPath -IdeTarget $DetectedIde -Override $ExtensionsDir
     if (-not [string]::IsNullOrWhiteSpace($extensionInstallDir)) {
         New-Item -ItemType Directory -Path $extensionInstallDir -Force | Out-Null
+        Clear-TheseusExtensionInstallState -ExtensionsRoot $extensionInstallDir
         Write-Host "Installing VSIX into IDE target: $DetectedIde ($Code)"
         Write-Host "ExtensionsDir: $extensionInstallDir"
-        & $Code --extensions-dir $extensionInstallDir --install-extension $VsixPath --force
+        Invoke-IdeInstallExtension `
+            -CodePath $Code `
+            -VsixFile $VsixPath `
+            -ExtensionDirectory $extensionInstallDir
     }
     else {
         Write-Host "Installing VSIX into IDE target: $DetectedIde ($Code)"
-        & $Code --install-extension $VsixPath --force
+        Invoke-IdeInstallExtension `
+            -CodePath $Code `
+            -VsixFile $VsixPath
     }
 }
 

@@ -25,10 +25,12 @@ import {
   updateCustomToolPermission,
 } from '../tools/CustomToolManager';
 import {
+  expandTheseusPath,
   findMentionFiles,
   getActiveCursorContext,
   getCoreRoot,
   getCustomToolSearchRoots,
+  getPythonPath,
   getRunnerPath,
   getRuntimeModeSetting,
   getWorkspaceCwd,
@@ -198,7 +200,7 @@ function formatPlanMarkdown(plan: JsonObject): string {
  */
 export async function pickWorktree(sessionManager?: TheseusSessionManager): Promise<string | undefined> {
   const cfg = vscode.workspace.getConfiguration('theseus');
-  const current = (cfg.get<string>('workspacePath') || '').trim();
+  const current = expandTheseusPath(cfg.get<string>('workspacePath')) || '';
   const folders = vscode.workspace.workspaceFolders ?? [];
 
   type Item = vscode.QuickPickItem & { value?: string; action?: 'browse' | 'clear' };
@@ -479,7 +481,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     const coreRoot = getCoreRoot(this.context) || '';
     const workspaceCwd = getWorkspaceCwd() || '';
     const config = vscode.workspace.getConfiguration('theseus');
-    const pythonExec = config.get<string>('pythonPath') || 'python';
+    const pythonExec = getPythonPath();
     const runnerPath = getRunnerPath();
     const runtimeModeSetting = getRuntimeModeSetting();
     const usingBundledRunner = !!runnerPath && runtimeModeSetting !== 'source-python';

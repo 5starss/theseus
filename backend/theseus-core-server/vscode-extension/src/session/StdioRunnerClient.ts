@@ -18,10 +18,11 @@ export class StdioRunnerClient implements RunnerClient {
   constructor(private readonly output: vscode.OutputChannel) {}
 
   startProcess(config: RunnerStartConfig): RunnerProcess {
+    const initialSession = config.initialSession || 'default';
     if (config.runnerPath) {
       return cp.spawn(
         config.runnerPath,
-        ['stdio', '--session', config.initialSession || 'default'],
+        ['stdio'],
         {
           cwd: config.workspaceCwd,
           env: {
@@ -29,6 +30,7 @@ export class StdioRunnerClient implements RunnerClient {
             THESEUS_SERVER_URL: config.serverUrl,
             THESEUS_CORE_ROOT: config.coreRoot,
             THESEUS_RUNNER_PATH: config.runnerPath,
+            THESEUS_INITIAL_SESSION: initialSession,
             PYTHONIOENCODING: 'utf-8',
             PYTHONUTF8: '1',
           },
@@ -43,13 +45,14 @@ export class StdioRunnerClient implements RunnerClient {
 
     return cp.spawn(
       config.pythonExec,
-      ['-m', 'theseus_engine.cli_runner', '--json-mode', '--session', config.initialSession || 'default'],
+      ['-m', 'theseus_engine.cli_runner', '--json-mode'],
       {
         cwd: config.workspaceCwd,
         env: {
           ...process.env,
           PYTHONPATH: extraPython,
           THESEUS_SERVER_URL: config.serverUrl,
+          THESEUS_INITIAL_SESSION: initialSession,
           PYTHONIOENCODING: 'utf-8',
           PYTHONUTF8: '1',
         },
