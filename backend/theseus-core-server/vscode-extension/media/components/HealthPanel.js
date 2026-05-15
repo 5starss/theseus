@@ -62,6 +62,7 @@ export function renderHealthPanel({
     extension.builtAt ? `builtAt: ${extension.builtAt}` : '',
     settings.corePath ? `corePath: ${settings.corePath}` : 'corePath: not configured',
     settings.workspacePath ? `workspacePath: ${settings.workspacePath}` : '',
+    settings.runnerPath ? `runnerPath: ${settings.runnerPath}` : '',
     Array.isArray(settings.customToolRoots) && settings.customToolRoots.length
       ? `customToolRoots: ${settings.customToolRoots.join(' | ')}`
       : '',

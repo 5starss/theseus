@@ -65,8 +65,6 @@ export function renderRunnerStatusBar({
     addButton('Reconnect', 'Reconnect to running agent', onReconnect, 'primary');
     addButton('Restart', 'Restart agent', onRestart);
   }
-  if (processRunning || lifecycle === 'error') addButton('Logs', 'Show Theseus logs', onShowLogs);
-  addButton('Tools', 'Refresh custom tools', onRefreshTools);
   addButton('Health', 'Show setup and runner health', onToggleHealth);
 }
 
@@ -118,10 +116,19 @@ export function applyRunnerStatusEvent({
     lastStatusAt: Date.now(),
     lastDiagnostic: event.lastDiagnostic || runnerState.lastDiagnostic,
     sessionId: event.sessionId || runnerState.sessionId,
+    session: event.session || runnerState.session,
+    model: event.model || runnerState.model,
     pythonExec: event.pythonExec || runnerState.pythonExec,
+    runnerPath: event.runnerPath || runnerState.runnerPath,
     coreRoot: event.coreRoot || runnerState.coreRoot,
     workspaceCwd: event.workspaceCwd || runnerState.workspaceCwd,
     cwd: event.cwd || runnerState.cwd,
+    runtimeMode: event.runtimeMode || event.mode || runnerState.runtimeMode,
+    daemonPid: event.daemonPid || runnerState.daemonPid,
+    daemonPort: event.daemonPort || runnerState.daemonPort,
+    lastEventAt: event.lastEventAt || runnerState.lastEventAt,
+    lastHeartbeatAt: event.lastHeartbeatAt || runnerState.lastHeartbeatAt,
+    pendingInput: Number.isInteger(event.pendingInput) ? event.pendingInput : runnerState.pendingInput,
     exitReason: event.exitReason || runnerState.exitReason,
   };
 

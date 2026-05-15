@@ -453,7 +453,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--token", default="")
     parser.add_argument("--model", default="google/gemini-3.1-pro-preview-customtools")
     parser.add_argument("--user-level", type=int, default=5)
-    parser.add_argument("--session", default="default")
+    parser.add_argument("--session", default=os.getenv("THESEUS_INITIAL_SESSION", "default"))
     return parser.parse_args(argv)
 
 

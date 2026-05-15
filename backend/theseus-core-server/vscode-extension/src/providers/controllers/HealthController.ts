@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 
 import { TheseusSessionManager } from '../../session/SessionManager';
 import type { JsonObject, RunnerEvent } from '../../shared/protocol';
-import { getCoreRoot, getCustomToolSearchRoots, getWorkspaceCwd } from '../../workspace/WorkspaceContext';
+import { getCoreRoot, getCustomToolSearchRoots, getRunnerPath, getRuntimeModeSetting, getWorkspaceCwd } from '../../workspace/WorkspaceContext';
 
 function getExtensionBuildInfo(context: vscode.ExtensionContext): JsonObject {
   const packageJson = context.extension.packageJSON as Record<string, unknown> | undefined;
@@ -34,6 +34,9 @@ export class HealthController {
     const workspaceCwd = getWorkspaceCwd() || '';
     const config = vscode.workspace.getConfiguration('theseus');
     const pythonExec = config.get<string>('pythonPath') || 'python';
+    const runnerPath = getRunnerPath();
+    const runtimeModeSetting = getRuntimeModeSetting();
+    const usingBundledRunner = !!runnerPath && runtimeModeSetting !== 'source-python';
     const serverUrl = config.get<string>('serverUrl') || '';
     const status = this.sessionManager.status;
     const customToolRoots = getCustomToolSearchRoots();
@@ -42,6 +45,8 @@ export class HealthController {
       settings: {
         corePath: coreRoot,
         pythonPath: pythonExec,
+        runnerPath,
+        runtimeModeSetting,
         serverUrl,
         workspacePath: workspaceCwd,
         coreRoot,
@@ -63,8 +68,8 @@ export class HealthController {
       checks: [
         {
           label: 'Core path',
-          status: coreRoot ? 'ok' : 'error',
-          detail: coreRoot || 'theseus.corePath를 설정하세요.',
+          status: coreRoot ? 'ok' : usingBundledRunner ? 'warn' : 'error',
+          detail: coreRoot || (usingBundledRunner ? 'bundled runner 사용 중' : 'theseus.corePath를 설정하세요.'),
         },
         {
           label: 'Workspace',
@@ -72,9 +77,9 @@ export class HealthController {
           detail: workspaceCwd || '워크스페이스 폴더를 열거나 theseus.workspacePath를 설정하세요.',
         },
         {
-          label: 'Python',
-          status: pythonExec ? 'ok' : 'warn',
-          detail: pythonExec,
+          label: usingBundledRunner ? 'Runner binary' : 'Python',
+          status: usingBundledRunner ? 'ok' : pythonExec ? 'ok' : 'warn',
+          detail: usingBundledRunner ? runnerPath : pythonExec,
         },
         {
           label: 'Runner',

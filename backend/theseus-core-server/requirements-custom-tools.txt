@@ -1,0 +1,11 @@
+# Optional dependencies for bundled example/custom tools.
+#
+# These are intentionally not installed by the default Core Server
+# requirements.txt. Install this file only when you explicitly want to run
+# the current local custom_tools examples that depend on host-specific or
+# policy-sensitive packages.
+
+-r requirements-browser.txt
+
+psutil
+speedtest-cli

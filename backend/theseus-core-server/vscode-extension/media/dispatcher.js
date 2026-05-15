@@ -101,6 +101,9 @@ export function createEventDispatcher(ctx) {
 
       case 'RunnerReady':
         ctx.activeRunnerMode = 'agent';
+        // runner가 정상화되었으므로 누적된 retry banner를 모두 제거
+        ctx.clearRetryBanners?.();
+        ctx.clearTransientSystemMessages?.();
         ctx.applyRunnerStatus({ ...event, type: 'RunnerStatus', running: true, processRunning: true, lifecycle: 'ready', state: 'ready' });
         if (ctx.runnerState.connectedSessionId !== ctx.runnerState.sessionId) {
           ctx.runnerState.connectedSessionId = ctx.runnerState.sessionId;
@@ -114,10 +117,25 @@ export function createEventDispatcher(ctx) {
 
       case 'RunnerStatus':
         ctx.applyRunnerStatus(event);
+        if (event.running || event.state === 'ready' || event.lifecycle === 'ready') {
+          ctx.clearRetryBanners?.();
+          ctx.clearTransientSystemMessages?.();
+        }
         break;
 
       case 'RunnerDiagnostic':
         ctx.runnerState.lastDiagnostic = event;
+        if (event.code === 'session_busy') {
+          break;
+        }
+        if (
+          event.code === 'ready_timeout' &&
+          (ctx.runnerState.running || ctx.runnerState.state === 'ready' || ctx.runnerState.lifecycle === 'ready')
+        ) {
+          ctx.clearRetryBanners?.();
+          ctx.clearTransientSystemMessages?.();
+          break;
+        }
         if (event.code === 'ready_timeout') {
           ctx.setLoopStatus('error', 'starting stale');
           ctx.appendTransientMessage('system', event.message || 'Runner startup is taking longer than expected.', 'warn');
@@ -140,7 +158,9 @@ export function createEventDispatcher(ctx) {
         ctx.runnerState.lastDiagnostic = event;
         ctx.applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'error', state: 'error', lastDiagnostic: event });
         ctx.appendTransientMessage('system', event.message || 'Unknown error', 'error');
-        ctx.appendRetryBanner();
+        if (!/falling back to stdio runner/i.test(event.message || '')) {
+          ctx.appendRetryBanner();
+        }
         ctx.appendTransientMessage('system', '→ View > Output > "Theseus" for details', 'hint');
         break;
 

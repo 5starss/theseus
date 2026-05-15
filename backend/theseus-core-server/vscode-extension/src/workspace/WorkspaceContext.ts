@@ -13,8 +13,26 @@ export type ActiveCursorContext = {
   line: number;
 };
 
+export type RuntimeModeSetting = 'auto' | 'source-python' | 'bundled-runner';
+
 export function hasTheseusEngine(dir: string): boolean {
   return fs.existsSync(path.join(dir, 'theseus_engine'));
+}
+
+export function getRunnerPath(): string {
+  return vscode.workspace.getConfiguration('theseus').get<string>('runnerPath')?.trim() || '';
+}
+
+export function getRuntimeModeSetting(): RuntimeModeSetting {
+  const value = vscode.workspace.getConfiguration('theseus').get<string>('runtimeMode')?.trim();
+  if (value === 'source-python' || value === 'bundled-runner') return value;
+  return 'auto';
+}
+
+export function shouldUseBundledRunner(): boolean {
+  const mode = getRuntimeModeSetting();
+  if (mode === 'source-python') return false;
+  return !!getRunnerPath();
 }
 
 export function getCoreRoot(context: vscode.ExtensionContext): string | undefined {

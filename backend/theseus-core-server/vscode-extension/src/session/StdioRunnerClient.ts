@@ -18,6 +18,25 @@ export class StdioRunnerClient implements RunnerClient {
   constructor(private readonly output: vscode.OutputChannel) {}
 
   startProcess(config: RunnerStartConfig): RunnerProcess {
+    if (config.runnerPath) {
+      return cp.spawn(
+        config.runnerPath,
+        ['stdio', '--session', config.initialSession || 'default'],
+        {
+          cwd: config.workspaceCwd,
+          env: {
+            ...process.env,
+            THESEUS_SERVER_URL: config.serverUrl,
+            THESEUS_CORE_ROOT: config.coreRoot,
+            THESEUS_RUNNER_PATH: config.runnerPath,
+            PYTHONIOENCODING: 'utf-8',
+            PYTHONUTF8: '1',
+          },
+          signal: config.signal,
+        },
+      );
+    }
+
     const extraPython = config.coreRoot !== config.workspaceCwd
       ? config.coreRoot + path.delimiter + (process.env.PYTHONPATH || '')
       : (process.env.PYTHONPATH || '');

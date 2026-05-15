@@ -73,6 +73,7 @@ export type RunnerStatusEvent = RunnerBaseEvent<'RunnerStatus'> & {
   lifecycle?: Nullable<RunnerLifecycleState>;
   state?: Nullable<RunnerLifecycleState>;
   runtimeMode?: Nullable<string>;
+  runnerPath?: Nullable<string>;
   daemonPort?: Nullable<number>;
   lastDiagnostic?: RunnerEvent;
 };
@@ -218,7 +219,8 @@ export type WebviewToHostMessage =
   | { type: 'reviewPlan'; action?: string }
   | { type: 'openPlanPreview'; plan?: JsonObject }
   | { type: 'getFiles'; query?: string }
-  | { type: 'updateToolPermission'; metadataPath?: string; permissionLevel?: unknown }
+  | { type: 'updateToolPermission'; metadataPath?: string; permissionLevel?: unknown; toolName?: string | null; session?: string | null }
+  | { type: 'selectWorktree' }
   | { type: 'savePastedImage'; name?: string; data?: unknown }
   | { type: 'revertChangedFile'; id?: string; path?: string; oldContent?: string }
   | { type: 'openFile'; path?: string }
@@ -263,6 +265,7 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'explainProblem',
   'fixProblem',
   'updateToolPermission',
+  'selectWorktree',
   'savePastedImage',
   'revertChangedFile',
   'openFile',

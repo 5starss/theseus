@@ -58,8 +58,6 @@ prompt-toolkit>=3.0.0
 # ── Web Scraping / Markdown ────────────────────────────────────────────────────
 markdownify>=1.2.2
 beautifulsoup4>=4.12.0
-playwright
-playwright-stealth
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 docker==7.1.0
@@ -72,5 +70,3 @@ paramiko<3.0.0
 
 # ── 기타 유틸 ─────────────────────────────────────────────────────────────────
 pyyaml>=6.0
-psutil
-speedtest-cli

@@ -1,0 +1,9 @@
+# Optional dependencies for document/spreadsheet analysis tools.
+#
+# Keep these out of the default Core Server requirements unless a runtime path
+# imports them directly. Install this file when enabling generated or bundled
+# tools that inspect office documents, PDFs, or spreadsheets.
+
+openpyxl
+pypdf
+python-docx
