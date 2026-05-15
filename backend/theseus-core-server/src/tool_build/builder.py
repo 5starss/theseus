@@ -41,6 +41,28 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
 
+_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT = """\
+You are Theseus explaining a generated tool build failure to the user.
+
+The build already failed in Core. Your job is not to retry the build directly,
+but to convert the raw failure into a concise Korean assistant response that the
+next PLAN/AGENT turn can also use as context.
+
+Rules:
+- Do not output JSON.
+- Do not use the user-facing term "ToolPlan"; say "approved plan",
+  "생성할 Tool", "Tool build", or "생성 작업" instead.
+- Explain the likely stage and root cause.
+- Give a safe next action and at least one Plan B.
+- If the failure is about an existing file/module/tool name, explain that the
+  artifact name already exists and suggest reuse, extension, replacement via
+  approval, or a new toolName/moduleName/fileName.
+- If the failure is from security policy, explain the blocked capability and
+  propose a safe alternative instead of relaxing policy.
+- Do not claim that any file, remote command, or tool execution succeeded.
+- Keep the response practical and under 8 short bullet points or paragraphs.
+"""
+
 
 class ToolBuildError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
@@ -133,6 +155,61 @@ class ToolBuilder:
                 result.final_message(self.repair_policy),
             )
         raise ToolBuildError("TOOL_BUILD_FAILED", "Tool build failed without a captured error.")
+
+    async def explain_failure(
+        self,
+        event: ToolBuildRequestedEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None = None,
+    ) -> str:
+        """Turn a raw Tool build failure into user-actionable feedback.
+
+        The Kafka/API contract remains `code/message`; this method only enriches
+        the message so the UI and later agent turns receive useful context.
+        """
+
+        prompt = self._build_failure_feedback_prompt(
+            event,
+            code=code,
+            message=message,
+            stage=stage,
+        )
+        try:
+            final_text = ""
+            collected_text: list[str] = []
+            async for llm_event in self.llm_client.stream_message(
+                ApiMessageRequest(
+                    model=self.model_name,
+                    messages=[ConversationMessage.from_user_text(prompt)],
+                    system_prompt=_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT,
+                    max_tokens=1200,
+                    tools=[],
+                    debug_context={
+                        **self._debug_context_for_event(event),
+                        "purpose": "tool_build_failure_feedback",
+                        "failure_code": code,
+                        "failure_stage": stage,
+                    },
+                )
+            ):
+                if isinstance(llm_event, ApiTextDeltaEvent):
+                    collected_text.append(llm_event.text)
+                elif isinstance(llm_event, ApiMessageCompleteEvent):
+                    final_text = llm_event.message.text or final_text
+            response = self._plain_feedback_response(final_text or "".join(collected_text))
+            if response:
+                return response
+        except Exception as exc:
+            logger.warning(
+                "Tool build failure feedback generation failed. runId=%s code=%s error=%s",
+                event.run_id,
+                code,
+                exc,
+                exc_info=True,
+            )
+        return self._fallback_failure_feedback(code=code, message=message, stage=stage)
 
     async def _validate_and_package_spec(
         self,
@@ -311,6 +388,76 @@ class ToolBuilder:
             return str(module_path.relative_to(CUSTOM_TOOLS_DIR))
         except ValueError:
             return str(module_path)
+
+    @staticmethod
+    def _build_failure_feedback_prompt(
+        event: ToolBuildRequestedEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None,
+    ) -> str:
+        approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
+        plan_summary = {
+            "goal": approved_plan.get("goal") or approved_plan.get("title"),
+            "summary": approved_plan.get("summary"),
+            "tasks": approved_plan.get("tasks"),
+            "execution_spec": approved_plan.get("execution_spec"),
+        }
+        return (
+            "A generated tool build failed. Explain it to the user in Korean and suggest a safe next step.\n\n"
+            f"runId={event.run_id}\n"
+            f"projectId={event.project_id}\n"
+            f"chatSessionId={event.chat_session_id}\n"
+            f"approvedPlanId={event.tool_plan_id}\n"
+            f"failureCode={code}\n"
+            f"failureStage={stage or 'unknown'}\n\n"
+            "Raw failure message:\n"
+            f"{message}\n\n"
+            "Approved plan summary:\n"
+            f"{json.dumps(plan_summary, ensure_ascii=False, indent=2)}\n"
+        )
+
+    @staticmethod
+    def _plain_feedback_response(text: str) -> str:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").strip()
+            if stripped.lower().startswith("markdown"):
+                stripped = stripped[len("markdown"):].strip()
+        return stripped
+
+    @staticmethod
+    def _fallback_failure_feedback(*, code: str, message: str, stage: str | None) -> str:
+        lowered = message.lower()
+        is_duplicate = any(
+            needle in lowered
+            for needle in (
+                "이미 존재",
+                "already exists",
+                "duplicate",
+                "file name",
+                "filename",
+                "module name",
+                "modulename",
+            )
+        )
+        if is_duplicate:
+            return (
+                "Tool build가 실패했습니다.\n\n"
+                f"- 원인: 같은 Tool 파일명 또는 moduleName의 artifact가 이미 존재합니다. (code={code}, stage={stage or 'unknown'})\n"
+                "- 의미: Core가 기존 Tool을 덮어쓰지 않도록 막았기 때문에 새 파일을 저장하지 않았습니다.\n"
+                "- 다음 선택지: 기존 Tool을 재사용하거나, 기존 Tool을 개선하는 승인 흐름으로 전환하거나, 새 toolName/moduleName/fileName으로 다시 생성해야 합니다.\n"
+                "- 재요청 예시: `기존 Tool과 충돌하지 않도록 새 이름으로 생성해줘. 기존 Tool이 있으면 재사용/확장 여부도 같이 제안해줘.`\n\n"
+                f"원본 오류: {message}"
+            )
+        return (
+            "Tool build가 실패했습니다.\n\n"
+            f"- code: {code}\n"
+            f"- stage: {stage or 'unknown'}\n"
+            f"- 원인: {message}\n"
+            "- 다음 단계: 위 오류를 반영해 PLAN draft를 다시 만들거나, 보안 정책/샌드박스/파일명 충돌 중 어느 조건을 바꿀지 명시해 다시 요청해야 합니다."
+        )
 
     @staticmethod
     def _debug_context_for_event(event: ToolBuildRequestedEvent) -> dict[str, object]:

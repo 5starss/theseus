@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 139 — Agent 작업 실패 설명 피드백 보강 (2026-05-15)
+
+#### `src`
+- Tool build worker가 `TOOL_BUILD_FAILED`를 publish하기 전에 raw error를 LLM 피드백 프롬프트로 정리해 원인, 실패 단계, 안전한 다음 선택지, Plan B를 `message`에 포함하도록 보강
+- Tool 파일명/moduleName 중복처럼 생성 artifact 충돌이 발생하면 기존 Tool 재사용, 확장, 승인 기반 대체, 새 이름 재생성 중 하나를 선택하도록 deterministic fallback 메시지를 추가
+- PLAN worker의 예외 종료도 raw exception만 반환하지 않고 한국어 설명/재시도 방향으로 변환해 `TOOL_PLAN_FAILED`/`TOOL_PLAN_GENERATION_FAILED.message`에 담도록 처리
+- 실패 설명 생성 LLM 호출 자체가 실패해도 기존 code/message 계약을 유지하며 fallback 설명을 반환하도록 방어
+
+#### `theseus-api-server`
+- API Server가 build completed artifact를 저장할 때 기존 Tool 파일명과 충돌하는 경우에도 단순 `이미 존재하는 Tool 파일명입니다.`에서 끝내지 않고, 기존 Tool 재사용/개선/새 이름 생성 선택지를 포함한 System Notice를 저장하도록 보강
+- Kafka/DTO schema는 바꾸지 않고 기존 `Tool build에 실패했습니다. code=..., message=...` 메시지 형식 안에서 설명만 확장
+
+#### 검증
+- `python -m py_compile src\tool_build\builder.py src\tool_build\processor.py src\tool_plan\planner.py src\tool_plan\processor.py` 성공
+- `python -m compileall -q src\tool_build src\tool_plan` 성공
+- API Server `ToolBuildEventServiceTest` 단위 테스트는 실행 시 현재 로컬 JVM이 Java 8이라 Spring Boot Gradle plugin의 Java 17 요구 조건에서 중단됨
+
+---
+
 ### 🛠️ Session 138 — Local extension source package 자동 압축 (2026-05-15)
 
 #### 설치/패키징
