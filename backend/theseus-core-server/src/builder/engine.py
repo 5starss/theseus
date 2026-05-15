@@ -334,6 +334,7 @@ def get_query_engine(
         permission_prompt=_deny_permission_prompt,
         tool_metadata={
             "tool_registry": full_registry,
+            "active_registry": active_registry,
             "tool_permissions": tool_permissions,
             "llm_client": api_client,
             "model_name": model_name,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -74,34 +75,42 @@ class ToolSearchTool(BaseTool):
     async def execute(
         self, arguments: ToolSearchInput, context: ToolExecutionContext
     ) -> ToolResult:
-        full_registry = context.metadata.get("tool_registry")
+        search_registry = (
+            context.metadata.get("tool_search_registry")
+            or context.metadata.get("tool_registry")
+        )
         active_registry = context.metadata.get("active_registry")
+        project_id = context.metadata.get("project_id")
 
-        if full_registry is None:
+        if search_registry is None:
             return ToolResult(
                 output=(
-                    "tool_search: Cannot access full_registry. "
+                    "tool_search: Cannot access a searchable tool registry. "
                     "Check engine_builder tool_metadata configuration."
                 ),
                 is_error=True,
             )
 
-        # ToolRetriever로 시맨틱 검색 수행
+        # ToolRetriever로 시맨틱 검색 수행. 임베딩 모델 캐시/권한 문제로
+        # 실패하면 이름/설명/example query 기반 fallback으로 검색한다.
+        search_mode = "semantic"
         try:
             from theseus_engine.core.tool_retriever import ToolRetriever
 
-            retriever = ToolRetriever(full_registry)
+            retriever = ToolRetriever(search_registry)
             matched_tools = await retriever.retrieve_top_k(
                 arguments.query,
-                full_registry,
+                search_registry,
                 k=arguments.top_k,
                 adaptive=False,
             )
         except Exception as e:
-            log.error("[ToolSearchTool] Search error: %s", e)
-            return ToolResult(
-                output=f"Error during tool search: {e}",
-                is_error=True,
+            log.warning("[ToolSearchTool] Semantic search failed; using lexical fallback: %s", e)
+            search_mode = "lexical_fallback"
+            matched_tools = self._lexical_search(
+                search_registry,
+                arguments.query,
+                top_k=arguments.top_k,
             )
 
         if not matched_tools:
@@ -154,6 +163,8 @@ class ToolSearchTool(BaseTool):
 
         lines = [
             f"Search results for '{arguments.query}': {len(matched_tools)} tools found",
+            f"Search mode: {search_mode}",
+            f"Project scope: {project_id if project_id is not None else 'local/default'}",
             "",
         ]
         lines.extend(tool_details)
@@ -166,3 +177,58 @@ class ToolSearchTool(BaseTool):
             )
 
         return ToolResult(output="\n".join(lines))
+
+    @staticmethod
+    def _lexical_search(registry: Any, query: str, *, top_k: int) -> list[BaseTool]:
+        query_tokens = _tokenize_tool_search_text(query)
+        scored: list[tuple[int, str, BaseTool]] = []
+        for tool in registry.list_tools():
+            haystack_parts = [
+                getattr(tool, "name", ""),
+                getattr(tool, "description", ""),
+            ]
+            examples = getattr(tool, "example_queries", None)
+            if isinstance(examples, (list, tuple)):
+                haystack_parts.extend(str(item) for item in examples)
+            haystack = " ".join(haystack_parts)
+            haystack_tokens = _tokenize_tool_search_text(haystack)
+            overlap = len(query_tokens & haystack_tokens)
+            substring_bonus = 2 if query.strip().lower() in haystack.lower() else 0
+            name_bonus = 3 if any(token in str(getattr(tool, "name", "")).lower() for token in query_tokens) else 0
+            score = overlap + substring_bonus + name_bonus
+            if score > 0:
+                scored.append((score, getattr(tool, "name", ""), tool))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [tool for _, _, tool in scored[:top_k]]
+
+
+def _tokenize_tool_search_text(text: str) -> set[str]:
+    aliases = {
+        "시스템": {"system"},
+        "환경": {"environment", "resource", "monitor"},
+        "상태": {"status", "health", "monitor"},
+        "리소스": {"resource", "cpu", "memory", "ram"},
+        "자원": {"resource", "cpu", "memory", "ram"},
+        "조회": {"check", "monitor", "inspect", "read"},
+        "점검": {"check", "health", "inspect"},
+        "모니터링": {"monitor", "metric", "metrics"},
+        "메모리": {"memory", "ram"},
+        "날씨": {"weather"},
+        "시간": {"time"},
+        "툴": {"tool"},
+        "도구": {"tool"},
+        "커스텀": {"custom"},
+    }
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9_가-힣]+", text)
+        if len(token) >= 2
+    }
+    expanded = set(tokens)
+    for token in tokens:
+        expanded.update(part for part in token.split("_") if len(part) >= 2)
+        expanded.update(aliases.get(token, set()))
+        for alias_key, alias_values in aliases.items():
+            if alias_key in token:
+                expanded.update(alias_values)
+    return expanded
