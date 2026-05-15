@@ -26,6 +26,7 @@ from theseus_engine.engine.stream_events import (
 )
 from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissionSettings
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 from theseus_engine.core.tool_visibility import (
     ToolVisibilityPolicy,
     build_visible_registry,
@@ -298,6 +299,12 @@ def get_query_engine(
         plan_phase=plan_phase,
         plan_content=build_context.plan_content,
         available_tools=allowed_tools,
+        runtime_reminders=build_mode_runtime_reminders(
+            build_context.mode,
+            plan_phase=plan_phase,
+            source="server_stream",
+            explicit_selection=True,
+        ),
     )
     permission_checker = TheseusPermissionChecker(
         settings=TheseusPermissionSettings(),

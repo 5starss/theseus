@@ -36,6 +36,7 @@ from theseus_engine.core.tool_visibility import (
     build_visible_registry,
     can_create_tool_for_state,
 )
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 
 
 DEFAULT_TOOL_PERMISSIONS = {
@@ -423,6 +424,7 @@ class EditorRuntime:
         self.tool_permissions: dict[str, int] = dict(DEFAULT_TOOL_PERMISSIONS)
         self.AgentMode: Any = None
         self.PlanPhase: Any = None
+        self.pending_mode_reminders: tuple[str, ...] = ()
         self.initialized = False
 
     async def _default_permission_prompt(self, tool_name: str, prompt_msg: str) -> bool:
@@ -490,8 +492,16 @@ class EditorRuntime:
         if normalized not in mode_map:
             return [{"type": "StatusEvent", "message": f"지원하지 않는 모드입니다: {mode}"}]
         label, mode_val = mode_map[normalized]
+        previous_mode = self.sm.mode
         if self.sm.mode != mode_val:
             self.sm.switch_mode(mode_val)
+        self.pending_mode_reminders = build_mode_runtime_reminders(
+            self.sm.mode,
+            previous_mode=previous_mode,
+            plan_phase=getattr(self.sm, "plan_phase", None),
+            source="editor_runtime",
+            explicit_selection=True,
+        )
         self._refresh_active_tool_registry()
         self._set_engine_system_prompt()
         self.engine.set_plan_drafting(getattr(self.sm, "is_plan_drafting", False))
@@ -540,7 +550,10 @@ class EditorRuntime:
             return ()
         return tuple(tool.name for tool in registry.list_tools())
 
-    def _set_engine_system_prompt(self) -> None:
+    def _set_engine_system_prompt(
+        self,
+        runtime_reminders: tuple[str, ...] = (),
+    ) -> None:
         """Refresh system prompt and mode metadata from the current state machine."""
         if self.engine is None or self.sm is None:
             return
@@ -548,8 +561,16 @@ class EditorRuntime:
         if isinstance(metadata, dict):
             metadata["agent_mode"] = self.sm.mode.value
         self.engine.set_system_prompt(
-            self.sm.get_system_prompt(available_tools=self._active_tool_names())
+            self.sm.get_system_prompt(
+                available_tools=self._active_tool_names(),
+                runtime_reminders=runtime_reminders,
+            )
         )
+
+    def _consume_pending_mode_reminders(self) -> tuple[str, ...]:
+        reminders = self.pending_mode_reminders
+        self.pending_mode_reminders = ()
+        return reminders
 
     def _plan_phase_from_text(self, phase: str | None) -> Any:
         normalized = str(phase or "").strip().lower()
@@ -921,6 +942,7 @@ class EditorRuntime:
         max_auto_resume = 5
         auto_resume_count = 0
         current_prompt = prompt
+        runtime_reminders = self._consume_pending_mode_reminders()
 
         try:
             while True:
@@ -935,7 +957,10 @@ class EditorRuntime:
                     getattr(self.sm, "is_plan_drafting", False)
                 )
                 self._refresh_active_tool_registry()
-                self._set_engine_system_prompt()
+                self._set_engine_system_prompt(
+                    runtime_reminders=runtime_reminders,
+                )
+                runtime_reminders = ()
 
                 with contextlib.redirect_stdout(sys.stderr):
                     async for event in self.engine.submit_message(current_prompt):

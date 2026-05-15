@@ -99,6 +99,9 @@ async def main():
                 print(msg)
 
         try:
+            command_handler._sync_engine_tool_visibility(
+                runtime_reminders=command_handler.consume_pending_mode_reminders()
+            )
             async for event in engine.submit_message(user_input):
                 if isinstance(event, AssistantTextDelta):
                     print(event.text, end="", flush=True)
