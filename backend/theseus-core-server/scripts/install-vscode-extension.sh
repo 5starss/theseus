@@ -155,7 +155,7 @@ usage() {
     "  --python PATH           Python executable for venv creation" \
     "  --ide NAME              IDE target: auto, vscode, antigravity" \
     "  --code PATH             IDE CLI executable (overrides --ide)" \
-    "  --settings-dir NAME     Workspace settings folder name" \
+    "  --settings-dir NAME     Workspace settings folder name (default: IDE user settings)" \
     "  --extensions-dir PATH   IDE extension storage directory" \
     "  --vsix PATH             VSIX package path" \
     "  --runner-path PATH      Packaged Theseus runner binary path" \
@@ -234,6 +234,21 @@ done
 
 command_path() {
   command -v "$1" 2>/dev/null
+}
+
+cli_exists() {
+  local cli="$1"
+  if command -v "$cli" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -f "$cli" ]]; then
+    return 0
+  fi
+  if is_windows_path "$cli" && command -v cygpath >/dev/null 2>&1; then
+    [[ -f "$(cygpath -u "$cli")" ]]
+    return $?
+  fi
+  return 1
 }
 
 cli_for_ide() {
@@ -387,6 +402,15 @@ user_settings_path_for_ide() {
         return 1
       fi
       ;;
+    vscode|code)
+      if [[ -n "${APPDATA:-}" ]]; then
+        printf '%s\\Code\\User\\settings.json\n' "$APPDATA"
+      elif [[ -n "${USERPROFILE:-}" ]]; then
+        printf '%s\\AppData\\Roaming\\Code\\User\\settings.json\n' "$USERPROFILE"
+      else
+        return 1
+      fi
+      ;;
     *)
       return 1
       ;;
@@ -449,7 +473,7 @@ settings_path_for_ide() {
     return 0
   fi
 
-  if [[ "$target" == "antigravity" ]]; then
+  if [[ "$target" == "antigravity" || "$target" == "vscode" || "$target" == "code" ]]; then
     user_settings_path_for_ide "$target"
     return 0
   fi
@@ -497,6 +521,11 @@ to_vscode_path() {
   fi
 }
 
+absolute_setting_path() {
+  local value="$1"
+  to_vscode_path "$value"
+}
+
 find_latest_vsix() {
   local extension_dir="$1"
   local latest=""
@@ -509,6 +538,87 @@ find_latest_vsix() {
   done
   shopt -u nullglob
   printf '%s\n' "$latest"
+}
+
+clear_theseus_extension_install_state() {
+  local extensions_dir="$1"
+
+  if [[ -z "$extensions_dir" ]]; then
+    return 0
+  fi
+
+  EXTENSIONS_DIR_FOR_CLEANUP="$(to_vscode_path "$extensions_dir")" "$VENV_PYTHON" - <<'PY'
+import json
+import os
+import shutil
+from pathlib import Path
+
+root = Path(os.environ["EXTENSIONS_DIR_FOR_CLEANUP"])
+if not root.exists():
+    root.mkdir(parents=True, exist_ok=True)
+
+root_resolved = root.resolve()
+
+for child in root.glob("theseus.theseus-vscode*"):
+    child_resolved = child.resolve()
+    if root_resolved not in [child_resolved, *child_resolved.parents]:
+        raise RuntimeError(f"Refusing to remove outside extensions dir: {child_resolved}")
+    if child.is_dir():
+        shutil.rmtree(child)
+        print(f"Removed stale Theseus extension dir: {child}")
+    elif child.exists():
+        child.unlink()
+        print(f"Removed stale Theseus extension file: {child}")
+
+extensions_json = root / "extensions.json"
+if extensions_json.exists():
+    try:
+        items = json.loads(extensions_json.read_text(encoding="utf-8-sig") or "[]")
+    except json.JSONDecodeError as exc:
+        print(f"Skipping unreadable extensions.json: {extensions_json}: {exc}")
+    else:
+        if isinstance(items, list):
+            kept = []
+            removed = 0
+            for item in items:
+                identifier = ((item or {}).get("identifier") or {}).get("id", "")
+                relative_location = (item or {}).get("relativeLocation", "")
+                location = (item or {}).get("location") or {}
+                paths = [
+                    location.get("path", ""),
+                    location.get("fsPath", ""),
+                    location.get("external", ""),
+                ]
+                text = " ".join(str(value) for value in [identifier, relative_location, *paths])
+                if "theseus.theseus-vscode" in text:
+                    removed += 1
+                    continue
+                kept.append(item)
+            if removed:
+                extensions_json.write_text(
+                    json.dumps(kept, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+                print(f"Removed stale Theseus entry from extensions.json: {removed}")
+
+obsolete_path = root / ".obsolete"
+if obsolete_path.exists():
+    try:
+        obsolete = json.loads(obsolete_path.read_text(encoding="utf-8-sig") or "{}")
+    except json.JSONDecodeError as exc:
+        print(f"Skipping unreadable .obsolete: {obsolete_path}: {exc}")
+    else:
+        if isinstance(obsolete, dict):
+            removed_keys = [key for key in obsolete if key.startswith("theseus.theseus-vscode")]
+            for key in removed_keys:
+                obsolete.pop(key, None)
+            if removed_keys:
+                obsolete_path.write_text(
+                    json.dumps(obsolete, ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+                print(f"Removed stale Theseus .obsolete entries: {len(removed_keys)}")
+PY
 }
 
 if [[ ! -f "$CORE_PATH/requirements.txt" ]]; then
@@ -547,14 +657,16 @@ if [[ "$SKIP_SETTINGS" -eq 0 ]]; then
       echo "Runner binary was not found: $RUNNER_PATH" >&2
       exit 1
     fi
-    RUNNER_SETTING="$(to_vscode_path "$RUNNER_PATH")"
+    RUNNER_SETTING="$(absolute_setting_path "$RUNNER_PATH")"
   fi
 
   SETTINGS_PATH="$SETTINGS_PATH_FOR_PYTHON" \
-  CORE_SETTING="$(to_vscode_path "$CORE_PATH")" \
-  PYTHON_SETTING="$(to_vscode_path "$VENV_PYTHON")" \
+  CORE_SETTING="$(absolute_setting_path "$CORE_PATH")" \
+  PYTHON_SETTING="$(absolute_setting_path "$VENV_PYTHON")" \
   RUNNER_SETTING="$RUNNER_SETTING" \
-  WORKSPACE_SETTING="$(to_vscode_path "$WORKSPACE_PATH")" \
+  WORKSPACE_SETTING="$(absolute_setting_path "$WORKSPACE_PATH")" \
+  WORKSPACE_SETTINGS_PATH="$(to_vscode_path "$WORKSPACE_PATH/.vscode/settings.json")" \
+  CLEAN_WORKSPACE_SETTINGS="$([[ -z "$SETTINGS_DIR_NAME" ]] && printf '1' || printf '0')" \
   "$VENV_PYTHON" - <<'PY'
 import json
 import os
@@ -564,36 +676,86 @@ from pathlib import Path
 
 settings_path = Path(os.environ["SETTINGS_PATH"])
 settings_path.parent.mkdir(parents=True, exist_ok=True)
-data = {}
-if settings_path.exists():
-    raw = settings_path.read_text(encoding="utf-8-sig")
-    if raw.strip():
-        try:
-            loaded = json.loads(raw)
-            if isinstance(loaded, dict):
-                data = loaded
-        except json.JSONDecodeError:
-            backup_path = settings_path.with_name(
-                f"{settings_path.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
-            )
-            shutil.copy2(settings_path, backup_path)
+updates = {
+    "theseus.corePath": os.environ["CORE_SETTING"],
+    "theseus.pythonPath": os.environ["PYTHON_SETTING"],
+    "theseus.workspacePath": os.environ["WORKSPACE_SETTING"],
+    "theseus.serverUrl": "",
+}
+if os.environ.get("RUNNER_SETTING"):
+    updates["theseus.runnerPath"] = os.environ["RUNNER_SETTING"]
+    updates["theseus.runtimeMode"] = "bundled-runner"
+
+def write_jsonc_settings(path: Path, values: dict[str, str]) -> None:
+    raw = path.read_text(encoding="utf-8-sig") if path.exists() else "{\n}\n"
+    if not raw.strip().startswith("{"):
+        backup_path = path.with_name(
+            f"{path.name}.bak-{time.strftime('%Y%m%d%H%M%S')}"
+        )
+        if path.exists():
+            shutil.copy2(path, backup_path)
             print(
-                "Existing settings.json is not strict JSON. "
+                "Existing settings file was not JSON/JSONC-like. "
                 f"Backed up to {backup_path} and writing fresh settings."
             )
+        raw = "{\n}\n"
 
-data["theseus.corePath"] = os.environ["CORE_SETTING"]
-data["theseus.pythonPath"] = os.environ["PYTHON_SETTING"]
-data["theseus.workspacePath"] = os.environ["WORKSPACE_SETTING"]
-if os.environ.get("RUNNER_SETTING"):
-    data["theseus.runnerPath"] = os.environ["RUNNER_SETTING"]
-    data["theseus.runtimeMode"] = "bundled-runner"
-data.setdefault("theseus.serverUrl", "")
+    lines = raw.splitlines()
+    lines = [
+        line
+        for line in lines
+        if not line.lstrip().startswith('"theseus.')
+    ]
+    if not lines:
+        lines = ["{", "}"]
 
-settings_path.write_text(
-    json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-    encoding="utf-8",
-)
+    closing_index = -1
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip().rstrip(",") == "}":
+            closing_index = index
+            break
+    if closing_index < 0:
+        lines.append("}")
+        closing_index = len(lines) - 1
+
+    previous_index = closing_index - 1
+    while previous_index >= 0:
+        stripped = lines[previous_index].strip()
+        if stripped and not stripped.startswith("//"):
+            break
+        previous_index -= 1
+    if previous_index >= 0:
+        previous = lines[previous_index].strip()
+        if previous and previous != "{" and not previous.endswith(","):
+            lines[previous_index] += ","
+
+    insert_lines = [
+        f"    {json.dumps(key, ensure_ascii=False)}: {json.dumps(value, ensure_ascii=False)},"
+        for key, value in values.items()
+    ]
+    updated = lines[:closing_index] + insert_lines + lines[closing_index:]
+    path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+
+def remove_jsonc_theseus_settings(path: Path) -> None:
+    if not path.exists():
+        return
+    raw = path.read_text(encoding="utf-8-sig")
+    lines = raw.splitlines()
+    kept = [
+        line
+        for line in lines
+        if not line.lstrip().startswith('"theseus.')
+    ]
+    if len(kept) == len(lines):
+        return
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    print(f"Removed stale workspace Theseus settings: {path}")
+
+write_jsonc_settings(settings_path, updates)
+if os.environ.get("CLEAN_WORKSPACE_SETTINGS") == "1":
+    workspace_settings = Path(os.environ["WORKSPACE_SETTINGS_PATH"])
+    if workspace_settings.resolve() != settings_path.resolve():
+        remove_jsonc_theseus_settings(workspace_settings)
 PY
 fi
 
@@ -632,9 +794,11 @@ if [[ "$SKIP_EXTENSION" -eq 0 ]]; then
     echo "IDE CLI was not found: $CODE_BIN" >&2
     exit 1
   fi
+  CLI_VSIX_PATH="$(to_vscode_path "$VSIX_PATH")"
   EXTENSIONS_DIR="$(extensions_dir_for_ide "$DETECTED_IDE" || true)"
   if [[ -n "$EXTENSIONS_DIR" ]]; then
     mkdir -p "$(to_posix_path "$EXTENSIONS_DIR")"
+    clear_theseus_extension_install_state "$EXTENSIONS_DIR"
     CLI_EXTENSIONS_DIR="$(to_vscode_path "$EXTENSIONS_DIR")"
     CLI_VSIX_PATH="$(to_vscode_path "$VSIX_PATH")"
     echo "Installing VSIX into IDE target: $DETECTED_IDE ($CODE_BIN)"

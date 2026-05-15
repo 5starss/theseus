@@ -143,15 +143,25 @@ local daemon이며, 실패하면 stdio JSON Lines runner로 fallback합니다.
 | Python 실행 환경 | `backend\theseus-core-server\.venv` 생성 또는 재사용 |
 | 의존성 설치 | `requirements.txt` 설치 |
 | VSIX 설치 | `vscode-extension\theseus-vscode-*.vsix` 최신 파일 설치 |
-| IDE 설정 | `theseus.corePath`, `theseus.pythonPath`, `theseus.workspacePath` 기록 |
+| IDE 설정 | `theseus.corePath`, `theseus.pythonPath`, `theseus.workspacePath`를 IDE User 설정에 기록 |
 | 실행 방식 | 기본은 source Python local daemon, `-RunnerPath`를 주면 packaged runner |
 
 설치 위치는 IDE별로 다릅니다.
 
 | IDE | Extension 저장소 | 설정 파일 |
 |---|---|---|
-| VS Code | `%USERPROFILE%\.vscode\extensions` | `<workspace>\.vscode\settings.json` |
+| VS Code | `%USERPROFILE%\.vscode\extensions` | `%APPDATA%\Code\User\settings.json` |
 | Antigravity | `%USERPROFILE%\.antigravity\extensions` | `%APPDATA%\Antigravity\User\settings.json` |
+
+설치기가 기록하는 경로는 기본적으로 현재 PC에서 해석된 절대경로입니다.
+예를 들어 repo 루트에서 실행하면 `theseus.corePath`는
+`C:\...\backend\theseus-core-server`처럼 저장됩니다. `${workspaceFolder}`를
+User settings에 그대로 저장하면 IDE가 워크스페이스를 열기 전이나 다른
+IDE 호환 환경에서 치환하지 못할 수 있어 기본 설치에서는 사용하지 않습니다.
+workspace별로 따로 저장해야 하면 설치 시 `-SettingsDir .vscode` 또는
+`--settings-dir .vscode`를 명시하면 됩니다.
+기본 User 설정 설치에서는 기존 `<workspace>\.vscode\settings.json`에 남아 있던
+`theseus.*` 키도 정리해 workspace 설정이 User 설정을 덮어쓰지 않게 합니다.
 
 #### 5.1.1 Windows에서 바로 설치
 

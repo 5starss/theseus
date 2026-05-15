@@ -25,6 +25,50 @@
 
 ---
 
+### 🐛 Session 134 — Extension runner ready timeout 60초 확장 (2026-05-15)
+
+#### `vscode-extension`
+- local daemon 및 stdio runner의 `RunnerReady` 대기 제한을 25초에서 60초로 늘려 custom tool/engine 초기화가 느린 환경에서 조기 fallback되는 빈도를 줄임
+- `theseus.readyTimeoutSeconds` 설정을 추가하고 최대값을 60초로 제한해 설정값이 과도하게 커지지 않도록 함
+- daemon startup 구조와 WebView 진단 상태 병합 방식은 변경하지 않음
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `git diff --check` 성공
+
+---
+
+### 🛠️ Session 133 — VSCode User 설정 및 path 변수 지원 (2026-05-15)
+
+#### `vscode-extension`
+- `theseus.corePath`, `theseus.pythonPath`, `theseus.runnerPath`, `theseus.workspacePath` 설정에서 `${workspaceFolder}`, `${userHome}`, `${env:NAME}` 변수를 해석하도록 변경
+- 사용자가 직접 `${workspaceFolder}/backend/theseus-core-server`처럼 변수 기반 설정을 넣어도 실제 실행 시 현재 열린 workspace 기준 경로로 변환되게 함
+- `corePath` 설정이 존재하지만 현재 workspace에서 유효하지 않으면 workspace root 및 `backend/theseus-core-server` fallback 탐색을 계속 수행하도록 보강
+
+#### 설치 / 배포
+- VSCode 설치 스크립트의 기본 설정 저장 위치를 workspace `.vscode/settings.json`에서 VSCode User settings(`%APPDATA%\Code\User\settings.json`)로 변경
+- Antigravity와 VSCode 모두 IDE User settings에는 현재 PC에서 해석된 절대경로를 기록하도록 변경해 `${workspaceFolder}`가 그대로 남아 실행 시 치환되지 않는 문제를 방지
+- 기존 workspace 설정 저장이 필요하면 `-SettingsDir .vscode` 또는 `--settings-dir .vscode`로 명시할 수 있게 유지
+- VSCode/Antigravity settings 파일이 JSONC 형태여도 기존 설정을 보존하면서 `theseus.*` 항목만 갱신하도록 설치 스크립트를 보강
+- 기본 User settings 설치 시 과거 workspace `.vscode/settings.json`에 남아 있던 `theseus.*` 키를 제거해 workspace 설정이 User 설정을 덮어쓰지 않도록 함
+
+#### 문서
+- `usage.md`의 Extension 저장소와 설정 파일 위치 설명을 VSCode User settings 기준으로 수정
+- 기본 설치는 절대경로를 기록하고, workspace별 설정이 필요하면 `-SettingsDir .vscode` / `--settings-dir .vscode`를 사용하는 방식으로 설명을 정정
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `npx.cmd @vscode/vsce package` 성공, `vscode-extension\theseus-vscode-0.0.1.vsix` 재생성
+- PowerShell scriptblock parse 검증 성공
+- Git Bash parser로 `scripts\install-vscode-extension.sh` 구문 검증 성공
+- PowerShell 설치 스크립트 smoke로 VSCode User settings에 절대경로 기반 값이 기록되는 것 확인
+- Git Bash 설치 스크립트 smoke로 VSCode User settings에 절대경로 기반 값이 기록되는 것 확인
+- PowerShell/Git Bash smoke로 기존 workspace `.vscode/settings.json`의 `theseus.*` 키가 제거되고 다른 workspace 설정은 유지되는 것 확인
+- 새 VSIX를 VSCode에 재설치하고 `%APPDATA%\Code\User\settings.json`에 절대경로 기반 `theseus.*` 값이 기록된 것 확인
+- 설치된 extension package description에 변수 기반 path 지원 안내가 포함된 것 확인
+
+---
+
 ### 🛠️ Session 132 — Mode runtime context 공통 reminder 주입 (2026-05-15)
 
 #### `theseus_engine`
@@ -50,6 +94,97 @@
 - system prompt smoke로 reminder 섹션이 중복 생성되지 않고, reminder 없는 다음 prompt에 이전 mode assertion이 남지 않는 것 확인
 - 강화된 AGENT reminder smoke로 이전 ASK mode 지시가 stale 처리되고, active tool list 확인 전 도구 부재를 단정하지 말라는 문구가 렌더링되는 것 확인
 - `python -m compileall -q theseus_engine src` 성공
+
+---
+
+### 🐛 Session 131 — Extension session 인자 호환성 및 User settings 정리 (2026-05-15)
+
+#### `vscode-extension`
+- stdio fallback 실행 시 `theseus_engine.cli_runner`와 packaged runner에 `--session` CLI 인자를 넘기지 않고 `THESEUS_INITIAL_SESSION` 환경변수로 전달하도록 변경
+- daemon path와 stdio path 모두 오래된 core checkout에 연결되어도 `unrecognized arguments: --session default`로 즉시 종료되지 않게 함
+
+#### `theseus_engine`
+- `cli_runner.py`의 기본 session 값을 `THESEUS_INITIAL_SESSION` 환경변수에서 읽도록 변경해 Extension의 env 기반 초기 세션 전달을 지원
+
+#### 설치 / 배포
+- `Uninstall-Theseus-VSCode.cmd`가 VSCode User settings(`%APPDATA%\Code\User\settings.json`)의 `theseus.*` 키도 삭제하도록 확장해 이전 테스트 경로가 재설치 후에도 남는 문제를 줄임
+- VSCode User settings처럼 trailing comma가 허용되는 JSONC 파일도 `theseus.*` 라인 제거 fallback으로 정리할 수 있게 함
+
+#### 검증
+- `npm.cmd run compile` 성공
+- `python -m py_compile backend\theseus-core-server\theseus_engine\cli_runner.py` 성공
+- `npx.cmd @vscode/vsce package` 성공, `vscode-extension\theseus-vscode-0.0.1.vsix` 재생성
+- 재생성된 VSIX의 `extension/out/session/*.js`에서 `--session` CLI 인자가 제거되고 `THESEUS_INITIAL_SESSION` env 전달만 남은 것 확인
+- `Uninstall-Theseus-VSCode.cmd` PowerShell body parse 검증 성공
+- 수정된 uninstall script로 VSCode User settings의 stale `theseus.*` JSONC 라인 제거 성공
+- 재생성한 VSIX를 VSCode에 재설치하고, 설치된 extension의 `out/session/*.js`에 `--session` CLI 인자가 남아 있지 않음을 확인
+
+---
+
+### 🐛 Session 130 — VSIX 재설치 stale metadata 자동 정리 (2026-05-15)
+
+#### 설치 / 배포
+- `scripts/install-vscode-extension.sh`와 `scripts/install-vscode-extension.ps1`가 VSIX 설치 직전에 VSCode extension 저장소의 Theseus stale 상태를 정리하도록 보강
+- `theseus.theseus-vscode*` 설치 폴더, `extensions.json`의 Theseus 항목, `.obsolete`의 Theseus 항목만 제한적으로 삭제해 `Please restart VS Code before reinstalling Theseus.` 오류가 반복되는 상태를 줄임
+- 삭제 범위는 현재 설치 대상 extension directory 내부로 제한해 다른 extension metadata에는 영향을 주지 않도록 함
+- `Uninstall-Theseus-VSCode.cmd`의 `extensions.json` 정리 로직도 `location.fsPath`/`location.external`이 포함된 최신 VSCode metadata 형태를 처리하도록 보강
+
+#### 검증
+- Git Bash parser로 `scripts\install-vscode-extension.sh` 구문 검증 성공
+- PowerShell scriptblock parse 검증 성공
+
+---
+
+### 🛠️ Session 129 — VSCode Theseus 삭제 범위 확장 (2026-05-15)
+
+#### 설치 / 배포
+- `Uninstall-Theseus-VSCode.cmd`가 현재 workspace의 `.vscode` 폴더와 Theseus core 전용 `.venv`까지 함께 삭제하도록 확장
+- `.vscode/settings.json`의 `theseus.corePath`를 먼저 읽어 실제 core 위치를 venv 삭제 후보로 포함하고, workspace/root 기준 `backend/theseus-core-server/.venv`도 함께 탐색하도록 함
+- 필요 시 `.venv` 또는 workspace `.vscode`를 남길 수 있도록 `-KeepVenv`, `-KeepWorkspaceVscode` 옵션을 추가
+
+#### 검증
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd -Help"` 성공
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd -DryRun -NoPause"` 성공
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd --dry-run --no-pause"` 성공
+
+---
+
+### 🐛 Session 128 — PowerShell Extension 설치 실패 감지 보강 (2026-05-15)
+
+#### 설치 / 배포
+- `scripts/install-vscode-extension.ps1`가 `code.cmd --install-extension` 실패 후에도 `Theseus VSCode extension setup complete.`를 출력하던 문제를 수정
+- VSIX 설치 호출을 `Invoke-IdeInstallExtension`으로 감싸고 `$LASTEXITCODE`를 확인해, `Please restart VS Code before reinstalling Theseus.` 같은 IDE CLI 실패를 즉시 오류로 중단하도록 함
+- 오류 메시지에 VSCode 종료 및 `Uninstall-Theseus-VSCode.cmd` 실행 후 재시도 안내를 포함
+
+#### 검증
+- PowerShell scriptblock parse 검증 성공
+- `install-vscode-extension.ps1 -SkipRequirements -SkipExtension -SkipSettings` 무동작 smoke test 성공
+
+---
+
+### 🛠️ Session 127 — VSCode Theseus 원클릭 삭제 스크립트 추가 (2026-05-15)
+
+#### 설치 / 배포
+- 저장소 루트에 `Uninstall-Theseus-VSCode.cmd`를 추가해 VSCode의 Theseus Extension 설치 폴더, `extensions.json` metadata, `.obsolete` entry, VSCode globalStorage, 현재 workspace의 `theseus.*` 설정, `.theseus/runner.json`, workspaceStorage의 Theseus UI 상태 키를 한 번에 정리할 수 있게 함
+- 별도 PowerShell helper 파일 없이 `.cmd` 단일 파일 안에 삭제 로직을 포함해 더블클릭 실행과 `-DryRun`/`--dry-run` 검증 실행을 모두 지원
+- VSCode가 실행 중이면 강제 종료하지 않고 재시작 필요 경고만 출력하도록 함
+
+#### 검증
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd -Help"` 성공
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd -DryRun -NoPause"` 성공
+- `cmd.exe /c "Uninstall-Theseus-VSCode.cmd --dry-run --no-pause"` 성공
+
+---
+
+### 🐛 Session 126 — Git Bash VSCode CLI 파일 경로 검증 수정 (2026-05-15)
+
+#### 설치 / 배포
+- `scripts/install-vscode-extension.sh`가 Git Bash에서 `/c/Users/.../Microsoft VS Code/bin/code.cmd`처럼 공백이 포함된 IDE CLI 파일 경로를 `command -v`만으로 검증하다가 실패하던 문제를 수정
+- IDE CLI가 PATH 명령이 아니라 실제 파일 경로인 경우 `-f`/`cygpath` 기반 확인도 허용하도록 `cli_exists`를 추가
+- VSIX 설치 시 VSIX 경로도 IDE CLI에 넘기기 전에 Windows 경로로 정규화해 Git Bash와 Windows `.cmd` 경계에서 경로 해석이 흔들리지 않게 함
+
+#### 검증
+- Git Bash parser로 `scripts\install-vscode-extension.sh` 구문 검증 성공
 
 ---
 

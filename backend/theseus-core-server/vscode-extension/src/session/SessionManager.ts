@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 
 import { asRunnerEvent, type RunnerEvent } from '../shared/protocol';
+import { getPythonPath, getRunnerPath, getRuntimeModeSetting } from '../workspace/WorkspaceContext';
 import { DaemonRunnerClient, errorMessage, isDaemonConnectionError, isDaemonHttpStatus, sameWorkspacePath } from './DaemonRunnerClient';
 import { killPidTree } from './ProcessUtils';
 import { RunnerStateStore } from './RunnerStateStore';
@@ -43,7 +44,8 @@ type ResolvedRuntimeConfig = {
   stdioMode: RunnerRuntimeMode;
 };
 
-const READY_TIMEOUT_MS = 25000;
+const DEFAULT_READY_TIMEOUT_MS = 60000;
+const MAX_READY_TIMEOUT_MS = 60000;
 const HEARTBEAT_STALE_MS = 45000;
 const DAEMON_HEARTBEAT_INTERVAL_MS = 5000;
 const DAEMON_HEARTBEAT_FAILURE_LIMIT = 2;
@@ -70,6 +72,12 @@ function normalizeSessionName(name: string | undefined): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function resolveReadyTimeoutMs(): number {
+  const seconds = vscode.workspace.getConfiguration('theseus').get<number>('readyTimeoutSeconds') ?? 60;
+  if (!Number.isFinite(seconds) || seconds <= 0) return DEFAULT_READY_TIMEOUT_MS;
+  return Math.min(MAX_READY_TIMEOUT_MS, Math.max(1000, Math.round(seconds * 1000)));
 }
 
 function isExpectedStopReason(reason: string | undefined): boolean {
@@ -116,6 +124,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   private readonly daemonClient = new DaemonRunnerClient(this.output);
   private readonly stdioClient = new StdioRunnerClient(this.output);
   private readonly runnerState = new RunnerStateStore(this.output);
+  private readyTimeoutMs = DEFAULT_READY_TIMEOUT_MS;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     const previous = this.context.workspaceState.get<Partial<TheseusSessionMetadata> & { sessionId?: string }>(SESSION_STATE_KEY);
@@ -138,9 +147,9 @@ export class TheseusSessionManager implements vscode.Disposable {
 
   private resolveRuntimeConfig(): ResolvedRuntimeConfig {
     const config = vscode.workspace.getConfiguration('theseus');
-    const pythonExec = config.get<string>('pythonPath') || 'python';
-    const configuredRunnerPath = config.get<string>('runnerPath')?.trim() || '';
-    const runtimeModeSetting = config.get<string>('runtimeMode')?.trim();
+    const pythonExec = getPythonPath();
+    const configuredRunnerPath = getRunnerPath();
+    const runtimeModeSetting = getRuntimeModeSetting();
     const useBundledRunner = !!configuredRunnerPath && runtimeModeSetting !== 'source-python';
     const runnerPath = useBundledRunner ? configuredRunnerPath : '';
     return {
@@ -434,6 +443,7 @@ export class TheseusSessionManager implements vscode.Disposable {
     const runtimeMode = runtimeConfig.daemonMode;
 
     this.runtimeMode = runtimeMode;
+    this.readyTimeoutMs = resolveReadyTimeoutMs();
     this.sessionId = makeSessionId();
     this.startMetadata = { coreRoot, workspaceCwd, pythonExec, runnerPath, serverUrl, runtimeMode, initialSession: this.preferredSessionName };
     this.lastReadyEvent = undefined;
@@ -511,7 +521,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   }
 
   private async waitForDaemonAttach(workspaceCwd: string, coreRoot: string, expectedPid?: number): Promise<boolean> {
-    const deadline = Date.now() + READY_TIMEOUT_MS;
+    const deadline = Date.now() + this.readyTimeoutMs;
     while (Date.now() < deadline) {
       if (await this.attachExistingDaemon(workspaceCwd, coreRoot, expectedPid)) return true;
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -814,6 +824,7 @@ export class TheseusSessionManager implements vscode.Disposable {
     const runtimeMode = runtimeConfig.stdioMode;
 
     this.runtimeMode = runtimeMode;
+    this.readyTimeoutMs = resolveReadyTimeoutMs();
     this.sessionId = makeSessionId();
     this.startMetadata = { coreRoot, workspaceCwd, pythonExec, runnerPath, serverUrl, runtimeMode, initialSession: this.preferredSessionName };
     this.lastReadyEvent = undefined;
@@ -1013,9 +1024,9 @@ export class TheseusSessionManager implements vscode.Disposable {
       this.setState('stale', { code: 'ready_timeout' });
       this.emitDiagnostic(
         'ready_timeout',
-        `Runner has not emitted RunnerReady after ${Math.round(READY_TIMEOUT_MS / 1000)}s. The Python process is still running.`,
+        `Runner has not emitted RunnerReady after ${Math.round(this.readyTimeoutMs / 1000)}s. The Python process is still running.`,
       );
-    }, READY_TIMEOUT_MS);
+    }, this.readyTimeoutMs);
   }
 
   private startHeartbeatMonitor(): void {
