@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any
 
 from src.history.schemas import HistoryMessageRecord
@@ -12,6 +13,10 @@ _FAILURE_CODE_MARKER = "code="
 _FAILURE_MESSAGE_MARKER = ", message="
 _FAILURE_ALTERNATIVES_MARKER = "가능한 대안:"
 _FAILURE_LAST_ERROR_MARKER = "마지막 오류:"
+_FAILURE_RECOVERABLE_MARKER = "recoverable="
+_FAILURE_RETRY_POLICY_MARKER = "retry_policy="
+_FAILURE_RECOVERABLE_LABEL = "recoverable:"
+_FAILURE_RETRY_POLICY_LABEL = "retry_policy:"
 _FAILURE_CONTEXT_LIMIT = 700
 _TOOL_HISTORY_CONTEXT_LIMIT = 1000
 _TOOL_CALL_MESSAGE_TYPES = {
@@ -198,6 +203,16 @@ def _summarize_failure_notice(failure_kind: str, content: str) -> str:
         message,
         _FAILURE_ALTERNATIVES_MARKER,
     )
+    recoverable = _extract_inline_marker_value(
+        message,
+        _FAILURE_RECOVERABLE_MARKER,
+        _FAILURE_RECOVERABLE_LABEL,
+    )
+    retry_policy = _extract_inline_marker_value(
+        message,
+        _FAILURE_RETRY_POLICY_MARKER,
+        _FAILURE_RETRY_POLICY_LABEL,
+    )
     reason = _trim_marked_section(message, _FAILURE_ALTERNATIVES_MARKER)
     reason = _trim_marked_section(reason, _FAILURE_LAST_ERROR_MARKER)
     if not reason:
@@ -210,6 +225,10 @@ def _summarize_failure_notice(failure_kind: str, content: str) -> str:
         details.append(f"원인={_limit_failure_context(reason)}")
     if alternatives:
         details.append(f"가능한 대안={_limit_failure_context(alternatives)}")
+    if recoverable:
+        details.append(f"recoverable={recoverable}")
+    if retry_policy:
+        details.append(f"retry_policy={retry_policy}")
     if details:
         return f"이전 {failure_kind} 실패: {', '.join(details)}"
     return f"이전 {failure_kind} 실패:"
@@ -240,6 +259,18 @@ def _extract_marked_section(content: str, marker: str) -> str:
         return ""
     section = content[marker_index + len(marker) :].strip()
     return _trim_marked_section(section, _FAILURE_LAST_ERROR_MARKER)
+
+
+def _extract_inline_marker_value(content: str, *markers: str) -> str:
+    for marker in markers:
+        marker_index = content.find(marker)
+        if marker_index < 0:
+            continue
+        value = content[marker_index + len(marker) :].strip()
+        if not value:
+            continue
+        return re.split(r"[\s,.)\]]+", value, maxsplit=1)[0].strip()
+    return ""
 
 
 def _trim_marked_section(content: str, marker: str) -> str:

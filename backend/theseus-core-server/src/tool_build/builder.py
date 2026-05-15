@@ -446,9 +446,20 @@ class ToolBuilder:
             return (
                 "Tool build가 실패했습니다.\n\n"
                 f"- 원인: 같은 Tool 파일명 또는 moduleName의 artifact가 이미 존재합니다. (code={code}, stage={stage or 'unknown'})\n"
+                "- recoverable: true\n"
+                "- retry_policy: do_not_retry_same_input\n"
                 "- 의미: Core가 기존 Tool을 덮어쓰지 않도록 막았기 때문에 새 파일을 저장하지 않았습니다.\n"
                 "- 다음 선택지: 기존 Tool을 재사용하거나, 기존 Tool을 개선하는 승인 흐름으로 전환하거나, 새 toolName/moduleName/fileName으로 다시 생성해야 합니다.\n"
                 "- 재요청 예시: `기존 Tool과 충돌하지 않도록 새 이름으로 생성해줘. 기존 Tool이 있으면 재사용/확장 여부도 같이 제안해줘.`\n\n"
+                f"원본 오류: {message}"
+            )
+        if "permissionlevel must be an integer" in lowered or "permission_level" in lowered:
+            return (
+                "Tool build가 실패했습니다.\n\n"
+                f"- 원인: permissionLevel은 정수 1~5만 허용됩니다. (code={code}, stage={stage or 'unknown'})\n"
+                "- recoverable: true\n"
+                "- retry_policy: requires_corrected_permission_level\n"
+                "- 다음 선택지: permissionLevel을 1~5 중 하나의 정수로 지정해 다시 생성합니다.\n\n"
                 f"원본 오류: {message}"
             )
         return (
@@ -456,6 +467,8 @@ class ToolBuilder:
             f"- code: {code}\n"
             f"- stage: {stage or 'unknown'}\n"
             f"- 원인: {message}\n"
+            "- recoverable: 상황에 따라 다름\n"
+            "- retry_policy: 원인을 반영한 수정 없이 같은 입력을 반복하지 않습니다.\n"
             "- 다음 단계: 위 오류를 반영해 PLAN draft를 다시 만들거나, 보안 정책/샌드박스/파일명 충돌 중 어느 조건을 바꿀지 명시해 다시 요청해야 합니다."
         )
 
