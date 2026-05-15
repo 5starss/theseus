@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
 
-from src.config import resolve_model_name
+from src.config import resolve_model_name, settings
 from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
 from src.remote_workspace.resolver import RemoteWorkspaceResolver, resolve_remote_workspace_config
 from src.remote_workspace.runtime import (
@@ -91,12 +92,25 @@ Rules:
 - Explain why the draft was rejected in terms the user can act on.
 - Identify which requirement conflicts with Core safety rules or execution spec
   validation.
+- The read-only command allowlist is not a secret. You may explain allowed
+  categories such as docker ps/inspect/logs, df/free/top/uptime/curl/grep/awk/sed -n.
+- If the failure mentions python3 -c, python3 <path>, or another interpreter
+  invocation, explain it as arbitrary code execution blocked in strict mode.
+- If the user is creating a generated Theseus custom tool, explain that the tool
+  file is not executed directly. The approved create_tool path runs Core's
+  Docker sandbox gate, which compiles/imports the code and checks the BaseTool
+  class shape and execute signature before activation.
+- For generated tool requests, do not suggest running the generated Python file
+  with shell commands or py_compile commands. Ask for a tool behavior/spec-
+  focused PLAN draft with validation_strategy=core_sandbox_gate instead.
 - Propose safe Plan B options, especially existing read-only remote tools or a
   narrower PLAN draft.
 - Do not claim that tool execution, file writing, or remote analysis already
   happened.
 - If writing a Markdown file is the risky part, separate "produce a Markdown
   report in chat" from "write a file to a path with approval".
+- Do not say that the full allowlist cannot be revealed, and do not frame the
+  explanation as hidden security reconnaissance prevention.
 - Keep the response concise and practical.
 """
 
@@ -165,7 +179,12 @@ _ALLOWED_COMMAND_ROOTS = {
     "grep",
     "awk",
     "sed",
+    "python",
+    "python3",
+    "node",
+    "git",
 }
+_VERIFICATION_COMMAND_ROOTS = {"python", "python3", "node", "git"}
 _ALLOWED_DOCKER_SUBCOMMANDS = {"ps", "inspect", "logs"}
 _DENIED_COMMAND_PATTERNS = (
     r"\bdocker\s+exec\b",
@@ -196,6 +215,18 @@ _DOCKER_INSPECT_REQUIRED_FIELDS = (
     ".State.Health",
     ".State.Health.Status",
 )
+
+
+def _is_safe_relative_path(raw_path: str, suffix: str) -> bool:
+    value = str(raw_path or "").strip()
+    if not value or value.startswith("-"):
+        return False
+    if value.startswith(("~", "/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
+        return False
+    path = Path(value)
+    if path.is_absolute() or any(part in {"", ".."} for part in path.parts):
+        return False
+    return value.lower().endswith(suffix.lower())
 
 
 def _slugify_project_id(project_id: int | str | None) -> str:
@@ -330,7 +361,7 @@ class ToolPlanPlanner:
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
         try:
-            self._validate_execution_spec_if_required(structured_plan, event)
+            validation_warnings = self._validate_execution_spec_if_required(structured_plan, event)
         except ToolPlanPlannerError as exc:
             await self._emit_progress(progress_callback, "PLAN_FEEDBACK", 95)
             feedback = await self._generate_validation_failure_feedback(
@@ -341,8 +372,16 @@ class ToolPlanPlanner:
             )
             return ToolPlanSkippedResult(message=feedback)
         version = self._resolve_plan_version(event)
-        snapshot = self._build_snapshot(structured_plan, version=version, event=event)
-        structured = self._build_structured_plan(structured_plan)
+        snapshot = self._build_snapshot(
+            structured_plan,
+            version=version,
+            event=event,
+            validation_warnings=validation_warnings,
+        )
+        structured = self._build_structured_plan(
+            structured_plan,
+            validation_warnings=validation_warnings,
+        )
         display_markdown = self._build_markdown(snapshot)
 
         await self._emit_progress(progress_callback, "PLAN_VALIDATING", 90)
@@ -400,10 +439,7 @@ class ToolPlanPlanner:
             ),
             checkpoint=checkpoint,
             checkpoint_callback=checkpoint_callback,
-            # PLAN drafts contain machine-readable JSON. Publish only the
-            # parsed display Markdown after validation so users do not see
-            # internal IDs or raw JSON while generation is still streaming.
-            chunk_callback=None,
+            chunk_callback=chunk_callback,
         )
 
         payload = extract_plan_json(loop_result.final_text)
@@ -685,9 +721,10 @@ class ToolPlanPlanner:
             "주요 원인:\n"
             f"{failure_message}\n\n"
             "가능한 대안:\n"
-            "1. output redirection, shell chaining, 허용 목록 밖 명령을 제거하고 읽기 전용 명령만 사용하는 실행 스펙으로 다시 요청합니다.\n"
-            "2. 이미 검증된 remote_* 읽기 도구를 사용하는 AGENT 작업으로 전환해 분석 보고서를 작성합니다.\n"
-            "3. md 파일 저장이 꼭 필요하면 저장 위치와 쓰기 승인을 명확히 한 별도 승인 흐름으로 분리합니다.\n\n"
+            "1. `python3 -c`, `python3 <path>`, output redirection, shell chaining처럼 strict 모드에서 임의 실행으로 해석되는 패턴을 제거합니다.\n"
+            "2. Docker/API/log 점검은 `docker ps/inspect/logs`, `df`, `free`, `top`, `uptime`, `curl`, `grep`, `awk`, `sed -n` 같은 읽기 전용 범주로 다시 작성합니다.\n"
+            "3. 생성할 Tool 요청이라면 shell command 실행 계획보다 Tool의 동작, 입력, 출력, `validation_strategy=core_sandbox_gate` 중심으로 다시 요청합니다.\n"
+            "4. md 파일 저장이 꼭 필요하면 저장 위치와 쓰기 승인을 명확히 한 별도 승인 흐름으로 분리합니다.\n\n"
             "다음 요청 예시:\n"
             "`허용된 remote read-only 도구만 사용해서 서비스별 코드 분석 PLAN draft를 다시 작성해줘. md 저장은 제외하고 Markdown 보고서 출력만 포함해줘.`"
             f"{remote_line}"
@@ -807,10 +844,28 @@ class ToolPlanPlanner:
             return event.base_plan_version + 1
         return 1
 
-    def _build_structured_plan(self, plan_json: dict[str, Any]) -> dict:
-        return dict(plan_json)
+    def _build_structured_plan(
+        self,
+        plan_json: dict[str, Any],
+        *,
+        validation_warnings: list[str] | None = None,
+    ) -> dict:
+        structured = dict(plan_json)
+        if validation_warnings:
+            structured["execution_spec_validation"] = {
+                "mode": settings.CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE,
+                "warnings": list(validation_warnings),
+            }
+        return structured
 
-    def _build_snapshot(self, plan_json: dict[str, Any], *, version: int, event: ToolPlanRequestEvent) -> dict:
+    def _build_snapshot(
+        self,
+        plan_json: dict[str, Any],
+        *,
+        version: int,
+        event: ToolPlanRequestEvent,
+        validation_warnings: list[str] | None = None,
+    ) -> dict:
         base_block_ids_by_title = self._base_block_ids_by_title(event)
         used_ids: set[str] = set()
         blocks = []
@@ -846,7 +901,7 @@ class ToolPlanPlanner:
                 }
             ]
 
-        return {
+        snapshot = {
             "schemaVersion": 1,
             "planVersion": version,
             "title": self._title_from_plan(plan_json),
@@ -860,6 +915,10 @@ class ToolPlanPlanner:
             "verification": self._verification_from_plan(plan_json),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
         }
+        if validation_warnings:
+            snapshot["validationWarnings"] = list(validation_warnings)
+            snapshot["validationMode"] = settings.CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE
+        return snapshot
 
     def _base_block_ids_by_title(self, event: ToolPlanRequestEvent) -> dict[str, str]:
         if not isinstance(event, ToolPlanRegenerationRequestedEvent):
@@ -1013,6 +1072,19 @@ class ToolPlanPlanner:
             lines.extend(["", "### 실행 스펙"])
             lines.extend(f"- {line}" for line in execution_lines)
 
+        validation_warnings = [
+            str(item).strip()
+            for item in snapshot.get("validationWarnings", [])
+            if str(item).strip()
+        ]
+        if validation_warnings:
+            lines.extend(["", "### 보완 필요"])
+            lines.append(
+                "- 실행 스펙 검증이 `warn` 모드라 저장은 허용했지만, "
+                "아래 항목은 승인/구현 전에 보완하는 것이 좋습니다."
+            )
+            lines.extend(f"- {item}" for item in validation_warnings[:10])
+
         verification_lines = self._display_verification(snapshot.get("verification") or {})
         if verification_lines:
             lines.extend(["", "### 검증 기준"])
@@ -1082,6 +1154,10 @@ class ToolPlanPlanner:
         if tool_name:
             lines.append(f"도구 이름: `{tool_name}`")
 
+        validation_strategy = str(execution_spec.get("validation_strategy") or "").strip()
+        if validation_strategy:
+            lines.append(f"검증 전략: `{validation_strategy}`")
+
         status_values = execution_spec.get("status_values")
         if isinstance(status_values, list) and status_values:
             lines.append(
@@ -1150,28 +1226,65 @@ class ToolPlanPlanner:
         self,
         plan_json: dict[str, Any],
         event: ToolPlanRequestEvent,
-    ) -> None:
+    ) -> list[str]:
+        validation_mode = settings.CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE
+        if validation_mode == "off":
+            return []
+
         requires_spec = self._requires_execution_spec(plan_json, event)
+        generated_tool_request = self._is_generated_tool_request(plan_json, event)
         execution_spec = plan_json.get("execution_spec")
         if not requires_spec and not isinstance(execution_spec, dict):
-            return
+            return []
+        warnings: list[str] = []
         if not isinstance(execution_spec, dict) or not execution_spec:
-            raise ToolPlanPlannerError(
+            if generated_tool_request:
+                execution_spec = self._default_generated_tool_execution_spec(plan_json)
+                plan_json["execution_spec"] = execution_spec
+                warnings.append(
+                    "execution_spec was missing for a generated Theseus custom tool request; "
+                    "Core normalized it with validation_strategy=core_sandbox_gate. "
+                    "Review the tool behavior, input schema, output schema, dependency policy, "
+                    "and exclusions before approval/build."
+                )
+            else:
+                errors = [
+                    "PLAN draft execution spec invalid: execution_spec is required for "
+                    "generated tool, remote, deployment, health check, Docker, API, log, "
+                    "resource, or operating-server diagnostic requests."
+                ]
+                if validation_mode == "warn":
+                    return errors
+                raise ToolPlanPlannerError(errors[0])
+
+        if not isinstance(execution_spec, dict):
+            errors = [
                 "PLAN draft execution spec invalid: execution_spec is required for "
                 "generated tool, remote, deployment, health check, Docker, API, log, "
                 "resource, or operating-server diagnostic requests."
-            )
+            ]
+            if validation_mode == "warn":
+                return errors
+            raise ToolPlanPlannerError(errors[0])
 
         errors: list[str] = []
+        self._validate_execution_spec_validation_strategy(
+            execution_spec,
+            generated_tool_request,
+            errors,
+        )
         self._validate_execution_spec_shape(execution_spec, errors)
         self._validate_execution_spec_command_policy(execution_spec, errors)
         self._validate_execution_spec_api_checks(execution_spec, errors)
         self._validate_execution_spec_steps(execution_spec, errors)
         if errors:
+            if validation_mode == "warn":
+                return [*warnings, *errors[:20]]
             details = "\n".join(f"- {item}" for item in errors[:20])
             raise ToolPlanPlannerError(
                 "PLAN draft execution spec invalid:\n" + details
             )
+        return warnings
 
     @staticmethod
     def _requires_execution_spec(plan_json: dict[str, Any], event: ToolPlanRequestEvent) -> bool:
@@ -1187,6 +1300,82 @@ class ToolPlanPlanner:
         ]
         text = "\n".join(str(item or "") for item in searchable).lower()
         return any(keyword.lower() in text for keyword in _EXECUTION_SPEC_KEYWORDS)
+
+    @staticmethod
+    def _is_generated_tool_request(plan_json: dict[str, Any], event: ToolPlanRequestEvent) -> bool:
+        searchable = [
+            getattr(event, "prompt", ""),
+            plan_json.get("goal"),
+            plan_json.get("summary"),
+            plan_json.get("title"),
+            json.dumps(plan_json.get("context") or {}, ensure_ascii=False),
+            json.dumps(plan_json.get("tasks") or [], ensure_ascii=False),
+            json.dumps(plan_json.get("execution_spec") or {}, ensure_ascii=False),
+        ]
+        text = "\n".join(str(item or "") for item in searchable).lower()
+        return any(
+            keyword in text
+            for keyword in (
+                "custom tool",
+                "generated tool",
+                "create_tool",
+                "theseus custom tool",
+                "tool_name",
+                "툴",
+                "도구",
+                "생성할 tool",
+                "커스텀",
+            )
+        )
+
+    @staticmethod
+    def _default_generated_tool_execution_spec(plan_json: dict[str, Any]) -> dict[str, Any]:
+        tool_name = ""
+        for key in ("tool_name", "toolName", "name"):
+            value = plan_json.get(key)
+            if isinstance(value, str) and value.strip():
+                tool_name = value.strip()
+                break
+        return {
+            "tool_name": tool_name,
+            "validation_strategy": "core_sandbox_gate",
+            "mvp_scope": [
+                "Generate one Theseus custom tool as a BaseTool module.",
+                "Validate compile/import/BaseTool subclass/required attributes/execute signature through Core sandbox gate.",
+            ],
+            "mvp_exclusions": [
+                "Do not directly execute the generated Python file with python/python3.",
+                "Do not use inline interpreter commands such as python -c.",
+                "Do not use subprocess, os.system, shell execution, or arbitrary local program execution inside generated custom tool code.",
+            ],
+            "implementation_constraints": [
+                "Import BaseTool, ToolExecutionContext, and ToolResult from theseus_engine.tools.core.base_tools.",
+                "Define a Pydantic BaseModel input model and assign it to input_model.",
+                "Define exactly one BaseTool subclass with name, description, input_model, permission_level, and async execute(arguments, context).",
+                "Return ToolResult with JSON-serializable output.",
+            ],
+            "steps": [],
+        }
+
+    @staticmethod
+    def _validate_execution_spec_validation_strategy(
+        execution_spec: dict[str, Any],
+        generated_tool_request: bool,
+        errors: list[str],
+    ) -> None:
+        strategy = str(execution_spec.get("validation_strategy") or "").strip()
+        if not strategy:
+            return
+        if strategy != "core_sandbox_gate":
+            errors.append(
+                "execution_spec.validation_strategy must be core_sandbox_gate when present."
+            )
+            return
+        if not generated_tool_request:
+            errors.append(
+                "execution_spec.validation_strategy=core_sandbox_gate is only valid "
+                "for generated Theseus custom tool plans."
+            )
 
     @staticmethod
     def _validate_execution_spec_shape(execution_spec: dict[str, Any], errors: list[str]) -> None:
@@ -1341,6 +1530,15 @@ class ToolPlanPlanner:
                     f"`{segment}` is outside the read-only allowlist."
                 )
                 continue
+            if root in _VERIFICATION_COMMAND_ROOTS:
+                self._validate_verification_command_segment(
+                    segment,
+                    root,
+                    step_index,
+                    command_index,
+                    errors,
+                )
+                continue
             if root == "docker":
                 self._validate_docker_command_segment(segment, step_index, command_index, command, errors)
             if root == "sed" and " -n" not in f" {segment.lower()} ":
@@ -1371,6 +1569,114 @@ class ToolPlanPlanner:
     def _command_root(segment: str) -> str:
         match = re.match(r"\s*([A-Za-z0-9_.-]+)", segment)
         return match.group(1).lower() if match else ""
+
+    def _validate_verification_command_segment(
+        self,
+        segment: str,
+        root: str,
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        try:
+            tokens = shlex.split(segment, posix=True)
+        except ValueError as exc:
+            errors.append(
+                f"steps[{step_index}].commands[{command_index}] has an invalid "
+                f"verification command: {exc}."
+            )
+            return
+        if not tokens:
+            return
+
+        if root in {"python", "python3"}:
+            self._validate_python_verification_command(tokens, step_index, command_index, errors)
+            return
+        if root == "node":
+            self._validate_node_verification_command(tokens, step_index, command_index, errors)
+            return
+        if root == "git":
+            self._validate_git_verification_command(tokens, step_index, command_index, errors)
+
+    @staticmethod
+    def _validate_python_verification_command(
+        tokens: list[str],
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        args = tokens[1:]
+        if "-c" in args:
+            errors.append(
+                f"steps[{step_index}].commands[{command_index}] uses inline Python execution; "
+                "only python -B -m py_compile <file.py> or python -m json.tool <file.json> "
+                "is allowed as a verification command."
+            )
+            return
+        no_bytecode = bool(args and args[0] == "-B")
+        if no_bytecode:
+            args = args[1:]
+        if len(args) >= 3 and args[:2] == ["-m", "py_compile"]:
+            if not no_bytecode:
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] py_compile verification "
+                    "must use -B to avoid writing __pycache__ files."
+                )
+                return
+            paths = args[2:]
+            if not paths:
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] py_compile requires at least one .py path."
+                )
+                return
+            for path in paths:
+                if not _is_safe_relative_path(path, ".py"):
+                    errors.append(
+                        f"steps[{step_index}].commands[{command_index}] py_compile path "
+                        f"`{path}` must be a workspace-relative .py path."
+                    )
+            return
+        if len(args) == 3 and args[:2] == ["-m", "json.tool"]:
+            path = args[2]
+            if not _is_safe_relative_path(path, ".json"):
+                errors.append(
+                    f"steps[{step_index}].commands[{command_index}] json.tool path "
+                    f"`{path}` must be a workspace-relative .json path."
+                )
+            return
+        errors.append(
+            f"steps[{step_index}].commands[{command_index}] uses Python outside the "
+            "verification allowlist. Direct script execution is not allowed."
+        )
+
+    @staticmethod
+    def _validate_node_verification_command(
+        tokens: list[str],
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        args = tokens[1:]
+        if len(args) == 2 and args[0] == "--check" and _is_safe_relative_path(args[1], ".js"):
+            return
+        errors.append(
+            f"steps[{step_index}].commands[{command_index}] uses node outside the "
+            "verification allowlist. Only node --check <file.js> is allowed."
+        )
+
+    @staticmethod
+    def _validate_git_verification_command(
+        tokens: list[str],
+        step_index: int,
+        command_index: int,
+        errors: list[str],
+    ) -> None:
+        if tokens == ["git", "diff", "--check"]:
+            return
+        errors.append(
+            f"steps[{step_index}].commands[{command_index}] uses git outside the "
+            "verification allowlist. Only git diff --check is allowed."
+        )
 
     @staticmethod
     def _validate_docker_command_segment(
