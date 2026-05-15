@@ -26,7 +26,7 @@ from src.remote_workspace.resolver import (
     RemoteWorkspaceResolveError,
     resolve_remote_workspace_config,
 )
-from theseus_engine.models.state import AgentMode
+from theseus_engine.models.modes import AgentMode
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

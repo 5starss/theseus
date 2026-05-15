@@ -18,6 +18,10 @@ from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
 from pydantic import BaseModel, Field
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
+from theseus_engine.tools.core.tool_server_adapter import (
+    create_tool_via_server,
+    resolve_server_create_tool_context,
+)
 from theseus_engine.tools.tool_repair import (
     COMMON_CUSTOM_TOOL_SECURITY_RULES,
     ToolRepairFailure,
@@ -925,32 +929,26 @@ class ToolCreatorTool(BaseTool):
         self, arguments: ToolCreatorInput, context: ToolExecutionContext
     ) -> ToolResult:
         """서버 컨텍스트가 있으면 서버 파이프라인, 없으면 standalone 경로로 실행합니다."""
-        project_id = context.metadata.get("project_id")
-        user_id = context.metadata.get("user_id")
-        chat_session_id = context.metadata.get("chat_session_id")
-        plan_id = context.metadata.get("plan_id")
+        server_context = resolve_server_create_tool_context(
+            context.metadata,
+            run_id=context.run_id,
+        )
 
-        if project_id and user_id and chat_session_id is not None and plan_id:
+        if server_context is not None:
             try:
-                from src.tooling import ServerToolCreationRequest, create_tool_for_server
-            except ImportError:
-                # src.tooling 없는 환경(CLI 전용 배포)에서는 standalone으로 폴백
-                return await self._execute_standalone(arguments, context)
-
-            result = await create_tool_for_server(
-                ServerToolCreationRequest(
+                result = await create_tool_via_server(
                     tool_name=arguments.tool_name,
                     python_code=arguments.python_code,
                     permission_level=arguments.permission_level,
-                    project_id=str(project_id),
-                    creator_user_id=str(user_id),
-                    chat_session_id=int(chat_session_id),
-                    plan_id=str(plan_id),
-                    run_id=context.run_id,
-                ),
-                registry=context.metadata.get("tool_registry"),
-                tool_permissions=context.metadata.get("tool_permissions"),
-            )
+                    server_context=server_context,
+                    registry=context.metadata.get("tool_registry"),
+                    tool_permissions=context.metadata.get("tool_permissions"),
+                )
+            except RuntimeError as exc:
+                if str(exc) != "server_tooling_unavailable":
+                    raise
+                # src.tooling 없는 환경(CLI 전용 배포)에서는 standalone으로 폴백
+                return await self._execute_standalone(arguments, context)
 
             if result.status == "created" and context.metadata.get("active_registry") is not None:
                 instance = context.metadata["tool_registry"].get(arguments.tool_name)

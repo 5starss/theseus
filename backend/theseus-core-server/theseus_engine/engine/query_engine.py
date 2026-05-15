@@ -48,6 +48,7 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionStarted,
     extract_plan_json,
 )
+from theseus_engine.engine.tool_execution_state import is_remote_workspace_tool
 from theseus_engine.skills.injection import (
     SkillInjectionConfig,
     apply_skill_injection,
@@ -405,33 +406,6 @@ _LLM_DEBUG_CONTEXT_KEYS = {
     "plan_phase",
     "remote_workspace_id",
 }
-_REMOTE_WORKSPACE_TOOL_NAMES = frozenset(
-    {
-        "remote_read_file",
-        "remote_glob",
-        "remote_grep",
-        "remote_tail_log",
-        "remote_check_cpu",
-        "remote_check_memory",
-        "remote_check_disk",
-        "remote_write_file",
-        "remote_edit_file",
-        "remote_run_command",
-    }
-)
-
-
-def _is_remote_workspace_tool(
-    tool_metadata: dict[str, object] | None,
-    tool_name: str,
-) -> bool:
-    return (
-        isinstance(tool_metadata, dict)
-        and tool_metadata.get("remote_workspace") is not None
-        and tool_name in _REMOTE_WORKSPACE_TOOL_NAMES
-    )
-
-
 def _llm_debug_context(tool_metadata: dict[str, object] | None) -> dict[str, object]:
     if not isinstance(tool_metadata, dict):
         return {}
@@ -497,13 +471,13 @@ async def _execute_tool_call(
         return _result(f"Invalid input for {tool_name}: {exc}", True)
 
     # Permission check
-    is_remote_workspace_tool = _is_remote_workspace_tool(
+    is_remote_tool = is_remote_workspace_tool(
         context.tool_metadata,
         tool_name,
     )
     _file_path = (
         None
-        if is_remote_workspace_tool
+        if is_remote_tool
         else _resolve_permission_file_path(context.cwd, tool_input, parsed_input)
     )
     _command = _extract_permission_command(tool_input, parsed_input)
@@ -541,7 +515,7 @@ async def _execute_tool_call(
     # 실행
     pre_change_metadata = (
         {}
-        if is_remote_workspace_tool
+        if is_remote_tool
         else _capture_file_change_snapshot(
             context.cwd,
             tool_name,
@@ -623,7 +597,7 @@ async def _execute_tool_call(
         tool_input=tool_input,
         tool_output=tool_result.content,
         is_error=tool_result.is_error,
-        resolved_file_path=None if is_remote_workspace_tool else _file_path,
+        resolved_file_path=None if is_remote_tool else _file_path,
     )
     return ExecutedToolCall(result=tool_result, metadata=event_metadata)
 

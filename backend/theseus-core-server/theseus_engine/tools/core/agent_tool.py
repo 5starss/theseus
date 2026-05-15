@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import os
 import logging
+import platform
+import shlex
+import subprocess
+import sys
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -138,11 +142,15 @@ class AgentTool(BaseTool):
             "asyncio.run(run())"
         )
 
-        command = ["python", "-c", agent_script]
+        command = [sys.executable, "-c", agent_script]
+        if platform.system() == "Windows":
+            command_line = subprocess.list2cmdline(command)
+        else:
+            command_line = " ".join(shlex.quote(part) for part in command)
 
         try:
             task = await manager.create_shell_task(
-                command=command if isinstance(command, str) else " ".join(command),
+                command=command_line,
                 description=f"[Sub-Agent] {arguments.description}",
                 cwd=cwd,
             )

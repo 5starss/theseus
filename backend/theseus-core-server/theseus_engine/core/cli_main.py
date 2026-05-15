@@ -18,7 +18,8 @@ except ImportError:
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta, ToolExecutionStarted, ToolExecutionCompleted, ErrorEvent
 )
-from theseus_engine.models.state import TheseusStateMachine, AgentMode
+from theseus_engine.models.modes import AgentMode
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.core.engine_builder import setup_engine
 from theseus_engine.core.command_handler import TheseusCommandHandler
 from theseus_engine.models.sessions import load_session_history, save_session_history

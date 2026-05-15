@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
@@ -8,19 +9,13 @@ from src.builder.system_prompt import build_theseus_system_prompt
 from src.config import resolve_model_name
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
-from src.remote_workspace.read_primitives import (
-    REMOTE_READ_ANALYSIS_TOOL_NAMES,
-    build_remote_read_analysis_tools,
-)
+from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.remote_workspace.runtime import (
     REMOTE_WORKSPACE_RUNTIME_KEY,
     register_remote_workspace_config,
 )
-from src.remote_workspace.write_primitives import (
-    REMOTE_WRITE_EXECUTION_TOOL_NAMES,
-    build_remote_write_execution_tools,
-)
+from src.remote_workspace.write_primitives import build_remote_write_execution_tools
 from src.tooling import load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
@@ -29,9 +24,14 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionCompleted,
     ToolExecutionStarted,
 )
+from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissionSettings
-from theseus_engine.models.state import AgentMode, PlanPhase
-from theseus_engine.tools.core import ALL_CORE_TOOLS, build_filtered_registry, load_custom_tools
+from theseus_engine.core.tool_visibility import (
+    ToolVisibilityPolicy,
+    build_visible_registry,
+    can_create_tool_for_state,
+)
+from theseus_engine.tools.core import ALL_CORE_TOOLS, load_custom_tools
 from theseus_engine.tools.core.base_tools import ToolRegistry
 from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.wrappers.hooks.theseus_hook_executor import (
@@ -43,6 +43,7 @@ from theseus_engine.wrappers.hooks.theseus_hook_executor import (
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 
 logger = logging.getLogger(__name__)
+_SERVER_ENGINE_RAG_TOOL_NAMES = frozenset({"search_knowledge_base", "ingest_document"})
 
 ApprovalPolicy = Literal["reject", "allow_safe_only"]
 
@@ -92,35 +93,6 @@ def _infer_registry_permissions(full_registry: Any) -> dict[str, int]:
     return permissions
 
 
-_PLAN_DRAFTING_ALLOWED_TOOLS = frozenset(
-    {
-        "read_file",
-        "glob",
-        "grep",
-        "web_fetch",
-        "web_search",
-        "deep_research",
-        "lsp",
-        "list_mcp_resources",
-        "read_mcp_resource",
-        "skill_read",
-        "skill_list",
-        "search_knowledge_base",
-        "memory_read",
-        "memory_list",
-        "tool_search",
-        "brief",
-    }
-)
-_LOCAL_REMOTE_OVERLAP_TOOL_NAMES = frozenset(
-    {"read_file", "glob", "grep", "bash", "write_file", "edit_file"}
-)
-
-
-def _all_tool_names(full_registry: ToolRegistry) -> set[str]:
-    return {tool.name for tool in full_registry.list_tools()}
-
-
 def _resolve_plan_phase(build_context: EngineBuildContext) -> PlanPhase | None:
     if build_context.mode != AgentMode.PLAN:
         return None
@@ -140,38 +112,6 @@ def _allows_remote_write_execution(
     if mode == AgentMode.AGENT:
         return bool(remote_workspace and remote_workspace.allow_write_execution)
     return False
-
-
-def _resolve_excluded_tools(
-    mode: AgentMode,
-    plan_phase: PlanPhase | None,
-    full_registry: ToolRegistry,
-    *,
-    has_remote_workspace: bool,
-    allow_remote_write_execution: bool,
-) -> set[str]:
-    all_tool_names = _all_tool_names(full_registry)
-    if mode == AgentMode.ASK:
-        if has_remote_workspace:
-            return all_tool_names - REMOTE_READ_ANALYSIS_TOOL_NAMES
-        return all_tool_names
-    if mode == AgentMode.PLAN and plan_phase in {
-        PlanPhase.DRAFTING,
-        PlanPhase.WAIT_FOR_REVIEW,
-    }:
-        allowed_tools = set(_PLAN_DRAFTING_ALLOWED_TOOLS)
-        if has_remote_workspace:
-            allowed_tools.difference_update(_LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
-            allowed_tools.update(REMOTE_READ_ANALYSIS_TOOL_NAMES)
-        return all_tool_names - allowed_tools
-    if mode != AgentMode.PLAN:
-        excluded_tools = {"create_tool"}
-        if has_remote_workspace:
-            excluded_tools.update(_LOCAL_REMOTE_OVERLAP_TOOL_NAMES)
-            if not allow_remote_write_execution:
-                excluded_tools.update(REMOTE_WRITE_EXECUTION_TOOL_NAMES)
-        return excluded_tools
-    return set()
 
 
 async def _enforce_executing_plan_guard(
@@ -319,14 +259,30 @@ def get_query_engine(
             build_context.session_id,
         )
 
-    active_registry = build_filtered_registry(
+    can_create_tool = can_create_tool_for_state(
+        mode=build_context.mode,
+        plan_phase=plan_phase,
+        project_id=None,
+        actor_role="ADMIN",
+    )
+    disabled_tools: set[str] = set()
+    if os.getenv("THESEUS_ENABLE_ENGINE_RAG_TOOLS", "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        disabled_tools.update(_SERVER_ENGINE_RAG_TOOL_NAMES)
+
+    active_registry = build_visible_registry(
         full_registry,
-        tool_permissions,
-        build_context.user_level,
-        exclude_tools=_resolve_excluded_tools(
-            build_context.mode,
-            plan_phase,
-            full_registry,
+        ToolVisibilityPolicy(
+            mode=build_context.mode,
+            plan_phase=plan_phase,
+            user_level=build_context.user_level,
+            tool_permissions=tool_permissions,
+            can_create_tool=can_create_tool,
+            disabled_tools=frozenset(disabled_tools),
             has_remote_workspace=build_context.remote_workspace is not None,
             allow_remote_write_execution=allow_remote_write_execution,
         ),

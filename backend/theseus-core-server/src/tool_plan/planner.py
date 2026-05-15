@@ -24,8 +24,9 @@ from src.tool_plan.schemas import (
     ToolPlanSkippedResult,
 )
 from theseus_engine.engine.stream_events import extract_plan_json
+from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, TextBlock
-from theseus_engine.models.state import AgentMode, PlanPhase, TheseusStateMachine
+from theseus_engine.models.state import TheseusStateMachine
 from theseus_engine.tools.core.base_tools import ToolRegistry
 from theseus_engine.wrappers.llm_clients.api_types import SupportsStreamingMessages
 from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
