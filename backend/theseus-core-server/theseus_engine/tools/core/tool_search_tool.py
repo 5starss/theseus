@@ -81,6 +81,7 @@ class ToolSearchTool(BaseTool):
         )
         active_registry = context.metadata.get("active_registry")
         project_id = context.metadata.get("project_id")
+        custom_tool_inventory = context.metadata.get("custom_tool_inventory") or []
 
         if search_registry is None:
             return ToolResult(
@@ -113,7 +114,13 @@ class ToolSearchTool(BaseTool):
                 top_k=arguments.top_k,
             )
 
-        if not matched_tools:
+        unavailable_matches = self._lexical_search_unavailable_inventory(
+            custom_tool_inventory,
+            arguments.query,
+            top_k=arguments.top_k,
+        )
+
+        if not matched_tools and not unavailable_matches:
             return ToolResult(
                 output=(
                     f"No tools matching '{arguments.query}' found. "
@@ -176,6 +183,26 @@ class ToolSearchTool(BaseTool):
                 f"Available from your next response."
             )
 
+        if unavailable_matches:
+            lines.extend(["", "Unavailable custom tool candidates:"])
+            for item in unavailable_matches:
+                missing = item.get("missingModules") or []
+                candidates = item.get("installCandidates") or []
+                reason = item.get("importError") or "import failed"
+                lines.append(
+                    f"  ⚠️ **{item.get('toolName') or item.get('fileName')}** "
+                    f"is present but not callable yet."
+                )
+                if missing:
+                    lines.append(f"    Missing modules: {', '.join(map(str, missing))}")
+                if candidates:
+                    lines.append(f"    Install candidates: {', '.join(map(str, candidates))}")
+                lines.append(f"    Reason: {reason}")
+            lines.append(
+                "Use the extension Custom Tools panel to install approved dependencies "
+                "and retry loading before calling these tools."
+            )
+
         return ToolResult(output="\n".join(lines))
 
     @staticmethod
@@ -200,6 +227,39 @@ class ToolSearchTool(BaseTool):
                 scored.append((score, getattr(tool, "name", ""), tool))
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [tool for _, _, tool in scored[:top_k]]
+
+    @staticmethod
+    def _lexical_search_unavailable_inventory(
+        inventory: Any,
+        query: str,
+        *,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(inventory, list):
+            return []
+        query_tokens = _tokenize_tool_search_text(query)
+        scored: list[tuple[int, str, dict[str, Any]]] = []
+        for item in inventory:
+            if not isinstance(item, dict):
+                continue
+            if item.get("loadState") != "unavailable":
+                continue
+            haystack_parts = [
+                item.get("toolName", ""),
+                item.get("fileName", ""),
+                item.get("moduleName", ""),
+                item.get("importError", ""),
+                " ".join(str(value) for value in item.get("missingModules", []) or []),
+            ]
+            haystack = " ".join(str(part) for part in haystack_parts if part)
+            haystack_tokens = _tokenize_tool_search_text(haystack)
+            overlap = len(query_tokens & haystack_tokens)
+            substring_bonus = 2 if query.strip().lower() in haystack.lower() else 0
+            score = overlap + substring_bonus
+            if score > 0:
+                scored.append((score, str(item.get("toolName") or item.get("fileName") or ""), item))
+        scored.sort(key=lambda value: (-value[0], value[1]))
+        return [item for _, _, item in scored[:top_k]]
 
 
 def _tokenize_tool_search_text(text: str) -> set[str]:

@@ -65,6 +65,14 @@ _CODE_EDITING_SAFETY_PROMPT = """\
  - Completion summaries for file edits must mention what changed and whether imports, declarations, config keys, and Python syntax were preserved.\
 """
 
+_CUSTOM_TOOL_RECOVERY_PROMPT = """\
+# Custom Tool Recovery
+ - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
+ - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
+ - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.
+ - Do not call an unavailable custom tool by name until it appears in your current tool schema.\
+"""
+
 _WEB_RESEARCH_CAPABILITY_PROMPT = """\
 # Web Research Capability
  - When writing or modifying tools/scripts that interact with external services \
@@ -219,6 +227,8 @@ def _render_capability_sections(capabilities: PromptCapabilities) -> str:
         )
     if capabilities.available_tools & {"write_file", "edit_file", "remote_write_file", "remote_edit_file"}:
         sections.append(_CODE_EDITING_SAFETY_PROMPT)
+    if capabilities.has_tool("tool_search"):
+        sections.append(_CUSTOM_TOOL_RECOVERY_PROMPT)
     if capabilities.available_tools & _WEB_RESEARCH_TOOL_NAMES:
         sections.append(_WEB_RESEARCH_CAPABILITY_PROMPT)
     if capabilities.has_tool("create_tool"):
@@ -241,6 +251,7 @@ CODE_EDITING_SAFETY_PROMPT = _CODE_EDITING_SAFETY_PROMPT
 WEB_CAPABILITY_PROMPT = _WEB_RESEARCH_CAPABILITY_PROMPT
 GENERATED_CUSTOM_TOOL_SECURITY_RULES = _GENERATED_CUSTOM_TOOL_SECURITY_RULES
 CREATE_TOOL_CAPABILITY_PROMPT = _CREATE_TOOL_CAPABILITY_PROMPT
+CUSTOM_TOOL_RECOVERY_PROMPT = _CUSTOM_TOOL_RECOVERY_PROMPT
 
 normalize_available_tools = _normalize_available_tools
 default_tool_names_for_mode = _default_tool_names_for_mode
@@ -257,6 +268,7 @@ __all__ = [
     "WEB_CAPABILITY_PROMPT",
     "GENERATED_CUSTOM_TOOL_SECURITY_RULES",
     "CREATE_TOOL_CAPABILITY_PROMPT",
+    "CUSTOM_TOOL_RECOVERY_PROMPT",
     "normalize_available_tools",
     "default_tool_names_for_mode",
     "build_prompt_capabilities",

@@ -322,6 +322,10 @@ export function createEventDispatcher(ctx) {
         ctx.renderCustomTools(event.tools || []);
         break;
 
+      case 'customToolInventoryUpdated':
+        ctx.renderCustomTools(event.tools || []);
+        break;
+
       case 'customToolsChanged': {
         const icons    = { created: '🔧➕', changed: '🔧✏️', deleted: '🔧🗑' };
         const icon     = icons[event.action] || '🔧';
@@ -335,6 +339,15 @@ export function createEventDispatcher(ctx) {
 
       case 'customToolValidation':
         ctx.appendMessageEl('system', event.message || '', event.success ? 'info' : 'warn');
+        break;
+
+      case 'customToolInstallProgress':
+        ctx.appendMessageEl('system', event.message || 'Custom tool dependency install updated.', event.success ? 'info' : 'warn');
+        ctx.vscode.postMessage({ type: 'getCustomTools' });
+        break;
+
+      case 'toolRegistryUpdated':
+        ctx.vscode.postMessage({ type: 'getCustomTools' });
         break;
 
       case 'healthStatus':

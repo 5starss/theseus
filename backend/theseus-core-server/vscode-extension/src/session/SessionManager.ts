@@ -422,6 +422,19 @@ export class TheseusSessionManager implements vscode.Disposable {
     this.lastSentMode = mode;
   }
 
+  refreshToolRegistry(reason = 'manual'): void {
+    const payload = JSON.stringify({ type: 'refreshToolRegistry', reason });
+    if (this.daemon) {
+      void this.sendDaemon(payload);
+      return;
+    }
+    if (!this.proc) {
+      this.emit({ type: 'toolRegistryUpdated', source: 'host', reason, availableTools: [], unavailableCount: 0 });
+      return;
+    }
+    this.writeLine(payload);
+  }
+
   showLogs(): void {
     this.output.show(true);
     this.output.appendLine('[Theseus] === Recent lifecycle events ===');
