@@ -181,8 +181,17 @@ export function ChatArea() {
     }
   };
 
-  const renderMessageContent = (msg: ChatMessage) => {
+  const renderMessageContent = (msg: ChatMessage, isLast: boolean) => {
     if (msg.senderType === 'ASSISTANT') {
+      if (!msg.content && isLast && isGenerating) {
+        return (
+          <div className="flex items-center gap-1.5 py-2 px-1">
+            <div className="w-1.5 h-1.5 bg-blue-400/60 rounded-full animate-bounce" />
+            <div className="w-1.5 h-1.5 bg-blue-400/60 rounded-full animate-bounce [animation-delay:0.2s]" />
+            <div className="w-1.5 h-1.5 bg-blue-400/60 rounded-full animate-bounce [animation-delay:0.4s]" />
+          </div>
+        );
+      }
       return <MarkdownViewer content={msg.content} />;
     }
 
@@ -211,6 +220,18 @@ export function ChatArea() {
               <div className="text-[14px] flex items-center gap-2 text-slate-300">
                 <CheckCircle className="w-3.5 h-3.5 text-blue-400" />
                 <span>도구 생성을 요청했습니다</span>
+              </div>
+            </div>
+          );
+        }
+
+        if (parsed.status === 'BUILT') {
+          return (
+            <div className="flex flex-col gap-1.5">
+              <div className="font-bold text-green-400 text-xs uppercase tracking-tight">도구 생성 완료</div>
+              <div className="text-[14px] flex items-center gap-2 text-slate-300">
+                <CheckCircle className="w-3.5 h-3.5 text-green-500" />
+                <span>도구(<code>{parsed.fileName}</code>)가 성공적으로 생성되었습니다.</span>
               </div>
             </div>
           );
@@ -245,18 +266,21 @@ export function ChatArea() {
         {messages.length > 0 ? (
           <div className="space-y-6">
             {messages.map((msg, idx) => {
+              const isLast = idx === messages.length - 1;
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
-              const isLastAssistant = msg.senderType === 'ASSISTANT' && idx === messages.length - 1;
+              const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
               if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
+
+              const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
 
               return (
                 <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[70%] p-4 rounded-lg overflow-x-auto ${msg.senderType === 'USER'
+                  <div className={`max-w-[70%] ${isLoadingDots ? 'px-4 py-2' : 'p-4'} rounded-lg overflow-x-auto ${msg.senderType === 'USER'
                     ? 'bg-slate-700 text-slate-100 shadow-md'
                     : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM' ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
-                      : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
+                      : `bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] ${isLoadingDots ? 'w-fit' : 'w-full'}`
                     }`}>
-                    {renderMessageContent(msg)}
+                    {renderMessageContent(msg, isLast)}
                   </div>
                 </div>
               );
