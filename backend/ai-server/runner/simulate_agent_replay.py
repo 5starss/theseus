@@ -19,12 +19,16 @@ from app.quant.agent import QuantAnalysisAgent
 from app.quant.feature_engineer import IntradayFeatureEngineer
 from app.quant.pipeline import build_state_from_feature_row
 from app.quant.sources import load_ohlcv_from_csv
+from app.shared.agents.historical_comparison_agent import HistoricalComparisonAgent
 from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
+from app.shared.agents.risk_review_agent import RiskReviewAgent
 from app.shared.rag.vector_db import NewsVectorDB
 from app.shared.schemas import Document
 from app.trading.account_service import apply_account_constraints, build_account_summary, cap_buy_quantity
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD
+from app.trading.decision_review_store import build_decision_review, save_decision_review
+from app.trading.decision_store import build_decision_trace, save_decision_trace
 from app.trading.strategy_service import build_strategy_profile
 
 load_dotenv()
@@ -93,7 +97,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--feature-profile", default="mtf", help="퀀트 feature profile")
     parser.add_argument("--score-gap-threshold", type=int, default=DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD)
     parser.add_argument("--log-level", default="INFO", help="로그 레벨")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.output_dir == "backend/ai-server/storage/sim" and Path.cwd().name == "ai-server":
+        args.output_dir = "storage/sim"
+    return args
 
 
 def _normalize_generic_news_docs(ticker: str, items: List[Dict[str, Any]]) -> List[Document]:
@@ -250,6 +257,8 @@ def _resolve_signal_confidence(
 def build_order_card(
     *,
     ticker: str,
+    trade_date: date,
+    base_date: date,
     previous_close: int,
     account: SimulationAccount,
     user_id: int,
@@ -261,6 +270,8 @@ def build_order_card(
     news_agent: NewsReporterAgent,
     quant_agent: QuantAnalysisAgent,
     judge_agent: JudgeAgent,
+    historical_agent: HistoricalComparisonAgent,
+    risk_review_agent: RiskReviewAgent,
 ) -> Dict[str, Any]:
     news_docs = retrieve_sim_news(collection_name=collection_name, query=strategy_profile["news_question"], top_k=5)
     community_docs: List[Any] = []
@@ -271,6 +282,10 @@ def build_order_card(
         news_docs=news_docs,
         community_docs=community_docs,
     )
+    news_card["timestamp"] = datetime.combine(trade_date, datetime.min.time()).replace(
+        hour=8,
+        minute=5,
+    ).isoformat()
     quant_state = build_state_from_feature_row(feature_row, ticker=ticker)
     quant_card = quant_agent.generate_analysis_card(ticker=ticker, quant_evidence=quant_state)
     rebuttal_result = run_rebuttal_agent(
@@ -280,6 +295,16 @@ def build_order_card(
         score_gap_threshold=score_gap_threshold,
     )
     signal_confidence = _resolve_signal_confidence(news_card, quant_card, quant_state)
+    historical_comparison = historical_agent.compare(
+        ticker=ticker,
+        user_id=user_id,
+        strategy_slot=strategy_slot,
+        news_card=news_card,
+        quant_card=quant_card,
+        quant_state=quant_state,
+        as_of_date=trade_date.isoformat(),
+        base_date=base_date.isoformat(),
+    )
     max_buy_qty, _ = cap_buy_quantity(
         requested_qty=999999,
         available_cash=account.cash,
@@ -308,8 +333,17 @@ def build_order_card(
         "quant_card": quant_card,
         "quant_state_summary": quant_state,
         "rebuttal": rebuttal_result,
+        "historical_comparison": historical_comparison,
     }
     order_card = judge_agent.generate_order_card(judge_payload)
+    order_card, risk_review = risk_review_agent.review_order(
+        order_card=order_card,
+        current_holding=current_holding,
+        quant_state=quant_state,
+        historical_comparison=historical_comparison,
+        signal_confidence=signal_confidence,
+        system_error=False,
+    )
     order_card = apply_account_constraints(
         order_card,
         available_cash=account.cash,
@@ -329,10 +363,33 @@ def build_order_card(
                 strategy_slot=strategy_slot,
             ),
             "rebuttal": rebuttal_result,
+            "historical_comparison": historical_comparison,
+            "risk_review": risk_review,
             "execution_mode": "simulated",
             "execution_status": "planned" if order_card.get("order", {}).get("action") in {"buy", "sell"} else "hold",
             "news_doc_count": len(news_docs),
             "community_doc_count": len(community_docs),
+            "_simulation_decision_state": {
+                "trade_date": trade_date.isoformat(),
+                "base_date": base_date.isoformat(),
+                "ticker": ticker,
+                "user_id": user_id,
+                "account_type": "SIM",
+                "invest_style": strategy_profile["invest_style"],
+                "user_investment_style": strategy_profile["user_investment_style"],
+                "resolved_slot": strategy_slot,
+                "strategy_slot": strategy_slot,
+                "workflow": "simulation_replay",
+                "workflow_version": "sim_v1",
+                "news_card": news_card,
+                "quant_card": quant_card,
+                "quant_state": quant_state,
+                "rebuttal_result": rebuttal_result,
+                "historical_comparison": historical_comparison,
+                "signal_confidence": signal_confidence,
+                "judge_payload": judge_payload,
+                "risk_review": risk_review,
+            },
         }
     )
     return order_card
@@ -438,6 +495,233 @@ def simulate_fill(
         return result
 
     return result
+
+
+def build_market_outcome(fill_result: Dict[str, Any], intraday_df: pd.DataFrame) -> Dict[str, Any]:
+    status = str(fill_result.get("status") or "")
+    action = str(fill_result.get("action") or "hold").lower()
+    executed_price = int(fill_result.get("executed_price") or 0)
+    executed_at = fill_result.get("executed_at")
+
+    if status != "filled" or executed_price <= 0 or intraday_df.empty:
+        if action == "hold" and not intraday_df.empty:
+            replay_df = intraday_df.copy()
+            replay_df["ts"] = pd.to_datetime(replay_df["ts"])
+            start_price = int(replay_df.iloc[0].get("open") or replay_df.iloc[0].get("close") or 0)
+            final_price = int(replay_df.iloc[-1].get("close") or 0)
+            high_price = int(replay_df["high"].max()) if "high" in replay_df else final_price
+            low_price = int(replay_df["low"].min()) if "low" in replay_df else final_price
+            opportunity_pct = ((final_price / start_price) - 1.0) * 100 if start_price > 0 else None
+            upside_pct = ((high_price / start_price) - 1.0) * 100 if start_price > 0 else None
+            downside_pct = ((low_price / start_price) - 1.0) * 100 if start_price > 0 else None
+            return {
+                "outcome": "NOT_EXECUTED",
+                "execution_status": status,
+                "pnl_pct": None,
+                "max_drawdown_pct": None,
+                "holding_minutes": None,
+                "start_price": start_price,
+                "final_price": final_price,
+                "opportunity_pct": round(opportunity_pct, 4) if opportunity_pct is not None else None,
+                "upside_pct": round(upside_pct, 4) if upside_pct is not None else None,
+                "downside_pct": round(downside_pct, 4) if downside_pct is not None else None,
+            }
+        return {
+            "outcome": "NOT_EXECUTED",
+            "execution_status": status,
+            "pnl_pct": None,
+            "max_drawdown_pct": None,
+            "holding_minutes": None,
+        }
+
+    replay_df = intraday_df.copy()
+    replay_df["ts"] = pd.to_datetime(replay_df["ts"])
+    if executed_at:
+        replay_df = replay_df[replay_df["ts"] >= pd.Timestamp(executed_at)].copy()
+    if replay_df.empty:
+        replay_df = intraday_df.copy()
+
+    final_price = int(replay_df.iloc[-1]["close"])
+    if action == "buy":
+        pnl_pct = ((final_price / executed_price) - 1.0) * 100 if executed_price > 0 else None
+        min_price = int(replay_df["low"].min()) if "low" in replay_df else int(replay_df["close"].min())
+        max_drawdown_pct = ((min_price / executed_price) - 1.0) * 100 if executed_price > 0 else None
+        favorable_move_pct = (
+            ((int(replay_df["high"].max()) / executed_price) - 1.0) * 100
+            if executed_price > 0 and "high" in replay_df
+            else None
+        )
+    elif action == "sell":
+        pnl_pct = ((executed_price / final_price) - 1.0) * 100 if final_price > 0 else None
+        max_price = int(replay_df["high"].max()) if "high" in replay_df else int(replay_df["close"].max())
+        max_drawdown_pct = ((executed_price / max_price) - 1.0) * 100 if max_price > 0 else None
+        min_price = int(replay_df["low"].min()) if "low" in replay_df else int(replay_df["close"].min())
+        favorable_move_pct = ((executed_price / min_price) - 1.0) * 100 if min_price > 0 else None
+    else:
+        pnl_pct = None
+        max_drawdown_pct = None
+        favorable_move_pct = None
+
+    if pnl_pct is None:
+        outcome = "UNKNOWN"
+    elif pnl_pct > 0.1:
+        outcome = "WIN"
+    elif pnl_pct < -0.1:
+        outcome = "LOSS"
+    else:
+        outcome = "FLAT"
+
+    start_ts = pd.Timestamp(executed_at) if executed_at else replay_df.iloc[0]["ts"]
+    end_ts = replay_df.iloc[-1]["ts"]
+    holding_minutes = max(0, int((end_ts - start_ts).total_seconds() // 60))
+
+    return {
+        "outcome": outcome,
+        "execution_status": status,
+        "entry_price": executed_price,
+        "final_price": final_price,
+        "pnl_pct": round(pnl_pct, 4) if pnl_pct is not None else None,
+        "max_drawdown_pct": round(max_drawdown_pct, 4) if max_drawdown_pct is not None else None,
+        "favorable_move_pct": round(favorable_move_pct, 4) if favorable_move_pct is not None else None,
+        "holding_minutes": holding_minutes,
+    }
+
+
+def build_sim_review_tags(
+    *,
+    order_card: Dict[str, Any],
+    fill_result: Dict[str, Any],
+    market_outcome: Dict[str, Any],
+) -> List[str]:
+    tags: List[str] = []
+    order = order_card.get("order") if isinstance(order_card.get("order"), dict) else {}
+    risk_review = order_card.get("risk_review") if isinstance(order_card.get("risk_review"), dict) else {}
+    historical = (
+        order_card.get("historical_comparison")
+        if isinstance(order_card.get("historical_comparison"), dict)
+        else {}
+    )
+    action = str(fill_result.get("action") or order.get("action") or "hold").lower()
+    status = str(fill_result.get("status") or "").lower()
+    outcome = str(market_outcome.get("outcome") or "").upper()
+
+    if status != "filled":
+        tags.append("not_executed")
+    if outcome == "WIN":
+        tags.append("profitable_decision")
+    elif outcome == "LOSS":
+        tags.append("loss_after_entry")
+    elif outcome == "FLAT":
+        tags.append("flat_result")
+
+    try:
+        pnl_pct = float(market_outcome.get("pnl_pct")) if market_outcome.get("pnl_pct") is not None else None
+    except Exception:
+        pnl_pct = None
+    try:
+        max_drawdown_pct = (
+            float(market_outcome.get("max_drawdown_pct"))
+            if market_outcome.get("max_drawdown_pct") is not None
+            else None
+        )
+    except Exception:
+        max_drawdown_pct = None
+
+    if action == "buy" and outcome == "WIN" and pnl_pct is not None and pnl_pct >= 2.0:
+        tags.append("good_buy_entry")
+        if str(risk_review.get("decision") or "").upper() == "REDUCE_SIZE":
+            tags.append("under_sized_winner")
+        if str(historical.get("recommendation") or "").upper() == "BUY_LESS":
+            tags.append("buy_less_on_winner")
+    if action == "buy" and outcome == "LOSS":
+        tags.append("bad_buy_entry")
+    if action == "sell" and outcome == "WIN":
+        tags.append("good_sell_exit")
+    if action == "sell" and outcome == "LOSS":
+        tags.append("premature_sell")
+        tags.append("missed_upside_after_sell")
+    if action == "hold" and status != "filled":
+        try:
+            opportunity_pct = (
+                float(market_outcome.get("opportunity_pct"))
+                if market_outcome.get("opportunity_pct") is not None
+                else None
+            )
+        except Exception:
+            opportunity_pct = None
+        if opportunity_pct is not None and opportunity_pct >= 1.5:
+            tags.append("missed_upside_after_hold")
+        elif opportunity_pct is not None and opportunity_pct <= -1.5:
+            tags.append("good_hold")
+    if max_drawdown_pct is not None and max_drawdown_pct <= -3.0:
+        tags.append("large_adverse_move")
+
+    return list(dict.fromkeys(tags))[:10]
+
+
+def build_sim_review_lesson(tags: List[str], market_outcome: Dict[str, Any]) -> str:
+    tag_set = set(tags)
+    if "premature_sell" in tag_set or "missed_upside_after_sell" in tag_set:
+        return "Similar sell decisions missed upside; avoid SELL_BIAS unless downside evidence is stronger."
+    if "missed_upside_after_hold" in tag_set:
+        return "Similar hold decisions missed upside; do not overuse HOLD when entry risk is low and alignment improves."
+    if "good_hold" in tag_set:
+        return "Similar hold decisions avoided downside; HOLD can be useful when signals are weak."
+    if "under_sized_winner" in tag_set or "buy_less_on_winner" in tag_set:
+        return "비슷한 강세 결과가 반복되면 BUY_LESS와 수량 축소를 완화할 근거로 사용한다."
+    if "bad_buy_entry" in tag_set or "large_adverse_move" in tag_set:
+        return "비슷한 진입 위험과 약한 신호에서 손실이 반복되면 신규 매수 수량을 줄이거나 보류한다."
+    if "good_sell_exit" in tag_set:
+        return "비슷한 조건의 매도 판단이 수익 방어에 도움이 되었는지 다음 판단에서 확인한다."
+    if "not_executed" in tag_set:
+        return "미체결 케이스는 방향성 학습 근거로 약하게 사용하고, 주문 가격 적정성만 참고한다."
+    if str(market_outcome.get("outcome") or "").upper() == "WIN":
+        return "비슷한 신호 조합에서 수익이 났으므로 방향성 근거로 재검토한다."
+    return "simulation outcome recorded for future historical comparison"
+
+
+def persist_sim_decision_artifacts(
+    *,
+    order_card: Dict[str, Any],
+    fill_result: Dict[str, Any],
+    intraday_df: pd.DataFrame,
+) -> Dict[str, Any]:
+    state = dict(order_card.get("_simulation_decision_state") or {})
+    if not state:
+        return {"decision_trace": None, "decision_review": None}
+
+    order_card["execution_status"] = str(fill_result.get("status") or order_card.get("execution_status") or "")
+    trace = build_decision_trace(state=state, order_card=order_card)
+    trace_meta = save_decision_trace(trace)
+    order_card["decision_trace"] = trace_meta
+
+    market_outcome = build_market_outcome(fill_result, intraday_df)
+    mistake_tags = build_sim_review_tags(
+        order_card=order_card,
+        fill_result=fill_result,
+        market_outcome=market_outcome,
+    )
+    review = build_decision_review(
+        decision_trace_id=trace_meta["decision_trace_id"],
+        ticker=str(state.get("ticker") or order_card.get("ticker") or ""),
+        user_id=state.get("user_id"),
+        strategy_slot=state.get("resolved_slot") or state.get("strategy_slot"),
+        outcome=market_outcome["outcome"],
+        pnl_pct=market_outcome.get("pnl_pct"),
+        max_drawdown_pct=market_outcome.get("max_drawdown_pct"),
+        holding_minutes=market_outcome.get("holding_minutes"),
+        execution_status=market_outcome.get("execution_status"),
+        mistake_tags=mistake_tags,
+        lesson=build_sim_review_lesson(mistake_tags, market_outcome),
+        evaluator="simulate_agent_replay",
+        extra={
+            "market_outcome": market_outcome,
+            "fill_result": fill_result,
+        },
+    )
+    review_meta = save_decision_review(review)
+    order_card["decision_review"] = review_meta
+    return {"decision_trace": trace_meta, "decision_review": review_meta, "market_outcome": market_outcome}
 
 
 def ensure_output_paths(output_dir: str, run_name: str) -> Dict[str, Path]:
@@ -574,6 +858,8 @@ def main() -> None:
     news_agent = NewsReporterAgent()
     quant_agent = QuantAnalysisAgent()
     judge_agent = JudgeAgent()
+    historical_agent = HistoricalComparisonAgent()
+    risk_review_agent = RiskReviewAgent()
 
     account = SimulationAccount(cash=args.initial_cash)
     run_name = f"sim_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -593,6 +879,8 @@ def main() -> None:
             "executed_price",
             "executed_quantity",
             "cash_after",
+            "decision_trace_id",
+            "decision_review_id",
         ]
         with open(paths["fills_csv"], "w", encoding="utf-8", newline="") as fills_fp:
             with open(paths["events_jsonl"], "w", encoding="utf-8") as events_fp:
@@ -682,6 +970,8 @@ def main() -> None:
                             strategy_ts = datetime.combine(trade_date, datetime.min.time()).replace(hour=8, minute=5)
                             order_card = build_order_card(
                                 ticker=ticker,
+                                trade_date=trade_date,
+                                base_date=base_date,
                                 previous_close=previous_close,
                                 account=account,
                                 user_id=0,
@@ -693,6 +983,8 @@ def main() -> None:
                                 news_agent=news_agent,
                                 quant_agent=quant_agent,
                                 judge_agent=judge_agent,
+                                historical_agent=historical_agent,
+                                risk_review_agent=risk_review_agent,
                             )
                             write_event(
                                 events_fp,
@@ -708,23 +1000,6 @@ def main() -> None:
                                     "collection_name": collection_name,
                                 },
                             )
-                            decisions_fp.write(
-                                json.dumps(
-                                    {
-                                        "trade_date": trade_date.isoformat(),
-                                        "base_date": base_date.isoformat(),
-                                        "ticker": ticker,
-                                        "previous_close": previous_close,
-                                        "news_doc_count": len(source_news_docs),
-                                        "collection_name": collection_name,
-                                        "order_card": order_card,
-                                    },
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-                            decision_count += 1
-
                             market_open_ts = datetime.combine(trade_date, datetime.min.time()).replace(hour=9)
                             write_event(
                                 events_fp,
@@ -744,6 +1019,40 @@ def main() -> None:
                                 order_card=order_card,
                                 account=account,
                             )
+                            decision_artifacts = persist_sim_decision_artifacts(
+                                order_card=order_card,
+                                fill_result=fill_result,
+                                intraday_df=intraday_df,
+                            )
+                            fill_result["decision_trace_id"] = (
+                                decision_artifacts.get("decision_trace") or {}
+                            ).get("decision_trace_id")
+                            fill_result["decision_review_id"] = (
+                                decision_artifacts.get("decision_review") or {}
+                            ).get("review_id")
+                            decisions_fp.write(
+                                json.dumps(
+                                    {
+                                        "trade_date": trade_date.isoformat(),
+                                        "base_date": base_date.isoformat(),
+                                        "ticker": ticker,
+                                        "previous_close": previous_close,
+                                        "news_doc_count": len(source_news_docs),
+                                        "collection_name": collection_name,
+                                        "decision_trace": decision_artifacts.get("decision_trace"),
+                                        "decision_review": decision_artifacts.get("decision_review"),
+                                        "market_outcome": decision_artifacts.get("market_outcome"),
+                                        "order_card": {
+                                            key: value
+                                            for key, value in order_card.items()
+                                            if key != "_simulation_decision_state"
+                                        },
+                                    },
+                                    ensure_ascii=False,
+                                )
+                                + "\n"
+                            )
+                            decision_count += 1
                             fills.append(fill_result)
                             writer.writerow({key: fill_result.get(key) for key in fill_fieldnames})
                             write_event(
