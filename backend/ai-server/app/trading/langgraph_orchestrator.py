@@ -14,8 +14,10 @@ from app.quant.agent import QuantAnalysisAgent
 from app.quant.data_loader import get_latest_feature_s3_key, download_and_load_feature_df
 from app.quant.pipeline import build_state_from_feature_row
 from app.quant.sources import load_ohlcv_from_db
+from app.shared.agents.historical_comparison_agent import HistoricalComparisonAgent
 from app.shared.agents.judge_agent import JudgeAgent
 from app.shared.agents.rebuttal_agent import RebuttalAgent
+from app.shared.agents.risk_review_agent import RiskReviewAgent
 from app.trading.account_service import (
     apply_account_constraints,
     build_account_summary,
@@ -34,6 +36,7 @@ from app.trading.analysis_store import (
 )
 from app.trading.constants import DEFAULT_REBUTTAL_SCORE_GAP_THRESHOLD, KST
 from app.trading.core_api_client import execute_order, get_trading_account_snapshot, get_user_profile
+from app.trading.decision_store import build_decision_trace, save_decision_trace
 from app.trading.market_data import get_current_price
 from app.trading.strategy_service import build_signal_weights, build_strategy_profile, resolve_strategy_slot
 
@@ -71,10 +74,13 @@ class TradingGraphState(TypedDict, total=False):
     analysis_profile: str
     analysis_cache_status: str
     analysis_cache_key: Dict[str, Any]
+    historical_comparison: Dict[str, Any]
     signal_confidence: Any
     judge_payload: Dict[str, Any]
+    risk_review: Dict[str, Any]
     order_card: Dict[str, Any]
     execution_status: str
+    decision_trace: Dict[str, Any]
 
 
 def _ensure_kst_datetime(value: Any) -> Optional[datetime]:
@@ -584,6 +590,49 @@ def _rebuttal_agent_node(state: TradingGraphState) -> TradingGraphState:
     return {"rebuttal_result": rebuttal_result}
 
 
+def _historical_comparison_node(state: TradingGraphState) -> TradingGraphState:
+    if state.get("news_system_error") or state.get("quant_system_error"):
+        return {
+            "historical_comparison": {
+                "schema": "historical_comparison_v1",
+                "similar_cases_count": 0,
+                "historical_bias": "insufficient_history",
+                "recommendation": "INSUFFICIENT_HISTORY",
+                "confidence": 0.0,
+                "position_size_multiplier": 1.0,
+                "reasons": ["skipped because upstream analysis failed"],
+                "cases_used": [],
+            }
+        }
+
+    try:
+        comparison = HistoricalComparisonAgent().compare(
+            ticker=state["ticker"],
+            user_id=state.get("user_id"),
+            strategy_slot=state["resolved_slot"],
+            news_card=state.get("news_card", {}),
+            quant_card=state.get("quant_card", {}),
+            quant_state=state.get("quant_state", {}),
+            as_of_date=str(state.get("trade_date") or current_trade_date().isoformat()),
+        )
+        return {"historical_comparison": comparison}
+    except Exception as exc:
+        logger.error("[%s] HistoricalComparisonAgent failed: %s", state["ticker"], exc)
+        return {
+            "historical_comparison": {
+                "schema": "historical_comparison_v1",
+                "similar_cases_count": 0,
+                "historical_bias": "neutral",
+                "recommendation": "INSUFFICIENT_HISTORY",
+                "confidence": 0.0,
+                "position_size_multiplier": 1.0,
+                "reasons": [f"historical comparison failed: {exc}"],
+                "cases_used": [],
+                "error": str(exc),
+            }
+        }
+
+
 def _judge_agent_node(state: TradingGraphState) -> TradingGraphState:
     ticker = state["ticker"]
     user_id = state.get("user_id")
@@ -627,6 +676,7 @@ def _judge_agent_node(state: TradingGraphState) -> TradingGraphState:
         "quant_card": quant_card,
         "quant_state_summary": quant_state,
         "rebuttal": rebuttal_result,
+        "historical_comparison": state.get("historical_comparison", {}),
     }
 
     try:
@@ -650,6 +700,23 @@ def _judge_agent_node(state: TradingGraphState) -> TradingGraphState:
         }
 
 
+def _risk_review_node(state: TradingGraphState) -> TradingGraphState:
+    system_error = bool(
+        state.get("news_system_error")
+        or state.get("quant_system_error")
+        or state.get("judge_system_error")
+    )
+    order_card, risk_review = RiskReviewAgent().review_order(
+        order_card=state["order_card"],
+        current_holding=state.get("current_holding", {}),
+        quant_state=state.get("quant_state", {}),
+        historical_comparison=state.get("historical_comparison", {}),
+        signal_confidence=state.get("signal_confidence"),
+        system_error=system_error,
+    )
+    return {"order_card": order_card, "risk_review": risk_review}
+
+
 def _apply_constraints_node(state: TradingGraphState) -> TradingGraphState:
     order_card = apply_account_constraints(
         state["order_card"],
@@ -671,6 +738,8 @@ def _apply_constraints_node(state: TradingGraphState) -> TradingGraphState:
                 strategy_slot=state["resolved_slot"],
             ),
             "rebuttal": state["rebuttal_result"],
+            "historical_comparison": state.get("historical_comparison"),
+            "risk_review": state.get("risk_review"),
             "analysis_cache": {
                 "status": state.get("analysis_cache_status"),
                 "key": state.get("analysis_cache_key"),
@@ -712,6 +781,23 @@ def _execute_finalize_node(state: TradingGraphState) -> TradingGraphState:
     return {"execution_status": execution_status, "order_card": order_card}
 
 
+def _decision_log_node(state: TradingGraphState) -> TradingGraphState:
+    order_card = state["order_card"]
+    try:
+        trace = build_decision_trace(state=state, order_card=order_card)
+        trace_meta = save_decision_trace(trace)
+        order_card["decision_trace"] = trace_meta
+        return {"decision_trace": trace_meta, "order_card": order_card}
+    except Exception as exc:
+        logger.error("[%s] decision trace save failed: %s", state["ticker"], exc)
+        order_card["decision_trace"] = {
+            "schema": "agent_decision_trace_v1",
+            "status": "failed",
+            "error": str(exc),
+        }
+        return {"decision_trace": order_card["decision_trace"], "order_card": order_card}
+
+
 def _execute_finalize(
     ticker: str,
     order: Dict[str, Any],
@@ -746,16 +832,22 @@ def get_trading_graph():
     graph = StateGraph(TradingGraphState)
     graph.add_node("load_context", _load_context_node)
     graph.add_node("load_analysis", _load_analysis_node)
+    graph.add_node("historical_comparison", _historical_comparison_node)
     graph.add_node("judge_agent", _judge_agent_node)
+    graph.add_node("risk_review", _risk_review_node)
     graph.add_node("apply_constraints", _apply_constraints_node)
     graph.add_node("finalize_execution", _execute_finalize_node)
+    graph.add_node("decision_log", _decision_log_node)
 
     graph.add_edge(START, "load_context")
     graph.add_edge("load_context", "load_analysis")
-    graph.add_edge("load_analysis", "judge_agent")
-    graph.add_edge("judge_agent", "apply_constraints")
+    graph.add_edge("load_analysis", "historical_comparison")
+    graph.add_edge("historical_comparison", "judge_agent")
+    graph.add_edge("judge_agent", "risk_review")
+    graph.add_edge("risk_review", "apply_constraints")
     graph.add_edge("apply_constraints", "finalize_execution")
-    graph.add_edge("finalize_execution", END)
+    graph.add_edge("finalize_execution", "decision_log")
+    graph.add_edge("decision_log", END)
     return graph.compile()
 
 

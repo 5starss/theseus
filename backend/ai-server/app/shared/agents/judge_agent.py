@@ -52,7 +52,7 @@ class JudgeAgent:
             raise ValueError("GMS_API_KEY가 설정되어 있지 않습니다.")
 
         self.llm = ChatOpenAI(
-            model="gpt-5-nano",
+            model="gpt-5-mini",
             openai_api_key=api_key,
             openai_api_base="https://gms.ssafy.io/gmsapi/api.openai.com/v1"
         )
@@ -95,6 +95,18 @@ verdict는 비워두지 말고 최종 판단 이유를 1문장으로 작성하�
   "verdict": "최종 판단 이유"
 }}
 analysis_context, cross_validation, signal_weights 같은 부가 필드는 출력하지 마세요.
+""",
+                ),
+                (
+                    "system",
+                    """Historical comparison instructions:
+- The input may include historical_comparison from prior decision traces.
+- You must explicitly use historical_comparison when deciding final_stance, final_score, and order.quantity.
+- If historical_comparison.recommendation is BUY_LESS, reduce buy quantity and avoid aggressive market orders.
+- If the recommendation is HOLD or INSUFFICIENT_HISTORY, only buy when News/Quant evidence is strong and risk is controlled.
+- If the recommendation is SELL_BIAS, prefer hold/sell over new buy unless current evidence is overwhelmingly bullish.
+- Apply historical_comparison.position_size_multiplier as an upper bound for sizing.
+- Mention the historical comparison briefly in verdict when it materially changes the decision.
 """,
                 ),
                 ("human", "[Input]\n{payload}"),
