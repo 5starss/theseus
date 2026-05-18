@@ -393,14 +393,14 @@ class ToolRepairLoop(Generic[T, S]):
             "return this JSON exactly:\n"
             "{\n"
             '  "decision": "needs_user_feedback",\n'
-            '  "message": "short Korean explanation",\n'
+            '  "message": "short explanation in the user\'s language",\n'
             '  "blockedRequirements": ["..."],\n'
             '  "safeAlternatives": ["..."]\n'
             "}\n\n"
             "Otherwise return this JSON exactly:\n"
             "{\n"
             '  "decision": "repair",\n'
-            '  "message": "short Korean repair summary",\n'
+            '  "message": "short repair summary in the user\'s language",\n'
             '  "candidate": { ... corrected candidate object ... }\n'
             "}\n\n"
             f"Task context:\n{task_context}\n\n"

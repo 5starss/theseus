@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 154 — Prompt 언어 중립화 보강 (2026-05-18)
+
+#### `src` / `theseus_engine`
+- `theseus_engine/prompts/base.py`의 communication-language 규칙에서 한국어/영어를 직접 열거하지 않고 최신 사용자 입력 언어를 따르는 원칙만 남기도록 정리
+- `create_tool`, tool repair, suggestion validator 프롬프트에서 Korean/English 혼합 예시와 한국어 고정 응답 요구를 제거하고 사용자/프로젝트/호출자 언어 컨텍스트를 따르도록 수정
+- PLAN draft validation feedback과 ToolBuild failure feedback 프롬프트도 한국어 고정 설명이 아니라 원 요청 또는 승인 plan의 언어로 설명하도록 정리
+
+#### 문서
+- `docs/prompt/prompt_architecture_map.md`의 PLAN/ToolBuild 실패 피드백 설명을 사용자 요청 언어 기준으로 갱신
+
+---
+
 ### 🛠️ Session 153 — ToolBuild sandbox 의존성/image 정책 최종 정리 (2026-05-18)
 
 #### `src` / `theseus_engine`

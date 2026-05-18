@@ -88,12 +88,12 @@ You are Theseus in PLAN mode.
 
 A PLAN draft failed Core validation before it could be saved or shown as an
 approved plan candidate. Your job is to turn the raw validation failure into a
-helpful Korean assistant response.
+helpful assistant response in the same language as the original user request.
 
 Rules:
 - Do not output a JSON block.
-- Do not use the user-facing term "ToolPlan"; say "PLAN draft", "실행 스펙",
-  "승인된 plan", or "생성할 Tool" instead.
+- Do not use the user-facing term "ToolPlan"; use language-neutral concepts such
+  as "PLAN draft", "execution spec", "approved plan", or "generated tool" instead.
 - Explain why the draft was rejected in terms the user can act on.
 - Identify which requirement conflicts with Core safety rules or execution spec
   validation.
@@ -123,13 +123,14 @@ _PLAN_FAILURE_FEEDBACK_SYSTEM_PROMPT = """\
 You are Theseus in PLAN mode.
 
 A PLAN generation worker failed before it could produce a valid assistant
-response. Your job is to convert the raw worker failure into a helpful Korean
-assistant response.
+response. Your job is to convert the raw worker failure into a helpful assistant
+response in the same language as the original user request or regeneration
+feedback.
 
 Rules:
 - Do not output JSON.
-- Do not use the user-facing term "ToolPlan"; say "PLAN draft", "실행 스펙",
-  "승인된 plan", or "생성할 Tool" instead.
+- Do not use the user-facing term "ToolPlan"; use language-neutral concepts such
+  as "PLAN draft", "execution spec", "approved plan", or "generated tool" instead.
 - Explain the likely stage and root cause in user-actionable terms.
 - Give a safe retry instruction and at least one Plan B.
 - If the failure is about existing tool artifacts, suggest reuse, extension,
@@ -755,7 +756,7 @@ class ToolPlanPlanner:
         )
         return (
             "The previous PLAN draft was rejected by Core validation before it could be saved.\n"
-            "Analyze the failure and give the user a helpful Korean response.\n\n"
+            "Analyze the failure and respond in the same language as the original user request.\n\n"
             "Original user request:\n"
             f"{request_text}\n\n"
             "Validation failure:\n"
@@ -879,7 +880,7 @@ class ToolPlanPlanner:
             else event.prompt
         )
         return (
-            "A PLAN generation worker failed. Explain it to the user in Korean and suggest a safe retry path.\n\n"
+            "A PLAN generation worker failed. Explain it to the user in the same language as the original request or feedback, and suggest a safe retry path.\n\n"
             f"runId={event.run_id}\n"
             f"projectId={event.project_id}\n"
             f"chatSessionId={event.chat_session_id}\n"

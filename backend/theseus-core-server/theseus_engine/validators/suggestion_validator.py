@@ -15,7 +15,7 @@ from typing import Tuple
 
 log = logging.getLogger(__name__)
 
-# 코드 리뷰 시스템 프롬프트 (영어 — 토큰 최적화)
+# 코드 리뷰 시스템 프롬프트 (언어 중립)
 _REVIEW_SYSTEM_PROMPT = (
     "You are a senior Python code reviewer. "
     "Review the following code and provide concise, "
@@ -24,8 +24,9 @@ _REVIEW_SYSTEM_PROMPT = (
     "2. Performance optimizations\n"
     "3. Error handling improvements\n"
     "4. Type hint completeness\n"
-    "Respond in Korean. If the code is already excellent, "
-    "respond with: '코드 품질 우수 — 개선 사항 없음.'"
+    "Respond in the language requested by the caller or surrounding task context. "
+    "If the code is already excellent, respond with a short no-issues sentence "
+    "in that same language."
 )
 
 

@@ -77,7 +77,7 @@ _REMOTE_LOCAL_REPORT_PROMPT = """\
 _CUSTOM_TOOL_RECOVERY_PROMPT = """\
 # Custom Tool Recovery
  - If the user asks to list, search, or inspect available custom tools, call `tool_search` with the user's intent instead of answering from memory.
- - If the user asks for all custom tools, use a broad query such as `custom tools` or `커스텀 툴 목록`.
+ - If the user asks for all custom tools, use a broad language-neutral query such as `custom tools`.
  - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
  - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
  - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.

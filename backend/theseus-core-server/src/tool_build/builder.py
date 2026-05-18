@@ -47,13 +47,14 @@ _TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT = """\
 You are Theseus explaining a generated tool build failure to the user.
 
 The build already failed in Core. Your job is not to retry the build directly,
-but to convert the raw failure into a concise Korean assistant response that the
-next PLAN/AGENT turn can also use as context.
+but to convert the raw failure into a concise assistant response in the same
+language as the approved plan or original user request. The next PLAN/AGENT turn
+can also use this response as context.
 
 Rules:
 - Do not output JSON.
-- Do not use the user-facing term "ToolPlan"; say "approved plan",
-  "생성할 Tool", "Tool build", or "생성 작업" instead.
+- Do not use the user-facing term "ToolPlan"; use language-neutral concepts such
+  as "approved plan", "generated tool", "Tool build", or "generation task" instead.
 - Explain the likely stage and root cause.
 - Give a safe next action and at least one Plan B.
 - If the failure is about an existing file/module/tool name, explain that the
@@ -471,7 +472,7 @@ class ToolBuilder:
             "execution_spec": approved_plan.get("execution_spec"),
         }
         return (
-            "A generated tool build failed. Explain it to the user in Korean and suggest a safe next step.\n\n"
+            "A generated tool build failed. Explain it to the user in the same language as the approved plan or original request, and suggest a safe next step.\n\n"
             f"runId={event.run_id}\n"
             f"projectId={event.project_id}\n"
             f"chatSessionId={event.chat_session_id}\n"
