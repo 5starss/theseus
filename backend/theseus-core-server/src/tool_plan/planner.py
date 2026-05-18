@@ -18,6 +18,10 @@ from src.remote_workspace.runtime import (
 )
 from src.remote_workspace.schemas import RemoteWorkspaceConnectionConfig
 from src.tool_plan.agent_loop import CheckpointCallback, ToolPlanAgentLoop
+from src.tool_plan.display_markdown import build_plan_display_markdown
+from src.tool_plan.execution_spec_validator import (
+    validate_execution_spec_if_required as validate_plan_execution_spec,
+)
 from src.tool_plan.schemas import (
     ConversationHistoryItem,
     ToolPlanRegenerationRequestedEvent,
@@ -1131,52 +1135,7 @@ class ToolPlanPlanner:
         return {}
 
     def _build_markdown(self, snapshot: dict) -> str:
-        lines = [f"## {snapshot['title']}"]
-        summary = str(snapshot.get("summary") or "").strip()
-        if summary:
-            lines.extend(["", summary])
-
-        lines.extend(["", "### 주요 작업"])
-        for index, block in enumerate(snapshot["blocks"], start=1):
-            title = str(block.get("title") or f"작업 {index}").strip()
-            lines.append(f"{index}. **{title}**")
-            display_content = self._display_block_content(str(block.get("content") or ""))
-            if display_content:
-                lines.extend(f"   - {line}" for line in display_content)
-
-        constraints = [str(item).strip() for item in snapshot.get("constraints", []) if str(item).strip()]
-        if constraints:
-            lines.extend(["", "### 주의 사항"])
-            lines.extend(f"- {item}" for item in constraints)
-
-        alternative_lines = self._display_alternatives(snapshot.get("alternatives") or [])
-        if alternative_lines:
-            lines.extend(["", "### 대안 / Plan B"])
-            lines.extend(f"- {line}" for line in alternative_lines)
-
-        execution_lines = self._display_execution_spec(snapshot.get("executionSpec") or {})
-        if execution_lines:
-            lines.extend(["", "### 실행 스펙"])
-            lines.extend(f"- {line}" for line in execution_lines)
-
-        validation_warnings = [
-            str(item).strip()
-            for item in snapshot.get("validationWarnings", [])
-            if str(item).strip()
-        ]
-        if validation_warnings:
-            lines.extend(["", "### 보완 필요"])
-            lines.append(
-                "- 실행 스펙 검증이 `warn` 모드라 저장은 허용했지만, "
-                "아래 항목은 승인/구현 전에 보완하는 것이 좋습니다."
-            )
-            lines.extend(f"- {item}" for item in validation_warnings[:10])
-
-        verification_lines = self._display_verification(snapshot.get("verification") or {})
-        if verification_lines:
-            lines.extend(["", "### 검증 기준"])
-            lines.extend(f"- {line}" for line in verification_lines)
-        return "\n".join(lines).strip()
+        return build_plan_display_markdown(snapshot)
 
     @staticmethod
     def _display_block_content(content: str) -> list[str]:
@@ -1315,69 +1274,19 @@ class ToolPlanPlanner:
         event: ToolPlanRequestEvent,
     ) -> list[str]:
         validation_mode = settings.CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE
-        if validation_mode == "off":
-            return []
-
-        requires_spec = self._requires_execution_spec(plan_json, event)
-        generated_tool_request = self._is_generated_tool_request(plan_json, event)
-        execution_spec = plan_json.get("execution_spec")
-        if not requires_spec and not isinstance(execution_spec, dict):
-            return []
-        warnings: list[str] = []
-        if not isinstance(execution_spec, dict) or not execution_spec:
-            if generated_tool_request:
-                execution_spec = self._default_generated_tool_execution_spec(plan_json)
-                plan_json["execution_spec"] = execution_spec
-                warnings.append(
-                    "execution_spec was missing for a generated Theseus custom tool request; "
-                    "Core normalized it with validation_strategy=core_sandbox_gate. "
-                    "Review the tool behavior, input schema, output schema, dependency policy, "
-                    "and exclusions before approval/build."
-                )
-            else:
-                errors = [
-                    "PLAN draft execution spec invalid: execution_spec is required for "
-                    "generated tool, remote, deployment, health check, Docker, API, log, "
-                    "resource, or operating-server diagnostic requests."
-                ]
-                if validation_mode == "warn":
-                    return errors
-                raise ToolPlanPlannerError(errors[0])
-
-        if not isinstance(execution_spec, dict):
-            errors = [
-                "PLAN draft execution spec invalid: execution_spec is required for "
-                "generated tool, remote, deployment, health check, Docker, API, log, "
-                "resource, or operating-server diagnostic requests."
-            ]
-            if validation_mode == "warn":
-                return errors
-            raise ToolPlanPlannerError(errors[0])
-
-        errors: list[str] = []
-        self._validate_execution_spec_validation_strategy(
-            execution_spec,
-            generated_tool_request,
-            errors,
+        result = validate_plan_execution_spec(
+            plan_json,
+            event,
+            validation_mode=validation_mode,
         )
-        self._validate_execution_spec_shape(execution_spec, errors)
-        self._validate_execution_spec_command_policy(execution_spec, errors)
-        self._validate_execution_spec_api_checks(execution_spec, errors)
-        self._validate_execution_spec_steps(execution_spec, errors)
-        warnings.extend(
-            self._collect_execution_spec_quality_warnings(
-                execution_spec,
-                generated_tool_request=generated_tool_request,
-            )
-        )
-        if errors:
+        if result.errors:
             if validation_mode == "warn":
-                return [*warnings, *errors[:20]]
-            details = "\n".join(f"- {item}" for item in errors[:20])
+                return [*result.warnings, *result.errors]
+            details = "\n".join(f"- {item}" for item in result.errors)
             raise ToolPlanPlannerError(
                 "PLAN draft execution spec invalid:\n" + details
             )
-        return warnings
+        return result.warnings
 
     @staticmethod
     def _requires_execution_spec(plan_json: dict[str, Any], event: ToolPlanRequestEvent) -> bool:
