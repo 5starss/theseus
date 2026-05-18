@@ -15,7 +15,8 @@
 - `Dockerfile.sandbox`는 Core 전체 `requirements.txt`를 설치하지 않고 `requirements-sandbox.txt`만 설치하도록 최종 정리
 - `requirements-sandbox.txt`에는 generated-tool compile/import/구조 검증에 필요한 공용 sandbox 의존성(`pydantic`, `psutil`, `nvidia-ml-py`, `markdownify`, `beautifulsoup4`, `PyYAML`, `requests`, `httpx`, `numpy`, `packaging`, `python-dotenv`)만 유지
 - sandbox image build 시 `pip check`와 핵심 import smoke를 수행하고, Core startup sandbox check도 `/sandbox/requirements/requirements-sandbox.txt`와 동일 import 목록을 검증하도록 보강
-- Core 기본 `SANDBOX_IMAGE`를 `theseus-sandbox:py311-tools`로 변경하고, prod compose와 `.env.example`도 같은 image tag 및 수동/CI rebuild 안내를 사용하도록 정리
+- Core 기본 `SANDBOX_IMAGE`를 `theseus-sandbox:py311-tools`로 변경하고, prod/local compose에 sandbox image build-smoke 서비스를 연결해 `docker compose up --build` 경로에서 같은 Docker host에 sandbox image tag가 생성되도록 정리
+- Core runtime `appuser` UID/GID를 999로 고정하고, prod/local compose에 bind mount 디렉터리 권한을 사전에 잡는 `theseus-core-permissions` init 서비스를 추가해 sandbox temp/custom tool/debug dump 경로 권한 오류 가능성을 낮춤
 
 #### 테스트
 - `tests/test_tool_repair_classification.py`를 추가해 `psutil` 누락은 이름 충돌이 아니며, 실제 `moduleName/fileName` 충돌 메시지는 계속 `TOOL_NAME_CONFLICT`로 분류되는지 검증

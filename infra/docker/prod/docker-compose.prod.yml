@@ -70,6 +70,36 @@ services:
     networks:
       - theseus-prod-network
 
+  theseus-sandbox-image:
+    build:
+      context: ../../../backend/theseus-core-server
+      dockerfile: Dockerfile.sandbox
+    image: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
+    container_name: theseus-prod-sandbox-image
+    command:
+      - python
+      - -c
+      - import pydantic, psutil, markdownify, bs4, yaml, requests, httpx, numpy, packaging, dotenv
+    restart: "no"
+    network_mode: "none"
+
+  theseus-core-permissions:
+    image: alpine:3.20
+    container_name: theseus-prod-core-permissions
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /sandbox-temp /custom-tools /debug-dumps
+        chown -R 999:999 /sandbox-temp /custom-tools /debug-dumps
+        chmod 770 /sandbox-temp /custom-tools /debug-dumps
+    restart: "no"
+    volumes:
+      - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:/sandbox-temp
+      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/custom-tools
+      - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/debug-dumps
+
   theseus-api-server:
     build:
       context: ../../../backend/theseus-api-server
@@ -144,6 +174,10 @@ services:
         condition: service_completed_successfully
       theseus-api-server:
         condition: service_started
+      theseus-sandbox-image:
+        condition: service_completed_successfully
+      theseus-core-permissions:
+        condition: service_completed_successfully
     networks:
       - theseus-prod-network
 
