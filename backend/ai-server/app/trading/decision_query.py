@@ -1,5 +1,6 @@
 import glob
 import json
+import logging
 import os
 import time
 from collections import Counter
@@ -7,7 +8,11 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from collector.storage import get_storage_dir
+from app.trading.decision_store import iter_decision_trace_records, load_decision_trace_payload
 from app.trading.decision_review_store import load_latest_reviews_by_decision_id
+
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date(value: Optional[str]) -> Optional[date]:
@@ -232,6 +237,35 @@ def _iter_decision_traces() -> List[Dict[str, Any]]:
     return traces
 
 
+def _iter_indexed_decision_traces(
+    *,
+    ticker: Optional[str] = None,
+    user_id: Optional[int] = None,
+    strategy_slot: Optional[str] = None,
+    action: Optional[str] = None,
+    risk_decision: Optional[str] = None,
+    execution_status: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    records = iter_decision_trace_records(
+        ticker=ticker,
+        user_id=user_id,
+        strategy_slot=strategy_slot,
+        action=action,
+        risk_decision=risk_decision,
+        execution_status=execution_status,
+        from_date=from_date,
+        to_date=to_date,
+    )
+    traces: List[Dict[str, Any]] = []
+    for record in records:
+        trace = load_decision_trace_payload(record)
+        if trace is not None:
+            traces.append(trace)
+    return traces
+
+
 def search_decision_traces(
     *,
     ticker: Optional[str] = None,
@@ -248,8 +282,24 @@ def search_decision_traces(
     started = time.perf_counter()
     items: List[Dict[str, Any]] = []
     latest_reviews = load_latest_reviews_by_decision_id()
+    try:
+        traces = _iter_indexed_decision_traces(
+            ticker=ticker,
+            user_id=user_id,
+            strategy_slot=strategy_slot,
+            action=action,
+            risk_decision=risk_decision,
+            execution_status=execution_status,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except Exception as exc:
+        logger.warning("decision trace DB/S3 search failed; falling back to local JSONL - error=%s", exc)
+        traces = []
+    if not traces:
+        traces = _iter_decision_traces()
 
-    for trace in _iter_decision_traces():
+    for trace in traces:
         index = trace.get("query_index") if isinstance(trace.get("query_index"), dict) else {}
         if not _date_in_range(index.get("trade_date"), from_date, to_date):
             continue
@@ -311,7 +361,15 @@ def get_decision_trace(decision_trace_id: str) -> Optional[Dict[str, Any]]:
     if not target:
         return None
     latest_reviews = load_latest_reviews_by_decision_id()
-    for trace in _iter_decision_traces():
+    try:
+        traces = _iter_indexed_decision_traces()
+    except Exception as exc:
+        logger.warning("decision trace DB/S3 get failed; falling back to local JSONL - error=%s", exc)
+        traces = []
+    if not traces:
+        traces = _iter_decision_traces()
+
+    for trace in traces:
         if str(trace.get("decision_trace_id") or "") != target:
             continue
         review = latest_reviews.get(target) or trace.get("review")
