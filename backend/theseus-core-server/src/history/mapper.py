@@ -37,6 +37,8 @@ _TOOL_RESULT_NOTICE_PREFIXES = (
     "Tool completed:",
     "툴 결과:",
 )
+_TOOL_NOTICE_CALL_KIND = "call"
+_TOOL_NOTICE_RESULT_KIND = "result"
 
 
 def _normalize_role(sender_type: str) -> str | None:
@@ -192,6 +194,100 @@ def _summarize_tool_history_record(prefix: str, content: str, content_type: str)
     return f"{prefix}: {_limit_tool_history_context(content)}"
 
 
+def _parse_json_object(content: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _extract_tool_notice_payload(record: HistoryMessageRecord) -> dict[str, Any] | None:
+    """Return normalized tool history payload for structured replay.
+
+    Tool events are stored as SYSTEM_NOTICE JSON for audit/UI. When replaying
+    history into the model, keep the original tool transcript shape instead of
+    flattening it into assistant text whenever enough fields are available.
+    """
+
+    message_type = (record.message_type or "").upper()
+    content_type = (record.content_type or "TEXT").upper()
+
+    if message_type not in _TOOL_CALL_MESSAGE_TYPES | _TOOL_RESULT_MESSAGE_TYPES:
+        if record.sender_type.upper() != "SYSTEM" or message_type != "SYSTEM_NOTICE":
+            return None
+        if content_type != "JSON":
+            return None
+
+    payload = _parse_json_object(record.content or "")
+    if payload is None:
+        return None
+
+    notice_type = str(
+        payload.get("noticeType")
+        or payload.get("messageType")
+        or payload.get("type")
+        or message_type
+        or ""
+    ).upper()
+
+    if notice_type in _TOOL_CALL_MESSAGE_TYPES:
+        kind = _TOOL_NOTICE_CALL_KIND
+    elif notice_type in _TOOL_RESULT_MESSAGE_TYPES:
+        kind = _TOOL_NOTICE_RESULT_KIND
+    else:
+        return None
+
+    tool_name = (
+        payload.get("toolName")
+        or payload.get("tool_name")
+        or payload.get("name")
+        or payload.get("tool")
+        or ""
+    )
+    if not str(tool_name).strip():
+        return None
+
+    tool_use_id = (
+        payload.get("toolUseId")
+        or payload.get("tool_use_id")
+        or payload.get("toolCallId")
+        or payload.get("id")
+        or f"history-tool-{record.message_id}"
+    )
+    tool_input = (
+        payload.get("toolInput")
+        or payload.get("tool_input")
+        or payload.get("input")
+        or {}
+    )
+    if not isinstance(tool_input, dict):
+        tool_input = {"value": tool_input}
+
+    output = (
+        payload.get("output")
+        if "output" in payload
+        else payload.get("toolOutput")
+        if "toolOutput" in payload
+        else payload.get("tool_output")
+        if "tool_output" in payload
+        else payload.get("result")
+        if "result" in payload
+        else payload.get("content", "")
+    )
+
+    return {
+        "kind": kind,
+        "tool_name": str(tool_name),
+        "tool_use_id": str(tool_use_id),
+        "tool_input": tool_input,
+        "output": output,
+        "is_error": bool(payload.get("isError", payload.get("is_error", False))),
+    }
+
+
 def _summarize_failure_notice(failure_kind: str, content: str) -> str:
     code = _extract_failure_code(content)
     message = _extract_failure_message(content)
@@ -331,7 +427,12 @@ def to_engine_messages(records: list[HistoryMessageRecord]) -> list[Any]:
         return []
 
     try:
-        from theseus_engine.models.messages import ConversationMessage, TextBlock
+        from theseus_engine.models.messages import (
+            ConversationMessage,
+            TextBlock,
+            ToolResultBlock,
+            ToolUseBlock,
+        )
     except ImportError:
         logger.warning(
             "Theseus message types unavailable while mapping history; "
@@ -340,7 +441,52 @@ def to_engine_messages(records: list[HistoryMessageRecord]) -> list[Any]:
         return _to_dict_messages(records)
 
     messages: list[Any] = []
+    pending_tool_calls: dict[str, dict[str, Any]] = {}
     for record in records:
+        tool_notice = _extract_tool_notice_payload(record)
+        if tool_notice is not None:
+            tool_use_id = tool_notice["tool_use_id"]
+            if tool_notice["kind"] == _TOOL_NOTICE_CALL_KIND:
+                pending_tool_calls[tool_use_id] = tool_notice
+                continue
+
+            started_notice = pending_tool_calls.pop(tool_use_id, None)
+            tool_name = (
+                started_notice.get("tool_name")
+                if started_notice is not None
+                else tool_notice["tool_name"]
+            )
+            tool_input = (
+                started_notice.get("tool_input")
+                if started_notice is not None
+                else tool_notice["tool_input"]
+            )
+            messages.append(
+                ConversationMessage(
+                    role="assistant",
+                    content=[
+                        ToolUseBlock(
+                            id=tool_use_id,
+                            name=tool_name,
+                            input=tool_input,
+                        )
+                    ],
+                )
+            )
+            messages.append(
+                ConversationMessage(
+                    role="user",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id=tool_use_id,
+                            content=tool_notice["output"],
+                            is_error=tool_notice["is_error"],
+                        )
+                    ],
+                )
+            )
+            continue
+
         role = _normalize_role_for_record(record)
         if role is None:
             logger.debug(

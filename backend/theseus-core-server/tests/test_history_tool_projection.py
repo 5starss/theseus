@@ -35,8 +35,9 @@ class HistoryToolProjectionTests(unittest.TestCase):
                 {
                     "noticeType": "TOOL_EXECUTION_STARTED",
                     "toolName": "system_health_reporter",
+                    "toolUseId": "toolu_1",
                     "status": "started",
-                    "input": {"cpu_threshold": 70, "memory_threshold": 70},
+                    "toolInput": {"cpu_threshold": 70, "memory_threshold": 70},
                 },
                 ensure_ascii=False,
             )
@@ -50,8 +51,9 @@ class HistoryToolProjectionTests(unittest.TestCase):
             content=json.dumps(
                 {
                     "toolName": "system_health_reporter",
+                    "toolUseId": "toolu_1",
                     "status": "started",
-                    "input": {"cpu_threshold": 70, "memory_threshold": 70},
+                    "toolInput": {"cpu_threshold": 70, "memory_threshold": 70},
                 },
                 ensure_ascii=False,
             ),
@@ -59,17 +61,59 @@ class HistoryToolProjectionTests(unittest.TestCase):
 
         self.assertEqual(to_engine_messages([record]), [])
 
-    def test_completed_tool_result_is_projected_to_llm_history(self) -> None:
+    def test_completed_tool_result_is_projected_as_structured_transcript(self) -> None:
+        started = _history_record(
+            message_id=1,
+            content=json.dumps(
+                {
+                    "noticeType": "TOOL_EXECUTION_STARTED",
+                    "toolName": "system_health_reporter",
+                    "toolUseId": "toolu_1",
+                    "status": "started",
+                    "toolInput": {"cpu_threshold": 70, "memory_threshold": 70},
+                },
+                ensure_ascii=False,
+            ),
+        )
         record = _history_record(
             message_id=2,
             content=json.dumps(
                 {
                     "noticeType": "TOOL_EXECUTION_COMPLETED",
                     "toolName": "system_health_reporter",
+                    "toolUseId": "toolu_1",
                     "status": "completed",
                     "isError": False,
-                    "input": {"cpu_threshold": 70, "memory_threshold": 70},
+                    "toolInput": {"cpu_threshold": 70, "memory_threshold": 70},
                     "output": "# System Health Report [PASS]",
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        messages = to_engine_messages([started, record])
+
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0].role, "assistant")
+        self.assertEqual(messages[0].content[0].type, "tool_use")
+        self.assertEqual(messages[0].content[0].name, "system_health_reporter")
+        self.assertEqual(messages[0].content[0].input["cpu_threshold"], 70)
+        self.assertEqual(messages[1].role, "user")
+        self.assertEqual(messages[1].content[0].type, "tool_result")
+        self.assertEqual(messages[1].content[0].tool_use_id, "toolu_1")
+        self.assertIn("System Health Report", messages[1].content[0].content)
+
+    def test_completed_tool_result_without_started_notice_gets_synthetic_tool_use(self) -> None:
+        record = _history_record(
+            message_id=2,
+            content=json.dumps(
+                {
+                    "noticeType": "TOOL_EXECUTION_COMPLETED",
+                    "toolName": "cpu_monitor",
+                    "status": "completed",
+                    "isError": False,
+                    "toolInput": {"top_n": 5},
+                    "output": {"cpu_summary": {"cpu_overall_percent": 1.1}},
                 },
                 ensure_ascii=False,
             ),
@@ -77,12 +121,13 @@ class HistoryToolProjectionTests(unittest.TestCase):
 
         messages = to_engine_messages([record])
 
-        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0].role, "assistant")
-        self.assertIn("이전 도구 실행 결과", messages[0].text)
-        self.assertIn("system_health_reporter", messages[0].text)
-        self.assertIn("System Health Report", messages[0].text)
-        self.assertNotIn("이전 도구 호출", messages[0].text)
+        self.assertEqual(messages[0].content[0].type, "tool_use")
+        self.assertEqual(messages[0].content[0].name, "cpu_monitor")
+        self.assertEqual(messages[1].role, "user")
+        self.assertEqual(messages[1].content[0].type, "tool_result")
+        self.assertIn("cpu_overall_percent", messages[1].content[0].content)
 
     def test_legacy_tool_execution_text_notice_is_not_projected(self) -> None:
         record = _history_record(

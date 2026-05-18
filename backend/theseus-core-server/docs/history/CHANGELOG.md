@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 164 — Tool history structured replay 보존 (2026-05-18)
+
+#### `src` / history
+- DB에 `SYSTEM_NOTICE` JSON으로 저장된 `TOOL_EXECUTION_STARTED` / `TOOL_EXECUTION_COMPLETED` 기록을 LLM history로 재조립할 때 `"이전 도구 실행 결과"` 텍스트로 평탄화하지 않고, 가능한 경우 `assistant tool_use` + `user tool_result` 구조로 복원하도록 변경
+- completed result만 남아 있는 기존 기록도 synthetic `tool_use`를 앞에 붙여 provider-compatible transcript로 복원
+- started 기록만 있고 completed result가 없는 경우는 이전처럼 LLM history에 주입하지 않아 진행 중이던 과거 tool call로 오인하지 않도록 유지
+
+#### 검증
+- `python -m py_compile src/history/mapper.py tests/test_history_tool_projection.py`
+- `python -m unittest discover -s tests -p test_history_tool_projection.py`
+- `python -m unittest discover -s tests`
+- `git diff --check -- backend/theseus-core-server/src/history/mapper.py backend/theseus-core-server/tests/test_history_tool_projection.py`
+
+---
+
 ### 🛠️ Session 163 — Billing outbox scheduler 기본 비활성화 (2026-05-18)
 
 #### `src` / 설정
