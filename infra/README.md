@@ -40,6 +40,17 @@ docker compose \
   up -d
 ```
 
+When the core compose file is included, Docker Compose also builds the
+`theseus-sandbox:py311-tools` image from
+`backend/theseus-core-server/Dockerfile.sandbox`. Core uses the host Docker
+daemon through `/var/run/docker.sock`, so this image tag must exist on the same
+Docker host before ToolBuild sandbox validation can run.
+
+The core compose file also runs a short `theseus-core-permissions` init service
+that creates and chowns the sandbox temp/custom-tool bind mount directories for
+the Core container user. Docker socket access still depends on `DOCKER_GID`
+matching the group id of `/var/run/docker.sock` on the host.
+
 Kafka UI:
 
 ```text
