@@ -513,11 +513,14 @@ def build_remote_write_execution_tools(
     config: RemoteWorkspaceConnectionConfig,
     *,
     connector_factory: ConnectorFactory | None = None,
+    include_command: bool = True,
 ) -> list[BaseTool]:
     """Return Remote Workspace write/execute tools with explicit remote names."""
 
-    return [
+    tools: list[BaseTool] = [
         RemoteWriteFileTool(config, connector_factory=connector_factory),
         RemoteEditFileTool(config, connector_factory=connector_factory),
-        RemoteRunCommandTool(config, connector_factory=connector_factory),
     ]
+    if include_command:
+        tools.append(RemoteRunCommandTool(config, connector_factory=connector_factory))
+    return tools

@@ -29,6 +29,18 @@
 
 ---
 
+### 🛠️ Session 159 — Remote Workspace 파일 수정 override 설정 추가 (2026-05-18)
+
+#### `src` / 설정
+- `THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE` 설정을 추가해 API Server resolver의 `allowWriteExecution=false`인 Remote Workspace도 AGENT 모드에서 `remote_write_file`, `remote_edit_file`을 노출할 수 있게 함
+- override는 파일 쓰기/수정 도구만 대상으로 하며, `remote_run_command`는 기존처럼 `allowWriteExecution=true`일 때만 노출되도록 분리
+- `backend/theseus-core-server/.env.example`과 `infra/docker/prod/.env.example`에 운영 설정 설명을 추가
+
+#### 문서
+- README와 prompt architecture map에 Remote Workspace 파일 수정 override와 command 실행 권한의 차이를 기록
+
+---
+
 ### 🛠️ Session 158 — Nested custom tool call runtime 지원 (2026-05-18)
 
 #### `theseus_engine` / `src`

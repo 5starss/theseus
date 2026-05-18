@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: str = "theseus-core"
     THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
     THESEUS_LOCAL_REPORT_ROOT: str = "reports"
+    THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE: bool = False
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
 
