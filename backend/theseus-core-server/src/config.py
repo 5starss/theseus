@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
     BILLING_OUTBOX_BATCH_SIZE: int = 10
     BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
-    SANDBOX_IMAGE: str = "python:3.11-slim"
+    SANDBOX_IMAGE: str = "theseus-sandbox:py311-tools"
     SANDBOX_MEMORY_LIMIT: str = "128m"
     SANDBOX_CPU_QUOTA: int = 50000
     SANDBOX_CPU_PERIOD: int = 100000

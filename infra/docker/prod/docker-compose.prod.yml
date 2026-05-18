@@ -119,6 +119,7 @@ services:
       THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
       THESEUS_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools
       THESEUS_PROJECT_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools/projects
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
       SANDBOX_HOST_TEMP_ROOT: ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       SANDBOX_CONTAINER_TEMP_ROOT: ${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       SPRING_BOOT_INTERNAL_URL: http://theseus-api-server:8080

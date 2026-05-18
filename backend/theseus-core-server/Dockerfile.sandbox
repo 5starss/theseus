@@ -5,5 +5,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /sandbox
 
-COPY requirements-sandbox.txt /tmp/requirements-sandbox.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-sandbox.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-sandbox.txt /sandbox/requirements/
+
+RUN python -m pip install --upgrade pip \
+    && pip install --no-cache-dir \
+        -r /sandbox/requirements/requirements-sandbox.txt \
+    && python -m pip check \
+    && python -c "import pydantic, psutil, markdownify, bs4, yaml, requests, httpx, numpy, packaging, dotenv"

@@ -194,7 +194,7 @@ Allowlist 공개 원칙:
 - Tool build/runtime `create_tool` 실패는 단순 오류 문자열로 끝내지 않고 원인, recoverable 여부, 다음 조치, retry policy를 포함합니다.
 - 같은 fileName/moduleName 충돌은 `tool_name_conflict`로 분류하고 `retry_policy=do_not_retry_same_input`으로 남깁니다. 모델은 같은 이름으로 재시도하지 말고 기존 Tool 재사용, 기존 Tool 확장, 새 이름 제안, 교체 승인 요청 중 하나를 제안해야 합니다.
 - `permissionLevel`은 정수 `1~5`만 허용합니다. 위험도/신뢰도 같은 소수점 점수는 permission과 분리해야 하며, 소수점 permission 값은 validation failure로 처리합니다.
-- Tool metadata의 `dependencies`/`pythonDependencies`/`requirements`가 있으면 sandbox allowlist와 대조합니다. 허용된 dependency라도 현재 `SANDBOX_IMAGE`에 설치되어 있지 않으면 `sandbox_missing_dependency`로 분류하고, `requirements-sandbox.txt`와 `Dockerfile.sandbox`를 수동/CI로 rebuild해야 한다고 안내합니다. ToolBuild 중 `pip install`이나 Docker image build는 수행하지 않습니다.
+- Tool metadata의 `dependencies`/`pythonDependencies`/`requirements`가 있으면 sandbox allowlist와 대조합니다. 허용된 dependency라도 현재 `SANDBOX_IMAGE`에 설치되어 있지 않으면 `sandbox_missing_dependency`로 분류하고, `requirements-sandbox.txt` 변경분을 `Dockerfile.sandbox`로 수동/CI rebuild해야 한다고 안내합니다. ToolBuild 중 `pip install`이나 Docker image build는 수행하지 않습니다.
 - 사용자가 커스텀 툴 목록/검색을 요청하면 assistant가 기억으로 답하지 않고 `tool_search`를 호출하도록 `Custom Tool Recovery` capability prompt에서 지시합니다. server runtime은 `custom_tool_inventory`를 metadata에 넣어 project active/unavailable custom tool 후보를 `tool_search`가 함께 표시할 수 있게 합니다.
 
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
