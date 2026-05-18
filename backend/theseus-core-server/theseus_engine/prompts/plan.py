@@ -249,12 +249,11 @@ worktree verification, the only interpreter-style commands that may appear in co
  - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
 the plan must describe creating a Theseus custom tool during the Executing phase. \
 In server/project runs, follow the runtime-provided project custom tool artifact root, \
-for example `theseus_engine/custom_tools/projects/{projectId}/`. In that case \
-`target_files` must list both `<project artifact root>/<moduleName>.py` and \
-`<project artifact root>/<moduleName>.meta.json`. Only standalone local runs without a \
-project artifact root should use the global `theseus_engine/custom_tools/<moduleName>.py` \
-fallback. Do not use legacy framework paths or generic source-file fallbacks for new \
-Theseus tools.
+which may be an env/volume-backed runtime path. In that case `target_files` must list both \
+`<runtime project artifact root>/<moduleName>.py` and \
+`<runtime project artifact root>/<moduleName>.meta.json`. Do not invent a global \
+`theseus_engine/custom_tools/` path when the runtime provides a project artifact root, \
+and do not use legacy framework paths or generic source-file fallbacks for new Theseus tools.
  - CRITICAL — custom tool implementation plans must respect the generated-tool \
 security rules below. Do not plan subprocess/nvidia-smi/shell execution inside generated \
 custom tool code; use read-only APIs or identify the requirement as needing a trusted core adapter.

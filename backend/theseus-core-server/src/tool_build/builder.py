@@ -316,6 +316,7 @@ class ToolBuilder:
                 tool_class=tool_class,
                 registry=None,
                 tool_permissions=None,
+                activation_source="server_toolbuild",
             )
             metadata = read_tool_metadata(paths)
         except ToolCreationError as exc:

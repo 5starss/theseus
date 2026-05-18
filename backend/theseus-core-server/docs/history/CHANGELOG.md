@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 162 — Custom Tool 전용 유지보수 도구와 sandbox 활성화 검증 강화 (2026-05-18)
+
+#### `theseus_engine`
+- `custom_tool_read_source`, `custom_tool_update_source` core tool을 추가해 `/opt/theseus/custom_tools` 같은 env/volume 기반 artifact를 일반 `read_file/edit_file`이 아니라 project/tool 식별자 기반 전용 도구로만 읽고 수정하도록 분리
+- `tool_search` custom tool inventory 출력에 source path, metadata path, sandbox 검증 여부, 유지보수 도구 안내를 포함
+- project custom tool loader가 `status=active`, `isActive=true`, `validationResult.success=true`, `sandboxResult.success=true`를 모두 만족할 때만 registry에 등록하도록 강화
+- global custom tool loader가 project artifact root 하위 파일을 우회 로드하지 않도록 차단하고, standalone 생성 artifact에는 `activationSource=standalone_without_sandbox`, `sandboxVerified=false` metadata를 남김
+- prompt에 기존 custom tool 수정은 `custom_tool_read_source` → `custom_tool_update_source`를 사용하고 일반 파일 도구로 custom tool root를 수정하지 말라는 규칙을 추가
+
+#### `src`
+- `src.tooling.service`에 project custom tool source read/update helper를 추가하고, update는 staged artifact에서 `ToolValidator`와 Core sandbox gate를 통과한 뒤에만 active artifact를 교체하도록 구현
+- sandbox 실패 또는 권한 오류 시 기존 active artifact를 유지하고 staged 실패 artifact만 cleanup하도록 정리
+- PLAN draft의 generated custom tool `target_files`가 `THESEUS_PROJECT_CUSTOM_TOOLS_DIR/{projectId}` 기반 runtime path로 정규화되도록 수정
+- `THESEUS_CUSTOM_TOOLS_HOST_DIR` 설정을 추가해 host bind mount path는 debug/display hint로만 사용할 수 있게 함
+- ToolBuild activation metadata에 `activationSource=server_toolbuild`, sandbox 통과 artifact에는 `sandboxVerified=true`를 기록
+
+#### 검증
+- `python -m py_compile src/tooling/service.py src/tool_build/builder.py src/config.py src/tool_plan/planner.py theseus_engine/tools/core/custom_tool_maintenance_tool.py theseus_engine/tools/core/__init__.py theseus_engine/tools/core/tool_factory.py theseus_engine/core/tool_visibility.py theseus_engine/tools/core/tool_search_tool.py theseus_engine/prompts/capabilities.py theseus_engine/prompts/plan.py tests/test_custom_tool_maintenance.py`
+- `python -m unittest discover -s tests`
+- `python -m compileall -q src theseus_engine`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 161 — VSCode Extension 로컬 데몬 / custom tool import 오류 표시 분리 (2026-05-18)
 
 #### `theseus_engine`

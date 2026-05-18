@@ -21,6 +21,10 @@ from theseus_engine.tools.core.tool_factory import (
     load_custom_tools_for_project,
     scan_custom_tool_inventory,
 )
+from theseus_engine.tools.core.custom_tool_maintenance_tool import (
+    CustomToolReadSourceTool,
+    CustomToolUpdateSourceTool,
+)
 
 # ── File Operations ──────────────────────────────────────────────
 from theseus_engine.tools.core.file_read_tool import ReadFileTool
@@ -97,6 +101,8 @@ ALL_CORE_TOOLS = [
     SystemRebootTool,
     # Meta
     ToolCreatorTool,
+    CustomToolReadSourceTool,
+    CustomToolUpdateSourceTool,
     ToolSearchTool,
     # File
     ReadFileTool,

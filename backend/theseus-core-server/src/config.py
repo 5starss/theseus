@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE: bool = False
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
+    THESEUS_CUSTOM_TOOLS_HOST_DIR: Optional[str] = None
 
     # Sandbox shared workdir settings.
     # When Core runs inside a Docker container and controls the host Docker daemon,
