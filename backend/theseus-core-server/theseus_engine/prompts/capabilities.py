@@ -101,6 +101,9 @@ multiprocessing, signal, pty, resource, tempfile, webbrowser, pickle, or shelve.
  - Do not execute shell commands or arbitrary local programs from generated custom tools.
  - Do not read or write arbitrary local files unless the approved plan explicitly names \
 safe read-only paths.
+ - If a generated custom tool must use another active Theseus tool, call it only with \
+`await context.call_tool("tool_name", {...})`. Do not read `context.metadata["tool_registry"]` \
+directly or import another tool module by file path.
  - For system metrics, prefer psutil and read-only /proc or /sys data. Do not call \
 nvidia-smi directly from a generated custom tool.
  - If a core requirement depends on a prohibited command or module, expose the limitation \
@@ -120,6 +123,11 @@ helper/output BaseModel classes are allowed when useful
    (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
    (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
  - IMPORTANT: Do NOT use ToolResult.from_error() or ToolResult(status=..., data=...) — they don't exist.
+ - When a tool needs threshold-based detail analysis, first collect summary metrics inside \
+the current tool, then call active detail tools with `await context.call_tool("cpu_monitor", {"top_n": 10})` \
+or the matching tool schema. Handle `is_error=True` results in the final report.
+ - Nested tool calls are for bounded diagnostic composition. Do not call the same tool with \
+the same arguments repeatedly, and do not use nested calls for write/edit/bash/reboot-style actions.
  - Generated custom tools must follow the shared Theseus security rules below.
  - You CANNOT create a tool and call it in the SAME turn. Call `create_tool`, wait for \
 the success result, and ONLY THEN call the newly created tool in your next response.\
