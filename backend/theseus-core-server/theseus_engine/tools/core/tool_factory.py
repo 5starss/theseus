@@ -388,13 +388,16 @@ class ToolValidator:
         tree: ast.Module,
         errors: List[str],
     ) -> None:
-        """입력 모델 클래스명이 <ToolClassName>Input 패턴을 따르는지 검증합니다.
+        """input_model에 실제 할당된 입력 모델 이름만 검증합니다.
 
-        Pydantic 스키마 캐시 충돌을 방지하기 위해 화이트리스트 방식으로
-        모델명을 강제합니다.
+        기존 Core Tool들은 대부분 ``ReadFileTool -> ReadFileInput``처럼
+        Tool suffix를 제거한 이름을 사용합니다. generated tool에서는
+        ``ReadFileToolInput`` 형태도 함께 허용합니다. ``ProcessInfo``나
+        ``CPUStatsOutput`` 같은 보조 Pydantic 모델은 입력 모델이 아니므로
+        이 검증 대상에서 제외합니다.
         """
-        tool_class_name = None
-        input_model_names: List[str] = []
+        base_model_names: Set[str] = set()
+        tool_input_models: Dict[str, str] = {}
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -403,20 +406,58 @@ class ToolValidator:
                 b.id for b in node.bases
                 if isinstance(b, ast.Name)
             ]
-            if "BaseTool" in base_names:
-                tool_class_name = node.name
-            elif "BaseModel" in base_names:
-                input_model_names.append(node.name)
+            if "BaseModel" in base_names:
+                base_model_names.add(node.name)
+            if "BaseTool" not in base_names:
+                continue
 
-        if tool_class_name and input_model_names:
-            expected = f"{tool_class_name}Input"
-            for name in input_model_names:
-                if name != expected:
-                    errors.append(
-                        f"To prevent Pydantic schema cache collisions, "
-                        f"the input model for '{tool_class_name}' must be "
-                        f"named '{expected}'. (found: '{name}')"
-                    )
+            input_model_name = cls._extract_declared_input_model_name(node)
+            if input_model_name:
+                tool_input_models[node.name] = input_model_name
+
+        for tool_class_name, input_model_name in tool_input_models.items():
+            if input_model_name not in base_model_names:
+                errors.append(
+                    f"'{tool_class_name}.input_model' references "
+                    f"'{input_model_name}', but no matching BaseModel class "
+                    f"was found in the module."
+                )
+                continue
+
+            tool_stem = (
+                tool_class_name[:-4]
+                if tool_class_name.endswith("Tool")
+                else tool_class_name
+            )
+            allowed = {f"{tool_class_name}Input", f"{tool_stem}Input"}
+            if input_model_name not in allowed:
+                errors.append(
+                    f"Input model for '{tool_class_name}' should be named "
+                    f"'{tool_stem}Input' or '{tool_class_name}Input'. "
+                    f"(found: '{input_model_name}')"
+                )
+
+    @staticmethod
+    def _extract_declared_input_model_name(class_node: ast.ClassDef) -> str | None:
+        """Return the class name assigned to a BaseTool's input_model attr."""
+        for item in class_node.body:
+            if isinstance(item, ast.Assign):
+                if not any(
+                    isinstance(target, ast.Name) and target.id == "input_model"
+                    for target in item.targets
+                ):
+                    continue
+                if isinstance(item.value, ast.Name):
+                    return item.value.id
+            if isinstance(item, ast.AnnAssign):
+                if not (
+                    isinstance(item.target, ast.Name)
+                    and item.target.id == "input_model"
+                    and isinstance(item.value, ast.Name)
+                ):
+                    continue
+                return item.value.id
+        return None
 
     # ------------------------------------------------------------------
     # 2단계: 모듈 로드 및 런타임 규격 검증

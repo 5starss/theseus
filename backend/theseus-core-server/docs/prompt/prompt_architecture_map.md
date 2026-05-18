@@ -164,6 +164,7 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 - log grep은 결과 없음과 명령 실패를 구분해야 하며, no-match는 PASS로 해석 가능한 `failure_policy=ignore_no_match` 또는 동등한 정책을 둡니다.
 - generated custom tool은 `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, `python3 -c ...`를 PLAN command step으로 넣지 않습니다. 승인된 `create_tool` 경로가 Core Docker sandbox gate에서 compile/import/BaseTool subclass/필수 속성/`execute` signature를 검증합니다.
 - 서버/프로젝트 요청에서 generated custom tool의 `target_files`는 runtime이 주입하는 project artifact root를 따라야 합니다. 기본 container-side 저장 경로는 `theseus_engine/custom_tools/projects/{projectId}/`이며, prod에서는 host `THESEUS_CUSTOM_TOOLS_HOST_DIR`가 container `THESEUS_PROJECT_CUSTOM_TOOLS_DIR`로 bind mount됩니다. 전역 `theseus_engine/custom_tools/*.py` 경로가 나오면 Core가 표시/저장용 PLAN projection에서 프로젝트별 경로로 정규화합니다.
+- generated custom tool의 Pydantic 입력 모델은 기존 Core Tool 스타일인 `<ToolClassWithoutTool>Input`을 우선 사용하고, `<ToolClassName>Input`도 허용합니다. `ProcessInfo`, `StatsOutput` 같은 보조/출력 `BaseModel`은 허용되지만, `BaseTool.input_model`에는 실제 입력 모델 하나를 명확히 할당해야 합니다.
 
 Core 검증 위치:
 

@@ -19,6 +19,8 @@
 - generated custom tool 산출물은 git 추적 대상에서 제외하고 `theseus_engine/custom_tools/.gitkeep`, `theseus_engine/custom_tools/projects/.gitkeep`만 저장소에 남기도록 `.gitignore`를 정리
 - `THESEUS_CUSTOM_TOOLS_DIR` / `THESEUS_PROJECT_CUSTOM_TOOLS_DIR` 설정을 추가해 서버 ToolBuild 저장 경로, PLAN 기존 Tool metadata 조회 경로, runtime project custom tool loader가 같은 container-side mount path를 사용하도록 정리
 - prod compose에서 host `/opt/theseus/custom_tools` bind mount 대상인 `/backend/theseus-core-server/theseus_engine/custom_tools/projects`를 Core 환경변수로 함께 주입해 volume 설정과 코드의 저장/로드 기준을 명시적으로 연결
+- ToolValidator의 Pydantic input model 명명 검증을 실제 `BaseTool.input_model`에 할당된 모델만 대상으로 완화하고, 기존 Core Tool 스타일인 `<ToolClassWithoutTool>Input`과 generated-friendly `<ToolClassName>Input`을 모두 허용
+- `ProcessInfo`, `CPUStatsOutput`처럼 Tool 출력/보조 구조화를 위한 추가 `BaseModel` 클래스는 입력 모델로 오인하지 않도록 정리
 
 ---
 
