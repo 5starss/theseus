@@ -2,7 +2,7 @@
 
 이 문서는 테세우스 고유의 모든 프롬프트 파일, 그 위치, 역할 및 간단한 설명을 카탈로그화한 것입니다. 이 프롬프트들은 AI 에이전트의 페르소나, 가드레일, 그리고 운영 지능을 종합적으로 정의합니다.
 
-> **최종 업데이트**: 2026-05-15 — runtime mode reminder, PLAN draft execution spec validation mode, validation/failure feedback, code editing safety, remote/local worktree boundary 반영
+> **최종 업데이트**: 2026-05-18 — runtime mode reminder, PLAN draft execution spec validation mode, validation/failure feedback, code editing safety, remote/local worktree boundary, project tool artifact path, sandbox dependency image 반영
 
 ---
 
@@ -163,6 +163,7 @@ PLAN 실행/검증 완료는 하위 호환을 위해 기존 문자열 marker도 
 - POST/PUT/PATCH/DELETE, 주문 생성, rollback, restart, `docker exec`, K8s 명령은 기본 MVP에서 제외합니다.
 - log grep은 결과 없음과 명령 실패를 구분해야 하며, no-match는 PASS로 해석 가능한 `failure_policy=ignore_no_match` 또는 동등한 정책을 둡니다.
 - generated custom tool은 `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, `python3 -c ...`를 PLAN command step으로 넣지 않습니다. 승인된 `create_tool` 경로가 Core Docker sandbox gate에서 compile/import/BaseTool subclass/필수 속성/`execute` signature를 검증합니다.
+- 서버/프로젝트 요청에서 generated custom tool의 `target_files`는 runtime이 주입하는 project artifact root를 따라야 합니다. 기본 container-side 저장 경로는 `theseus_engine/custom_tools/projects/{projectId}/`이며, prod에서는 host `THESEUS_CUSTOM_TOOLS_HOST_DIR`가 container `THESEUS_PROJECT_CUSTOM_TOOLS_DIR`로 bind mount됩니다. 전역 `theseus_engine/custom_tools/*.py` 경로가 나오면 Core가 표시/저장용 PLAN projection에서 프로젝트별 경로로 정규화합니다.
 
 Core 검증 위치:
 
@@ -178,6 +179,7 @@ Core 검증 위치:
 - generated custom tool은 운영체제 command plan이 아니므로 `execution_spec.steps`가 비어 있어도 정상입니다. 이 경우 `implementation_constraints`에 BaseTool import, Pydantic input model, `execute(arguments, context)`, ToolResult output, dependency/fallback 정책을 남기는 것을 권장합니다.
 - 일반 worktree 검증용 command step에서는 `python -B -m py_compile <상대경로.py>`, `python3 -B -m py_compile <상대경로.py>`, `python -m json.tool <상대경로.json>`, `node --check <상대경로.js>`, `git diff --check`만 interpreter/build 계열 예외로 허용합니다.
 - `structuredPlanJson`에는 `execution_spec` 원본을 보존하고, `planSnapshot.executionSpec`에는 표시/검토용 projection을 둡니다.
+- generated custom tool의 `planSnapshot.blocks[].target_files`와 사용자 표시 Markdown은 실제 build 저장 경로와 맞도록 프로젝트별 artifact path를 사용합니다.
 
 Allowlist 공개 원칙:
 
@@ -191,6 +193,8 @@ Allowlist 공개 원칙:
 - Tool build/runtime `create_tool` 실패는 단순 오류 문자열로 끝내지 않고 원인, recoverable 여부, 다음 조치, retry policy를 포함합니다.
 - 같은 fileName/moduleName 충돌은 `tool_name_conflict`로 분류하고 `retry_policy=do_not_retry_same_input`으로 남깁니다. 모델은 같은 이름으로 재시도하지 말고 기존 Tool 재사용, 기존 Tool 확장, 새 이름 제안, 교체 승인 요청 중 하나를 제안해야 합니다.
 - `permissionLevel`은 정수 `1~5`만 허용합니다. 위험도/신뢰도 같은 소수점 점수는 permission과 분리해야 하며, 소수점 permission 값은 validation failure로 처리합니다.
+- Tool metadata의 `dependencies`/`pythonDependencies`/`requirements`가 있으면 sandbox allowlist와 대조합니다. 허용된 dependency라도 현재 `SANDBOX_IMAGE`에 설치되어 있지 않으면 `sandbox_missing_dependency`로 분류하고, `requirements-sandbox.txt`와 `Dockerfile.sandbox`를 수동/CI로 rebuild해야 한다고 안내합니다. ToolBuild 중 `pip install`이나 Docker image build는 수행하지 않습니다.
+- 사용자가 커스텀 툴 목록/검색을 요청하면 assistant가 기억으로 답하지 않고 `tool_search`를 호출하도록 `Custom Tool Recovery` capability prompt에서 지시합니다. server runtime은 `custom_tool_inventory`를 metadata에 넣어 project active/unavailable custom tool 후보를 `tool_search`가 함께 표시할 수 있게 합니다.
 
 #### 1.4 Coordinator 모드 프롬프트 (4단계 오케스트레이션)
 

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from src.builder.system_prompt import build_theseus_system_prompt
 from src.config import resolve_model_name, settings
@@ -11,6 +12,7 @@ from src.tool_build.schemas import GeneratedToolSpec, ToolArtifactPayload, ToolB
 from src.tooling.service import (
     CUSTOM_TOOLS_DIR,
     PROJECT_TOOLS_DIR,
+    SANDBOX_ALLOWED_DEPENDENCIES,
     ServerToolCreationRequest,
     ToolCreationError,
     activate_tool_artifact,
@@ -62,6 +64,68 @@ Rules:
 - Do not claim that any file, remote command, or tool execution succeeded.
 - Keep the response practical and under 8 short bullet points or paragraphs.
 """
+
+_DEPENDENCY_KEYS = ("dependencies", "pythonDependencies", "requirements")
+
+
+def _normalize_dependency_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.split("#", 1)[0].strip()
+    text = re.split(r"\s*(?:==|>=|<=|~=|!=|>|<|\[)", text, maxsplit=1)[0].strip()
+    return text
+
+
+def _declared_tool_dependencies(metadata_json: dict[str, Any]) -> list[str]:
+    dependencies: list[str] = []
+    for key in _DEPENDENCY_KEYS:
+        raw_value = metadata_json.get(key)
+        if raw_value in (None, "", []):
+            continue
+        raw_items: list[Any]
+        if isinstance(raw_value, str):
+            raw_items = [item.strip() for item in re.split(r"[,\n]", raw_value) if item.strip()]
+        elif isinstance(raw_value, list):
+            raw_items = raw_value
+        else:
+            continue
+        for item in raw_items:
+            if isinstance(item, dict):
+                item = item.get("name") or item.get("package") or item.get("dependency")
+            name = _normalize_dependency_name(item)
+            if name and name not in dependencies:
+                dependencies.append(name)
+    return dependencies
+
+
+def _validate_declared_sandbox_dependencies(spec: GeneratedToolSpec) -> None:
+    dependencies = _declared_tool_dependencies(spec.metadata_json or {})
+    if not dependencies:
+        return
+    allowed_names = {dependency.casefold() for dependency in SANDBOX_ALLOWED_DEPENDENCIES}
+    unsupported = [
+        dependency
+        for dependency in dependencies
+        if dependency.casefold() not in allowed_names
+    ]
+    if not unsupported:
+        return
+    raise ToolRepairFailure(
+        stage="dependency_policy",
+        code="DEPENDENCY_POLICY_VIOLATION",
+        message=(
+            "Generated Tool metadata declares dependencies outside the sandbox allowlist. "
+            f"unsupported={unsupported}, allowed={sorted(SANDBOX_ALLOWED_DEPENDENCIES)}. "
+            "ToolBuild does not run pip install or Docker build; use an allowed dependency "
+            "or update requirements-sandbox.txt and rebuild the sandbox image manually."
+        ),
+        metadata={
+            "declaredDependencies": dependencies,
+            "unsupportedDependencies": unsupported,
+            "allowedDependencies": sorted(SANDBOX_ALLOWED_DEPENDENCIES),
+        },
+    )
 
 
 class ToolBuildError(RuntimeError):
@@ -219,6 +283,7 @@ class ToolBuilder:
         progress_callback: ProgressCallback | None = None,
     ) -> ToolArtifactPayload:
         await self._emit_progress(progress_callback, "TOOL_BUILD_VALIDATING", 55)
+        _validate_declared_sandbox_dependencies(spec)
         creation_request = ServerToolCreationRequest(
             tool_name=spec.tool_name,
             python_code=spec.python_code,

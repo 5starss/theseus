@@ -114,13 +114,18 @@ class ToolSearchTool(BaseTool):
                 top_k=arguments.top_k,
             )
 
+        inventory_matches = self._lexical_search_inventory(
+            custom_tool_inventory,
+            arguments.query,
+            top_k=arguments.top_k,
+        )
         unavailable_matches = self._lexical_search_unavailable_inventory(
             custom_tool_inventory,
             arguments.query,
             top_k=arguments.top_k,
         )
 
-        if not matched_tools and not unavailable_matches:
+        if not matched_tools and not inventory_matches and not unavailable_matches:
             return ToolResult(
                 output=(
                     f"No tools matching '{arguments.query}' found. "
@@ -175,6 +180,18 @@ class ToolSearchTool(BaseTool):
             "",
         ]
         lines.extend(tool_details)
+
+        if inventory_matches:
+            lines.extend(["", "Custom tool inventory matches:"])
+            for item in inventory_matches:
+                lines.append(
+                    f"  - **{item.get('toolName') or item.get('fileName')}** "
+                    f"({item.get('loadState', 'unknown')}, file={item.get('fileName', '?')}, "
+                    f"level={item.get('permissionLevel', '?')})"
+                )
+                description = item.get("displayDescription") or item.get("description")
+                if description:
+                    lines.append(f"    Description: {description}")
 
         if injected:
             lines.append("")
@@ -261,6 +278,47 @@ class ToolSearchTool(BaseTool):
         scored.sort(key=lambda value: (-value[0], value[1]))
         return [item for _, _, item in scored[:top_k]]
 
+    @staticmethod
+    def _lexical_search_inventory(
+        inventory: Any,
+        query: str,
+        *,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(inventory, list):
+            return []
+        if _is_custom_tool_inventory_query(query):
+            return [
+                item
+                for item in inventory[:top_k]
+                if isinstance(item, dict)
+            ]
+
+        query_tokens = _tokenize_tool_search_text(query)
+        scored: list[tuple[int, str, dict[str, Any]]] = []
+        for item in inventory:
+            if not isinstance(item, dict):
+                continue
+            haystack_parts = [
+                item.get("toolName", ""),
+                item.get("fileName", ""),
+                item.get("moduleName", ""),
+                item.get("displayDescription", ""),
+                item.get("description", ""),
+                item.get("status", ""),
+                item.get("loadState", ""),
+                " ".join(str(value) for value in item.get("dependencies", []) or []),
+            ]
+            haystack = " ".join(str(part) for part in haystack_parts if part)
+            haystack_tokens = _tokenize_tool_search_text(haystack)
+            overlap = len(query_tokens & haystack_tokens)
+            substring_bonus = 2 if query.strip().lower() in haystack.lower() else 0
+            score = overlap + substring_bonus
+            if score > 0:
+                scored.append((score, str(item.get("toolName") or item.get("fileName") or ""), item))
+        scored.sort(key=lambda value: (-value[0], value[1]))
+        return [item for _, _, item in scored[:top_k]]
+
 
 def _tokenize_tool_search_text(text: str) -> set[str]:
     aliases = {
@@ -292,3 +350,23 @@ def _tokenize_tool_search_text(text: str) -> set[str]:
             if alias_key in token:
                 expanded.update(alias_values)
     return expanded
+
+
+def _is_custom_tool_inventory_query(query: str) -> bool:
+    normalized = str(query or "").strip().lower()
+    if not normalized:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "custom tool",
+            "custom tools",
+            "커스텀",
+            "사용 가능한 툴",
+            "사용가능한 툴",
+            "툴 목록",
+            "도구 목록",
+            "등록된 툴",
+            "등록된 도구",
+        )
+    )

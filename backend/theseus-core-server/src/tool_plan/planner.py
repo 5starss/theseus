@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import shlex
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal
@@ -43,7 +44,7 @@ ChunkCallback = Callable[[str], Awaitable[None] | None]
 
 logger = logging.getLogger(__name__)
 
-PROJECT_CUSTOM_TOOLS_DIR = (
+_DEFAULT_PROJECT_CUSTOM_TOOLS_DIR = (
     Path(__file__).resolve().parents[2] / "theseus_engine" / "custom_tools" / "projects"
 )
 MAX_EXISTING_CUSTOM_TOOLS_IN_PROMPT = 20
@@ -234,11 +235,79 @@ def _slugify_project_id(project_id: int | str | None) -> str:
     return slug or "default"
 
 
+def _canonical_tool_module_stem(tool_name: str | None) -> str:
+    stem = re.sub(r"[^a-zA-Z0-9_]+", "_", str(tool_name or "").strip().lower())
+    stem = re.sub(r"_+", "_", stem).strip("_") or "generated_tool"
+    if not stem.endswith("_tool"):
+        stem = f"{stem}_tool"
+    return stem
+
+
+def _project_custom_tools_dir() -> Path:
+    configured = str(settings.THESEUS_PROJECT_CUSTOM_TOOLS_DIR or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return _DEFAULT_PROJECT_CUSTOM_TOOLS_DIR
+
+
+def _project_custom_tool_artifact_root(project_id: int | str | None) -> str:
+    return f"theseus_engine/custom_tools/projects/{_slugify_project_id(project_id)}"
+
+
+def _project_custom_tool_artifact_context(project_id: int | str | None) -> str:
+    root = _project_custom_tool_artifact_root(project_id)
+    example_module = _canonical_tool_module_stem("create_sandbox_math_test")
+    return (
+        "Project custom tool artifact context:\n"
+        f"- Current project generated tool root: `{root}/`.\n"
+        "- For server/project PLAN drafts, generated custom tool `target_files` MUST use this "
+        "project root, not the global `theseus_engine/custom_tools/` root.\n"
+        "- Use canonical module file names: logical `toolName=create_sandbox_math_test` maps to "
+        f"`{root}/{example_module}.py` and "
+        f"`{root}/{example_module}.meta.json`.\n"
+        "- If a logical tool name already ends with `_tool`, do not append `_tool` twice.\n"
+        "- Keep `toolName` as the user-facing call name; use `moduleName`/`fileName` for the "
+        "import module and persisted artifact file."
+    )
+
+
+def _normalize_project_custom_tool_path(
+    value: str,
+    project_id: int | str | None,
+) -> str:
+    text = str(value)
+    normalized = text.replace("\\", "/").strip()
+    global_prefix = "theseus_engine/custom_tools/"
+    project_prefix = "theseus_engine/custom_tools/projects/"
+    if not normalized.startswith(global_prefix) or normalized.startswith(project_prefix):
+        return text
+    if not normalized.endswith((".py", ".meta.json")):
+        return text
+
+    relative = normalized[len(global_prefix) :]
+    if "/" in relative:
+        return text
+    return f"{_project_custom_tool_artifact_root(project_id)}/{Path(relative).name}"
+
+
+def _normalize_project_custom_tool_paths(value: Any, project_id: int | str | None) -> Any:
+    if isinstance(value, str):
+        return _normalize_project_custom_tool_path(value, project_id)
+    if isinstance(value, list):
+        return [_normalize_project_custom_tool_paths(item, project_id) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_project_custom_tool_paths(item, project_id)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _load_existing_custom_tool_summaries(project_id: int | str | None) -> list[dict[str, Any]]:
     if project_id is None:
         return []
 
-    project_dir = PROJECT_CUSTOM_TOOLS_DIR / _slugify_project_id(project_id)
+    project_dir = _project_custom_tools_dir() / _slugify_project_id(project_id)
     if not project_dir.is_dir():
         return []
 
@@ -372,14 +441,15 @@ class ToolPlanPlanner:
             )
             return ToolPlanSkippedResult(message=feedback)
         version = self._resolve_plan_version(event)
+        display_plan = self._normalize_project_artifacts_for_display(structured_plan, event)
         snapshot = self._build_snapshot(
-            structured_plan,
+            display_plan,
             version=version,
             event=event,
             validation_warnings=validation_warnings,
         )
         structured = self._build_structured_plan(
-            structured_plan,
+            display_plan,
             validation_warnings=validation_warnings,
         )
         display_markdown = self._build_markdown(snapshot)
@@ -460,10 +530,12 @@ class ToolPlanPlanner:
         return loop_result.final_text, payload
 
     def _build_prompt(self, event: ToolPlanRequestEvent) -> str:
+        artifact_context = _project_custom_tool_artifact_context(event.project_id)
         existing_tool_context = _existing_custom_tool_context(event.project_id)
-        existing_tool_section = (
-            f"\n\n{existing_tool_context}" if existing_tool_context else ""
+        context_section = "\n\n".join(
+            item for item in (artifact_context, existing_tool_context) if item
         )
+        extra_context = f"\n\n{context_section}" if context_section else ""
         if isinstance(event, ToolPlanRegenerationRequestedEvent):
             feedback = [
                 item.model_dump(mode="json", by_alias=True)
@@ -477,9 +549,9 @@ class ToolPlanPlanner:
                 "Feedback:\n"
                 f"{json.dumps(feedback, ensure_ascii=False, indent=2)}\n\n"
                 f"{_CUSTOM_TOOL_SAFETY_CONTEXT}"
-                f"{existing_tool_section}"
+                f"{extra_context}"
             )
-        return f"{event.prompt}\n\n{_CUSTOM_TOOL_SAFETY_CONTEXT}{existing_tool_section}"
+        return f"{event.prompt}\n\n{_CUSTOM_TOOL_SAFETY_CONTEXT}{extra_context}"
 
     def _history_messages(self, event: ToolPlanRequestEvent) -> list[ConversationMessage]:
         messages: list[ConversationMessage] = []
@@ -564,7 +636,11 @@ class ToolPlanPlanner:
                 ensure_ascii=False,
                 indent=2,
             )
-        return state_machine.get_system_prompt(available_tools=available_tools)
+        runtime_reminders = (_project_custom_tool_artifact_context(event.project_id),)
+        return state_machine.get_system_prompt(
+            available_tools=available_tools,
+            runtime_reminders=runtime_reminders,
+        )
 
     def _build_tool_registry(
         self,
@@ -858,6 +934,16 @@ class ToolPlanPlanner:
             }
         return structured
 
+    def _normalize_project_artifacts_for_display(
+        self,
+        plan_json: dict[str, Any],
+        event: ToolPlanRequestEvent,
+    ) -> dict[str, Any]:
+        if not self._is_generated_tool_request(plan_json, event):
+            return plan_json
+        normalized = deepcopy(plan_json)
+        return _normalize_project_custom_tool_paths(normalized, event.project_id)
+
     def _build_snapshot(
         self,
         plan_json: dict[str, Any],
@@ -882,14 +968,15 @@ class ToolPlanPlanner:
             explicit_id = str(task_dict.get("id") or "").strip()
             block_id = self._stable_block_id(title, explicit_id, base_block_ids_by_title, used_ids)
             used_ids.add(block_id)
-            blocks.append(
-                {
-                    "blockId": block_id,
-                    "title": title,
-                    "content": self._task_content(task_dict),
-                    "order": self._task_order(task_dict, index),
-                }
-            )
+            block = {
+                "blockId": block_id,
+                "title": title,
+                "content": self._task_content(task_dict),
+                "order": self._task_order(task_dict, index),
+            }
+            if isinstance(task_dict.get("target_files"), list):
+                block["target_files"] = list(task_dict["target_files"])
+            blocks.append(block)
 
         if not blocks:
             blocks = [
