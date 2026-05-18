@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 165 — Tool Search 주입 경계와 custom tool 실패 해석 보강 (2026-05-18)
+
+#### `theseus_engine`
+- `tool_search`가 전체 검색 registry에서 찾은 도구를 곧바로 active registry에 주입하지 않고, builder가 넘긴 현재 mode/phase/RBAC 기준 `search_injectable_tool_names` 안의 도구만 주입하도록 제한
+- `create_tool`은 검색 결과에 나타나더라도 PLAN Executing이 아니면 `Not injectable: requires approved PLAN Executing phase`로 표시하고 active registry에 등록하지 않도록 변경
+- custom tool recovery/create prompt에 `create_tool requires an executing plan` 실패 해석, `custom_tool_update_source` 성공 판정 조건, update 후 read-back 검증 절차를 명시해 실제 tool result에 없는 “수정 성공/캐싱 문제” 추론을 줄임
+
+#### `src`
+- server engine builder가 `search_injectable_tool_names`, `agent_mode`, `plan_phase`, `user_rbac_level` metadata를 tool runtime에 전달하도록 보강
+- local/extension engine builder도 full registry 기준 visibility policy를 별도로 계산해 RAG top-k에 빠졌지만 현재 권한으로 주입 가능한 도구만 `tool_search`가 추가할 수 있게 정리
+
+#### 검증
+- `python -m py_compile theseus_engine/tools/core/tool_search_tool.py theseus_engine/prompts/capabilities.py src/builder/engine.py theseus_engine/core/engine_builder.py`
+- `python -m unittest discover -s tests -p "*tool_search*"`
+- `python -m unittest discover -s tests -p test_history_tool_projection.py`
+- `python -m unittest discover -s tests`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 164 — Tool history structured replay 보존 (2026-05-18)
 
 #### `src` / history

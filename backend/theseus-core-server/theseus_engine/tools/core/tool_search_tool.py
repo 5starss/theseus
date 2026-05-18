@@ -82,6 +82,11 @@ class ToolSearchTool(BaseTool):
         active_registry = context.metadata.get("active_registry")
         project_id = context.metadata.get("project_id")
         custom_tool_inventory = context.metadata.get("custom_tool_inventory") or []
+        injectable_tool_names = _normalize_tool_name_set(
+            context.metadata.get("search_injectable_tool_names")
+        )
+        agent_mode = context.metadata.get("agent_mode")
+        plan_phase = context.metadata.get("plan_phase")
 
         if search_registry is None:
             return ToolResult(
@@ -136,11 +141,27 @@ class ToolSearchTool(BaseTool):
         # active_registry에 주입 (없는 툴만)
         injected: list[str] = []
         already_available: list[str] = []
+        not_injectable: dict[str, str] = {}
 
         for tool in matched_tools:
             if active_registry is not None:
                 existing = active_registry.get(tool.name)
                 if existing is None:
+                    reason = _resolve_not_injectable_reason(
+                        tool.name,
+                        injectable_tool_names=injectable_tool_names,
+                        agent_mode=agent_mode,
+                        plan_phase=plan_phase,
+                    )
+                    if reason is not None:
+                        not_injectable[tool.name] = reason
+                        log.info(
+                            "[ToolSearchTool] Tool '%s' was found but not "
+                            "injected: %s",
+                            tool.name,
+                            reason,
+                        )
+                        continue
                     active_registry.register(tool)
                     injected.append(tool.name)
                     log.info(
@@ -166,7 +187,15 @@ class ToolSearchTool(BaseTool):
             except Exception:
                 param_summary = "(no schema)"
 
-            status = "✅ Newly added" if tool.name in injected else "ℹ️ Already available"
+            if tool.name in injected:
+                status = "✅ Newly added"
+            elif tool.name in not_injectable:
+                status = (
+                    "🚫 Not injectable: "
+                    f"{not_injectable[tool.name]}"
+                )
+            else:
+                status = "ℹ️ Already available"
             tool_details.append(
                 f"  {status} **{tool.name}**\n"
                 f"    Description: {tool.description}\n"
@@ -208,6 +237,13 @@ class ToolSearchTool(BaseTool):
             lines.append(
                 f"⚡ {len(injected)} tools added to current session. "
                 f"Available from your next response."
+            )
+
+        if not_injectable:
+            lines.append("")
+            lines.append(
+                "Some matching tools were not added because the current "
+                "mode, plan phase, or RBAC policy does not allow them."
             )
 
         if unavailable_matches:
@@ -386,3 +422,38 @@ def _is_custom_tool_inventory_query(query: str) -> bool:
             "등록된 도구",
         )
     )
+
+
+def _normalize_tool_name_set(value: Any) -> set[str] | None:
+    """Return a normalized tool-name set, or None when no policy was supplied."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        names = re.split(r"[\s,]+", value)
+        return {name.strip() for name in names if name.strip()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return {str(name).strip() for name in value if str(name).strip()}
+    return None
+
+
+def _resolve_not_injectable_reason(
+    tool_name: str,
+    *,
+    injectable_tool_names: set[str] | None,
+    agent_mode: Any,
+    plan_phase: Any,
+) -> str | None:
+    """Explain why a found tool cannot be injected into the active registry."""
+
+    if tool_name == "create_tool" and not _is_plan_executing(agent_mode, plan_phase):
+        return "requires approved PLAN Executing phase"
+    if injectable_tool_names is not None and tool_name not in injectable_tool_names:
+        return "not visible in the current mode, plan phase, or RBAC policy"
+    return None
+
+
+def _is_plan_executing(agent_mode: Any, plan_phase: Any) -> bool:
+    mode = str(getattr(agent_mode, "value", agent_mode) or "").strip().lower()
+    phase = str(getattr(plan_phase, "value", plan_phase) or "").strip().lower()
+    return mode == "plan" and phase == "executing"
