@@ -40,6 +40,7 @@ services:
       - .env.local
     environment:
       AUTH_MODE: spring
+      BILLING_OUTBOX_SCHEDULER_ENABLED: ${BILLING_OUTBOX_SCHEDULER_ENABLED:-false}
       CORE_KAFKA_CONSUMER_ENABLED: true
       SANDBOX_STARTUP_CHECK: false
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
