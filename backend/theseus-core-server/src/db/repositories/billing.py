@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -12,6 +13,13 @@ OUTBOX_STATUS_PENDING = "pending"
 OUTBOX_STATUS_PROCESSING = "processing"
 OUTBOX_STATUS_SENT = "sent"
 OUTBOX_STATUS_FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimedBillingOutbox:
+    id: str
+    report: BillingUsageReport
+    retry_count: int
 
 
 class BillingOutboxRepository:
@@ -37,7 +45,7 @@ class BillingOutboxRepository:
         self.db.refresh(record)
         return record
 
-    def claim_batch(self, batch_size: int = 10) -> list[BillingOutbox]:
+    def claim_batch(self, batch_size: int = 10) -> list[ClaimedBillingOutbox]:
         now = datetime.now(timezone.utc)
         stmt = (
             select(BillingOutbox)
@@ -53,12 +61,19 @@ class BillingOutboxRepository:
             record.status = OUTBOX_STATUS_PROCESSING
             record.updated_at = now
 
+        claimed = [
+            ClaimedBillingOutbox(
+                id=record.id,
+                report=self.to_usage_report(record),
+                retry_count=int(record.retry_count or 0),
+            )
+            for record in records
+        ]
+
         if records:
             self.db.commit()
-            for record in records:
-                self.db.refresh(record)
 
-        return records
+        return claimed
 
     def mark_sent(self, record_id: str) -> None:
         record = self.db.get(BillingOutbox, record_id)

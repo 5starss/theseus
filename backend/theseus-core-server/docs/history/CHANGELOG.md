@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 167 — Billing outbox worker DB 세션 수명 분리 (2026-05-18)
+
+#### `src` / 설정
+- billing outbox worker가 짧은 DB 트랜잭션으로 claim한 뒤 필요한 payload만 `ClaimedBillingOutbox` DTO로 분리하고, DB 세션을 닫은 뒤 Spring Billing API를 호출하도록 변경
+- billing 처리 결과 갱신은 성공/실패 각각 새 DB 세션에서 짧게 수행하도록 분리해 외부 HTTP 호출 중 PostgreSQL connection을 점유하지 않도록 보강
+- 운영/로컬 compose와 env example에 `BILLING_OUTBOX_SCHEDULER_ENABLED=false` 기본값을 명시
+
+#### 테스트
+- `python -m py_compile src/db/repositories/billing.py src/builder/worker.py`
+
+---
+
 ### 🛠️ Session 166 — Custom tool source maintenance readback/중복 식별자 보강 (2026-05-18)
 
 #### `src`
