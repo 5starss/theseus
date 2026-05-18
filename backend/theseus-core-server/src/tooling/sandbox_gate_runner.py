@@ -39,7 +39,15 @@ def _install_stubs() -> type:
         pass
 
     class ToolExecutionContext:
-        pass
+        async def call_tool(self, tool_name, arguments=None):
+            del arguments
+            return ToolResult(
+                output=(
+                    "Nested tool execution is disabled during sandbox gate "
+                    f"validation: {tool_name}."
+                ),
+                is_error=True,
+            )
 
     class ToolResult:
         def __init__(self, output=None, is_error=False, metadata=None):

@@ -30,6 +30,51 @@ class ToolExecutionContext:
     """Kafka runId — 실행 중 로깅·트레이싱에 사용. src에서 주입."""
     tool_draft_id: str | None = None
     """Kafka toolDraftId — 실행 결과를 특정 draft와 연결할 때 사용. src에서 주입."""
+    tool_invoker: Any | None = None
+    """Optional runtime callback used by tools to call another active tool."""
+
+    async def call_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any] | BaseModel | None = None,
+    ) -> "ToolResult":
+        """Call another active tool through the runtime's normal execution path."""
+
+        if self.tool_invoker is None:
+            return ToolResult(
+                output=(
+                    "Nested tool calls are not available in this execution "
+                    "context."
+                ),
+                is_error=True,
+            )
+        if arguments is None:
+            payload: dict[str, Any] = {}
+        elif isinstance(arguments, BaseModel):
+            payload = arguments.model_dump()
+        elif isinstance(arguments, dict):
+            payload = dict(arguments)
+        else:
+            return ToolResult(
+                output=(
+                    "Nested tool call arguments must be a dict, Pydantic "
+                    "BaseModel, or None."
+                ),
+                is_error=True,
+            )
+
+        try:
+            result = self.tool_invoker(tool_name, payload)
+            if hasattr(result, "__await__"):
+                result = await result
+            if isinstance(result, ToolResult):
+                return result
+            return ToolResult(output=result)
+        except Exception as exc:
+            return ToolResult(
+                output=f"Nested tool call failed: {tool_name}: {type(exc).__name__}: {exc}",
+                is_error=True,
+            )
 
 
 @dataclass

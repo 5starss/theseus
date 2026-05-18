@@ -12,11 +12,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
@@ -69,6 +70,21 @@ from theseus_engine.wrappers.hooks.theseus_hook_executor import HookEvent
 log = logging.getLogger(__name__)
 
 _DIFF_SNAPSHOT_MAX_BYTES = 1_000_000
+_DEFAULT_NESTED_TOOL_MAX_DEPTH = 3
+_DEFAULT_NESTED_TOOL_MAX_CALLS_PER_PARENT = 5
+_DEFAULT_NESTED_TOOL_MAX_TOTAL_CALLS = 20
+_NESTED_TOOL_BLOCKED_NAMES = frozenset(
+    {
+        "bash",
+        "write_file",
+        "edit_file",
+        "local_write_report",
+        "remote_write_file",
+        "remote_edit_file",
+        "remote_run_command",
+        "system_reboot",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -189,6 +205,31 @@ def _offload_tool_output_if_needed(
     if preview:
         inline += f"\n\nPreview:\n{preview}"
     return inline, artifact_path
+
+
+def _nested_tool_signature(tool_name: str, tool_input: dict[str, object]) -> str:
+    try:
+        payload = json.dumps(tool_input, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        payload = str(tool_input)
+    return f"{tool_name}:{payload}"
+
+
+def _metadata_int(
+    metadata: dict[str, object],
+    key: str,
+    default: int,
+) -> int:
+    try:
+        return int(metadata.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _limit_preview(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n... [truncated]"
 
 
 def _resolve_permission_file_path(
@@ -470,6 +511,53 @@ async def _execute_tool_call(
         log.warning("unknown tool: %s", tool_name)
         return _result(f"Unknown tool: {tool_name}", True)
 
+    tool_metadata = dict(context.tool_metadata or {})
+    call_stack = tuple(
+        str(item)
+        for item in tool_metadata.get("nested_tool_call_stack", ())
+        if item is not None
+    )
+    if tool_name in call_stack:
+        return _result(
+            f"Nested tool call blocked: recursive call to {tool_name}.",
+            True,
+            metadata={"nestedToolBlocked": "recursive_call"},
+        )
+    try:
+        max_nested_depth = int(
+            tool_metadata.get(
+                "nested_tool_max_depth",
+                _DEFAULT_NESTED_TOOL_MAX_DEPTH,
+            )
+        )
+    except (TypeError, ValueError):
+        max_nested_depth = _DEFAULT_NESTED_TOOL_MAX_DEPTH
+    if call_stack and len(call_stack) >= max_nested_depth:
+        return _result(
+            (
+                "Nested tool call blocked: maximum nested tool depth "
+                f"({max_nested_depth}) exceeded."
+            ),
+            True,
+            metadata={"nestedToolBlocked": "max_depth_exceeded"},
+        )
+    is_nested_call = bool(call_stack)
+    nested_depth = len(call_stack)
+    if is_nested_call and tool_name in _NESTED_TOOL_BLOCKED_NAMES:
+        return _result(
+            (
+                "Nested tool call blocked: this tool is not allowed to run as a "
+                f"nested call: {tool_name}."
+            ),
+            True,
+            metadata={
+                "nestedToolBlocked": "blocked_tool",
+                "nested": True,
+                "nestedDepth": nested_depth,
+                "parentToolName": call_stack[-1] if call_stack else None,
+            },
+        )
+
     try:
         parsed_input = tool.input_model.model_validate(tool_input)
     except Exception as exc:
@@ -478,7 +566,7 @@ async def _execute_tool_call(
 
     # Permission check
     is_remote_tool = is_remote_workspace_tool(
-        context.tool_metadata,
+        tool_metadata,
         tool_name,
     )
     _file_path = (
@@ -529,20 +617,150 @@ async def _execute_tool_call(
         )
     )
     t0 = time.monotonic()
+    nested_seen_signatures = set(
+        str(item)
+        for item in tool_metadata.get("nested_tool_seen", ())
+        if item is not None
+    )
+    nested_parent_call_count = 0
+    nested_total_counter = tool_metadata.get("_nested_tool_total_counter")
+    if not isinstance(nested_total_counter, dict):
+        nested_total_counter = {
+            "count": _metadata_int(tool_metadata, "nested_tool_total_count", 0)
+        }
+    max_calls_per_parent = _metadata_int(
+        tool_metadata,
+        "nested_tool_max_calls_per_parent",
+        _DEFAULT_NESTED_TOOL_MAX_CALLS_PER_PARENT,
+    )
+    max_total_calls = _metadata_int(
+        tool_metadata,
+        "nested_tool_max_total_calls",
+        _DEFAULT_NESTED_TOOL_MAX_TOTAL_CALLS,
+    )
+    tool_context_metadata = {
+        "tool_registry": context.tool_registry,
+        "active_registry": context.tool_registry,
+        "ask_user_prompt": context.ask_user_prompt,
+        **tool_metadata,
+    }
+    nested_tool_events: list[dict[str, object]] = []
+    tool_context_metadata["_nested_tool_events"] = nested_tool_events
     try:
+        async def _nested_tool_invoker(
+            nested_tool_name: str,
+            nested_tool_input: dict[str, object] | None = None,
+        ) -> ToolResult:
+            nonlocal nested_parent_call_count
+            nested_payload = dict(nested_tool_input or {})
+            nested_signature = _nested_tool_signature(
+                nested_tool_name,
+                nested_payload,
+            )
+            nested_event_metadata = {
+                "nested": True,
+                "parentToolName": tool_name,
+                "nestedDepth": len(call_stack) + 1,
+                "callStack": [*call_stack, tool_name],
+            }
+            if nested_signature in nested_seen_signatures:
+                return ToolResult(
+                    output=(
+                        "Nested tool call blocked: repeated same tool and "
+                        f"arguments for {nested_tool_name}."
+                    ),
+                    is_error=True,
+                    metadata={
+                        **nested_event_metadata,
+                        "nestedToolBlocked": "duplicate_call",
+                    },
+                )
+            if nested_parent_call_count >= max_calls_per_parent:
+                return ToolResult(
+                    output=(
+                        "Nested tool call blocked: maximum nested calls per "
+                        f"parent ({max_calls_per_parent}) exceeded."
+                    ),
+                    is_error=True,
+                    metadata={
+                        **nested_event_metadata,
+                        "nestedToolBlocked": "max_calls_per_parent_exceeded",
+                    },
+                )
+            if int(nested_total_counter.get("count", 0)) >= max_total_calls:
+                return ToolResult(
+                    output=(
+                        "Nested tool call blocked: maximum total nested calls "
+                        f"({max_total_calls}) exceeded."
+                    ),
+                    is_error=True,
+                    metadata={
+                        **nested_event_metadata,
+                        "nestedToolBlocked": "max_total_calls_exceeded",
+                    },
+                )
+            nested_seen_signatures.add(nested_signature)
+            nested_parent_call_count += 1
+            nested_total_counter["count"] = int(nested_total_counter.get("count", 0)) + 1
+            nested_tool_use_id = f"nested_{uuid4().hex}"
+            nested_tool_events.append(
+                {
+                    "type": "ToolExecutionStarted",
+                    "toolName": nested_tool_name,
+                    "toolUseId": nested_tool_use_id,
+                    "toolInput": nested_payload,
+                    "metadata": nested_event_metadata,
+                }
+            )
+            nested_metadata = {
+                **tool_metadata,
+                "nested_tool_call_stack": (*call_stack, tool_name),
+                "nested_tool_parent": tool_name,
+                "nested_tool_seen": tuple(nested_seen_signatures),
+                "_nested_tool_total_counter": nested_total_counter,
+            }
+            nested_context = replace(
+                context,
+                tool_metadata=nested_metadata,
+            )
+            nested_executed = await _execute_tool_call(
+                nested_context,
+                nested_tool_name,
+                nested_tool_use_id,
+                nested_payload,
+            )
+            nested_tool_events.append(
+                {
+                    "type": "ToolExecutionCompleted",
+                    "toolName": nested_tool_name,
+                    "toolUseId": nested_tool_use_id,
+                    "toolInput": nested_payload,
+                    "isError": nested_executed.result.is_error,
+                    "outputPreview": _limit_preview(nested_executed.result.content, 500),
+                    "metadata": {
+                        **nested_event_metadata,
+                        **nested_executed.metadata,
+                    },
+                }
+            )
+            return ToolResult(
+                output=nested_executed.result.content,
+                is_error=nested_executed.result.is_error,
+                metadata={
+                    "nestedToolName": nested_tool_name,
+                    **nested_executed.metadata,
+                },
+            )
+
         result = await tool.execute(
             parsed_input,
             ToolExecutionContext(
                 cwd=context.cwd,
-                metadata={
-                    "tool_registry": context.tool_registry,
-                    "active_registry": context.tool_registry,
-                    "ask_user_prompt": context.ask_user_prompt,
-                    **(context.tool_metadata or {}),
-                },
+                metadata=tool_context_metadata,
                 hook_executor=context.hook_executor,
-                run_id=(context.tool_metadata or {}).get("run_id"),
-                tool_draft_id=(context.tool_metadata or {}).get("tool_draft_id"),
+                run_id=tool_metadata.get("run_id"),
+                tool_draft_id=tool_metadata.get("tool_draft_id"),
+                tool_invoker=_nested_tool_invoker,
             ),
         )
     except Exception as exc:
@@ -576,6 +794,17 @@ async def _execute_tool_call(
         is_error=result.is_error,
     )
     event_metadata: dict[str, object] = dict(result.metadata or {})
+    if is_nested_call:
+        event_metadata.update(
+            {
+                "nested": True,
+                "parentToolName": call_stack[-1] if call_stack else None,
+                "nestedDepth": nested_depth,
+                "callStack": list(call_stack),
+            }
+        )
+    if nested_tool_events:
+        event_metadata["nestedToolCalls"] = nested_tool_events
     if pre_change_metadata:
         event_metadata.update(pre_change_metadata)
 

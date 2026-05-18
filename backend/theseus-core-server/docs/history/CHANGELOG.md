@@ -29,6 +29,21 @@
 
 ---
 
+### 🛠️ Session 158 — Nested custom tool call runtime 지원 (2026-05-18)
+
+#### `theseus_engine` / `src`
+- generated custom tool이 다른 active tool을 안전하게 호출할 수 있도록 `ToolExecutionContext.call_tool()` 공식 API를 추가
+- nested call은 기존 QueryEngine tool execution pipeline을 재사용해 registry lookup, input validation, RBAC/permission, hook, output normalization을 동일하게 통과하도록 연결
+- cycle guard, max depth, 같은 tool+arguments 반복 차단, parent당/전체 nested call budget, write/edit/bash/reboot 계열 nested 차단을 추가
+- nested 실행 요약은 parent tool 완료 metadata의 `nestedToolCalls`에 남겨 디버깅과 감사 추적 근거로 활용할 수 있게 정리
+- sandbox gate stub에도 `call_tool()`을 추가하되 sandbox 검증 중 실제 nested 실행은 수행하지 않고 error `ToolResult`를 반환하도록 유지
+- generated tool 프롬프트와 ToolBuild 지침에 `context.call_tool("tool_name", {...})` 사용 규칙과 nested call 제한을 추가
+
+#### 테스트
+- invoker 없는 context, 정상 nested 호출, cycle guard, depth limit, duplicate guard, blocked tool name을 검증하는 단위 테스트 추가
+
+---
+
 ### 🛠️ Session 157 — Tool started history projection 제외 (2026-05-18)
 
 #### `src`
