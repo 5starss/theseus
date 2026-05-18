@@ -29,6 +29,18 @@
 
 ---
 
+### 🛠️ Session 157 — Tool started history projection 제외 (2026-05-18)
+
+#### `src`
+- `TOOL_EXECUTION_STARTED` / `TOOL_CALL` / `TOOL_USE` 기록은 UI와 감사 로그용으로만 유지하고, 다음 LLM 요청 history에는 assistant context로 재주입하지 않도록 `src/history/mapper.py`를 수정
+- `TOOL_EXECUTION_COMPLETED` / tool result 기록은 기존처럼 “이전 도구 실행 결과” assistant context로 유지해 실제 완료 결과만 다음 턴의 근거로 사용되도록 정리
+- legacy text notice 중 `Tool execution:`처럼 시작 상태에 가까운 기록도 LLM history projection 대상에서 제외하고, `Tool result:` / `Tool completed:` 계열만 유지
+
+#### 테스트
+- started tool notice가 `to_engine_messages()`에서 제외되고 completed result는 계속 projection되는지 검증하는 history mapper 단위 테스트 추가
+
+---
+
 ### 🛠️ Session 156 — VSCode Extension custom tool registry 정합성 수정 (2026-05-18)
 
 #### `theseus_engine`
