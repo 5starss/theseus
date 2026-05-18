@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from src.auth.schemas import SessionContext
 from src.builder.system_prompt import build_theseus_system_prompt
-from src.config import resolve_model_name
+from src.config import resolve_model_name, settings
 from src.db.postgres import SessionLocal
 from src.plan.service import assert_plan_execution_context
 from src.remote_workspace.read_primitives import build_remote_read_analysis_tools
@@ -26,6 +26,7 @@ from theseus_engine.engine.stream_events import (
 )
 from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.rbac import TheseusPermissionChecker, TheseusPermissionSettings
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 from theseus_engine.core.tool_visibility import (
     ToolVisibilityPolicy,
     build_visible_registry,
@@ -112,6 +113,20 @@ def _allows_remote_write_execution(
     if mode == AgentMode.AGENT:
         return bool(remote_workspace and remote_workspace.allow_write_execution)
     return False
+
+
+def _allows_local_report_write(
+    mode: AgentMode,
+    plan_phase: PlanPhase | None,
+    remote_workspace: RemoteWorkspaceConnectionConfig | None,
+) -> bool:
+    if not settings.THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED:
+        return False
+    if remote_workspace is None:
+        return False
+    if mode == AgentMode.AGENT:
+        return True
+    return mode == AgentMode.PLAN and plan_phase == PlanPhase.EXECUTING
 
 
 async def _enforce_executing_plan_guard(
@@ -222,6 +237,11 @@ def get_query_engine(
         plan_phase,
         build_context.remote_workspace,
     )
+    allow_local_report_write = _allows_local_report_write(
+        build_context.mode,
+        plan_phase,
+        build_context.remote_workspace,
+    )
     model_name = resolve_model_name()
     api_client = TheseusLLMClient(model_name)
 
@@ -244,11 +264,13 @@ def get_query_engine(
     tool_permissions = dict(inferred_permissions)
     tool_permissions.update(build_context.project_tool_permissions)
 
+    custom_tool_inventory: list[dict[str, Any]] = []
     if build_context.project_id:
         loaded_tools = load_custom_tools_for_project(
             full_registry,
             project_id=build_context.project_id,
             tool_permissions=tool_permissions,
+            load_report=custom_tool_inventory,
         )
     else:
         loaded_tools = load_custom_tools(full_registry, tool_permissions)
@@ -285,6 +307,7 @@ def get_query_engine(
             disabled_tools=frozenset(disabled_tools),
             has_remote_workspace=build_context.remote_workspace is not None,
             allow_remote_write_execution=allow_remote_write_execution,
+            allow_local_report_write=allow_local_report_write,
         ),
     )
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
@@ -298,6 +321,12 @@ def get_query_engine(
         plan_phase=plan_phase,
         plan_content=build_context.plan_content,
         available_tools=allowed_tools,
+        runtime_reminders=build_mode_runtime_reminders(
+            build_context.mode,
+            plan_phase=plan_phase,
+            source="server_stream",
+            explicit_selection=True,
+        ),
     )
     permission_checker = TheseusPermissionChecker(
         settings=TheseusPermissionSettings(),
@@ -327,7 +356,9 @@ def get_query_engine(
         permission_prompt=_deny_permission_prompt,
         tool_metadata={
             "tool_registry": full_registry,
+            "active_registry": active_registry,
             "tool_permissions": tool_permissions,
+            "custom_tool_inventory": custom_tool_inventory,
             "llm_client": api_client,
             "model_name": model_name,
             "tool_repair_policy": ToolRepairPolicy.from_env(),
@@ -340,6 +371,7 @@ def get_query_engine(
             "agent_mode": build_context.mode.value,
             "plan_phase": plan_phase.value if plan_phase is not None else None,
             "remote_workspace_id": build_context.remote_workspace_id,
+            "local_report_root": settings.THESEUS_LOCAL_REPORT_ROOT,
             REMOTE_WORKSPACE_RUNTIME_KEY: remote_workspace_runtime_key,
             "remote_workspace": (
                 build_context.remote_workspace.redacted_model_dump(by_alias=True)

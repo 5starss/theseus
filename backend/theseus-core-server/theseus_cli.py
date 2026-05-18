@@ -55,6 +55,7 @@ async def run_cli():
     actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
     project_tool_permissions = {
         "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
+        "local_write_report": 2,
         "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
         "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
         "search_knowledge_base": 1, "ingest_document": 2,
@@ -187,26 +188,30 @@ async def run_cli():
             if did_compress:
                 print(f"[*] 컨텍스트 압축 완료: {len(current_messages)}개 메시지로 축약")
 
+            runtime_reminders = ctx.pending_mode_reminders
+            ctx.pending_mode_reminders = ()
+            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.DRAFTING:
+                runtime_reminders = (
+                    *runtime_reminders,
+                    (
+                        "You are in PLAN DRAFTING mode. If this is a question "
+                        "or clarification, answer it directly in natural language. "
+                        "If this is an implementation request, research the codebase "
+                        "first, then output a JSON plan."
+                    ),
+                )
+
             ctx.engine, new_full_registry = await setup_engine(
                 ctx.sm, ctx.user_level, ctx.project_tool_permissions, ctx.ask_permission,
                 api_client=ctx.client, user_query=line, top_k=8,
                 history_messages=current_messages,
+                runtime_reminders=runtime_reminders,
             )
             ctx.full_registry = new_full_registry
             ctx.engine.load_messages(current_messages)
 
-            # ── 모드 전환 알림 + DRAFTING 형식 강제 주입 ──────────────
+            # ── 스트리밍 입력 준비 ──────────────────────────────────
             actual_line = line
-            if ctx.pending_mode_notification:
-                actual_line = ctx.pending_mode_notification + actual_line
-                ctx.pending_mode_notification = ""
-            if ctx.sm.mode == AgentMode.PLAN and ctx.sm.plan_phase == PlanPhase.DRAFTING:
-                actual_line = (
-                    f"{actual_line}\n\n"
-                    "REMINDER: You are in PLAN DRAFTING mode. "
-                    "If this is a question or clarification, answer it directly in natural language. "
-                    "If this is an implementation request, research the codebase first, then output a JSON plan."
-                )
 
             # ── 스트리밍 실행 ──────────────────────────────────────────
             print("assistant> ", end="", flush=True)

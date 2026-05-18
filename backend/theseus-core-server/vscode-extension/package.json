@@ -15,6 +15,7 @@
     "onCommand:theseus.start",
     "onCommand:theseus.stop",
     "onCommand:theseus.showLogs",
+    "onCommand:theseus.selectWorktree",
     "onCommand:theseus.moveToSecondarySidebar",
     "onCommand:theseus.moveToPanel",
     "onCommand:theseus.askSelected",
@@ -31,12 +32,27 @@
         "theseus.corePath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the theseus-core-server directory (the folder that contains theseus_engine/). Required when the workspace root is not the core server directory."
+          "description": "Path to the theseus-core-server directory (the folder that contains theseus_engine/). Supports ${workspaceFolder}, ${userHome}, and ${env:NAME}."
         },
         "theseus.pythonPath": {
           "type": "string",
           "default": "python",
-          "description": "Python executable used to start Theseus. Use the full path if 'python' is not on PATH (e.g. C:\\Python311\\python.exe or /usr/bin/python3)."
+          "description": "Python executable used to start Theseus. Supports ${workspaceFolder}, ${userHome}, and ${env:NAME}."
+        },
+        "theseus.runtimeMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "source-python",
+            "bundled-runner"
+          ],
+          "default": "auto",
+          "description": "Runtime startup mode. auto uses theseus.runnerPath when configured, otherwise the source Python runtime."
+        },
+        "theseus.runnerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to a packaged Theseus runner binary. Supports ${workspaceFolder}, ${userHome}, and ${env:NAME}. When set, the extension starts this binary instead of python -m theseus_engine.daemon."
         },
         "theseus.serverUrl": {
           "type": "string",
@@ -46,7 +62,14 @@
         "theseus.workspacePath": {
           "type": "string",
           "default": "",
-          "description": "Working directory for the agent (your project root). Defaults to the first VSCode workspace folder. Do not point this at custom_tools; Theseus loads tools from corePath/theseus_engine/custom_tools and workspace custom_tools."
+          "description": "Working directory for the agent (your project root). Supports ${workspaceFolder}, ${userHome}, and ${env:NAME}. Defaults to the first VSCode workspace folder."
+        },
+        "theseus.readyTimeoutSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "Maximum seconds to wait for Theseus RunnerReady during startup. Values are capped at 60 seconds."
         }
       }
     },
@@ -62,6 +85,10 @@
       {
         "command": "theseus.showLogs",
         "title": "Theseus: Show Logs"
+      },
+      {
+        "command": "theseus.selectWorktree",
+        "title": "Theseus: Select Workspace (Worktree)"
       },
       {
         "command": "theseus.moveToSecondarySidebar",
@@ -156,6 +183,9 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "package:vsix": "npm run compile && npx @vscode/vsce package",
+    "package:test": "npm run package:vsix && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\package-test-distribution.ps1",
+    "package:local-source": "npm run package:vsix && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\scripts\\package-local-extension-source.ps1",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {

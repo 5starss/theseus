@@ -18,8 +18,12 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 # 런타임 스테이지
 FROM python:3.11-slim as runtime
 
+ARG APP_UID=999
+ARG APP_GID=999
+
 # 보안: non-root 사용자 생성
-RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
+RUN groupadd --system --gid "${APP_GID}" appuser \
+    && useradd --system --uid "${APP_UID}" --gid appuser -m -d /home/appuser appuser
 
 WORKDIR /app
 

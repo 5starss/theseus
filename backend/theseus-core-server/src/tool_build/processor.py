@@ -100,7 +100,8 @@ class ToolBuildProcessor:
             self._finished_runs.add(event.run_id)
         except ToolBuildError as exc:
             logger.error("Tool build failed. runId=%s code=%s error=%s", event.run_id, exc.code, exc.message)
-            await self.publish_failed(event, exc.code, exc.message)
+            message = await self._explain_failure(event, code=exc.code, message=exc.message)
+            await self.publish_failed(event, exc.code, message)
         except ToolBuildPublishError:
             logger.error("Tool build event publish failed. runId=%s", event.run_id, exc_info=True)
             raise
@@ -110,14 +111,43 @@ class ToolBuildProcessor:
                 event.run_id,
                 settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS,
             )
-            await self.publish_failed(
-                event,
-                "TOOL_BUILD_TIMEOUT",
-                f"Tool build exceeded {settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS} seconds.",
-            )
+            code = "TOOL_BUILD_TIMEOUT"
+            message = f"Tool build exceeded {settings.CORE_TOOL_BUILD_RUN_TIMEOUT_SECONDS} seconds."
+            message = await self._explain_failure(event, code=code, message=message, stage="timeout")
+            await self.publish_failed(event, code, message)
         except Exception as exc:
             logger.error("Unexpected Tool build failure. runId=%s error=%s", event.run_id, exc, exc_info=True)
-            await self.publish_failed(event, "TOOL_BUILD_FAILED", str(exc))
+            code = "TOOL_BUILD_FAILED"
+            message = await self._explain_failure(event, code=code, message=str(exc), stage="unexpected")
+            await self.publish_failed(event, code, message)
+
+    async def _explain_failure(
+        self,
+        event: ToolBuildRequestedEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None = None,
+    ) -> str:
+        try:
+            return await asyncio.wait_for(
+                self.builder.explain_failure(
+                    event,
+                    code=code,
+                    message=message,
+                    stage=stage,
+                ),
+                timeout=20,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Tool build failure explanation failed. runId=%s code=%s error=%s",
+                event.run_id,
+                code,
+                exc,
+                exc_info=True,
+            )
+            return message
 
     async def publish_progress(
         self,

@@ -48,6 +48,11 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionStarted,
     extract_plan_json,
 )
+from theseus_engine.engine.agent_loop_control import (
+    AGENT_AUTO_CONTINUE_MAX,
+    AUTO_CONTINUE_PROMPT,
+    should_auto_continue_after_assistant,
+)
 from theseus_engine.engine.tool_execution_state import is_remote_workspace_tool
 from theseus_engine.skills.injection import (
     SkillInjectionConfig,
@@ -57,6 +62,7 @@ from theseus_engine.tools.core.base_tools import (
     ToolExecutionContext,
     ToolRegistry,
     ToolResult,
+    stringify_tool_output,
 )
 from theseus_engine.wrappers.hooks.theseus_hook_executor import HookEvent
 
@@ -530,6 +536,7 @@ async def _execute_tool_call(
                 cwd=context.cwd,
                 metadata={
                     "tool_registry": context.tool_registry,
+                    "active_registry": context.tool_registry,
                     "ask_user_prompt": context.ask_user_prompt,
                     **(context.tool_metadata or {}),
                 },
@@ -553,11 +560,12 @@ async def _execute_tool_call(
             is_error=True,
         )
     elapsed = time.monotonic() - t0
+    output_text = stringify_tool_output(result.output)
     log.debug("executed %s in %.2fs err=%s output_len=%d",
-              tool_name, elapsed, result.is_error, len(result.output or ""))
+              tool_name, elapsed, result.is_error, len(output_text))
 
     inline_output, artifact_path = _offload_tool_output_if_needed(
-        tool_name=tool_name, tool_use_id=tool_use_id, output=result.output,
+        tool_name=tool_name, tool_use_id=tool_use_id, output=output_text,
     )
     if artifact_path:
         _remember_active_artifact(context.tool_metadata, str(artifact_path))
@@ -587,7 +595,7 @@ async def _execute_tool_call(
         if final_output != tool_result.content:
             tool_result = ToolResultBlock(
                 tool_use_id=tool_use_id,
-                content=str(final_output),
+                content=stringify_tool_output(final_output),
                 is_error=tool_result.is_error,
             )
 
@@ -657,6 +665,32 @@ def _relative_to_cwd(cwd: Path, path: Path) -> str:
         return str(path)
 
 
+def _assistant_text(message: ConversationMessage) -> str:
+    return "".join(
+        block.text for block in message.content
+        if isinstance(block, TextBlock) and isinstance(block.text, str)
+    )
+
+
+def _should_auto_continue_after_assistant(
+    *,
+    context: QueryContext,
+    final_message: ConversationMessage,
+    stop_reason: str | None,
+    tool_call_count: int,
+    auto_continue_count: int,
+) -> bool:
+    mode = str((context.tool_metadata or {}).get("agent_mode") or "").upper()
+    return should_auto_continue_after_assistant(
+        final_text=_assistant_text(final_message),
+        stop_reason=stop_reason,
+        tool_call_count=tool_call_count,
+        auto_continue_count=auto_continue_count,
+        has_available_tools=bool(context.tool_registry.to_api_schema()),
+        mode=mode,
+    )
+
+
 # ── run_query 루프 ────────────────────────────────────────────
 
 async def run_query(
@@ -680,6 +714,8 @@ async def run_query(
     reported_token_clamp = False
 
     turn_count = 0
+    auto_continue_count = 0
+    pending_auto_continue: ConversationMessage | None = None
     while context.max_turns is None or turn_count < context.max_turns:
         turn_count += 1
         yield AgentLoopStatus(
@@ -715,13 +751,18 @@ async def run_query(
             messages[:] = compacted_messages
 
         final_message: ConversationMessage | None = None
+        final_stop_reason: str | None = None
         usage = UsageSnapshot()
+        request_messages = messages
+        if pending_auto_continue is not None:
+            request_messages = [*messages, pending_auto_continue]
+            pending_auto_continue = None
 
         try:
             async for event in context.api_client.stream_message(
                 ApiMessageRequest(
                     model=context.model,
-                    messages=messages,
+                    messages=request_messages,
                     system_prompt=context.system_prompt,
                     max_tokens=effective_max_tokens,
                     tools=context.tool_registry.to_api_schema(),
@@ -740,6 +781,7 @@ async def run_query(
                 elif isinstance(event, ApiMessageCompleteEvent):
                     final_message = event.message
                     usage = event.usage
+                    final_stop_reason = event.stop_reason
 
         except Exception as exc:
             if _is_completion_token_limit_error(exc):
@@ -822,10 +864,39 @@ async def run_query(
                 ), None
 
         if not tool_calls:
+            if _should_auto_continue_after_assistant(
+                context=context,
+                final_message=final_message,
+                stop_reason=final_stop_reason,
+                tool_call_count=len(tool_calls),
+                auto_continue_count=auto_continue_count,
+            ):
+                auto_continue_count += 1
+                pending_auto_continue = ConversationMessage.from_user_text(AUTO_CONTINUE_PROMPT)
+                yield AgentLoopStatus(
+                    phase="waiting",
+                    turn=turn_count,
+                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    tool_count=0,
+                ), usage
+                yield StatusEvent(
+                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    metadata={
+                        "reason": "assistant_pending_action_without_tool_call",
+                        "stopReason": final_stop_reason,
+                        "autoContinueCount": auto_continue_count,
+                        "maxAutoContinue": AGENT_AUTO_CONTINUE_MAX,
+                    },
+                ), usage
+                continue
             if context.hook_executor is not None:
                 await context.hook_executor.execute(
                     HookEvent.STOP,
-                    {"event": HookEvent.STOP.value, "stop_reason": "tool_uses_empty"},
+                    {
+                        "event": HookEvent.STOP.value,
+                        "stop_reason": "tool_uses_empty",
+                        "model_stop_reason": final_stop_reason,
+                    },
                 )
             yield AgentLoopStatus(
                 phase="complete",

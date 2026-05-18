@@ -73,6 +73,7 @@ export type RunnerStatusEvent = RunnerBaseEvent<'RunnerStatus'> & {
   lifecycle?: Nullable<RunnerLifecycleState>;
   state?: Nullable<RunnerLifecycleState>;
   runtimeMode?: Nullable<string>;
+  runnerPath?: Nullable<string>;
   daemonPort?: Nullable<number>;
   lastDiagnostic?: RunnerEvent;
 };
@@ -160,6 +161,9 @@ export type KnownRunnerEvent =
   | (RunnerBaseEvent<'workspaceInfo'> & { name?: string; path?: string })
   | (RunnerBaseEvent<'activeFileChanged'> & { file?: string; line?: number })
   | (RunnerBaseEvent<'customToolsLoaded'> & { tools?: unknown[] })
+  | (RunnerBaseEvent<'customToolInventoryUpdated'> & { tools?: unknown[] })
+  | (RunnerBaseEvent<'customToolInstallProgress'> & { success?: boolean; packages?: unknown[] })
+  | (RunnerBaseEvent<'toolRegistryUpdated'> & { availableTools?: unknown[]; unavailableCount?: number })
   | (RunnerBaseEvent<'customToolsChanged'> & { action?: string; file?: string; validation?: unknown })
   | (RunnerBaseEvent<'customToolValidation'> & { success?: boolean })
   | (RunnerBaseEvent<'healthStatus'> & { settings?: JsonObject; runner?: JsonObject; checks?: unknown[] })
@@ -201,6 +205,7 @@ type EmptyWebviewCommand = {
     | 'getWorkspaceName'
     | 'getActiveFile'
     | 'getCustomTools'
+    | 'refreshToolRegistry'
     | 'getHealth'
     | 'explainProblem'
     | 'fixProblem';
@@ -218,7 +223,9 @@ export type WebviewToHostMessage =
   | { type: 'reviewPlan'; action?: string }
   | { type: 'openPlanPreview'; plan?: JsonObject }
   | { type: 'getFiles'; query?: string }
-  | { type: 'updateToolPermission'; metadataPath?: string; permissionLevel?: unknown }
+  | { type: 'updateToolPermission'; metadataPath?: string; permissionLevel?: unknown; toolName?: string | null; session?: string | null }
+  | { type: 'installCustomToolDependencies' | 'retryCustomToolLoad' | 'registerCustomTool' | 'disableCustomTool'; metadataPath?: string; modulePath?: string; toolName?: string | null }
+  | { type: 'selectWorktree' }
   | { type: 'savePastedImage'; name?: string; data?: unknown }
   | { type: 'revertChangedFile'; id?: string; path?: string; oldContent?: string }
   | { type: 'openFile'; path?: string }
@@ -259,10 +266,16 @@ const WEBVIEW_TO_HOST_MESSAGE_TYPES = new Set([
   'getWorkspaceName',
   'getActiveFile',
   'getCustomTools',
+  'refreshToolRegistry',
   'getHealth',
   'explainProblem',
   'fixProblem',
   'updateToolPermission',
+  'installCustomToolDependencies',
+  'retryCustomToolLoad',
+  'registerCustomTool',
+  'disableCustomTool',
+  'selectWorktree',
   'savePastedImage',
   'revertChangedFile',
   'openFile',
@@ -318,6 +331,9 @@ const KNOWN_RUNNER_EVENT_TYPES = new Set([
   'workspaceInfo',
   'activeFileChanged',
   'customToolsLoaded',
+  'customToolInventoryUpdated',
+  'customToolInstallProgress',
+  'toolRegistryUpdated',
   'customToolsChanged',
   'customToolValidation',
   'healthStatus',
@@ -401,7 +417,13 @@ function isKnownRunnerEventShape(value: JsonObject, type: string): boolean {
     case 'activeFileChanged':
       return optionalString(value.file) && optionalNumber(value.line);
     case 'customToolsLoaded':
+    case 'customToolInventoryUpdated':
       return value.tools === undefined || Array.isArray(value.tools);
+    case 'customToolInstallProgress':
+      return optionalBoolean(value.success) && (isMissing(value.packages) || Array.isArray(value.packages));
+    case 'toolRegistryUpdated':
+      return (isMissing(value.availableTools) || Array.isArray(value.availableTools))
+        && optionalNumber(value.unavailableCount);
     case 'customToolValidation':
       return optionalBoolean(value.success) && optionalString(value.message);
     case 'healthStatus':

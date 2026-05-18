@@ -59,7 +59,7 @@ Main task required fields: `id`, `parent_id` (null), `tier`, `title`, `problem`,
 `target_files`, `expected_effect`, `description`, `status`
 Sub-task required fields: `id`, `parent_id`, `title`, `description`, `target_files`, `status`
 Optional fields (omit if not applicable): `integration_points`, `sequential_dependencies`, \
-`plan_b`, `safe_alternative`, top-level `alternatives`
+`plan_b`, `safe_alternative`, top-level `alternatives`, top-level `execution_spec`
 
 ```json
 {
@@ -106,6 +106,82 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
     "manual_checks": ["Items to verify manually"],
     "success_criteria": "Criteria for success determination"
   },
+  "execution_spec": {
+    "tool_name": "snake_case logical tool name when the request is for a generated tool",
+    "validation_strategy": "core_sandbox_gate for generated Theseus custom tools; omit for pure remote/operator diagnostics",
+    "mvp_scope": ["Concrete read-only capabilities included in the first version"],
+    "mvp_exclusions": ["Write operations, recovery actions, or integrations intentionally excluded"],
+    "status_values": ["PASS", "WARNING", "FAIL", "SKIPPED", "INFO"],
+    "inputs": [
+      {
+        "name": "required_containers",
+        "type": "array[string]",
+        "required": true,
+        "description": "Project-specific container names to inspect"
+      }
+    ],
+    "outputs": {
+      "format": "json_and_markdown",
+      "required_result_fields": [
+        "check_id",
+        "category",
+        "target",
+        "status",
+        "evidence",
+        "sanitized_output",
+        "recommendation"
+      ]
+    },
+    "command_policy": {
+      "allowlist": ["docker ps", "docker inspect", "docker logs", "df", "free", "top", "uptime", "curl", "grep", "awk", "sed -n"],
+      "denylist": ["docker exec", "docker stop", "docker restart", "docker rm", "docker compose up", "docker compose down", "rm", "mv", "cp", "chmod", "chown", "systemctl", "service", "kill", "reboot", "shutdown", "kubectl"]
+    },
+    "api_checks": [
+      {
+        "name": "health-check",
+        "method": "GET",
+        "path": "/health",
+        "expected_statuses": [200],
+        "requires_auth": false,
+        "read_only": true,
+        "timeout_seconds": 5,
+        "latency_warning_ms": 1000
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "docker_container_audit",
+        "description": "Docker container state audit",
+        "commands": [
+          {
+            "command": "docker inspect <container_name> --format='Name={{.Name}} Status={{.State.Status}} RestartCount={{.RestartCount}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'",
+            "type": "read_only",
+            "timeout_seconds": 10,
+            "failure_policy": "fail",
+            "parse_strategy": "key_value"
+          }
+        ],
+        "decision_rules": [
+          {
+            "condition": "State.Status is not running OR OOMKilled is true",
+            "status": "FAIL",
+            "message": "A required container is not healthy enough for post-deploy operation."
+          },
+          {
+            "condition": "Health is none",
+            "status": "SKIPPED",
+            "message": "Docker healthcheck is not configured; do not treat this as failure."
+          }
+        ],
+        "json_mapping": {
+          "evidence": "Parsed key-value fields used for the decision",
+          "sanitized_output": "Secret-free command output",
+          "recommendation": "Operator action or next read-only diagnostic step"
+        }
+      }
+    ],
+    "markdown_report_example": "Human-readable report layout summarizing PASS/WARNING/FAIL/SKIPPED/INFO results"
+  },
   "action_plan": {
     "immediate": ["List of task IDs to start immediately"],
     "sequential_dependencies": "Description of task pairs with sequential dependencies (optional)",
@@ -129,12 +205,56 @@ Classify each main task into one of three tiers:
  - The `description` field MUST NOT be a vague summary. Specify concrete class/function names, library methods with key arguments, and error handling — detailed enough to code from directly.
  - The JSON must be complete and valid — no truncation, no placeholder values.
  - This plan will be parsed programmatically. The JSON block must be valid.
+ - CRITICAL — executable tool specs: If the user asks for a generated tool, Remote Workspace \
+diagnostic, deployment check, server health check, log audit, API audit, Docker audit, or \
+resource monitoring capability, the JSON MUST include top-level `execution_spec`. This is \
+not a roadmap section; it is the build-ready spec that the next phase will use as context.
+ - Generated Theseus custom tools MUST use `execution_spec.validation_strategy: "core_sandbox_gate"`. \
+Do NOT add `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, or `python3 -c ...` \
+as execution steps for generated tools. After approval, `create_tool` runs the Core \
+Docker sandbox gate, which compiles/imports the module and checks the BaseTool subclass, \
+required attributes, and execute signature before activation.
+ - Generated Theseus custom tools are not operating-system command plans. Their \
+`execution_spec.steps[]` may be empty when validation is delegated to `core_sandbox_gate`; \
+instead, include implementation constraints such as BaseTool imports, Pydantic input model, \
+async `execute(arguments, context)`, ToolResult output shape, dependency policy, and \
+MVP exclusions.
+ - `execution_spec.steps[]` MUST include concrete read-only commands only when the capability \
+runs against an operating system, Docker host, Remote Workspace, API endpoint, or logs.
+ - Every command entry MUST include `command`, `type`, `timeout_seconds`, `failure_policy`, \
+and `parse_strategy`. Use `type: "read_only"` for MVP diagnostics.
+ - Every step MUST include `decision_rules` with concrete `condition`, `status`, and \
+`message`, and `json_mapping` with `evidence`, `sanitized_output`, and `recommendation`.
+ - Supported status values are exactly `PASS`, `WARNING`, `FAIL`, `SKIPPED`, and `INFO`.
+ - Docker inspect checks MUST use real Docker fields: `.State.Status`, `.RestartCount`, \
+`.State.ExitCode`, `.State.OOMKilled`, and `.State.Health.Status` when health exists. \
+Do NOT use grep over raw docker inspect output to infer health.
+ - Docker health status `none` means healthcheck is not configured; classify it as \
+`SKIPPED` or `INFO`, not `FAIL`.
+ - API checks MUST declare `method`, `path`, `expected_statuses`, `requires_auth`, \
+`read_only`, `timeout_seconds`, and `latency_warning_ms`. Auth-required read-only API \
+checks may allow `200`, `401`, or `403`. Data-changing endpoints are excluded from MVP.
+ - POST, PUT, PATCH, DELETE, order creation, rollback, restart, Docker exec, Kubernetes \
+commands, Slack/Teams notifications, recovery commands, and production configuration \
+changes MUST be listed in `mvp_exclusions` unless the user explicitly asked for a \
+separate approved write-capable tool.
+ - Log grep checks MUST distinguish "no matches" from command failure. Use a \
+`failure_policy` such as `ignore_no_match` and design the result so no matches means PASS.
+ - Command policy MUST be allowlist-based. If a command is not in the allowlist or matches \
+the denylist, do not include it in the MVP spec; explain the safe alternative instead.
+ - Verification commands are separate from generated-tool sandbox validation. For ordinary \
+worktree verification, the only interpreter-style commands that may appear in command steps are \
+`python -B -m py_compile <relative .py>`, `python3 -B -m py_compile <relative .py>`, \
+`python -m json.tool <relative .json>`, `node --check <relative .js>`, and `git diff --check`.
  - CRITICAL — new tool creation: If the goal is to add a new agent capability/tool, \
 the plan must describe creating a Theseus custom tool during the Executing phase. \
-In this case `target_files` must list both `theseus_engine/custom_tools/<tool_name>_tool.py` \
-and the generated `theseus_engine/custom_tools/<tool_name>_tool.meta.json` unless \
-the logical tool name already ends with `_tool`. Do not use legacy framework paths or \
-generic source-file fallbacks for new Theseus tools.
+In server/project runs, follow the runtime-provided project custom tool artifact root, \
+for example `theseus_engine/custom_tools/projects/{projectId}/`. In that case \
+`target_files` must list both `<project artifact root>/<moduleName>.py` and \
+`<project artifact root>/<moduleName>.meta.json`. Only standalone local runs without a \
+project artifact root should use the global `theseus_engine/custom_tools/<moduleName>.py` \
+fallback. Do not use legacy framework paths or generic source-file fallbacks for new \
+Theseus tools.
  - CRITICAL — custom tool implementation plans must respect the generated-tool \
 security rules below. Do not plan subprocess/nvidia-smi/shell execution inside generated \
 custom tool code; use read-only APIs or identify the requirement as needing a trusted core adapter.

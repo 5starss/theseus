@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { useParams } from 'react-router-dom';
-import { Lock, CheckCircle } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
@@ -9,7 +9,7 @@ import { remoteWorkspaceApi } from '../../api/remoteWorkspace';
 import { useToolGenerationSSE } from '../../hooks/useToolGenerationSSE';
 import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
-import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
+import { MessageItem } from './MessageItem';
 import { ToolPlanMode } from '../../types/chat';
 import type { ChatMessage, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 import type { RemoteWorkspaceResponse } from '../../types/project';
@@ -22,6 +22,7 @@ const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description:
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
+  const navigate = useNavigate();
   const { currentProject } = useProjectStore();
   const {
     messages,
@@ -45,18 +46,31 @@ export function ChatArea() {
   const [input, setInput] = useState('');
   const [remoteWorkspaces, setRemoteWorkspaces] = useState<RemoteWorkspaceResponse[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isAtBottom = useRef(true);
+
   const { connectSSE } = useToolGenerationSSE();
   const { connectChatStream } = useChatStreamSSE();
   const selectedRemoteWorkspace = remoteWorkspaces.find(
     workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
   );
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const handleScroll = () => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    // 하단에서 100px 이내면 바닥에 있는 것으로 간주
+    const atBottom = scrollHeight - scrollTop - clientHeight < 100;
+    isAtBottom.current = atBottom;
+  };
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   useEffect(() => {
-    scrollToBottom();
+    if (isAtBottom.current) {
+      scrollToBottom(isGenerating ? 'auto' : 'smooth');
+    }
   }, [messages, isGenerating, progressInfo]);
 
   useEffect(() => {
@@ -154,6 +168,7 @@ export function ChatArea() {
 
     const userMessage = input.trim();
     setInput('');
+    isAtBottom.current = true;
 
     try {
       if (mode === ToolPlanMode.ASK) {
@@ -181,47 +196,7 @@ export function ChatArea() {
     }
   };
 
-  const renderMessageContent = (msg: ChatMessage) => {
-    if (msg.senderType === 'ASSISTANT') {
-      return <MarkdownViewer content={msg.content} />;
-    }
 
-    // TOOL_FEEDBACK 타입이거나 내용이 JSON 형태인 경우 파싱 시도
-    if (msg.messageType === 'TOOL_FEEDBACK' || msg.content.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(msg.content);
-        if (parsed.feedbackItems && Array.isArray(parsed.feedbackItems)) {
-          return (
-            <div className="space-y-1">
-              <div className="font-bold text-blue-300 mb-1 text-xs uppercase tracking-tight">PLAN 수정 요청</div>
-              {parsed.feedbackItems.map((item: { comment: string }, i: number) => (
-                <div key={i} className="flex gap-2 text-[14px]">
-                  <span className="text-blue-400/60 mt-1">•</span>
-                  <span>{item.comment}</span>
-                </div>
-              ))}
-            </div>
-          );
-        }
-
-        if (parsed.toolApprovalId) {
-          return (
-            <div className="flex flex-col gap-1.5">
-              <div className="font-bold text-blue-300 text-xs uppercase tracking-tight">도구 생성 요청</div>
-              <div className="text-[14px] flex items-center gap-2 text-slate-300">
-                <CheckCircle className="w-3.5 h-3.5 text-blue-400" />
-                <span>도구 생성을 요청했습니다</span>
-              </div>
-            </div>
-          );
-        }
-      } catch {
-        // JSON 파싱 실패 시 일반 텍스트로 렌더링
-      }
-    }
-
-    return <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>;
-  };
 
   return (
     <div className="flex flex-col h-full relative overflow-hidden">
@@ -241,24 +216,29 @@ export function ChatArea() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-8 z-10 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent"
+      >
         {messages.length > 0 ? (
           <div className="space-y-6">
             {messages.map((msg, idx) => {
+              const isLast = idx === messages.length - 1;
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
-              const isLastAssistant = msg.senderType === 'ASSISTANT' && idx === messages.length - 1;
+              const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
               if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
 
+              const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
+
               return (
-                <div key={msg.messageId} className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[70%] p-4 rounded-lg overflow-x-auto ${msg.senderType === 'USER'
-                    ? 'bg-slate-700 text-slate-100 shadow-md'
-                    : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM' ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
-                      : 'bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] w-full'
-                    }`}>
-                    {renderMessageContent(msg)}
-                  </div>
-                </div>
+                <MessageItem
+                  key={msg.messageId}
+                  msg={msg}
+                  isLast={isLast}
+                  isGenerating={isGenerating}
+                  isLoadingDots={isLoadingDots}
+                />
               );
             })}
 
@@ -351,34 +331,47 @@ export function ChatArea() {
           )}
         </div>
 
-        <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : isClosed ? 'border-red-900/30' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isGenerating || isClosed}
-            className="flex-1 bg-transparent border-none outline-none resize-none px-3 py-2 text-sm text-slate-300 placeholder-slate-500 min-h-[40px] max-h-[200px] disabled:opacity-50"
-            rows={1}
-            placeholder={
-              isGenerating
-                ? 'AI가 작업 중입니다...'
-                : isClosed
-                  ? '종료된 세션입니다. 새로운 세션을 시작해 주세요.'
+        {isClosed ? (
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-6 flex flex-col items-center justify-center gap-4 shadow-xl backdrop-blur-sm">
+            <div className="flex items-center gap-2 text-red-400 font-medium">
+              <Lock size={18} className="animate-pulse" />
+              <span className="text-sm tracking-tight">이 세션은 종료되었습니다. 기록만 확인할 수 있습니다.</span>
+            </div>
+            <button
+              onClick={() => navigate(`/projects/${projectId}`, { replace: true })}
+              className="bg-blue-400 hover:bg-blue-500 text-slate-900 px-8 py-2.5 rounded font-bold transition-all hover:scale-[1.02] active:scale-[0.98] uppercase tracking-widest text-[11px] shadow-[0_0_20px_rgba(96,165,250,0.3)]"
+            >
+              새 대화 시작하기
+            </button>
+          </div>
+        ) : (
+          <div className={`bg-[#0d1c2d] border ${isGenerating ? 'border-slate-600' : 'border-slate-700/50'} rounded-lg p-3 flex items-end shadow-lg shadow-blue-500/5 transition-colors`}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isGenerating}
+              className="flex-1 bg-transparent border-none outline-none resize-none px-3 py-2 text-sm text-slate-300 placeholder-slate-500 min-h-[40px] max-h-[200px] disabled:opacity-50"
+              rows={1}
+              placeholder={
+                isGenerating
+                  ? 'AI가 작업 중입니다...'
                   : mode === ToolPlanMode.ASK
                     ? '일반 질문을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
                     : mode === ToolPlanMode.AGENT
                       ? 'Agent에게 승인된 Tool 사용 작업을 지시하세요. (Enter 전송, Shift+Enter 줄바꿈)'
                       : 'Tool PLAN 요청 또는 피드백을 입력하세요. (Enter 전송, Shift+Enter 줄바꿈)'
-            }
-          />
-          <button
-            onClick={handleSend}
-            disabled={isGenerating || !input.trim() || isClosed}
-            className="bg-blue-400 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 px-6 py-2 rounded text-xs font-bold transition-colors ml-4 uppercase tracking-wider"
-          >
-            {isGenerating ? '처리중' : '보내기'}
-          </button>
-        </div>
+              }
+            />
+            <button
+              onClick={handleSend}
+              disabled={isGenerating || !input.trim()}
+              className="bg-blue-400 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-slate-900 px-6 py-2 rounded text-xs font-bold transition-colors ml-4 uppercase tracking-wider"
+            >
+              {isGenerating ? '처리중' : '보내기'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

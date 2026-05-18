@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from src.builder.system_prompt import build_theseus_system_prompt
 from src.config import resolve_model_name, settings
@@ -11,6 +12,7 @@ from src.tool_build.schemas import GeneratedToolSpec, ToolArtifactPayload, ToolB
 from src.tooling.service import (
     CUSTOM_TOOLS_DIR,
     PROJECT_TOOLS_DIR,
+    SANDBOX_ALLOWED_DEPENDENCIES,
     ServerToolCreationRequest,
     ToolCreationError,
     activate_tool_artifact,
@@ -40,6 +42,91 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[str, int], Awaitable[None] | None]
 ChunkCallback = Callable[[str], Awaitable[None] | None]
+
+_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT = """\
+You are Theseus explaining a generated tool build failure to the user.
+
+The build already failed in Core. Your job is not to retry the build directly,
+but to convert the raw failure into a concise assistant response in the same
+language as the approved plan or original user request. The next PLAN/AGENT turn
+can also use this response as context.
+
+Rules:
+- Do not output JSON.
+- Do not use the user-facing term "ToolPlan"; use language-neutral concepts such
+  as "approved plan", "generated tool", "Tool build", or "generation task" instead.
+- Explain the likely stage and root cause.
+- Give a safe next action and at least one Plan B.
+- If the failure is about an existing file/module/tool name, explain that the
+  artifact name already exists and suggest reuse, extension, replacement via
+  approval, or a new toolName/moduleName/fileName.
+- If the failure is from security policy, explain the blocked capability and
+  propose a safe alternative instead of relaxing policy.
+- Do not claim that any file, remote command, or tool execution succeeded.
+- Keep the response practical and under 8 short bullet points or paragraphs.
+"""
+
+_DEPENDENCY_KEYS = ("dependencies", "pythonDependencies", "requirements")
+
+
+def _normalize_dependency_name(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.split("#", 1)[0].strip()
+    text = re.split(r"\s*(?:==|>=|<=|~=|!=|>|<|\[)", text, maxsplit=1)[0].strip()
+    return text
+
+
+def _declared_tool_dependencies(metadata_json: dict[str, Any]) -> list[str]:
+    dependencies: list[str] = []
+    for key in _DEPENDENCY_KEYS:
+        raw_value = metadata_json.get(key)
+        if raw_value in (None, "", []):
+            continue
+        raw_items: list[Any]
+        if isinstance(raw_value, str):
+            raw_items = [item.strip() for item in re.split(r"[,\n]", raw_value) if item.strip()]
+        elif isinstance(raw_value, list):
+            raw_items = raw_value
+        else:
+            continue
+        for item in raw_items:
+            if isinstance(item, dict):
+                item = item.get("name") or item.get("package") or item.get("dependency")
+            name = _normalize_dependency_name(item)
+            if name and name not in dependencies:
+                dependencies.append(name)
+    return dependencies
+
+
+def _validate_declared_sandbox_dependencies(spec: GeneratedToolSpec) -> None:
+    dependencies = _declared_tool_dependencies(spec.metadata_json or {})
+    if not dependencies:
+        return
+    allowed_names = {dependency.casefold() for dependency in SANDBOX_ALLOWED_DEPENDENCIES}
+    unsupported = [
+        dependency
+        for dependency in dependencies
+        if dependency.casefold() not in allowed_names
+    ]
+    if not unsupported:
+        return
+    raise ToolRepairFailure(
+        stage="dependency_policy",
+        code="DEPENDENCY_POLICY_VIOLATION",
+        message=(
+            "Generated Tool metadata declares dependencies outside the sandbox allowlist. "
+            f"unsupported={unsupported}, allowed={sorted(SANDBOX_ALLOWED_DEPENDENCIES)}. "
+            "ToolBuild does not run pip install or Docker build; use an allowed dependency "
+            "or update requirements-sandbox.txt and rebuild the sandbox image manually."
+        ),
+        metadata={
+            "declaredDependencies": dependencies,
+            "unsupportedDependencies": unsupported,
+            "allowedDependencies": sorted(SANDBOX_ALLOWED_DEPENDENCIES),
+        },
+    )
 
 
 class ToolBuildError(RuntimeError):
@@ -134,6 +221,61 @@ class ToolBuilder:
             )
         raise ToolBuildError("TOOL_BUILD_FAILED", "Tool build failed without a captured error.")
 
+    async def explain_failure(
+        self,
+        event: ToolBuildRequestedEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None = None,
+    ) -> str:
+        """Turn a raw Tool build failure into user-actionable feedback.
+
+        The Kafka/API contract remains `code/message`; this method only enriches
+        the message so the UI and later agent turns receive useful context.
+        """
+
+        prompt = self._build_failure_feedback_prompt(
+            event,
+            code=code,
+            message=message,
+            stage=stage,
+        )
+        try:
+            final_text = ""
+            collected_text: list[str] = []
+            async for llm_event in self.llm_client.stream_message(
+                ApiMessageRequest(
+                    model=self.model_name,
+                    messages=[ConversationMessage.from_user_text(prompt)],
+                    system_prompt=_TOOL_BUILD_FAILURE_FEEDBACK_SYSTEM_PROMPT,
+                    max_tokens=1200,
+                    tools=[],
+                    debug_context={
+                        **self._debug_context_for_event(event),
+                        "purpose": "tool_build_failure_feedback",
+                        "failure_code": code,
+                        "failure_stage": stage,
+                    },
+                )
+            ):
+                if isinstance(llm_event, ApiTextDeltaEvent):
+                    collected_text.append(llm_event.text)
+                elif isinstance(llm_event, ApiMessageCompleteEvent):
+                    final_text = llm_event.message.text or final_text
+            response = self._plain_feedback_response(final_text or "".join(collected_text))
+            if response:
+                return response
+        except Exception as exc:
+            logger.warning(
+                "Tool build failure feedback generation failed. runId=%s code=%s error=%s",
+                event.run_id,
+                code,
+                exc,
+                exc_info=True,
+            )
+        return self._fallback_failure_feedback(code=code, message=message, stage=stage)
+
     async def _validate_and_package_spec(
         self,
         event: ToolBuildRequestedEvent,
@@ -142,6 +284,7 @@ class ToolBuilder:
         progress_callback: ProgressCallback | None = None,
     ) -> ToolArtifactPayload:
         await self._emit_progress(progress_callback, "TOOL_BUILD_VALIDATING", 55)
+        _validate_declared_sandbox_dependencies(spec)
         creation_request = ServerToolCreationRequest(
             tool_name=spec.tool_name,
             python_code=spec.python_code,
@@ -263,7 +406,8 @@ class ToolBuilder:
             "Python code requirements:\n"
             "- Import BaseModel from pydantic.\n"
             "- Import BaseTool, ToolExecutionContext, and ToolResult from theseus_engine.tools.core.base_tools.\n"
-            "- Define one Pydantic input model class.\n"
+            "- Define one Pydantic input model class named '<ToolClassWithoutTool>Input' "
+            "or '<ToolClassName>Input'. Helper/output BaseModel classes are allowed.\n"
             "- Define one BaseTool subclass with name, description, input_model, and permission_level.\n"
             "- Implement async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult.\n"
             "- Return ToolResult(output=<string or JSON-serializable value>) on success.\n"
@@ -311,6 +455,89 @@ class ToolBuilder:
             return str(module_path.relative_to(CUSTOM_TOOLS_DIR))
         except ValueError:
             return str(module_path)
+
+    @staticmethod
+    def _build_failure_feedback_prompt(
+        event: ToolBuildRequestedEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None,
+    ) -> str:
+        approved_plan = event.approved_plan.model_dump(mode="json", by_alias=True)
+        plan_summary = {
+            "goal": approved_plan.get("goal") or approved_plan.get("title"),
+            "summary": approved_plan.get("summary"),
+            "tasks": approved_plan.get("tasks"),
+            "execution_spec": approved_plan.get("execution_spec"),
+        }
+        return (
+            "A generated tool build failed. Explain it to the user in the same language as the approved plan or original request, and suggest a safe next step.\n\n"
+            f"runId={event.run_id}\n"
+            f"projectId={event.project_id}\n"
+            f"chatSessionId={event.chat_session_id}\n"
+            f"approvedPlanId={event.tool_plan_id}\n"
+            f"failureCode={code}\n"
+            f"failureStage={stage or 'unknown'}\n\n"
+            "Raw failure message:\n"
+            f"{message}\n\n"
+            "Approved plan summary:\n"
+            f"{json.dumps(plan_summary, ensure_ascii=False, indent=2)}\n"
+        )
+
+    @staticmethod
+    def _plain_feedback_response(text: str) -> str:
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").strip()
+            if stripped.lower().startswith("markdown"):
+                stripped = stripped[len("markdown"):].strip()
+        return stripped
+
+    @staticmethod
+    def _fallback_failure_feedback(*, code: str, message: str, stage: str | None) -> str:
+        lowered = message.lower()
+        is_duplicate = any(
+            needle in lowered
+            for needle in (
+                "이미 존재",
+                "already exists",
+                "duplicate",
+                "file name",
+                "filename",
+                "module name",
+                "modulename",
+            )
+        )
+        if is_duplicate:
+            return (
+                "Tool build가 실패했습니다.\n\n"
+                f"- 원인: 같은 Tool 파일명 또는 moduleName의 artifact가 이미 존재합니다. (code={code}, stage={stage or 'unknown'})\n"
+                "- recoverable: true\n"
+                "- retry_policy: do_not_retry_same_input\n"
+                "- 의미: Core가 기존 Tool을 덮어쓰지 않도록 막았기 때문에 새 파일을 저장하지 않았습니다.\n"
+                "- 다음 선택지: 기존 Tool을 재사용하거나, 기존 Tool을 개선하는 승인 흐름으로 전환하거나, 새 toolName/moduleName/fileName으로 다시 생성해야 합니다.\n"
+                "- 재요청 예시: `기존 Tool과 충돌하지 않도록 새 이름으로 생성해줘. 기존 Tool이 있으면 재사용/확장 여부도 같이 제안해줘.`\n\n"
+                f"원본 오류: {message}"
+            )
+        if "permissionlevel must be an integer" in lowered or "permission_level" in lowered:
+            return (
+                "Tool build가 실패했습니다.\n\n"
+                f"- 원인: permissionLevel은 정수 1~5만 허용됩니다. (code={code}, stage={stage or 'unknown'})\n"
+                "- recoverable: true\n"
+                "- retry_policy: requires_corrected_permission_level\n"
+                "- 다음 선택지: permissionLevel을 1~5 중 하나의 정수로 지정해 다시 생성합니다.\n\n"
+                f"원본 오류: {message}"
+            )
+        return (
+            "Tool build가 실패했습니다.\n\n"
+            f"- code: {code}\n"
+            f"- stage: {stage or 'unknown'}\n"
+            f"- 원인: {message}\n"
+            "- recoverable: 상황에 따라 다름\n"
+            "- retry_policy: 원인을 반영한 수정 없이 같은 입력을 반복하지 않습니다.\n"
+            "- 다음 단계: 위 오류를 반영해 PLAN draft를 다시 만들거나, 보안 정책/샌드박스/파일명 충돌 중 어느 조건을 바꿀지 명시해 다시 요청해야 합니다."
+        )
 
     @staticmethod
     def _debug_context_for_event(event: ToolBuildRequestedEvent) -> dict[str, object]:

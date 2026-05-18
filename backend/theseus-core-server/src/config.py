@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
     BILLING_OUTBOX_BATCH_SIZE: int = 10
     BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
-    SANDBOX_IMAGE: str = "python:3.11-slim"
+    SANDBOX_IMAGE: str = "theseus-sandbox:py311-tools"
     SANDBOX_MEMORY_LIMIT: str = "128m"
     SANDBOX_CPU_QUOTA: int = 50000
     SANDBOX_CPU_PERIOD: int = 100000
@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_GENERATION_EVENT: str = "theseus.tool-generation.event"
     KAFKA_TOPIC_TOOL_PLAN_REQUEST: str = "theseus.tool-plan.request"
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
+    CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE: Literal["strict", "warn", "off"] = "strict"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
@@ -109,6 +110,10 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: Optional[str] = None
     LANGSMITH_TRACING: bool = False
     LANGSMITH_PROJECT: str = "theseus-core"
+    THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
+    THESEUS_LOCAL_REPORT_ROOT: str = "reports"
+    THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
+    THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
 
     # Sandbox shared workdir settings.
     # When Core runs inside a Docker container and controls the host Docker daemon,

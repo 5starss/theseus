@@ -19,7 +19,7 @@ const EMPTY_FORM = {
   username: '',
   password: '',
   privateKeyPath: '',
-  basePath: '/',
+  basePath: '',
   allowWriteExecution: false,
 };
 
@@ -143,14 +143,14 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
                 <div>
                   <div className="font-semibold text-slate-100">{workspace.name}</div>
                   <div className="mt-1 text-xs text-slate-400">
-                    {workspace.username}@{workspace.host}:{workspace.port} · {workspace.basePath}
+                    {workspace.host} · {workspace.basePath}
                   </div>
                   <div className="mt-2 text-xs">
                     <span className={`rounded border px-2 py-1 ${workspace.allowWriteExecution
                       ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
                       : 'border-blue-400/30 bg-blue-400/10 text-blue-200'
                       }`}>
-                      {workspace.allowWriteExecution ? 'Write/command enabled' : 'Read-only'}
+                      {workspace.allowWriteExecution ? '쓰기/명령 허용' : '읽기 전용'}
                     </span>
                   </div>
                 </div>
@@ -183,9 +183,6 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
       <Card className="bg-slate-900/40 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">등록</CardTitle>
-          <CardDescription className="text-slate-400">
-            알파 단계에서는 비밀번호 또는 private key path 중 하나를 사용합니다.
-          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -258,9 +255,9 @@ export function RemoteWorkspaceManagement({ projectId }: RemoteWorkspaceManageme
               className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-950"
             />
             <span>
-              <span className="block font-semibold text-slate-100">Allow write/command execution</span>
+              <span className="block font-semibold text-slate-100">쓰기 및 명령 실행 허용</span>
               <span className="block text-xs text-slate-400">
-                ASK/PLAN stay read-only. AGENT and approved Tool execution can write or run commands.
+                ASK/PLAN 모드는 읽기 전용으로 유지됩니다. AGENT 및 승인된 도구 실행 시 파일 쓰기 또는 명령을 실행할 수 있습니다.
               </span>
             </span>
           </label>

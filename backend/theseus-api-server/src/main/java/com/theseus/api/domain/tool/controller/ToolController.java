@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -57,5 +58,19 @@ public class ToolController {
 	) {
 		ToolDetailResponse response = toolService.getTool(currentUser, projectId, toolId);
 		return ApiResponse.onSuccess(SuccessCode.OK, response);
+	}
+
+	@Operation(
+		summary = "Tool 삭제 (상태 변경)",
+		description = "Tool 상태를 DELETED로 변경하여 삭제 처리합니다."
+	)
+	@DeleteMapping("/{toolId}")
+	public ResponseEntity<ApiResponse<Void>> deleteTool(
+		@AuthenticationPrincipal AuthenticatedUser currentUser,
+		@PathVariable Long projectId,
+		@PathVariable Long toolId
+	) {
+		toolService.deleteTool(currentUser, projectId, toolId);
+		return ApiResponse.onSuccess(SuccessCode.OK, null);
 	}
 }

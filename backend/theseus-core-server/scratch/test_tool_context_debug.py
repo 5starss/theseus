@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -11,6 +12,8 @@ os.environ.setdefault("ALLOWED_ORIGINS", '["http://localhost:3000"]')
 
 from pydantic import BaseModel
 
+from src.auth.schemas import SessionContext
+from src.history import service as history_service
 from src.history.mapper import to_engine_messages
 from src.history.schemas import HistoryMessageRecord
 from src.tool_plan import planner as planner_module
@@ -187,6 +190,80 @@ class ToolContextDebugSmokeTest(unittest.TestCase):
         self.assertEqual(messages[0].role, "assistant")
         self.assertIn("이전 도구 실행 결과", messages[0].text)
         self.assertIn("system_monitor_tool", messages[0].text)
+
+    def test_tool_history_persistence_uses_system_json_records(self) -> None:
+        saved = []
+
+        class FakeHistoryClient:
+            async def save_message(self, session, request):
+                saved.append(request)
+
+        previous = history_service.history_client
+        history_service.history_client = FakeHistoryClient()
+        try:
+            session = SessionContext(
+                user_id=1,
+                project_id=2,
+                permission_level=3,
+                token="token",
+            )
+            asyncio.run(
+                history_service.persist_tool_call_message(
+                    session,
+                    4,
+                    tool_name="system_monitor_tool",
+                    tool_input={"detail": True},
+                    tool_use_id="toolu_1",
+                )
+            )
+            asyncio.run(
+                history_service.persist_tool_result_message(
+                    session,
+                    4,
+                    tool_name="system_monitor_tool",
+                    output="CPU 10%",
+                    is_error=False,
+                    tool_use_id="toolu_1",
+                    tool_input={"detail": True},
+                    metadata={"duration": 0.1},
+                )
+            )
+        finally:
+            history_service.history_client = previous
+
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(saved[0].sender_type, "SYSTEM")
+        self.assertEqual(saved[0].message_type, "SYSTEM_NOTICE")
+        self.assertEqual(saved[0].content_type, "JSON")
+        started_payload = json.loads(saved[0].content)
+        self.assertEqual(started_payload["noticeType"], "TOOL_EXECUTION_STARTED")
+        self.assertEqual(started_payload["toolName"], "system_monitor_tool")
+        self.assertEqual(started_payload["toolUseId"], "toolu_1")
+
+        self.assertEqual(saved[1].sender_type, "SYSTEM")
+        self.assertEqual(saved[1].message_type, "SYSTEM_NOTICE")
+        completed_payload = json.loads(saved[1].content)
+        self.assertEqual(completed_payload["noticeType"], "TOOL_EXECUTION_COMPLETED")
+        self.assertEqual(completed_payload["output"], "CPU 10%")
+        self.assertFalse(completed_payload["isError"])
+
+        messages = to_engine_messages(
+            [
+                HistoryMessageRecord(
+                    messageId=1,
+                    chatSessionId=4,
+                    messageOrder=1,
+                    senderType="SYSTEM",
+                    messageType=saved[1].message_type,
+                    contentType=saved[1].content_type,
+                    content=saved[1].content,
+                    createdAt=datetime.now(),
+                )
+            ]
+        )
+        self.assertEqual(messages[0].role, "assistant")
+        self.assertIn("이전 도구 실행 결과", messages[0].text)
+        self.assertIn("CPU 10%", messages[0].text)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ package com.theseus.api.domain.toolgeneration.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
@@ -182,7 +183,9 @@ class ToolBuildEventServiceTest {
 			eq(ChatMessageSenderType.SYSTEM),
 			eq(ChatMessageType.SYSTEM_NOTICE),
 			eq(ChatMessageContentType.TEXT),
-			eq("Tool build에 실패했습니다. code=TOOL-008, message=이미 존재하는 Tool 파일명입니다."),
+			argThat(message -> message.startsWith("Tool build에 실패했습니다. code=TOOL-008, message=이미 존재하는 Tool 파일명입니다.")
+				&& message.contains("incident_recovery.py")
+				&& message.contains("새 toolName/moduleName/fileName")),
 			eq("tool-build-event:build-run-253:TOOL_BUILD_COMPLETED:system")
 		);
 	}

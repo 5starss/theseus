@@ -83,6 +83,20 @@ public class ToolService {
 		return ToolDetailResponse.createFrom(tool);
 	}
 
+	/**
+	 * Tool을 논리 삭제 처리합니다.
+	 */
+	@Transactional
+	public void deleteTool(AuthenticatedUser currentUser, Long projectId, Long toolId) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember projectMember = getActiveProjectMember(project, user);
+		validateToolUsePermission(projectMember);
+
+		Tool tool = getToolEntity(project, toolId);
+		tool.delete();
+	}
+
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {
 		if (currentUser == null) {
 			throw BusinessException.of(ErrorCode.UNAUTHORIZED);

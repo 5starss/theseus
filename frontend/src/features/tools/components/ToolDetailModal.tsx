@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Code, FileText, CheckCircle, Clock } from 'lucide-react';
+import { X, Code, FileText, CheckCircle, Clock, Trash2 } from 'lucide-react';
 import { toolApi } from '../api';
 import type { ToolDetailResponse, ToolItem } from '../types';
 
@@ -7,11 +7,35 @@ interface ToolDetailModalProps {
   projectId: string;
   toolItem: ToolItem;
   onClose: () => void;
+  onDeleteSuccess?: () => void;
 }
 
-export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModalProps) {
+export function ToolDetailModal({ projectId, toolItem, onClose, onDeleteSuccess }: ToolDetailModalProps) {
   const [detail, setDetail] = useState<ToolDetailResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!window.confirm('정말 이 도구를 삭제하시겠습니까? 삭제 후에는 도구 목록에서 보이지 않습니다.')) {
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      await toolApi.deleteTool(projectId, toolItem.toolId);
+      alert('도구가 성공적으로 삭제되었습니다.');
+      if (onDeleteSuccess) {
+        onDeleteSuccess();
+      }
+      onClose();
+    } catch (err: unknown) {
+      console.error('Failed to delete tool:', err);
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      alert(axiosErr.response?.data?.message || '도구 삭제에 실패했습니다.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -135,19 +159,21 @@ export function ToolDetailModal({ projectId, toolItem, onClose }: ToolDetailModa
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex justify-end gap-3">
+        <div className="px-6 py-4 border-t border-slate-800 bg-slate-900/50 flex justify-between items-center">
+          <button 
+            onClick={handleDelete}
+            disabled={isDeleting || isLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded text-sm font-medium text-rose-400 border border-rose-500/20 hover:bg-rose-500/10 hover:border-rose-500/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Trash2 className="w-4 h-4" />
+            {isDeleting ? '삭제 중...' : '도구 삭제'}
+          </button>
+          
           <button 
             onClick={onClose}
             className="px-4 py-2 rounded text-sm font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
             닫기
-          </button>
-          <button 
-            className="px-4 py-2 rounded text-sm font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => alert('이 도구를 실행하는 기능은 준비 중입니다.')}
-            disabled={detail?.status !== 'APPROVED'}
-          >
-            이 도구 실행하기
           </button>
         </div>
       </div>

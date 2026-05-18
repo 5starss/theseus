@@ -10,6 +10,7 @@ from src.config import settings
 from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, ToolResultBlock
 from theseus_engine.models.state import TheseusStateMachine
+from theseus_engine.tools.core.base_tools import stringify_tool_output
 from theseus_engine.wrappers.llm_clients.api_types import (
     ApiMessageCompleteEvent,
     ApiMessageRequest,
@@ -275,7 +276,7 @@ class ToolPlanAgentLoop:
             )
             return ToolResultBlock(
                 tool_use_id=tool_use_id,
-                content=result.output,
+                content=stringify_tool_output(result.output),
                 is_error=result.is_error,
             )
         except Exception as exc:

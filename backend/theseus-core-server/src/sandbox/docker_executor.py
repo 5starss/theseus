@@ -18,6 +18,20 @@ from src.sandbox.base import (
 
 logger = logging.getLogger(__name__)
 
+SANDBOX_REQUIREMENT_FILES = ("requirements-sandbox.txt",)
+SANDBOX_REQUIREMENT_IMPORTS = (
+    "pydantic",
+    "psutil",
+    "markdownify",
+    "bs4",
+    "yaml",
+    "requests",
+    "httpx",
+    "numpy",
+    "packaging",
+    "dotenv",
+)
+
 
 class SandboxStartupCheckError(SandboxUnavailableError):
     """Raised when sandbox prerequisites fail during startup validation."""
@@ -77,11 +91,99 @@ class DockerExecutor(ToolRunner):
                     f"Sandbox image '{image}' could not be pulled."
                 ) from pull_exc
 
+        requirements_status = self._verify_image_requirements(client, image)
+
         return {
             "dockerHost": settings.docker_host or "local-default",
             "image": image,
             "imageStatus": image_status,
+            "requirements": requirements_status,
         }
+
+    def _verify_image_requirements(self, client, image: str) -> dict[str, Any]:
+        script = """
+import importlib
+import json
+import pathlib
+import subprocess
+import sys
+
+requirement_files = __REQUIREMENT_FILES__
+required_imports = __REQUIRED_IMPORTS__
+requirements_dir = pathlib.Path("/sandbox/requirements")
+missing_files = [
+    name for name in requirement_files
+    if not (requirements_dir / name).is_file()
+]
+missing_modules = []
+for module_name in required_imports:
+    try:
+        importlib.import_module(module_name)
+    except Exception as exc:
+        missing_modules.append({"module": module_name, "error": str(exc)})
+pip_check = subprocess.run(
+    [sys.executable, "-m", "pip", "check"],
+    capture_output=True,
+    text=True,
+)
+payload = {
+    "requirementsDir": str(requirements_dir),
+    "requiredFiles": requirement_files,
+    "missingFiles": missing_files,
+    "requiredImports": required_imports,
+    "missingModules": missing_modules,
+    "pipCheckReturnCode": pip_check.returncode,
+    "pipCheckStdout": pip_check.stdout.strip(),
+    "pipCheckStderr": pip_check.stderr.strip(),
+}
+payload["ok"] = (
+    not payload["missingFiles"]
+    and not payload["missingModules"]
+    and payload["pipCheckReturnCode"] == 0
+)
+print(json.dumps(payload, ensure_ascii=False))
+""".replace(
+            "__REQUIREMENT_FILES__",
+            json.dumps(list(SANDBOX_REQUIREMENT_FILES)),
+        ).replace(
+            "__REQUIRED_IMPORTS__",
+            json.dumps(list(SANDBOX_REQUIREMENT_IMPORTS)),
+        )
+        try:
+            output = client.containers.run(
+                image,
+                command=["python", "-c", script],
+                network_disabled=True,
+                remove=True,
+                working_dir="/sandbox",
+            )
+        except Exception as exc:
+            raise SandboxStartupCheckError(
+                f"Sandbox image '{image}' requirements check could not run: {exc}"
+            ) from exc
+
+        payload = self._parse_requirements_probe_output(output)
+        if not payload.get("ok"):
+            raise SandboxStartupCheckError(
+                "Sandbox image requirements check failed: "
+                f"missingFiles={payload.get('missingFiles')}, "
+                f"missingModules={payload.get('missingModules')}, "
+                f"pipCheckReturnCode={payload.get('pipCheckReturnCode')}"
+            )
+        return payload
+
+    def _parse_requirements_probe_output(self, output: bytes | str) -> dict[str, Any]:
+        text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output)
+        for line in reversed([item.strip() for item in text.splitlines() if item.strip()]):
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        raise SandboxStartupCheckError(
+            f"Sandbox image requirements check returned invalid output: {text[:500]}"
+        )
 
     async def execute(self, request: SandboxInput) -> SandboxOutput:
         start_time = time.time()

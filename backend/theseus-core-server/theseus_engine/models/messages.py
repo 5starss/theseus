@@ -7,6 +7,7 @@ QueryEngine / LLM Client 전환 시 이 모듈만 변경하면 됩니다.
 from __future__ import annotations
 
 import base64
+import json
 import mimetypes
 from pathlib import Path
 from typing import Any, Annotated, Literal
@@ -56,11 +57,31 @@ class ToolResultBlock(BaseModel):
     content: str
     is_error: bool = False
 
+    @field_validator("content", mode="before")
+    @classmethod
+    def _stringify_content(cls, value: Any) -> str:
+        return stringify_message_content(value)
+
 
 ContentBlock = Annotated[
     TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock,
     Field(discriminator="type"),
 ]
+
+
+def stringify_message_content(value: Any) -> str:
+    """Normalize message-bound content into provider-safe text."""
+
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    except TypeError:
+        return str(value)
 
 
 # ── ConversationMessage ───────────────────────────────────────

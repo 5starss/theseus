@@ -13,17 +13,25 @@
 
     <!-- ── 툴바 ── -->
     <div class="toolbar">
+      <!-- 왼쪽: 상태 + 액션 버튼 -->
       <div id="runner-status-bar" class="runner-status-bar">
         <span id="loop-status" class="loop-status idle" title="Agent loop status">idle</span>
         <span id="runner-status-detail" class="runner-status-detail" title="Runner status">Stopped</span>
         <div id="runner-actions" class="runner-actions"></div>
       </div>
-      <button id="clear-history" title="Clear chat">🗑</button>
-      <span id="workspace-label" class="workspace-label" title="Active workspace"></span>
-      <span id="active-file-label" class="active-file-label" title=""></span>
-      <div class="popup-anchor session-anchor" id="session-anchor">
-        <button type="button" id="session-label" class="session-label" title="Session">default ▾</button>
-        <div id="session-menu" class="session-menu" hidden></div>
+      <!-- 오른쪽: 메타 정보 -->
+      <div class="toolbar-meta">
+        <span id="workspace-label" class="workspace-label" title="Active workspace"></span>
+        <!-- 워크트리 빠른 선택: 작업 폴더 picker 열기 -->
+        <button id="select-worktree" class="toolbar-meta-btn" title="작업 폴더(워크트리) 선택">📁</button>
+        <!-- active-file-label: 표시 제거 (DOM은 유지, JS 호환) -->
+        <span id="active-file-label" class="active-file-label" hidden></span>
+        <button id="clear-history" title="Clear chat" class="toolbar-meta-btn">🗑</button>
+        <!-- 세션: 화살표 아이콘만 표시, title tooltip으로 세션명 노출 -->
+        <div class="popup-anchor session-anchor" id="session-anchor">
+          <button type="button" id="session-label" class="session-label" title="Session: default">▾</button>
+          <div id="session-menu" class="session-menu" hidden></div>
+        </div>
       </div>
     </div>
 

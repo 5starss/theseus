@@ -16,8 +16,16 @@ import importlib.util
 from datetime import datetime, timezone
 from typing import Any, Dict, Tuple, Type, Optional, List, Set
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from theseus_engine.tools.core.base_tools import BaseTool, ToolExecutionContext, ToolResult, ToolRegistry
+from theseus_engine.tools.core.custom_tool_paths import (
+    CUSTOM_TOOLS_DIR,
+    PROJECT_CUSTOM_TOOLS_DIR,
+    canonical_tool_module_stem,
+    custom_tool_dirs as _custom_tool_dirs,
+    get_custom_tools_dir,
+    get_project_custom_tools_dir,
+)
 from theseus_engine.tools.core.tool_server_adapter import (
     create_tool_via_server,
     resolve_server_create_tool_context,
@@ -31,44 +39,68 @@ from theseus_engine.tools.tool_repair import (
 
 log = logging.getLogger(__name__)
 
-# Directory where generated custom tools are stored
-# 구조: backend/theseus-core-server/theseus_engine/tools/core/tool_factory.py
-# 타겟: backend/theseus-core-server/theseus_engine/custom_tools/
-CUSTOM_TOOLS_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "custom_tools")
-)
-
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
+MIN_PERMISSION_LEVEL = 1
+MAX_PERMISSION_LEVEL = 5
 
 
-def canonical_tool_module_stem(tool_name: str) -> str:
-    """Return the persisted module stem for a logical custom tool name."""
-    normalized = tool_name.strip().lower().replace("-", "_")
-    if normalized.endswith("_tool"):
-        return normalized
-    return f"{normalized}_tool"
+def _coerce_permission_level(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    if isinstance(value, int):
+        level = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        level = int(value.strip())
+    else:
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    if not (MIN_PERMISSION_LEVEL <= level <= MAX_PERMISSION_LEVEL):
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+    return level
+
+MISSING_MODULE_PACKAGE_ALIASES = {
+    "pynvml": "nvidia-ml-py",
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "yaml": "PyYAML",
+}
+MISSING_MODULE_INSTALL_DENYLIST = {"theseus_engine", "src"}
 
 
-def _custom_tool_dirs(extra_dirs: Optional[List[str | os.PathLike[str]]] = None) -> List[str]:
-    """Return custom tool directories in load order, de-duplicated."""
-    dirs: List[str] = []
-    seen: Set[str] = set()
-    raw_dirs: List[str | os.PathLike[str]] = [CUSTOM_TOOLS_DIR]
-    env_dir = os.getenv("THESEUS_CUSTOM_TOOLS_DIR", "").strip()
-    if env_dir:
-        raw_dirs.extend(part.strip() for part in env_dir.split(os.pathsep) if part.strip())
-    if extra_dirs:
-        raw_dirs.extend(extra_dirs)
+def _safe_dependency_name(value: Any) -> str | None:
+    name = str(value or "").strip()
+    if not name:
+        return None
+    if name in MISSING_MODULE_INSTALL_DENYLIST:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        return name
+    return None
 
-    for raw in raw_dirs:
-        path = os.path.abspath(os.fspath(raw))
-        key = os.path.normcase(path)
-        if key in seen:
-            continue
-        seen.add(key)
-        dirs.append(path)
-    return dirs
+
+def _extract_missing_modules(message: str) -> List[str]:
+    modules: List[str] = []
+    for match in re.finditer(r"No module named ['\"]([^'\"]+)['\"]", message):
+        module_name = match.group(1).split(".", 1)[0].strip()
+        if module_name and module_name not in modules:
+            modules.append(module_name)
+    return modules
+
+
+def _install_candidates(
+    *,
+    dependencies: List[str],
+    missing_modules: List[str],
+) -> List[str]:
+    if dependencies:
+        return dependencies
+    candidates: List[str] = []
+    for module_name in missing_modules:
+        candidate = MISSING_MODULE_PACKAGE_ALIASES.get(module_name, module_name)
+        safe = _safe_dependency_name(candidate)
+        if safe and safe not in candidates:
+            candidates.append(safe)
+    return candidates
 
 
 def _sanitize_generated_code(code: str) -> str:
@@ -309,13 +341,16 @@ class ToolValidator:
         tree: ast.Module,
         errors: List[str],
     ) -> None:
-        """입력 모델 클래스명이 <ToolClassName>Input 패턴을 따르는지 검증합니다.
+        """input_model에 실제 할당된 입력 모델 이름만 검증합니다.
 
-        Pydantic 스키마 캐시 충돌을 방지하기 위해 화이트리스트 방식으로
-        모델명을 강제합니다.
+        기존 Core Tool들은 대부분 ``ReadFileTool -> ReadFileInput``처럼
+        Tool suffix를 제거한 이름을 사용합니다. generated tool에서는
+        ``ReadFileToolInput`` 형태도 함께 허용합니다. ``ProcessInfo``나
+        ``CPUStatsOutput`` 같은 보조 Pydantic 모델은 입력 모델이 아니므로
+        이 검증 대상에서 제외합니다.
         """
-        tool_class_name = None
-        input_model_names: List[str] = []
+        base_model_names: Set[str] = set()
+        tool_input_models: Dict[str, str] = {}
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
@@ -324,20 +359,58 @@ class ToolValidator:
                 b.id for b in node.bases
                 if isinstance(b, ast.Name)
             ]
-            if "BaseTool" in base_names:
-                tool_class_name = node.name
-            elif "BaseModel" in base_names:
-                input_model_names.append(node.name)
+            if "BaseModel" in base_names:
+                base_model_names.add(node.name)
+            if "BaseTool" not in base_names:
+                continue
 
-        if tool_class_name and input_model_names:
-            expected = f"{tool_class_name}Input"
-            for name in input_model_names:
-                if name != expected:
-                    errors.append(
-                        f"To prevent Pydantic schema cache collisions, "
-                        f"the input model for '{tool_class_name}' must be "
-                        f"named '{expected}'. (found: '{name}')"
-                    )
+            input_model_name = cls._extract_declared_input_model_name(node)
+            if input_model_name:
+                tool_input_models[node.name] = input_model_name
+
+        for tool_class_name, input_model_name in tool_input_models.items():
+            if input_model_name not in base_model_names:
+                errors.append(
+                    f"'{tool_class_name}.input_model' references "
+                    f"'{input_model_name}', but no matching BaseModel class "
+                    f"was found in the module."
+                )
+                continue
+
+            tool_stem = (
+                tool_class_name[:-4]
+                if tool_class_name.endswith("Tool")
+                else tool_class_name
+            )
+            allowed = {f"{tool_class_name}Input", f"{tool_stem}Input"}
+            if input_model_name not in allowed:
+                errors.append(
+                    f"Input model for '{tool_class_name}' should be named "
+                    f"'{tool_stem}Input' or '{tool_class_name}Input'. "
+                    f"(found: '{input_model_name}')"
+                )
+
+    @staticmethod
+    def _extract_declared_input_model_name(class_node: ast.ClassDef) -> str | None:
+        """Return the class name assigned to a BaseTool's input_model attr."""
+        for item in class_node.body:
+            if isinstance(item, ast.Assign):
+                if not any(
+                    isinstance(target, ast.Name) and target.id == "input_model"
+                    for target in item.targets
+                ):
+                    continue
+                if isinstance(item.value, ast.Name):
+                    return item.value.id
+            if isinstance(item, ast.AnnAssign):
+                if not (
+                    isinstance(item.target, ast.Name)
+                    and item.target.id == "input_model"
+                    and isinstance(item.value, ast.Name)
+                ):
+                    continue
+                return item.value.id
+        return None
 
     # ------------------------------------------------------------------
     # 2단계: 모듈 로드 및 런타임 규격 검증
@@ -494,10 +567,181 @@ def normalize_tool_meta(
         log.warning("[MetaNorm] Failed to write normalized meta %s: %s", meta_path, e)
 
 
+def _read_tool_meta(meta_path: str) -> Dict[str, Any]:
+    try:
+        with open(meta_path, encoding="utf-8") as f:
+            parsed = json.load(f)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _iter_inventory_dirs(
+    extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+) -> List[str]:
+    dirs: List[str] = []
+    seen: Set[str] = set()
+    for base in _custom_tool_dirs(extra_dirs):
+        candidates = [base]
+        projects_dir = os.path.join(base, "projects")
+        if os.path.isdir(projects_dir):
+            candidates.extend(
+                os.path.join(projects_dir, name)
+                for name in sorted(os.listdir(projects_dir))
+                if os.path.isdir(os.path.join(projects_dir, name))
+            )
+        for candidate in candidates:
+            key = os.path.normcase(os.path.abspath(candidate))
+            if key in seen:
+                continue
+            seen.add(key)
+            dirs.append(os.path.abspath(candidate))
+    return dirs
+
+
+def _inventory_candidate_from_meta(
+    custom_tools_dir: str,
+    meta_file: str,
+) -> Tuple[str, str, str, Dict[str, Any]]:
+    meta_path = os.path.join(custom_tools_dir, meta_file)
+    meta = _read_tool_meta(meta_path)
+    fallback_stem = meta_file.removesuffix(".meta.json")
+    file_name = str(meta.get("fileName") or f"{fallback_stem}.py")
+    file_name = os.path.basename(file_name)
+    if not file_name.endswith(".py"):
+        file_name = f"{fallback_stem}.py"
+    module_name = str(meta.get("moduleName") or file_name[:-3]).strip() or file_name[:-3]
+    return module_name, os.path.join(custom_tools_dir, file_name), meta_path, meta
+
+
+def _tool_inventory_item(
+    *,
+    module_name: str,
+    file_path: str,
+    meta_path: str | None,
+    meta: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    meta = meta or {}
+    dependencies = [
+        dep
+        for dep in (_safe_dependency_name(item) for item in meta.get("dependencies", []) or [])
+        if dep
+    ]
+    fallback_name = os.path.splitext(os.path.basename(file_path))[0]
+    item: Dict[str, Any] = {
+        "toolName": str(meta.get("toolName") or fallback_name),
+        "fileName": os.path.basename(file_path),
+        "moduleName": module_name,
+        "modulePath": os.path.abspath(file_path),
+        "metadataPath": os.path.abspath(meta_path) if meta_path else "",
+        "permissionLevel": meta.get("permissionLevel", ""),
+        "status": str(meta.get("status") or "unknown"),
+        "isActive": bool(meta.get("isActive", True)),
+        "dependencies": dependencies,
+        "missingModules": [],
+        "installCandidates": [],
+        "importError": "",
+        "loadState": "available",
+        "canInstall": False,
+        "canRegister": False,
+    }
+
+    if not item["isActive"] or item["status"] not in {"unknown", "active"}:
+        item["loadState"] = "inactive"
+        return item
+
+    if not os.path.exists(file_path):
+        item["loadState"] = "unavailable"
+        item["importError"] = f"Missing module file: {os.path.basename(file_path)}"
+        return item
+
+    is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
+        module_name,
+        file_path,
+    )
+    if not is_valid or tool_class is None:
+        missing_modules = _extract_missing_modules(msg)
+        item["loadState"] = "unavailable"
+        item["importError"] = msg
+        item["missingModules"] = missing_modules
+        item["installCandidates"] = _install_candidates(
+            dependencies=dependencies,
+            missing_modules=missing_modules,
+        )
+        item["canInstall"] = bool(item["installCandidates"])
+        return item
+
+    item["toolName"] = getattr(tool_class, "name", item["toolName"])
+    item["permissionLevel"] = getattr(
+        tool_class,
+        "permission_level",
+        item["permissionLevel"] or DEFAULT_PERMISSION_LEVEL,
+    )
+    item["status"] = "active"
+    item["canRegister"] = True
+    return item
+
+
+def scan_custom_tool_inventory(
+    extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Return loadable and unavailable custom tools without mutating a registry."""
+    inventory: List[Dict[str, Any]] = []
+    seen_files: Set[str] = set()
+
+    for custom_tools_dir in _iter_inventory_dirs(extra_dirs):
+        if not os.path.isdir(custom_tools_dir):
+            continue
+
+        meta_files = sorted(
+            filename
+            for filename in os.listdir(custom_tools_dir)
+            if filename.endswith(".meta.json") and not filename.startswith("_")
+        )
+        for meta_file in meta_files:
+            module_name, file_path, meta_path, meta = _inventory_candidate_from_meta(
+                custom_tools_dir,
+                meta_file,
+            )
+            seen_files.add(os.path.normcase(os.path.abspath(file_path)))
+            inventory.append(
+                _tool_inventory_item(
+                    module_name=module_name,
+                    file_path=file_path,
+                    meta_path=meta_path,
+                    meta=meta,
+                )
+            )
+
+        for filename in sorted(os.listdir(custom_tools_dir)):
+            if not filename.endswith(".py") or filename.startswith("_"):
+                continue
+            file_path = os.path.abspath(os.path.join(custom_tools_dir, filename))
+            if os.path.normcase(file_path) in seen_files:
+                continue
+            inventory.append(
+                _tool_inventory_item(
+                    module_name=filename[:-3],
+                    file_path=file_path,
+                    meta_path=None,
+                    meta={},
+                )
+            )
+
+    return sorted(
+        inventory,
+        key=lambda item: (
+            str(item.get("loadState") or ""),
+            str(item.get("toolName") or item.get("fileName") or ""),
+        ),
+    )
+
+
 def load_custom_tools(
     registry: ToolRegistry,
     tool_permissions: Optional[Dict[str, int]] = None,
     extra_dirs: Optional[List[str | os.PathLike[str]]] = None,
+    load_report: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """custom_tools/ 폴더 내의 모든 .py 파일을 스캔하여 ToolRegistry에 자동 등록합니다.
 
@@ -526,6 +770,13 @@ def load_custom_tools(
 
             module_name = filename[:-3]  # .py 제거
             file_path = os.path.join(custom_tools_dir, filename)
+            meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
+            meta = _read_tool_meta(meta_path)
+            dependencies = [
+                dep
+                for dep in (_safe_dependency_name(item) for item in meta.get("dependencies", []) or [])
+                if dep
+            ]
 
             is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
                 module_name, file_path
@@ -535,6 +786,28 @@ def load_custom_tools(
                     instance = tool_class()
                     registry.register(instance)
                     loaded.append(tool_class.name)
+                    if load_report is not None:
+                        load_report.append({
+                            "toolName": tool_class.name,
+                            "fileName": filename,
+                            "moduleName": module_name,
+                            "modulePath": os.path.abspath(file_path),
+                            "metadataPath": os.path.abspath(meta_path),
+                            "permissionLevel": getattr(
+                                tool_class,
+                                "permission_level",
+                                DEFAULT_PERMISSION_LEVEL,
+                            ),
+                            "status": "active",
+                            "isActive": True,
+                            "loadState": "available",
+                            "dependencies": dependencies,
+                            "missingModules": [],
+                            "installCandidates": [],
+                            "importError": "",
+                            "canInstall": False,
+                            "canRegister": True,
+                        })
 
                     # 툴의 permission_level을 RBAC 맵에 자동 등록
                     level = getattr(
@@ -548,13 +821,57 @@ def load_custom_tools(
                         )
 
                     # meta.json 정규화 (누락·이름 오류 교정)
-                    meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
                     normalize_tool_meta(meta_path, tool_class, module_name)
 
                 except Exception as e:
                     log.warning("Failed to instantiate tool from %s: %s", file_path, e)
+                    if load_report is not None:
+                        msg = str(e)
+                        missing_modules = _extract_missing_modules(msg)
+                        load_report.append({
+                            "toolName": module_name,
+                            "fileName": filename,
+                            "moduleName": module_name,
+                            "modulePath": os.path.abspath(file_path),
+                            "metadataPath": os.path.abspath(meta_path),
+                            "permissionLevel": "",
+                            "status": "unknown",
+                            "isActive": True,
+                            "loadState": "unavailable",
+                            "dependencies": dependencies,
+                            "missingModules": missing_modules,
+                            "installCandidates": _install_candidates(
+                                dependencies=dependencies,
+                                missing_modules=missing_modules,
+                            ),
+                            "importError": msg,
+                            "canInstall": bool(missing_modules),
+                            "canRegister": False,
+                        })
             else:
                 log.warning("Skipped invalid custom tool %s: %s", file_path, msg)
+                if load_report is not None:
+                    missing_modules = _extract_missing_modules(msg)
+                    load_report.append({
+                        "toolName": module_name,
+                        "fileName": filename,
+                        "moduleName": module_name,
+                        "modulePath": os.path.abspath(file_path),
+                        "metadataPath": os.path.abspath(meta_path),
+                        "permissionLevel": "",
+                        "status": "unknown",
+                        "isActive": True,
+                        "loadState": "unavailable",
+                        "dependencies": dependencies,
+                        "missingModules": missing_modules,
+                        "installCandidates": _install_candidates(
+                            dependencies=dependencies,
+                            missing_modules=missing_modules,
+                        ),
+                        "importError": msg,
+                        "canInstall": bool(missing_modules),
+                        "canRegister": False,
+                    })
 
     return loaded
 
@@ -585,7 +902,7 @@ def load_custom_tools_for_project(
     Returns:
         성공적으로 로드된 툴 이름 목록.
     """
-    project_dir = os.path.join(CUSTOM_TOOLS_DIR, "projects", project_id)
+    project_dir = os.path.join(get_project_custom_tools_dir(), project_id)
     loaded: List[str] = []
 
     if not os.path.isdir(project_dir):
@@ -728,10 +1045,11 @@ class ToolCreatorInput(BaseModel):
             "BaseTool and BaseModel and follows the Theseus tool specification. "
             "The BaseTool subclass MUST include a 'permission_level' class attribute. "
             "STRONGLY RECOMMENDED: Also include an 'example_queries' class attribute "
-            "(list of 3-5 short user utterances in Korean and English) that would "
+            "(list of 3-5 short user utterances in the user's or project's likely "
+            "language context) that would "
             "trigger this tool. This boosts retrieval accuracy in the RAG-based "
             "tool selector. Example: "
-            "example_queries = ['날씨 알려줘', '오늘 비 와?', \"what's the weather\"]. "
+            "example_queries = ['<short request>', '<alternate phrasing>', '<domain-specific request>']. "
             "Generated tools must follow Theseus custom tool security rules: no "
             "subprocess/shell execution or other banned modules/functions; use safe "
             "read-only APIs such as psutil, /proc, or /sys where possible."
@@ -739,11 +1057,18 @@ class ToolCreatorInput(BaseModel):
     )
     permission_level: int = Field(
         default=1,
+        ge=MIN_PERMISSION_LEVEL,
+        le=MAX_PERMISSION_LEVEL,
         description=(
-            "Minimum permission level required to use this tool (positive integer). "
+            "Minimum permission level required to use this tool (integer from 1 to 5). "
             "1 = anyone can use; higher values require higher privileges."
         ),
     )
+
+    @field_validator("permission_level", mode="before")
+    @classmethod
+    def validate_permission_level(cls, value: Any) -> int:
+        return _coerce_permission_level(value)
 
 
 ToolCreatorInput.model_rebuild()
@@ -771,7 +1096,7 @@ class ToolCreatorTool(BaseTool):
         "if a required capability needs prohibited command execution, explain that "
         "user feedback or a trusted core adapter is required. "
         "Always declare an 'example_queries' class attribute listing 3-5 short "
-        "user utterances (mix Korean/English) that should trigger this tool — "
+        "user utterances in the user's or project's likely language context that should trigger this tool — "
         "this dramatically improves the RAG retriever's ability to surface it. "
         "CRITICAL: You CANNOT create a tool and call it in the SAME turn. "
         "You must call create_tool, wait for the success result, and ONLY "
@@ -881,7 +1206,7 @@ class ToolCreatorTool(BaseTool):
         return ToolCreatorInput(
             tool_name=str(candidate.get("toolName") or candidate.get("tool_name") or fallback.tool_name),
             python_code=str(candidate.get("pythonCode") or candidate.get("python_code") or fallback.python_code),
-            permission_level=int(
+            permission_level=_coerce_permission_level(
                 candidate.get("permissionLevel")
                 or candidate.get("permission_level")
                 or fallback.permission_level
@@ -898,7 +1223,7 @@ class ToolCreatorTool(BaseTool):
         return {
             "toolName": str(tool_name),
             "pythonCode": str(python_code),
-            "permissionLevel": int(permission_level),
+            "permissionLevel": _coerce_permission_level(permission_level),
         }
 
     @staticmethod

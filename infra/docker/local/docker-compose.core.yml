@@ -1,4 +1,32 @@
 services:
+  theseus-sandbox-image:
+    build:
+      context: ../../../backend/theseus-core-server
+      dockerfile: Dockerfile.sandbox
+    image: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
+    container_name: theseus-local-sandbox-image
+    command:
+      - python
+      - -c
+      - import pydantic, psutil, markdownify, bs4, yaml, requests, httpx, numpy, packaging, dotenv
+    restart: "no"
+    network_mode: "none"
+
+  theseus-core-permissions:
+    image: alpine:3.20
+    container_name: theseus-local-core-permissions
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /sandbox-temp
+        chown -R 999:999 /sandbox-temp
+        chmod 770 /sandbox-temp
+    restart: "no"
+    volumes:
+      - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:/sandbox-temp
+
   theseus-core-server:
     build:
       context: ../../../backend/theseus-core-server
@@ -14,6 +42,7 @@ services:
       AUTH_MODE: spring
       CORE_KAFKA_CONSUMER_ENABLED: true
       SANDBOX_STARTUP_CHECK: false
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
       DOCKER_HOST: unix:///var/run/docker.sock
       THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
       SANDBOX_HOST_TEMP_ROOT: ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
@@ -39,6 +68,10 @@ services:
         condition: service_healthy
       theseus-local-kafka:
         condition: service_healthy
+      theseus-sandbox-image:
+        condition: service_completed_successfully
+      theseus-core-permissions:
+        condition: service_completed_successfully
     networks:
       - theseus-local-network
 

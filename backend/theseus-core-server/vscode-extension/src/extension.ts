@@ -1,18 +1,37 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 
-import { TheseusChatViewProvider } from './providers/ChatViewProvider';
+import { pickWorktree, TheseusChatViewProvider } from './providers/ChatViewProvider';
 import { TheseusDiffContentProvider } from './providers/DiffProvider';
 import { TheseusSessionManager } from './session/SessionManager';
 import { createCustomToolWatchers } from './tools/CustomToolManager';
 import {
   getCoreRoot,
+  getRunnerPath,
+  getRuntimeModeSetting,
   getWorkspaceCwd,
+  shouldUseBundledRunner,
 } from './workspace/WorkspaceContext';
 import { InlineEditController } from './inline/InlineEditController';
 
 function startRunner(context: vscode.ExtensionContext, sessionManager: TheseusSessionManager): void {
+  const runnerPath = getRunnerPath();
+  const runtimeMode = getRuntimeModeSetting();
+  if (runtimeMode === 'bundled-runner' && !runnerPath) {
+    vscode.window.showErrorMessage(
+      'theseus.runtimeMode is bundled-runner, but theseus.runnerPath is empty.',
+      'Open Settings',
+    ).then(c => {
+      if (c === 'Open Settings') {
+        vscode.commands.executeCommand('workbench.action.openSettings', 'theseus.runnerPath');
+      }
+    });
+    return;
+  }
+
   const coreRoot = getCoreRoot(context);
-  if (!coreRoot) {
+  const useBundledRunner = shouldUseBundledRunner();
+  if (!coreRoot && !useBundledRunner) {
     vscode.window.showErrorMessage(
       'Cannot find theseus_engine/. Set "theseus.corePath" to the theseus-core-server directory.',
       'Open Settings',
@@ -24,10 +43,11 @@ function startRunner(context: vscode.ExtensionContext, sessionManager: TheseusSe
     return;
   }
 
-  const workspaceCwd = getWorkspaceCwd() ?? coreRoot;
+  const fallbackRoot = coreRoot || path.dirname(runnerPath);
+  const workspaceCwd = getWorkspaceCwd() ?? fallbackRoot;
 
   sessionManager.output.show(true);
-  void sessionManager.ensureSession(coreRoot, workspaceCwd);
+  void sessionManager.ensureSession(fallbackRoot, workspaceCwd);
 }
 
 function diagnosticAtCursor(editor: vscode.TextEditor): vscode.Diagnostic | undefined {
@@ -141,6 +161,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('theseus.start', () => startRunner(context, sessionManager)),
     vscode.commands.registerCommand('theseus.stop', () => sessionManager.stop()),
     vscode.commands.registerCommand('theseus.showLogs', () => sessionManager.showLogs()),
+    vscode.commands.registerCommand('theseus.selectWorktree', async () => {
+      await pickWorktree(sessionManager);
+    }),
 
     vscode.commands.registerCommand('theseus.askSelected', () => {
       const editor = vscode.window.activeTextEditor;

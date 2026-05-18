@@ -70,6 +70,38 @@ services:
     networks:
       - theseus-prod-network
 
+  theseus-sandbox-image:
+    profiles:
+      - sandbox-build
+    build:
+      context: ../../../backend/theseus-core-server
+      dockerfile: Dockerfile.sandbox
+    image: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
+    container_name: theseus-prod-sandbox-image
+    command:
+      - python
+      - -c
+      - import pydantic, psutil, markdownify, bs4, yaml, requests, httpx, numpy, packaging, dotenv
+    restart: "no"
+    network_mode: "none"
+
+  theseus-core-permissions:
+    image: alpine:3.20
+    container_name: theseus-prod-core-permissions
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /sandbox-temp /custom-tools /debug-dumps
+        chown -R 999:999 /sandbox-temp /custom-tools /debug-dumps
+        chmod 770 /sandbox-temp /custom-tools /debug-dumps
+    restart: "no"
+    volumes:
+      - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:/sandbox-temp
+      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/custom-tools
+      - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/debug-dumps
+
   theseus-api-server:
     build:
       context: ../../../backend/theseus-api-server
@@ -117,6 +149,9 @@ services:
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
       DOCKER_HOST: unix:///var/run/docker.sock
       THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
+      THESEUS_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools
+      THESEUS_PROJECT_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools/projects
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
       SANDBOX_HOST_TEMP_ROOT: ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       SANDBOX_CONTAINER_TEMP_ROOT: ${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       SPRING_BOOT_INTERNAL_URL: http://theseus-api-server:8080
@@ -129,6 +164,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
+      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/backend/theseus-core-server/theseus_engine/custom_tools/projects
       - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/var/log/theseus/debug/dumps
       - ${REMOTE_WORKSPACE_KEY_HOST_PATH:-/secure/theseus/keys/ssafy-ec2-key.pem}:/home/appuser/.ssh/ssafy-ec2-key.pem:ro
     ports:
@@ -140,6 +176,8 @@ services:
         condition: service_completed_successfully
       theseus-api-server:
         condition: service_started
+      theseus-core-permissions:
+        condition: service_completed_successfully
     networks:
       - theseus-prod-network
 

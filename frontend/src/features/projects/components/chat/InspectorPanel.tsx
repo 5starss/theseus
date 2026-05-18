@@ -167,11 +167,11 @@ export function InspectorPanel() {
               currentPlan.blocks.map(block => (
                 <div key={block.blockId} className="bg-slate-800/30 border border-slate-700/50 p-4 rounded text-sm text-slate-300 flex flex-col gap-3 group hover:border-slate-600 transition-colors">
                   <div>
-                    <div className="font-semibold text-blue-200 mb-1 flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                    <div className="font-semibold text-blue-200 mb-1 flex items-center gap-2 break-words">
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
                       {block.title}
                     </div>
-                    <div className="text-slate-400 leading-relaxed whitespace-pre-wrap">{block.content}</div>
+                    <div className="text-slate-400 leading-relaxed whitespace-pre-wrap break-words">{block.content}</div>
                   </div>
 
                   {commentMode && (

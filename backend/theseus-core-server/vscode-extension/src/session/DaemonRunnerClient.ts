@@ -72,6 +72,37 @@ export class DaemonRunnerClient implements RunnerClient {
   constructor(private readonly output: vscode.OutputChannel) {}
 
   startProcess(config: RunnerStartConfig): RunnerProcess {
+    const initialSession = config.initialSession || 'default';
+    if (config.runnerPath) {
+      return cp.spawn(
+        config.runnerPath,
+        [
+          'daemon',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          '0',
+          '--workspace',
+          config.workspaceCwd,
+          '--core-root',
+          config.coreRoot,
+        ],
+        {
+          cwd: config.workspaceCwd,
+          env: {
+            ...process.env,
+            THESEUS_SERVER_URL: config.serverUrl,
+            THESEUS_CORE_ROOT: config.coreRoot,
+            THESEUS_RUNNER_PATH: config.runnerPath,
+            THESEUS_INITIAL_SESSION: initialSession,
+            PYTHONIOENCODING: 'utf-8',
+            PYTHONUTF8: '1',
+          },
+          signal: config.signal,
+        },
+      );
+    }
+
     const extraPython = config.coreRoot !== config.workspaceCwd
       ? config.coreRoot + path.delimiter + (process.env.PYTHONPATH || '')
       : (process.env.PYTHONPATH || '');
@@ -89,8 +120,6 @@ export class DaemonRunnerClient implements RunnerClient {
         config.workspaceCwd,
         '--core-root',
         config.coreRoot,
-        '--session',
-        config.initialSession || 'default',
       ],
       {
         cwd: config.workspaceCwd,
@@ -98,6 +127,7 @@ export class DaemonRunnerClient implements RunnerClient {
           ...process.env,
           PYTHONPATH: extraPython,
           THESEUS_SERVER_URL: config.serverUrl,
+          THESEUS_INITIAL_SESSION: initialSession,
           PYTHONIOENCODING: 'utf-8',
           PYTHONUTF8: '1',
         },

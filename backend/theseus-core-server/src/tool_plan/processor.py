@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Callable
@@ -86,10 +87,42 @@ class ToolPlanProcessor:
             raise
         except ToolPlanPlannerError as exc:
             logger.error("ToolPlan generation failed. runId=%s error=%s", event.run_id, exc, exc_info=True)
-            await self.publish_failed(event, "TOOL_PLAN_GENERATION_FAILED", str(exc))
+            code = "TOOL_PLAN_GENERATION_FAILED"
+            message = await self._explain_failure(event, code=code, message=str(exc), stage="planner")
+            await self.publish_failed(event, code, message)
         except Exception as exc:
             logger.error("Unexpected ToolPlan failure. runId=%s error=%s", event.run_id, exc, exc_info=True)
-            await self.publish_failed(event, "TOOL_PLAN_FAILED", str(exc))
+            code = "TOOL_PLAN_FAILED"
+            message = await self._explain_failure(event, code=code, message=str(exc), stage="unexpected")
+            await self.publish_failed(event, code, message)
+
+    async def _explain_failure(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        code: str,
+        message: str,
+        stage: str | None = None,
+    ) -> str:
+        try:
+            return await asyncio.wait_for(
+                self.planner.explain_failure(
+                    event,
+                    code=code,
+                    message=message,
+                    stage=stage,
+                ),
+                timeout=20,
+            )
+        except Exception as exc:
+            logger.warning(
+                "ToolPlan failure explanation failed. runId=%s code=%s error=%s",
+                event.run_id,
+                code,
+                exc,
+                exc_info=True,
+            )
+            return message
 
     def _begin_run(self, event: ToolPlanRequestEvent, *, request_type: str) -> bool:
         with self._checkpoint_repo() as repo:

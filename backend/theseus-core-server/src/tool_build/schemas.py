@@ -3,7 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _coerce_permission_level(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("permissionLevel must be an integer from 1 to 5")
+    if isinstance(value, int):
+        level = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        level = int(value.strip())
+    else:
+        raise ValueError("permissionLevel must be an integer from 1 to 5")
+    if not 1 <= level <= 5:
+        raise ValueError("permissionLevel must be an integer from 1 to 5")
+    return level
 
 
 class ApprovedPlanPayload(BaseModel):
@@ -39,6 +53,11 @@ class GeneratedToolSpec(BaseModel):
     permission_level: int = Field(default=1, alias="permissionLevel")
     python_code: str = Field(alias="pythonCode")
     metadata_json: dict[str, Any] = Field(default_factory=dict, alias="metadataJson")
+
+    @field_validator("permission_level", mode="before")
+    @classmethod
+    def validate_permission_level(cls, value: Any) -> int:
+        return _coerce_permission_level(value)
 
 
 class ToolArtifactPayload(BaseModel):

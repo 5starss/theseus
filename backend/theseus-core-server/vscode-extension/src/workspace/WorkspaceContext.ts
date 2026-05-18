@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -13,17 +14,77 @@ export type ActiveCursorContext = {
   line: number;
 };
 
+export type RuntimeModeSetting = 'auto' | 'source-python' | 'bundled-runner';
+
 export function hasTheseusEngine(dir: string): boolean {
   return fs.existsSync(path.join(dir, 'theseus_engine'));
 }
 
+function firstWorkspaceFolderPath(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+function workspaceFolderPath(name?: string): string | undefined {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (!name) return folders[0]?.uri.fsPath;
+  return folders.find(folder => folder.name === name)?.uri.fsPath;
+}
+
+export function expandTheseusPath(value: string | undefined): string {
+  const raw = value?.trim() || '';
+  if (!raw) return '';
+
+  let expanded = raw.replace(/\$\{workspaceFolder(?::([^}]+))?\}/g, (_match, name: string | undefined) => {
+    return workspaceFolderPath(name) || '';
+  });
+
+  expanded = expanded.replace(/\$\{userHome\}/g, os.homedir());
+  expanded = expanded.replace(/\$\{env:([^}]+)\}/g, (_match, name: string) => process.env[name] || '');
+
+  if (expanded === '~' || expanded.startsWith(`~${path.sep}`) || expanded.startsWith('~/') || expanded.startsWith('~\\')) {
+    expanded = path.join(os.homedir(), expanded.slice(1));
+  }
+
+  if (!path.isAbsolute(expanded)) {
+    const workspace = firstWorkspaceFolderPath();
+    if (workspace) expanded = path.resolve(workspace, expanded);
+  }
+
+  return path.normalize(expanded);
+}
+
+function getTheseusPathSetting(key: string): string {
+  return expandTheseusPath(vscode.workspace.getConfiguration('theseus').get<string>(key));
+}
+
+export function getRunnerPath(): string {
+  return getTheseusPathSetting('runnerPath');
+}
+
+export function getPythonPath(): string {
+  return getTheseusPathSetting('pythonPath') || 'python';
+}
+
+export function getRuntimeModeSetting(): RuntimeModeSetting {
+  const value = vscode.workspace.getConfiguration('theseus').get<string>('runtimeMode')?.trim();
+  if (value === 'source-python' || value === 'bundled-runner') return value;
+  return 'auto';
+}
+
+export function shouldUseBundledRunner(): boolean {
+  const mode = getRuntimeModeSetting();
+  if (mode === 'source-python') return false;
+  return !!getRunnerPath();
+}
+
 export function getCoreRoot(context: vscode.ExtensionContext): string | undefined {
-  const cfg = vscode.workspace.getConfiguration('theseus');
-  const corePath = cfg.get<string>('corePath')?.trim();
-  if (corePath) return corePath;
+  const corePath = getTheseusPathSetting('corePath');
+  if (corePath && hasTheseusEngine(corePath)) return corePath;
 
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     if (hasTheseusEngine(folder.uri.fsPath)) return folder.uri.fsPath;
+    const nestedCore = path.join(folder.uri.fsPath, 'backend', 'theseus-core-server');
+    if (hasTheseusEngine(nestedCore)) return nestedCore;
   }
 
   const devRoot = path.resolve(context.extensionUri.fsPath, '..');
@@ -33,10 +94,9 @@ export function getCoreRoot(context: vscode.ExtensionContext): string | undefine
 }
 
 export function getWorkspaceCwd(): string | undefined {
-  const cfg = vscode.workspace.getConfiguration('theseus');
-  const explicit = cfg.get<string>('workspacePath')?.trim();
+  const explicit = getTheseusPathSetting('workspacePath');
   if (explicit) return explicit;
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return firstWorkspaceFolderPath();
 }
 
 export function getCoreRootPathFallback(): string | undefined {
@@ -139,7 +199,7 @@ export function getCustomToolSearchRoots(): string[] {
   const roots = new Set<string>();
   const workspace = getWorkspaceCwd();
   if (workspace) roots.add(workspace);
-  const corePath = vscode.workspace.getConfiguration('theseus').get<string>('corePath')?.trim();
+  const corePath = getTheseusPathSetting('corePath');
   if (corePath) roots.add(corePath);
   const fallbackCore = getCoreRootPathFallback();
   if (fallbackCore) roots.add(fallbackCore);

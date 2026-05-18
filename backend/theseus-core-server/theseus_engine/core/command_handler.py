@@ -6,6 +6,7 @@ from theseus_engine.core.tool_visibility import (
     build_visible_registry,
     can_create_tool_for_state,
 )
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 from theseus_engine.models.sessions import list_sessions, get_session_path, save_session_history, load_session_history
 
 class TheseusCommandHandler:
@@ -16,6 +17,7 @@ class TheseusCommandHandler:
         self.project_tool_permissions = project_tool_permissions
         self.user_level = user_level
         self.current_session = current_session
+        self.pending_mode_reminders: tuple[str, ...] = ()
 
     def handle_command(self, user_input: str) -> tuple[bool, str]:
         """
@@ -27,17 +29,23 @@ class TheseusCommandHandler:
         args = parts[1:]
 
         if cmd == "/ask":
+            previous_mode = self.sm.mode
             self.sm.switch_mode(AgentMode.ASK)
+            self._set_pending_mode_reminders(previous_mode)
             self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to ASK mode (Read-only)."
             
         elif cmd == "/agent":
+            previous_mode = self.sm.mode
             self.sm.switch_mode(AgentMode.AGENT)
+            self._set_pending_mode_reminders(previous_mode)
             self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to AGENT mode."
             
         elif cmd == "/plan":
+            previous_mode = self.sm.mode
             self.sm.switch_mode(AgentMode.PLAN)
+            self._set_pending_mode_reminders(previous_mode)
             self._sync_engine_tool_visibility()
             return True, "\n[System] Switched to PLAN mode (Drafting phase)."
             
@@ -85,7 +93,24 @@ class TheseusCommandHandler:
                 
         return False, "Unknown command."
 
-    def _sync_engine_tool_visibility(self) -> None:
+    def consume_pending_mode_reminders(self) -> tuple[str, ...]:
+        reminders = self.pending_mode_reminders
+        self.pending_mode_reminders = ()
+        return reminders
+
+    def _set_pending_mode_reminders(self, previous_mode: AgentMode) -> None:
+        self.pending_mode_reminders = build_mode_runtime_reminders(
+            self.sm.mode,
+            previous_mode=previous_mode,
+            plan_phase=getattr(self.sm, "plan_phase", None),
+            source="CLI",
+            explicit_selection=True,
+        )
+
+    def _sync_engine_tool_visibility(
+        self,
+        runtime_reminders: tuple[str, ...] = (),
+    ) -> None:
         can_create_tool = can_create_tool_for_state(
             mode=self.sm.mode,
             plan_phase=getattr(self.sm, "plan_phase", None),
@@ -105,6 +130,7 @@ class TheseusCommandHandler:
         self.engine.set_tool_registry(registry)
         self.engine.set_system_prompt(
             self.sm.get_system_prompt(
-                available_tools=tuple(tool.name for tool in registry.list_tools())
+                available_tools=tuple(tool.name for tool in registry.list_tools()),
+                runtime_reminders=runtime_reminders,
             )
         )

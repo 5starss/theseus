@@ -47,6 +47,7 @@ from theseus_engine.core.tool_visibility import (
     build_visible_registry,
     can_create_tool_for_state,
 )
+from theseus_engine.core.mode_context import build_mode_runtime_reminders
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -174,6 +175,7 @@ class TheseusTUI(App):
 
         self.project_tool_permissions: dict = {
             "bash": 3, "read_file": 1, "write_file": 2, "edit_file": 2,
+            "local_write_report": 2,
             "glob": 1, "grep": 1, "web_search": 1, "web_fetch": 1,
             "dummy_echo": 1, "create_tool": 2, "system_reboot": 5,
             "search_knowledge_base": 1, "ingest_document": 2,
@@ -182,6 +184,7 @@ class TheseusTUI(App):
         self.actor_role = "ADMIN"  # standalone: 로컬 사용자 = ADMIN
         self._session_id: str = ""
         self._session_token: str = os.getenv("THESEUS_SESSION_TOKEN", "")
+        self.pending_mode_reminders: tuple[str, ...] = ()
 
     # ── 레이아웃 ────────────────────────────────────────────────
 
@@ -281,7 +284,14 @@ class TheseusTUI(App):
         if tool_name in self._always_approve_tools:
             return True
 
-        _DESTRUCTIVE = {"bash", "write_file", "edit_file", "system_reboot", "create_tool"}
+        _DESTRUCTIVE = {
+            "bash",
+            "write_file",
+            "edit_file",
+            "local_write_report",
+            "system_reboot",
+            "create_tool",
+        }
         if tool_name not in _DESTRUCTIVE:
             return True
 
@@ -342,6 +352,7 @@ class TheseusTUI(App):
         max_auto_resume = 5
         auto_resume_count = 0
         current_line = line
+        runtime_reminders = self._consume_pending_mode_reminders()
 
         while True:
             accumulated_text = ""
@@ -352,7 +363,10 @@ class TheseusTUI(App):
             verification_complete = False
 
             # PLAN DRAFTING 여부를 엔진에 동기화 — JSON 감지 활성화
-            self._sync_engine_tool_visibility()
+            self._sync_engine_tool_visibility(
+                runtime_reminders=runtime_reminders,
+            )
+            runtime_reminders = ()
 
             model_name = getattr(self._bundle.engine, "_model", self._model)
             tags     = get_tracing_tags(self.user_level, model_name, self.current_session)
@@ -603,28 +617,36 @@ class TheseusTUI(App):
 
     def action_switch_plan(self) -> None:
         if not self._bundle: return
+        previous_mode = self.theseus_sm.mode
         self.theseus_sm.switch_mode(AgentMode.PLAN)
+        self._set_pending_mode_reminders(previous_mode, source="TUI")
         self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold yellow]PLAN[/bold yellow] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_agent(self) -> None:
         if not self._bundle: return
+        previous_mode = self.theseus_sm.mode
         self.theseus_sm.switch_mode(AgentMode.AGENT)
+        self._set_pending_mode_reminders(previous_mode, source="TUI")
         self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold green]AGENT[/bold green] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_ask(self) -> None:
         if not self._bundle: return
+        previous_mode = self.theseus_sm.mode
         self.theseus_sm.switch_mode(AgentMode.ASK)
+        self._set_pending_mode_reminders(previous_mode, source="TUI")
         self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold blue]ASK[/bold blue] mode.")
         self._refresh_sidebars(force=True)
 
     def action_switch_coordinator(self) -> None:
         if not self._bundle: return
+        previous_mode = self.theseus_sm.mode
         self.theseus_sm.switch_mode(AgentMode.COORDINATOR)
+        self._set_pending_mode_reminders(previous_mode, source="TUI")
         self._sync_engine_tool_visibility()
         self._append_line("system> Switched to [bold magenta]COORDINATOR[/bold magenta] mode.")
         self._refresh_sidebars(force=True)
@@ -648,7 +670,24 @@ class TheseusTUI(App):
             checker._settings.mode = target
         self._bundle.app_state.permission_mode = target.value
 
-    def _sync_engine_tool_visibility(self) -> None:
+    def _set_pending_mode_reminders(self, previous_mode: AgentMode, *, source: str) -> None:
+        self.pending_mode_reminders = build_mode_runtime_reminders(
+            self.theseus_sm.mode,
+            previous_mode=previous_mode,
+            plan_phase=getattr(self.theseus_sm, "plan_phase", None),
+            source=source,
+            explicit_selection=True,
+        )
+
+    def _consume_pending_mode_reminders(self) -> tuple[str, ...]:
+        reminders = self.pending_mode_reminders
+        self.pending_mode_reminders = ()
+        return reminders
+
+    def _sync_engine_tool_visibility(
+        self,
+        runtime_reminders: tuple[str, ...] = (),
+    ) -> None:
         if not self._bundle:
             return
         can_create_tool = can_create_tool_for_state(
@@ -670,7 +709,10 @@ class TheseusTUI(App):
         self._bundle.engine.set_tool_registry(active_registry)
         active_names = tuple(tool.name for tool in active_registry.list_tools())
         self._bundle.engine.set_system_prompt(
-            self.theseus_sm.get_system_prompt(available_tools=active_names)
+            self.theseus_sm.get_system_prompt(
+                available_tools=active_names,
+                runtime_reminders=runtime_reminders,
+            )
         )
         self._bundle.engine.set_plan_drafting(self.theseus_sm.is_plan_drafting)
         self._sync_permission_mode()

@@ -19,6 +19,8 @@ from src.db.repositories.billing import BillingOutboxRepository
 from src.history.service import (
     load_history_messages,
     persist_assistant_message,
+    persist_tool_call_message,
+    persist_tool_result_message,
     persist_user_message,
 )
 from src.plan.service import restore_plan_after_stream, validate_executing_plan_binding
@@ -115,6 +117,13 @@ async def stream_agent_response(
                 assistant_chunks.append(event.text)
                 yield sse_event("chunk", {"content": event.text})
             elif isinstance(event, assembly.tool_execution_started_type):
+                await persist_tool_call_message(
+                    session=session,
+                    chat_session_id=chat_session_id,
+                    tool_name=event.tool_name,
+                    tool_input=event.tool_input,
+                    tool_use_id=getattr(event, "tool_use_id", None),
+                )
                 logger.info(
                     "Theseus tool started: user=%s project=%s chat_session=%s mode=%s tool=%s input_keys=%s",
                     session.user_id,
@@ -129,6 +138,16 @@ async def stream_agent_response(
                     {"message": f"Executing tool: {event.tool_name}"},
                 )
             elif isinstance(event, assembly.tool_execution_completed_type):
+                await persist_tool_result_message(
+                    session=session,
+                    chat_session_id=chat_session_id,
+                    tool_name=event.tool_name,
+                    output=event.output,
+                    is_error=event.is_error,
+                    tool_use_id=getattr(event, "tool_use_id", None),
+                    tool_input=getattr(event, "tool_input", None),
+                    metadata=getattr(event, "metadata", None),
+                )
                 logger.info(
                     "Theseus tool completed: user=%s project=%s chat_session=%s mode=%s tool=%s is_error=%s output_len=%s",
                     session.user_id,

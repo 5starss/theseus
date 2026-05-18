@@ -21,14 +21,21 @@ import {
   type RunnerEvent,
 } from '../shared/protocol';
 import {
+  disableCustomTool,
+  installCustomToolDependencies,
   loadCustomToolSummaries,
+  registerCustomTool,
   updateCustomToolPermission,
 } from '../tools/CustomToolManager';
 import {
+  expandTheseusPath,
   findMentionFiles,
   getActiveCursorContext,
   getCoreRoot,
   getCustomToolSearchRoots,
+  getPythonPath,
+  getRunnerPath,
+  getRuntimeModeSetting,
   getWorkspaceCwd,
   injectCursorContext,
   resolveContextMentions,
@@ -187,6 +194,109 @@ function formatPlanMarkdown(plan: JsonObject): string {
   return lines.join('\n');
 }
 
+/**
+ * 워크트리(작업 폴더) 선택 picker — VSCode 작업 폴더 목록 + Browse + Clear.
+ * 선택 결과는 `theseus.workspacePath` workspace 설정에 저장된다.
+ *
+ * @param sessionManager 변경 후 runner가 실행 중이면 재시작 안내/자동 재시작을 위해 전달.
+ *                       전달하지 않으면 안내만 표시하지 않음.
+ */
+export async function pickWorktree(sessionManager?: TheseusSessionManager): Promise<string | undefined> {
+  const cfg = vscode.workspace.getConfiguration('theseus');
+  const current = expandTheseusPath(cfg.get<string>('workspacePath')) || '';
+  const folders = vscode.workspace.workspaceFolders ?? [];
+
+  type Item = vscode.QuickPickItem & { value?: string; action?: 'browse' | 'clear' };
+  const items: Item[] = [];
+
+  for (const folder of folders) {
+    const fsPath = folder.uri.fsPath;
+    items.push({
+      label: `$(folder) ${folder.name}`,
+      description: fsPath === current ? '(current)' : undefined,
+      detail: fsPath,
+      value: fsPath,
+    });
+  }
+
+  if (current && !folders.some(f => f.uri.fsPath === current)) {
+    items.push({
+      label: `$(folder-active) Custom path`,
+      description: '(current, not in VSCode folders)',
+      detail: current,
+      value: current,
+    });
+  }
+
+  items.push({ label: '$(folder-opened) Browse...', detail: 'OS 파일 선택 대화상자로 폴더 선택', action: 'browse' });
+  if (current) {
+    items.push({ label: '$(clear-all) Clear', detail: '설정을 비우고 첫 번째 VSCode 작업 폴더로 자동 사용', action: 'clear' });
+  }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'Theseus 워크트리 선택',
+    placeHolder: current || '작업 폴더를 선택하세요',
+    matchOnDescription: true,
+    matchOnDetail: true,
+  });
+  if (!picked) return undefined;
+
+  let nextValue: string | undefined;
+
+  if (picked.action === 'browse') {
+    const uri = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: 'Use as Workspace',
+    });
+    if (!uri?.length) return undefined;
+    nextValue = uri[0].fsPath;
+  } else if (picked.action === 'clear') {
+    nextValue = '';
+  } else if (typeof picked.value === 'string') {
+    nextValue = picked.value;
+  } else {
+    return undefined;
+  }
+
+  // 이전 워크트리 (변경 여부 판단용)
+  const previousResolved = current || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+
+  // workspace 범위가 있으면 workspace 단위로, 없으면 user 범위로 저장
+  const target = vscode.workspace.workspaceFolders?.length
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await cfg.update('workspacePath', nextValue || '', target);
+
+  const resolved = nextValue || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  const changed = resolved !== previousResolved;
+
+  // runner가 옛 경로로 동작 중이면 재시작 권유
+  if (changed && sessionManager?.hasProcess) {
+    const action = await vscode.window.showWarningMessage(
+      resolved
+        ? `Theseus 워크트리가 ${resolved}로 변경되었습니다. 실행 중인 runner는 옛 경로를 사용 중입니다.`
+        : 'Theseus 워크트리 설정이 비워졌습니다. 실행 중인 runner는 옛 경로를 사용 중입니다.',
+      { modal: false },
+      'Restart Runner',
+      'Later',
+    );
+    if (action === 'Restart Runner') {
+      sessionManager.stop('worktree_changed');
+      // start는 호출 측 또는 사용자에 위임 (자동 재시작은 컨텍스트 의존성 큼)
+      vscode.window.showInformationMessage('Runner를 재시작하려면 Start 버튼을 눌러주세요.');
+    }
+  } else if (changed) {
+    if (resolved) {
+      vscode.window.showInformationMessage(`Theseus 워크트리가 ${resolved}로 설정되었습니다.`);
+    } else {
+      vscode.window.showInformationMessage('Theseus 워크트리 설정이 비워졌습니다.');
+    }
+  }
+  return resolved;
+}
+
 async function openPlanMarkdownPreview(plan: JsonObject): Promise<void> {
   const doc = await vscode.workspace.openTextDocument({
     content: formatPlanMarkdown(plan),
@@ -282,8 +392,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private currentSessionName(): string {
-    const status = this.sessionManager.status;
-    return typeof status.session === 'string' && status.session ? status.session : 'default';
+    return this.sessionManager.preferredSessionName;
   }
 
   private postLocalSessionSnapshot(snapshot: LocalSessionActionResult): void {
@@ -313,20 +422,42 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private canRouteSessionCommandToRunner(): boolean {
-    return this.sessionManager.hasProcess && ['ready', 'waiting_input'].includes(this.sessionManager.currentState);
+    const status = this.sessionManager.status;
+    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
+    return !!status.processRunning && ['ready', 'waiting_input'].includes(state);
   }
 
-  private canHandleSessionLocally(): boolean {
-    return !this.sessionManager.hasProcess || ['stopped', 'error', 'exited', 'stale'].includes(this.sessionManager.currentState);
+  private isSessionChangeBlockedByActiveRun(): boolean {
+    const status = this.sessionManager.status;
+    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
+    return !!status.processRunning && (state === 'busy' || this.sessionManager.currentState === 'busy');
   }
 
-  private postSessionBusyNotice(): void {
-    this.postRunnerEvent({
-      type: 'RunnerDiagnostic',
-      code: 'session_busy',
-      message: 'Session changes are available after the current run finishes or the runner is stopped.',
-      state: this.sessionManager.currentState,
+  private postTransientNotice(message: string, tone = 'hint'): void {
+    this.messageQueue.post({ type: 'transientNotice', message, tone });
+  }
+
+  private syncSessionCommandWhenReady(command: string): void {
+    if (!this.sessionManager.hasProcess) return;
+    if (this.canRouteSessionCommandToRunner()) {
+      this.sessionManager.send(command);
+      return;
+    }
+
+    let settled = false;
+    const disposable = this.sessionManager.onEvent(() => {
+      if (settled || !this.canRouteSessionCommandToRunner()) return;
+      settled = true;
+      clearTimeout(timer);
+      disposable.dispose();
+      this.sessionManager.send(command);
     });
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      disposable.dispose();
+    }, 15000);
   }
 
   refreshActiveCursor(): void {
@@ -347,13 +478,25 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       type: 'runnerEvent',
       event: { type: 'customToolsLoaded', tools },
     });
+    this.messageQueue.post({
+      type: 'runnerEvent',
+      event: { type: 'customToolInventoryUpdated', source: 'host', tools },
+    });
+  }
+
+  private refreshRuntimeToolRegistry(reason: string): void {
+    this.sessionManager.refreshToolRegistry(reason);
+    void this.refreshCustomTools();
   }
 
   private postHealthStatus(): void {
     const coreRoot = getCoreRoot(this.context) || '';
     const workspaceCwd = getWorkspaceCwd() || '';
     const config = vscode.workspace.getConfiguration('theseus');
-    const pythonExec = config.get<string>('pythonPath') || 'python';
+    const pythonExec = getPythonPath();
+    const runnerPath = getRunnerPath();
+    const runtimeModeSetting = getRuntimeModeSetting();
+    const usingBundledRunner = !!runnerPath && runtimeModeSetting !== 'source-python';
     const serverUrl = config.get<string>('serverUrl') || '';
     const status = this.sessionManager.status;
     const customToolRoots = getCustomToolSearchRoots();
@@ -362,6 +505,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       settings: {
         corePath: coreRoot,
         pythonPath: pythonExec,
+        runnerPath,
+        runtimeModeSetting,
         serverUrl,
         workspacePath: workspaceCwd,
         coreRoot,
@@ -382,8 +527,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       checks: [
         {
           label: 'Core path',
-          status: coreRoot ? 'ok' : 'error',
-          detail: coreRoot || 'theseus.corePath를 설정하세요.',
+          status: coreRoot ? 'ok' : usingBundledRunner ? 'warn' : 'error',
+          detail: coreRoot || (usingBundledRunner ? 'bundled runner 사용 중' : 'theseus.corePath를 설정하세요.'),
         },
         {
           label: 'Workspace',
@@ -391,9 +536,9 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           detail: workspaceCwd || '워크스페이스 폴더를 열거나 theseus.workspacePath를 설정하세요.',
         },
         {
-          label: 'Python',
-          status: pythonExec ? 'ok' : 'warn',
-          detail: pythonExec,
+          label: usingBundledRunner ? 'Runner binary' : 'Python',
+          status: usingBundledRunner ? 'ok' : pythonExec ? 'ok' : 'warn',
+          detail: usingBundledRunner ? runnerPath : pythonExec,
         },
         {
           label: 'Runner',
@@ -556,14 +701,16 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
             const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName();
             if (this.canRouteSessionCommandToRunner()) {
               this.sessionManager.send(`/session new ${JSON.stringify(name)}`);
-            } else if (this.canHandleSessionLocally()) {
+            } else if (this.isSessionChangeBlockedByActiveRun()) {
+              this.syncSessionCommandWhenReady(`/session new ${JSON.stringify(name)}`);
+              this.postTransientNotice(`현재 응답 완료 후 새 세션으로 전환합니다: ${name}`);
+            } else {
               try {
                 this.postLocalSessionSnapshot(createLocalSession(this.localSessionWorkspace(), name));
+                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(name)}`);
               } catch (err) {
                 this.postLocalSessionError(err);
               }
-            } else {
-              this.postSessionBusyNotice();
             }
           }
           break;
@@ -571,14 +718,16 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           if (typeof msg.name === 'string') {
             if (this.canRouteSessionCommandToRunner()) {
               this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
-            } else if (this.canHandleSessionLocally()) {
+            } else if (this.isSessionChangeBlockedByActiveRun()) {
+              this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.name)}`);
+              this.postTransientNotice(`현재 응답 완료 후 세션을 전환합니다: ${msg.name}`);
+            } else {
               try {
                 this.postLocalSessionSnapshot(switchLocalSession(this.localSessionWorkspace(), msg.name));
+                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.name)}`);
               } catch (err) {
                 this.postLocalSessionError(err);
               }
-            } else {
-              this.postSessionBusyNotice();
             }
           }
           break;
@@ -604,14 +753,17 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
               }
             } else if (this.canRouteSessionCommandToRunner()) {
               this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
-            } else if (this.canHandleSessionLocally()) {
+            } else if (this.isSessionChangeBlockedByActiveRun()) {
+              this.syncSessionCommandWhenReady(`/session delete ${JSON.stringify(msg.name)}`);
+              this.postTransientNotice(`현재 응답 완료 후 세션을 삭제합니다: ${msg.name}`);
+            } else {
               try {
-                this.postLocalSessionSnapshot(deleteLocalSession(this.localSessionWorkspace(), msg.name, this.currentSessionName()));
+                const snapshot = deleteLocalSession(this.localSessionWorkspace(), msg.name, this.currentSessionName());
+                this.postLocalSessionSnapshot(snapshot);
+                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(snapshot.current)}`);
               } catch (err) {
                 this.postLocalSessionError(err);
               }
-            } else {
-              this.postSessionBusyNotice();
             }
           }
           break;
@@ -619,32 +771,31 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           if (typeof msg.oldName === 'string' && typeof msg.newName === 'string') {
             if (this.canRouteSessionCommandToRunner()) {
               this.sessionManager.send(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
-            } else if (this.canHandleSessionLocally()) {
+            } else if (this.isSessionChangeBlockedByActiveRun()) {
+              this.syncSessionCommandWhenReady(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
+              this.postTransientNotice(`현재 응답 완료 후 세션 이름을 변경합니다: ${msg.oldName} → ${msg.newName}`);
+            } else {
               try {
+                const wasCurrent = msg.oldName === this.currentSessionName();
                 this.postLocalSessionSnapshot(renameLocalSession(this.localSessionWorkspace(), msg.oldName, msg.newName, this.currentSessionName()));
+                if (wasCurrent) {
+                  this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.newName)}`);
+                }
               } catch (err) {
                 this.postLocalSessionError(err);
               }
-            } else {
-              this.postSessionBusyNotice();
             }
           }
           break;
         case 'exportSession':
           if (typeof msg.name === 'string' && typeof msg.format === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session export ${JSON.stringify(msg.name)} ${msg.format}`);
-            } else if (this.canHandleSessionLocally()) {
-              try {
-                this.postRunnerEvent({
-                  type: 'SessionExportedEvent',
-                  ...exportLocalSession(this.localSessionWorkspace(), msg.name, msg.format),
-                });
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            } else {
-              this.postSessionBusyNotice();
+            try {
+              this.postRunnerEvent({
+                type: 'SessionExportedEvent',
+                ...exportLocalSession(this.localSessionWorkspace(), msg.name, msg.format),
+              });
+            } catch (err) {
+              this.postLocalSessionError(err);
             }
           }
           break;
@@ -697,9 +848,27 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case 'getWorkspaceName': {
-          const name = vscode.workspace.workspaceFolders?.[0]?.name ?? 'unknown';
-          const wpath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-          this.postRunnerEvent({ type: 'workspaceInfo', name, path: wpath });
+          // 실제 활성 워크스페이스 경로 = setting(workspacePath)이 있으면 그것, 없으면 첫 번째 폴더
+          const resolved = getWorkspaceCwd() ?? '';
+          const folder = vscode.workspace.workspaceFolders?.find(
+            f => f.uri.fsPath === resolved,
+          );
+          const name = folder?.name
+            || (resolved ? path.basename(resolved) : '')
+            || vscode.workspace.workspaceFolders?.[0]?.name
+            || 'unknown';
+          this.postRunnerEvent({ type: 'workspaceInfo', name, path: resolved });
+          break;
+        }
+        case 'selectWorktree': {
+          const next = await pickWorktree(this.sessionManager);
+          if (next !== undefined) {
+            // 변경된 워크트리 정보를 webview에 알리고 활성 파일 컨텍스트도 갱신
+            const folder = vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath === next);
+            const name = folder?.name || (next ? path.basename(next) : 'unknown');
+            this.postRunnerEvent({ type: 'workspaceInfo', name, path: next });
+            this.refreshActiveCursor();
+          }
           break;
         }
         case 'getActiveFile':
@@ -708,6 +877,9 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         case 'getCustomTools':
           await this.refreshCustomTools();
           break;
+        case 'refreshToolRegistry':
+          this.refreshRuntimeToolRegistry('manual_refresh');
+          break;
         case 'updateToolPermission': {
           if (typeof msg.metadataPath === 'string') {
             const result = await updateCustomToolPermission(msg.metadataPath, Number(msg.permissionLevel));
@@ -715,6 +887,46 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
             else vscode.window.showErrorMessage(result.message);
             this.postRunnerEvent({ type: 'customToolValidation', ...result });
             await this.refreshCustomTools();
+            if (result.success) this.sessionManager.refreshToolRegistry('permission_changed');
+          }
+          break;
+        }
+        case 'installCustomToolDependencies': {
+          const result = await installCustomToolDependencies(msg.metadataPath, msg.modulePath);
+          this.postRunnerEvent({
+            type: 'customToolInstallProgress',
+            success: result.success,
+            message: result.message,
+            packages: result.packages || [],
+          });
+          if (result.success) {
+            vscode.window.showInformationMessage(result.message);
+            this.refreshRuntimeToolRegistry('dependencies_installed');
+          } else {
+            vscode.window.showWarningMessage(result.message);
+            await this.refreshCustomTools();
+          }
+          break;
+        }
+        case 'retryCustomToolLoad': {
+          this.refreshRuntimeToolRegistry('retry_load');
+          break;
+        }
+        case 'registerCustomTool': {
+          if (typeof msg.metadataPath === 'string') {
+            const result = await registerCustomTool(msg.metadataPath);
+            this.postRunnerEvent({ type: 'customToolValidation', ...result });
+            if (result.success) this.refreshRuntimeToolRegistry('register_custom_tool');
+            else await this.refreshCustomTools();
+          }
+          break;
+        }
+        case 'disableCustomTool': {
+          if (typeof msg.metadataPath === 'string') {
+            const result = await disableCustomTool(msg.metadataPath);
+            this.postRunnerEvent({ type: 'customToolValidation', ...result });
+            if (result.success) this.refreshRuntimeToolRegistry('disable_custom_tool');
+            else await this.refreshCustomTools();
           }
           break;
         }

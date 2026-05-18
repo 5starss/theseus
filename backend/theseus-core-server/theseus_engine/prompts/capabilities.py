@@ -20,7 +20,7 @@ Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in yo
  - Do NOT use Bash to run commands when a relevant dedicated tool is provided:
    - Read files: use read_file instead of cat/head/tail
    - Edit files: use edit_file instead of sed/awk
-   - Write files: use write_file instead of echo/heredoc
+   - Create new files: use write_file instead of echo/heredoc
    - Search files: use glob instead of find/ls
    - Search content: use grep instead of grep/rg
    - Reserve Bash exclusively for system commands that require shell execution.
@@ -54,6 +54,36 @@ with "[TheseusHook]". When this happens:
    Do NOT retry with the exact same arguments — the validator will block it again.\
 """
 
+_CODE_EDITING_SAFETY_PROMPT = """\
+# Code Editing Safety Rules
+ - Before editing a file, read the target file and confirm the exact location you will change.
+ - Treat user constraints such as "do not change APP title" as invariants. Preserve those exact strings and include them in preserve_patterns when using file tools.
+ - For comments, one-line edits, and small config changes, prefer edit_file with a unique old_str. Do not use write_file for existing files.
+ - write_file is for new files by default. Existing-file overwrite requires allow_overwrite=true and a clear overwrite_reason because it replaces the whole file.
+ - Keep edits narrowly scoped. Do not delete imports, classes, functions, or config keys unless the user explicitly requested that structural change.
+ - After a file tool reports a safety rejection or rollback, explain the cause and retry with a smaller safer patch instead of claiming success.
+ - Completion summaries for file edits must mention what changed and whether imports, declarations, config keys, and Python syntax were preserved.\
+"""
+
+_REMOTE_LOCAL_REPORT_PROMPT = """\
+# Remote Workspace and Local Worktree Boundaries
+ - When a Remote Workspace is selected, remote files/logs/resources must be inspected with remote_* tools such as remote_read_file, remote_glob, remote_grep, remote_tail_log, and remote_check_*.
+ - Local tools such as read_file, glob, grep, write_file, and edit_file operate on the Core/local worktree, not on the Remote Workspace.
+ - If the target is ambiguous, stop and clarify whether the user means the Remote Workspace or the Core/local worktree before calling a tool.
+ - If the user asks to save a remote analysis/report locally, prefer local_write_report. It writes only report artifacts under reports/ or .theseus/reports/ with .md, .json, or .txt extensions.
+ - Use local write_file/edit_file only for intentional Core/local worktree source changes or approved plan execution, never as a substitute for remote_write_file/remote_edit_file.\
+"""
+
+_CUSTOM_TOOL_RECOVERY_PROMPT = """\
+# Custom Tool Recovery
+ - If the user asks to list, search, or inspect available custom tools, call `tool_search` with the user's intent instead of answering from memory.
+ - If the user asks for all custom tools, use a broad language-neutral query such as `custom tools`.
+ - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
+ - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
+ - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.
+ - Do not call an unavailable custom tool by name until it appears in your current tool schema.\
+"""
+
 _WEB_RESEARCH_CAPABILITY_PROMPT = """\
 # Web Research Capability
  - When writing or modifying tools/scripts that interact with external services \
@@ -83,8 +113,9 @@ _CREATE_TOOL_CAPABILITY_PROMPT = """\
  - When using `create_tool`, you MUST produce a complete, self-contained Python module that:
    (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
    (2) imports BaseModel, Field from pydantic
-   (3) defines an input model inheriting BaseModel — the class name MUST be `<ToolClassName>Input` \
-(e.g., WeatherFetcherInput for WeatherFetcherTool)
+   (3) defines an input model inheriting BaseModel — name it `<ToolClassWithoutTool>Input` \
+(preferred, e.g., WeatherFetcherInput for WeatherFetcherTool) or `<ToolClassName>Input`; \
+helper/output BaseModel classes are allowed when useful
    (4) defines a tool class inheriting BaseTool with name, description, input_model, permission_level
    (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
    (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
@@ -110,6 +141,21 @@ class PromptCapabilities:
 
 
 _WEB_RESEARCH_TOOL_NAMES = frozenset({"web_search", "web_fetch", "deep_research"})
+_REMOTE_CONTEXT_TOOL_NAMES = frozenset(
+    {
+        "remote_read_file",
+        "remote_glob",
+        "remote_grep",
+        "remote_tail_log",
+        "remote_check_cpu",
+        "remote_check_memory",
+        "remote_check_disk",
+        "remote_write_file",
+        "remote_edit_file",
+        "remote_run_command",
+        "local_write_report",
+    }
+)
 _AGENT_DEFAULT_TOOL_NAMES = frozenset(
     {
         "bash",
@@ -206,6 +252,12 @@ def _render_capability_sections(capabilities: PromptCapabilities) -> str:
                 _VALIDATION_CAPABILITY_PROMPT,
             ]
         )
+    if capabilities.available_tools & {"write_file", "edit_file", "remote_write_file", "remote_edit_file"}:
+        sections.append(_CODE_EDITING_SAFETY_PROMPT)
+    if capabilities.available_tools & _REMOTE_CONTEXT_TOOL_NAMES:
+        sections.append(_REMOTE_LOCAL_REPORT_PROMPT)
+    if capabilities.has_tool("tool_search"):
+        sections.append(_CUSTOM_TOOL_RECOVERY_PROMPT)
     if capabilities.available_tools & _WEB_RESEARCH_TOOL_NAMES:
         sections.append(_WEB_RESEARCH_CAPABILITY_PROMPT)
     if capabilities.has_tool("create_tool"):
@@ -224,9 +276,12 @@ def _render_runtime_reminders(reminders: tuple[str, ...]) -> str:
 TOOL_USE_CAPABILITY_PROMPT = _TOOL_USE_CAPABILITY_PROMPT
 RBAC_PERMISSION_PROMPT = _RBAC_CAPABILITY_PROMPT
 VALIDATION_CAPABILITY_PROMPT = _VALIDATION_CAPABILITY_PROMPT
+CODE_EDITING_SAFETY_PROMPT = _CODE_EDITING_SAFETY_PROMPT
 WEB_CAPABILITY_PROMPT = _WEB_RESEARCH_CAPABILITY_PROMPT
 GENERATED_CUSTOM_TOOL_SECURITY_RULES = _GENERATED_CUSTOM_TOOL_SECURITY_RULES
 CREATE_TOOL_CAPABILITY_PROMPT = _CREATE_TOOL_CAPABILITY_PROMPT
+CUSTOM_TOOL_RECOVERY_PROMPT = _CUSTOM_TOOL_RECOVERY_PROMPT
+REMOTE_LOCAL_REPORT_PROMPT = _REMOTE_LOCAL_REPORT_PROMPT
 
 normalize_available_tools = _normalize_available_tools
 default_tool_names_for_mode = _default_tool_names_for_mode
@@ -239,9 +294,12 @@ __all__ = [
     "TOOL_USE_CAPABILITY_PROMPT",
     "RBAC_PERMISSION_PROMPT",
     "VALIDATION_CAPABILITY_PROMPT",
+    "CODE_EDITING_SAFETY_PROMPT",
     "WEB_CAPABILITY_PROMPT",
     "GENERATED_CUSTOM_TOOL_SECURITY_RULES",
     "CREATE_TOOL_CAPABILITY_PROMPT",
+    "CUSTOM_TOOL_RECOVERY_PROMPT",
+    "REMOTE_LOCAL_REPORT_PROMPT",
     "normalize_available_tools",
     "default_tool_names_for_mode",
     "build_prompt_capabilities",

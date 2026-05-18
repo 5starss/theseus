@@ -5,11 +5,16 @@ export function isTransientSystemText(text) {
     '에이전트가 시작 중입니다',
     '에이전트 연결 상태를 다시 확인 중입니다',
     'Runner startup is taking longer than expected',
+    'Runner has not emitted RunnerReady',
     'Runner emitted non-JSON stdout',
+    'Local daemon failed to start',
+    'Local daemon did not become healthy',
     'Last runner diagnostic',
     'Connected  model:',
     'Runner stopped',
     'Runner stopped gracefully',
+    'Session changes are available',
+    '세션 전환 대기 중',
     'Auto-compacting conversation memory',
     'Prompt too long; compacting and retrying',
     'View > Output > "Theseus"',
@@ -27,13 +32,13 @@ export function maybeAddFold(article, body, text, { messagesEl, threshold }) {
   const lines = (text || '').split('\n').length;
   if (lines < threshold) return;
   if (article.querySelector('.fold-btn')) return;
-  body.classList.add('folded');
+  // 기본은 펼친 상태로 노출 (사용자가 원할 때만 접도록 반전)
   const foldBtn = document.createElement('button');
   foldBtn.className = 'fold-btn';
-  foldBtn.textContent = `▼ 더 보기 (${lines}줄)`;
+  foldBtn.textContent = `▲ 접기 (${lines}줄)`;
   foldBtn.addEventListener('click', () => {
     const folded = body.classList.toggle('folded');
-    foldBtn.textContent = folded ? `▼ 더 보기 (${lines}줄)` : '▲ 접기';
+    foldBtn.textContent = folded ? `▼ 펼치기 (${lines}줄)` : `▲ 접기 (${lines}줄)`;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   });
   article.appendChild(foldBtn);
@@ -63,7 +68,24 @@ export function createTypingIndicator(messagesEl) {
   return { article, body };
 }
 
+/** 메시지 영역의 모든 retry banner를 제거. runner가 ready/running 상태가 되었을 때 호출. */
+export function clearRetryBanners(messagesEl) {
+  if (!messagesEl) return;
+  messagesEl.querySelectorAll('.retry-banner').forEach(el => el.remove());
+}
+
+/** runner 상태/진단성 system message는 runner가 정상화되면 채팅 흐름에서 제거한다. */
+export function clearTransientSystemMessages(messagesEl) {
+  if (!messagesEl) return;
+  messagesEl.querySelectorAll('.message.system').forEach(el => {
+    const text = el.querySelector('.body')?.textContent || el.textContent || '';
+    if (isTransientSystemText(text)) el.remove();
+  });
+}
+
 export function appendRetryBanner(messagesEl, onRestart) {
+  // 이미 retry banner가 있으면 중복 추가하지 않음 (재시도 실패 누적 방지)
+  if (messagesEl?.querySelector('.retry-banner')) return;
   const banner = document.createElement('div');
   banner.className = 'retry-banner';
   const btn = document.createElement('button');

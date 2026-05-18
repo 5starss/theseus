@@ -47,5 +47,18 @@ export const toolApi = {
       console.error(`Failed to update tool ${toolId} status:`, error);
       throw error;
     }
+  },
+
+  /**
+   * Tool을 논리 삭제 처리합니다.
+   */
+  deleteTool: async (projectId: string | number, toolId: string | number): Promise<boolean> => {
+    try {
+      await apiClient.delete(`/api/v1/projects/${projectId}/tools/${toolId}`);
+      return true;
+    } catch (error) {
+      console.error(`Failed to delete tool ${toolId}:`, error);
+      throw error;
+    }
   }
 };
