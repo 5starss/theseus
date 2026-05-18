@@ -78,6 +78,49 @@ AskUserPrompt = Callable[[str], Awaitable[str]]
 _TOOL_OUTPUT_INLINE_CHARS = int(os.getenv("THESEUS_TOOL_OUTPUT_INLINE_CHARS", "8000"))
 _TOOL_OUTPUT_PREVIEW_CHARS = int(os.getenv("THESEUS_TOOL_OUTPUT_PREVIEW_CHARS", "3000"))
 
+
+def _read_non_negative_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        log.warning("Invalid %s=%r; using %s", name, raw, default)
+        return max(0, default)
+
+
+_AGENT_AUTO_CONTINUE_MAX = _read_non_negative_int_env("THESEUS_AGENT_AUTO_CONTINUE_MAX", 1)
+
+_AUTO_CONTINUE_PROMPT = (
+    "Continue the task now. Your previous assistant message indicated pending work "
+    "but did not call a tool. Do not repeat the plan or ask the user to wait. "
+    "If a tool is needed, call the appropriate tool now. If no tool is needed, "
+    "provide the final result directly."
+)
+_PENDING_ACTION_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bI\s+(?:will|am going to)\b",
+        r"\b(?:I'll|I’ll)\b",
+        r"\b(?:let me|I'll now|I will now)\b",
+        r"\b(?:checking|analyzing|reading|editing|running|testing|verifying)\b",
+        r"(?:하겠습니다|하겠습니?다|하겠어요|하겠습니다\.)",
+        r"(?:읽겠습니다|확인하겠습니다|분석하겠습니다|수정하겠습니다|실행하겠습니다|검증하겠습니다)",
+        r"(?:진행하겠습니다|시작하겠습니다|작업하겠습니다|들어가겠습니다)",
+        r"(?:진행 중입니다|분석 중입니다|수정 작업에 들어가겠습니다)",
+        r"(?:잠시만 기다려|기다려 주시면|바로 .*하겠습니다|먼저 .*하겠습니다)",
+    )
+)
+_USER_DECISION_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\?$",
+        r"(?:진행해도 될까요|진행하시겠습니까|승인.*(?:필요|해|하시겠습니까))",
+        r"(?:허용하시겠습니까|동의하시면|말씀해 주세요|어떻게 진행할까요)",
+        r"(?:which option|would you like|should I|please confirm)",
+    )
+)
+_CONTINUATION_STOP_REASONS = {"length", "max_tokens", "model_length", "token_limit"}
+
 # 안전한 최대 completion token 수
 MAX_SAFE_COMPLETION_TOKENS = 128_000
 
@@ -660,6 +703,62 @@ def _relative_to_cwd(cwd: Path, path: Path) -> str:
         return str(path)
 
 
+def _assistant_text(message: ConversationMessage) -> str:
+    return "".join(
+        block.text for block in message.content
+        if isinstance(block, TextBlock) and isinstance(block.text, str)
+    )
+
+
+def _looks_like_user_decision_request(text: str) -> bool:
+    compact = text.strip()
+    if not compact:
+        return False
+    return any(pattern.search(compact) for pattern in _USER_DECISION_PATTERNS)
+
+
+def _looks_like_pending_action(text: str) -> bool:
+    compact = text.strip()
+    if not compact:
+        return False
+    if _looks_like_user_decision_request(compact):
+        return False
+    return any(pattern.search(compact) for pattern in _PENDING_ACTION_PATTERNS)
+
+
+def _stop_reason_requests_continuation(stop_reason: str | None) -> bool:
+    if not stop_reason:
+        return False
+    normalized = stop_reason.strip().lower()
+    return normalized in _CONTINUATION_STOP_REASONS
+
+
+def _should_auto_continue_after_assistant(
+    *,
+    context: QueryContext,
+    final_message: ConversationMessage,
+    stop_reason: str | None,
+    tool_call_count: int,
+    auto_continue_count: int,
+) -> bool:
+    if tool_call_count > 0:
+        return False
+    if auto_continue_count >= _AGENT_AUTO_CONTINUE_MAX:
+        return False
+    if not context.tool_registry.to_api_schema():
+        return False
+
+    mode = str((context.tool_metadata or {}).get("agent_mode") or "").upper()
+    if mode == "ASK":
+        return False
+
+    text = _assistant_text(final_message)
+    return (
+        _stop_reason_requests_continuation(stop_reason)
+        or _looks_like_pending_action(text)
+    )
+
+
 # ── run_query 루프 ────────────────────────────────────────────
 
 async def run_query(
@@ -683,6 +782,8 @@ async def run_query(
     reported_token_clamp = False
 
     turn_count = 0
+    auto_continue_count = 0
+    pending_auto_continue: ConversationMessage | None = None
     while context.max_turns is None or turn_count < context.max_turns:
         turn_count += 1
         yield AgentLoopStatus(
@@ -718,13 +819,18 @@ async def run_query(
             messages[:] = compacted_messages
 
         final_message: ConversationMessage | None = None
+        final_stop_reason: str | None = None
         usage = UsageSnapshot()
+        request_messages = messages
+        if pending_auto_continue is not None:
+            request_messages = [*messages, pending_auto_continue]
+            pending_auto_continue = None
 
         try:
             async for event in context.api_client.stream_message(
                 ApiMessageRequest(
                     model=context.model,
-                    messages=messages,
+                    messages=request_messages,
                     system_prompt=context.system_prompt,
                     max_tokens=effective_max_tokens,
                     tools=context.tool_registry.to_api_schema(),
@@ -743,6 +849,7 @@ async def run_query(
                 elif isinstance(event, ApiMessageCompleteEvent):
                     final_message = event.message
                     usage = event.usage
+                    final_stop_reason = event.stop_reason
 
         except Exception as exc:
             if _is_completion_token_limit_error(exc):
@@ -825,10 +932,39 @@ async def run_query(
                 ), None
 
         if not tool_calls:
+            if _should_auto_continue_after_assistant(
+                context=context,
+                final_message=final_message,
+                stop_reason=final_stop_reason,
+                tool_call_count=len(tool_calls),
+                auto_continue_count=auto_continue_count,
+            ):
+                auto_continue_count += 1
+                pending_auto_continue = ConversationMessage.from_user_text(_AUTO_CONTINUE_PROMPT)
+                yield AgentLoopStatus(
+                    phase="waiting",
+                    turn=turn_count,
+                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    tool_count=0,
+                ), usage
+                yield StatusEvent(
+                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    metadata={
+                        "reason": "assistant_pending_action_without_tool_call",
+                        "stopReason": final_stop_reason,
+                        "autoContinueCount": auto_continue_count,
+                        "maxAutoContinue": _AGENT_AUTO_CONTINUE_MAX,
+                    },
+                ), usage
+                continue
             if context.hook_executor is not None:
                 await context.hook_executor.execute(
                     HookEvent.STOP,
-                    {"event": HookEvent.STOP.value, "stop_reason": "tool_uses_empty"},
+                    {
+                        "event": HookEvent.STOP.value,
+                        "stop_reason": "tool_uses_empty",
+                        "model_stop_reason": final_stop_reason,
+                    },
                 )
             yield AgentLoopStatus(
                 phase="complete",

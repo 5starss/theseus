@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 150 — Agent loop pending action 자동 continuation (2026-05-18)
+
+#### `theseus_engine`
+- QueryEngine이 assistant 응답의 `stop_reason`과 마지막 문구를 함께 확인해, 도구 호출 없이 “읽겠습니다/분석하겠습니다/진행 중입니다”처럼 pending work를 예고하고 끝난 경우 agent loop를 한 번 자동 재진입하도록 보강
+- 자동 continuation은 사용자 history에 저장하지 않는 내부 프롬프트로만 주입되며, ASK mode나 사용자 승인/선택을 요구하는 질문형 응답에는 적용하지 않도록 제한
+- `THESEUS_AGENT_AUTO_CONTINUE_MAX` 환경변수로 turn당 자동 continuation 최대 횟수를 조절할 수 있게 함
+
+#### 설정
+- `.env.example`에 `THESEUS_AGENT_AUTO_CONTINUE_MAX=1` 기본값과 설명 추가
+
+---
+
 ### 🛠️ Session 149 — PLAN draft 검증/Tool 생성 실패 처리 완화 (2026-05-15)
 
 #### `src` / `theseus_engine`
