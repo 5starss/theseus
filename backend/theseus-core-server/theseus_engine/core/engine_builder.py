@@ -209,17 +209,20 @@ async def setup_engine(
         if creator is not None:
             current_registry.register(creator)
 
-    active_registry = build_visible_registry(
-        current_registry,
-        ToolVisibilityPolicy(
-            mode=sm.mode,
-            plan_phase=getattr(sm, "plan_phase", None),
-            user_level=user_level,
-            tool_permissions=project_tool_permissions,
-            can_create_tool=can_create_tool,
-            disabled_tools=frozenset(project_disabled_tools or set()),
-        ),
+    visibility_policy = ToolVisibilityPolicy(
+        mode=sm.mode,
+        plan_phase=getattr(sm, "plan_phase", None),
+        user_level=user_level,
+        tool_permissions=project_tool_permissions,
+        can_create_tool=can_create_tool,
+        disabled_tools=frozenset(project_disabled_tools or set()),
     )
+    search_injectable_registry = build_visible_registry(
+        full_registry,
+        visibility_policy,
+    )
+    search_injectable_tool_names = active_tool_names(search_injectable_registry)
+    active_registry = build_visible_registry(current_registry, visibility_policy)
 
     if rag_failed and active_registry.get("tool_search") is None:
         active_registry.register(ToolSearchTool())
@@ -261,6 +264,7 @@ async def setup_engine(
             "tool_registry": full_registry,
             "tool_permissions": project_tool_permissions,
             "active_registry": active_registry,
+            "search_injectable_tool_names": search_injectable_tool_names,
             "custom_tool_inventory": custom_tool_inventory,
             "llm_client": api_client,
             "model_name": model_name,
@@ -269,7 +273,13 @@ async def setup_engine(
             "session_stats": stats,
             "scoped_memory": scoped_memory,
             "user_rbac_level": user_level,
+            "user_level": user_level,
             "agent_mode": sm.mode.value if hasattr(sm, "mode") else "normal",
+            "plan_phase": (
+                sm.plan_phase.value
+                if getattr(sm, "plan_phase", None) is not None
+                else None
+            ),
             "project_id": project_id,
             "actor_role": actor_role,
             "active_skills": [],

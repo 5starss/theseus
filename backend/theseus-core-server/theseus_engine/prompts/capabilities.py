@@ -82,6 +82,10 @@ _CUSTOM_TOOL_RECOVERY_PROMPT = """\
  - Existing project custom tool artifacts are not normal workspace files. Do not use `read_file`, `edit_file`, or `write_file` on a custom tool artifact root such as `/opt/theseus/custom_tools` or the Core container custom tool mount.
  - To inspect an existing project custom tool source, use `custom_tool_read_source` with `project_id` plus `tool_name` or `module_name`.
  - To repair an existing project custom tool source, use `custom_tool_read_source` first, then `custom_tool_update_source` with the complete replacement source. The update tool stages, validates, sandbox-verifies, and only then replaces the active artifact.
+ - Do not claim that `custom_tool_update_source` was attempted or succeeded unless the transcript contains that exact tool call result.
+ - Treat a custom tool update as successful only when the tool result reports `status=updated` and metadata confirms `activationSource=custom_tool_update_source`, `lastMaintainedAt`, and `sandboxVerified=true`.
+ - After a reported update success, verify by reading the tool again with `custom_tool_read_source`; only call it a runtime cache/registry problem if the metadata confirms the update but the next tool execution still uses old behavior.
+ - If `create_tool` returns `create_tool requires an executing plan`, interpret it only as "tool creation did not run; an approved PLAN Executing phase is required." Do not describe it as successful creation, cache delay, or registration lag.
  - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
  - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.
  - Do not call an unavailable custom tool by name until it appears in your current tool schema.\
@@ -116,6 +120,7 @@ and propose a safe alternative instead of silently removing that capability.\
 _CREATE_TOOL_CAPABILITY_PROMPT = """\
 # create_tool Capability
  - Tool creation (`create_tool`) is ONLY available in Plan mode's Executing phase. Do not attempt it in Agent, Ask, Drafting, Review, or Verifying mode.
+ - `tool_search` may show `create_tool` as a search match outside Plan Executing, but it is not callable there. If it is marked "Not injectable", explain the required mode instead of calling it.
  - When using `create_tool`, you MUST produce a complete, self-contained Python module that:
    (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
    (2) imports BaseModel, Field from pydantic
