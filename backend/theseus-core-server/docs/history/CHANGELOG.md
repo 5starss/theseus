@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 166 — Custom tool source maintenance readback/중복 식별자 보강 (2026-05-18)
+
+#### `src`
+- `custom_tool_update_source`가 active artifact를 쓴 뒤 같은 module path로 readback 검증을 수행하고, 검증 실패 시 기존 source/metadata를 복구하도록 보강
+- 같은 `toolName`에 active metadata가 여러 개 매칭되는 경우 임의의 첫 번째 artifact를 읽거나 수정하지 않고 `module_name` 명시를 요구하도록 변경
+- 성공 후 staging cleanup 결과는 오류가 아니므로 `errors`에 남기지 않고, cleanup 실패/skip만 진단 정보로 남기도록 정리
+
+#### 테스트
+- `python -m py_compile src/tooling/service.py tests/test_custom_tool_maintenance.py`
+- `python -m unittest discover -s tests -p test_custom_tool_maintenance.py`
+
+---
+
 ### 🛠️ Session 165 — Tool Search 주입 경계와 custom tool 실패 해석 보강 (2026-05-18)
 
 #### `theseus_engine`

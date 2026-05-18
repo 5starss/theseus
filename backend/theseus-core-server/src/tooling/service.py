@@ -421,6 +421,92 @@ def _metadata_matches_tool_identifier(
     return False
 
 
+def _module_identifier_matches(
+    metadata: dict[str, Any],
+    paths: ServerToolArtifactPaths,
+    module_name: str | None,
+) -> bool:
+    raw = str(module_name or "").strip()
+    if not raw:
+        return False
+    normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", raw.lower()).strip("_")
+    expected_modules = {normalized, canonical_tool_module_stem(normalized)}
+    observed_modules = {
+        str(metadata.get("moduleName") or "").strip().lower(),
+        paths.module_name.lower(),
+        paths.module_path.stem.lower(),
+        Path(str(metadata.get("fileName") or "")).stem.lower(),
+    }
+    return bool(expected_modules & observed_modules)
+
+
+def _ambiguous_tool_identifier_error(
+    *,
+    project_id: str | int,
+    tool_name: str | None,
+    module_name: str | None,
+    candidates: list[tuple[ServerToolArtifactPaths, dict[str, Any]]],
+) -> ToolCreationError:
+    details = [
+        (
+            f"moduleName={paths.module_name}, "
+            f"toolName={metadata.get('toolName')}, "
+            f"metadataPath={paths.metadata_path}"
+        )
+        for paths, metadata in candidates
+    ]
+    return ToolCreationError(
+        "ambiguous_tool_identifier",
+        (
+            "Multiple project custom tool artifacts match the requested "
+            "tool identifier. Provide module_name to select one explicitly. "
+            f"projectId={project_id}, toolName={tool_name}, moduleName={module_name}."
+        ),
+        errors=details,
+    )
+
+
+def _select_project_tool_candidate(
+    *,
+    project_id: str | int,
+    tool_name: str | None,
+    module_name: str | None,
+    candidates: list[tuple[ServerToolArtifactPaths, dict[str, Any]]],
+) -> tuple[ServerToolArtifactPaths, dict[str, Any]]:
+    if module_name:
+        exact_module_matches = [
+            (paths, metadata)
+            for paths, metadata in candidates
+            if _module_identifier_matches(metadata, paths, module_name)
+        ]
+        if len(exact_module_matches) == 1:
+            return exact_module_matches[0]
+        if len(exact_module_matches) > 1:
+            raise _ambiguous_tool_identifier_error(
+                project_id=project_id,
+                tool_name=tool_name,
+                module_name=module_name,
+                candidates=exact_module_matches,
+            )
+
+    active_matches = [
+        (paths, metadata)
+        for paths, metadata in candidates
+        if _is_tool_active_metadata(metadata)
+    ]
+    if len(active_matches) == 1:
+        return active_matches[0]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    raise _ambiguous_tool_identifier_error(
+        project_id=project_id,
+        tool_name=tool_name,
+        module_name=module_name,
+        candidates=active_matches or candidates,
+    )
+
+
 def resolve_project_tool_artifact(
     *,
     project_id: str | int,
@@ -445,6 +531,7 @@ def resolve_project_tool_artifact(
             errors=[f"project_dir={project_dir}"],
         )
 
+    candidates: list[tuple[ServerToolArtifactPaths, dict[str, Any]]] = []
     for metadata_path in sorted(project_dir.glob("*.meta.json")):
         try:
             paths, metadata = _paths_from_project_metadata(project_dir, metadata_path)
@@ -462,7 +549,15 @@ def resolve_project_tool_artifact(
                     f"Custom tool source file is missing: {paths.module_path}",
                     errors=[f"module_path={paths.module_path}"],
                 )
-            return paths, metadata
+            candidates.append((paths, metadata))
+
+    if candidates:
+        return _select_project_tool_candidate(
+            project_id=project_id,
+            tool_name=tool_name,
+            module_name=module_name,
+            candidates=candidates,
+        )
 
     expected_modules = _candidate_module_names(
         tool_name=tool_name,
@@ -1546,6 +1641,36 @@ async def update_project_tool_source(
             write_tool_metadata(paths, old_metadata)
             raise
 
+        readback = read_project_tool_source(
+            project_id=project_id,
+            module_name=paths.module_name,
+            storage_root=storage_root,
+        )
+        if (
+            readback.status != "read"
+            or readback.module_path != str(paths.module_path)
+            or (readback.source or "") != sanitized_code
+            or readback.metadata.get("activationSource") != "custom_tool_update_source"
+        ):
+            paths.module_path.write_text(old_source, encoding="utf-8")
+            write_tool_metadata(paths, old_metadata)
+            raise ToolCreationError(
+                "maintenance_readback_mismatch",
+                (
+                    "Custom tool source update did not pass readback "
+                    "verification; active artifact was restored."
+                ),
+                errors=[
+                    f"readbackStatus={readback.status}",
+                    f"readbackModulePath={readback.module_path}",
+                    f"expectedModulePath={paths.module_path}",
+                    (
+                        "readbackActivationSource="
+                        f"{readback.metadata.get('activationSource')}"
+                    ),
+                ],
+            )
+
         registered = False
         for candidate_registry in (registry, active_registry):
             if candidate_registry is None:
@@ -1572,6 +1697,10 @@ async def update_project_tool_source(
             require_request_match=True,
         )
         updated_metadata = read_tool_metadata(paths)
+        cleanup_line = cleanup_report_line(cleanup_result)
+        errors = []
+        if cleanup_result is not None and not cleanup_result.get("cleanupSucceeded"):
+            errors.append(cleanup_line)
         return ServerToolSourceResult(
             status="updated",
             stage="completed",
@@ -1591,7 +1720,7 @@ async def update_project_tool_source(
             permission_level=getattr(tool_class, "permission_level", permission_level),
             registry_registered=registered,
             sandbox_verified=True,
-            errors=[cleanup_report_line(cleanup_result)],
+            errors=errors,
             trace_id=updated_metadata.get("latestTraceId"),
         )
     except ToolCreationError as exc:
