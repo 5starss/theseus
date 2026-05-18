@@ -201,6 +201,11 @@ button, textarea { font: inherit; }
   color: var(--vscode-errorForeground);
 }
 
+.loop-status.stalled {
+  border-color: var(--vscode-editorWarning-foreground);
+  color: var(--vscode-editorWarning-foreground);
+}
+
 .workspace-label {
   color: var(--vscode-descriptionForeground);
   font-size: 11px;
@@ -814,6 +819,12 @@ button, textarea { font: inherit; }
   opacity: 0.75;
 }
 
+.activity-note-time {
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
 /* ── Plan checklist ─────────────────────────────────────────── */
 .plan-panel {
   grid-area: plan;
@@ -1248,6 +1259,12 @@ button, textarea { font: inherit; }
 
 .tool.error summary { color: var(--vscode-errorForeground); }
 .tool:not(.error) summary { color: var(--vscode-foreground); }
+
+.tool-meta {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  margin: 2px 0 0 18px;
+}
 
 .tool pre {
   background: var(--vscode-textCodeBlock-background);

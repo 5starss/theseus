@@ -4,6 +4,54 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 160 — VSCode Extension 작업 상태 가시성 개선 (2026-05-18)
+
+#### `vscode-extension`
+- Theseus Composer의 multi-file change 항목에 `createdAt` / `updatedAt` / `completedAt` / `failedAt` / `durationMs` / `errorMessage`를 포함해 실패 시각과 경과 시간을 표시하도록 개선
+- Composer 패널이 변경 때마다 전체 HTML을 재생성하지 않고 WebView message로 change list만 갱신하도록 바꿔 성공/실패 이력이 깜빡이거나 사라지는 문제를 줄임
+- `SessionController`를 세션 생성/전환/삭제/rename/export의 단일 경로로 사용하게 정리하고, busy 상태의 세션 변경은 runner 재시작 없이 현재 run 완료 후 적용 대기 안내로 처리
+- runner status에 active run id/status와 last event/heartbeat 시간을 포함해 WebView가 실제 run 진행 여부를 판단할 수 있게 보강
+- `AgentLoopStatus` / assistant streaming / tool execution 이벤트를 기준으로 상단 loop chip에 `Thinking`, `Running tool`, `Answering`, `Stalled` 같은 사용자용 상태와 마지막 이벤트 경과 시간을 표시
+- tool/activity accordion은 tool이 없는 일반 응답에서도 loop status를 표시하고, 실행 중 자동 펼침 및 완료 후 자동 접힘 정책으로 정리
+- tool call 항목에 시작 시각, 완료 시각, duration, 실패 여부를 표시하고 완료된 tool detail은 기본 접힘 상태로 전환
+- ready 회복 시 stale/retry성 system message와 restart banner가 채팅에 남지 않도록 transient message 분류를 보강
+- 구버전 daemon에서 registry refresh control endpoint가 없을 때 일반 `send_failed`로 노출하지 않고 지원 불가 안내와 상태 갱신으로 처리
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media/main.js`
+- `node --check media/dispatcher.js`
+- `node --check media/components/ActivityLog.js`
+- `node --check media/components/RunnerStatus.js`
+- `node --check media/components/CustomTools.js`
+- `python -m py_compile theseus_engine/daemon.py theseus_engine/runner_runtime.py`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 156 — VSCode Extension custom tool registry 정합성 수정 (2026-05-18)
+
+#### `theseus_engine`
+- local daemon에 `POST /control/tool-registry/refresh` control endpoint를 추가해 registry refresh가 일반 LLM `/runs`와 충돌하지 않도록 분리
+- active run 중 registry refresh 요청이 들어오면 즉시 409로 실패하지 않고 pending refresh로 보관한 뒤 run 종료 직후 자동 적용하도록 정리
+- workspace/repo root 실행과 core root 실행에서 같은 custom tool 후보를 보도록 `workspace_custom_tool_dirs()` 공통 helper를 추가하고 runner loader 경로 계산에 연결
+- daemon `--core-root` 값을 `THESEUS_CORE_ROOT`로 동기화해 local daemon이 core 내부 custom tool 경로를 놓치지 않도록 보강
+
+#### `vscode-extension`
+- `refreshToolRegistry`가 daemon 모드에서 `/runs`를 만들지 않고 daemon control endpoint를 호출하도록 변경
+- WebView Custom Tools 목록은 runner가 보낸 `customToolInventoryUpdated`를 우선 source of truth로 사용하고, host probe는 runner stopped 상태의 preview/fallback으로 제한
+- extension host의 custom tool scan을 runner가 실제 로드하는 direct custom tool root 기준으로 좁혀 UI에만 보이는 tool 후보가 생기지 않도록 정리
+- dependency 설치는 명시적으로 설정된 `theseus.pythonPath`가 있을 때만 가능하게 제한하고, `python` fallback 환경에 임의 설치하지 않도록 수정
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media\main.js`
+- `node --check media\dispatcher.js`
+- `node --check media\components\CustomTools.js`
+- `python -m py_compile theseus_engine\daemon.py theseus_engine\runner_runtime.py theseus_engine\core\engine_builder.py theseus_engine\tools\core\tool_factory.py theseus_engine\tools\core\custom_tool_paths.py`
+
+---
+
 ### 🛠️ Session 155 — ToolBuild 실패 artifact cleanup 재적용 (2026-05-18)
 
 #### `src`

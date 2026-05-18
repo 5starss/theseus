@@ -81,6 +81,7 @@ import { createEventDispatcher } from './dispatcher.js';
   const FOLD_THRESHOLD = 25;
   const LONG_RUNNING_MS = 30000;
   const MODE_LABELS    = { agent: 'AGENT', ask: 'ASK', plan: 'PLAN' };
+  const LOOP_STALLED_MS = 30000;
   const MODE_SWITCH_GUIDANCE = '모드 전환은 입력창 아래 모드 선택을 사용하세요.';
   const SLASH_COMMANDS = [
     { value: '/tools', description: 'Custom Tools 패널 새로고침', kind: 'local' },
@@ -127,6 +128,7 @@ import { createEventDispatcher } from './dispatcher.js';
   let sessions          = initialState.sessions;
   let toolStats         = initialState.toolStats;
   let customTools       = [];
+  let customToolsSource = 'host';
   let customToolsCollapsed = initialState.customToolsCollapsed;
   let customToolsView   = initialState.customToolsView;
   let sessionListOpen   = initialState.sessionListOpen;
@@ -136,7 +138,7 @@ import { createEventDispatcher } from './dispatcher.js';
   let healthPanelVisible = false;
   let activeFileContext = null;
   let suppressedActiveFile = '';
-  let lastLoopStatus    = { state: 'idle', text: 'idle' };
+  let lastLoopStatus    = { state: 'idle', text: 'Idle', lastEventAt: 0 };
 
   let currentAssistantArticle = null;
   let currentAssistantEl      = null;
@@ -160,6 +162,10 @@ import { createEventDispatcher } from './dispatcher.js';
     workspaceCwd: null,
     cwd: null,
     exitReason: null,
+    activeRunId: null,
+    activeRunStatus: null,
+    activeRun: null,
+    stalledReason: null,
   };
   let inputHistory            = [];
   let inputHistoryIdx         = -1;
@@ -396,9 +402,41 @@ import { createEventDispatcher } from './dispatcher.js';
     persistState();
   }
 
-  function setLoopStatus(state, text) {
-    lastLoopStatus = { state: state || 'idle', text: text || 'idle' };
-    renderLoopStatus(loopStatusEl, state, text);
+  function formatElapsed(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '';
+    if (ms < 2000) return 'now';
+    const seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    return `${Math.floor(seconds / 60)}m ago`;
+  }
+
+  function renderLoopStatusDisplay() {
+    const base = lastLoopStatus || { state: 'idle', text: 'Idle', lastEventAt: 0 };
+    const active = runnerState.processRunning || runnerState.running || isGenerating;
+    const lastEventAt = base.lastEventAt || runnerState.lastEventAt || runnerState.lastStatusAt || 0;
+    const elapsed = lastEventAt ? Date.now() - lastEventAt : 0;
+    if (active && base.state !== 'idle' && elapsed > LOOP_STALLED_MS) {
+      const text = `Stalled · ${formatElapsed(elapsed)} since ${base.text || 'last activity'}`;
+      renderLoopStatus(loopStatusEl, 'stalled', text);
+      return;
+    }
+    const suffix = base.state !== 'idle' && lastEventAt ? ` · ${formatElapsed(elapsed)}` : '';
+    renderLoopStatus(loopStatusEl, base.state, `${base.text || 'Idle'}${suffix}`);
+  }
+
+  function setLoopStatus(state, text, eventAt = Date.now()) {
+    lastLoopStatus = { state: state || 'idle', text: text || 'Idle', lastEventAt: eventAt };
+    renderLoopStatusDisplay();
+    renderRunnerStatus();
+  }
+
+  function touchLoopActivity(state = 'running', text = lastLoopStatus.text || 'Working') {
+    if (lastLoopStatus.state === 'idle' && state === 'running') {
+      lastLoopStatus = { state, text, lastEventAt: Date.now() };
+    } else {
+      lastLoopStatus = { ...lastLoopStatus, lastEventAt: Date.now() };
+    }
+    renderLoopStatusDisplay();
     renderRunnerStatus();
   }
 
@@ -432,6 +470,7 @@ import { createEventDispatcher } from './dispatcher.js';
       requestRunnerAttach,
       requestRunnerStatus,
     });
+    renderLoopStatusDisplay();
     renderRunnerStatus();
     renderHealthPanel();
   }
@@ -486,6 +525,11 @@ import { createEventDispatcher } from './dispatcher.js';
       },
     });
   }
+
+  setInterval(() => {
+    renderLoopStatusDisplay();
+    renderRunnerStatus();
+  }, 1000);
 
   function renderHealthPanel() {
     renderHealthPanelComponent({
@@ -727,8 +771,21 @@ import { createEventDispatcher } from './dispatcher.js';
     if (typeof ensureWelcomeState === 'function') ensureWelcomeState();
   }
 
-  function renderCustomTools(tools) {
+  function isRunnerProcessLive() {
+    return Boolean(
+      runnerState.processRunning
+      || runnerState.running
+      || ['starting', 'ready', 'busy', 'waiting_input', 'stale'].includes(runnerState.lifecycle || runnerState.state),
+    );
+  }
+
+  function renderCustomTools(tools, source = 'host') {
+    const nextSource = source || 'host';
+    if (nextSource === 'host' && isRunnerProcessLive() && customToolsSource === 'runner') {
+      return;
+    }
     customTools = Array.isArray(tools) ? tools : [];
+    customToolsSource = nextSource;
     renderCustomToolsComponent(tools, {
       containerEl: customToolsEl,
       toolStats,
@@ -1529,6 +1586,7 @@ import { createEventDispatcher } from './dispatcher.js';
     showActiveSkills,
     formatAgentLoopStatus,
     setLoopStatus,
+    touchLoopActivity,
     formatCompactProgress,
     appendTransientMessage,
     createChangeReviewItem,
@@ -1550,6 +1608,7 @@ import { createEventDispatcher } from './dispatcher.js';
     workspaceLabelEl,
     activeFileEl,
     renderCustomTools,
+    isRunnerProcessLive,
     vscode,
     renderHealthPanel,
     insertMentionPath,

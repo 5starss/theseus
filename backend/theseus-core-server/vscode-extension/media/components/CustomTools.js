@@ -220,6 +220,7 @@ export function renderCustomTools(tools, {
       Array.isArray(tool.dependencies) && tool.dependencies.length ? `dependencies: ${tool.dependencies.join(', ')}` : '',
       Array.isArray(tool.missingModules) && tool.missingModules.length ? `missing: ${tool.missingModules.join(', ')}` : '',
       Array.isArray(tool.installCandidates) && tool.installCandidates.length ? `install: ${tool.installCandidates.join(', ')}` : '',
+      tool.installDisabledReason ? `install disabled: ${tool.installDisabledReason}` : '',
       tool.importError ? `import: ${tool.importError}` : '',
       validation.message ? `validation: ${validation.message}` : '',
     ].filter(Boolean);

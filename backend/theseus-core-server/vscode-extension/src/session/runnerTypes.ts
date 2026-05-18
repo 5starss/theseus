@@ -67,6 +67,13 @@ export type RunnerStartConfig = {
   signal?: AbortSignal;
 };
 
+export type ActiveRunSnapshot = {
+  runId?: string;
+  status?: string;
+  updatedAt?: number;
+  eventCount?: number;
+};
+
 export interface RunnerClient {
   readonly mode: RunnerRuntimeMode;
 }

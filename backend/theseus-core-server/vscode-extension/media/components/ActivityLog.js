@@ -22,6 +22,18 @@ function compactPrompt(text) {
   return normalized.length > 48 ? `${normalized.slice(0, 45)}...` : normalized;
 }
 
+function formatClock(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
 export function createActivityLogController({
   messagesEl,
   longRunningMs,
@@ -52,6 +64,9 @@ export function createActivityLogController({
       summaryTitleEl: null,
       summaryMetaEl: null,
       collapseTimer: null,
+      userOpenOverride: null,
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
     };
     requests.add(currentRequest);
     ensureTurnContainer(currentRequest);
@@ -103,6 +118,9 @@ export function createActivityLogController({
         summaryTitleEl: null,
         summaryMetaEl: null,
         collapseTimer: null,
+        userOpenOverride: null,
+        startedAt: Date.now(),
+        lastActivityAt: Date.now(),
       };
       requests.add(currentRequest);
       ensureTurnContainer(currentRequest);
@@ -131,8 +149,10 @@ export function createActivityLogController({
     const list = document.createElement('div');
     list.className = 'activity-list';
 
+    const ownerRequest = currentRequest;
     summary.addEventListener('click', () => {
       const nextOpen = !groupEl.classList.contains('open');
+      if (ownerRequest) ownerRequest.userOpenOverride = nextOpen;
       groupEl.classList.toggle('open', nextOpen);
       summary.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
       list.hidden = !nextOpen;
@@ -161,10 +181,11 @@ export function createActivityLogController({
   function setRequestActive(request, active) {
     if (!request?.groupEl) return;
     request.groupEl.toggleAttribute('data-active', !!active);
+    request.lastActivityAt = Date.now();
     if (active) {
       if (request.collapseTimer) clearTimeout(request.collapseTimer);
       request.collapseTimer = null;
-      setRequestOpen(request, true);
+      if (request.userOpenOverride !== false) setRequestOpen(request, true);
     }
   }
 
@@ -185,6 +206,10 @@ export function createActivityLogController({
 
   function scheduleCollapse(request, delay = 1200) {
     if (!request?.groupEl || requestRunningToolCount(request) > 0) return;
+    if (request.userOpenOverride !== null) {
+      setRequestActive(request, false);
+      return;
+    }
     if (request.collapseTimer) clearTimeout(request.collapseTimer);
     request.collapseTimer = setTimeout(() => {
       if (requestRunningToolCount(request) === 0) {
@@ -214,16 +239,16 @@ export function createActivityLogController({
     if (!parts.length && notes.length) parts.push(`${notes.length} status`);
     if (!parts.length) parts.push('waiting');
     request.summaryTitleEl.textContent = `Activity for "${compactPrompt(request.prompt)}"`;
-    request.summaryMetaEl.textContent = `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${parts.join(', ')}`;
+    const last = formatClock(request.lastActivityAt || request.startedAt);
+    request.summaryMetaEl.textContent = `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${parts.join(', ')}${last ? ` · ${last}` : ''}`;
   }
 
   function note({ key, label, detail = '', state = 'info' } = {}) {
     const text = String(label || '').trim();
     if (!text) return null;
     const request = ensureRequest();
-    // 실제 툴 호출이 1개 이상 있을 때만 아코디언 표시
-    const hasTools = request.groupEl.querySelectorAll('details.tool').length > 0;
-    if (hasTools) request.groupEl.hidden = false;
+    request.groupEl.hidden = false;
+    request.lastActivityAt = Date.now();
     const noteKey = key ? `${request.id || 'request'}:${key}` : '';
     let item = noteKey ? noteEls.get(noteKey) : null;
     if (!item || item.dataset.requestPrompt !== (request.prompt || '')) {
@@ -245,7 +270,10 @@ export function createActivityLogController({
       const detailEl = document.createElement('span');
       detailEl.className = 'activity-note-detail';
 
-      body.append(labelEl, detailEl);
+      const timeEl = document.createElement('span');
+      timeEl.className = 'activity-note-time';
+
+      body.append(labelEl, detailEl, timeEl);
       item.append(marker, body);
       request.listEl.appendChild(item);
     }
@@ -253,11 +281,13 @@ export function createActivityLogController({
     item.dataset.state = state || 'info';
     const labelEl = item.querySelector('.activity-note-label');
     const detailEl = item.querySelector('.activity-note-detail');
+    const timeEl = item.querySelector('.activity-note-time');
     if (labelEl) labelEl.textContent = text;
     if (detailEl) {
       const detailText = String(detail || '').trim();
       detailEl.textContent = detailText ? ` ${detailText}` : '';
     }
+    if (timeEl) timeEl.textContent = ` · ${formatClock(Date.now())}`;
     if (state === 'running' || state === 'tool') {
       setRequestActive(request, true);
     } else if (state === 'info' && requestRunningToolCount(request) === 0) {
@@ -304,6 +334,9 @@ export function createActivityLogController({
       output,
       is_error: !!isError,
       status,
+      startedAt: eventData?.startedAt,
+      completedAt: eventData?.completedAt,
+      durationMs: eventData?.durationMs,
     };
   }
 
@@ -314,12 +347,15 @@ export function createActivityLogController({
       || eventData?.type === 'ToolExecutionStarted'
       || (!eventData && output === undefined && !isError);
     if (isRunning) setRequestActive(request, true);
+    request.lastActivityAt = Date.now();
     const item = document.createElement('details');
     item.className = isError ? 'tool error' : 'tool';
-    item.open = isRunning || save;
+    item.open = isRunning;
     item.dataset.status = isRunning ? 'running' : isError ? 'failed' : 'done';
     if (eventData?.tool_use_id) item.dataset.toolId = eventData.tool_use_id;
     if (toolName) item.dataset.tool = toolName;
+    const startedAt = eventData?.startedAt || Date.now();
+    item.dataset.startedAt = String(startedAt);
 
     const summary = document.createElement('summary');
     summary.innerHTML = isRunning
@@ -329,7 +365,17 @@ export function createActivityLogController({
     const pre = document.createElement('pre');
     pre.textContent = formatToolPayload(isRunning ? toolInput : output);
 
-    item.append(summary, pre);
+    const meta = document.createElement('div');
+    meta.className = 'tool-meta';
+    const completedAt = eventData?.completedAt;
+    const durationMs = eventData?.durationMs;
+    meta.textContent = [
+      startedAt ? `started ${formatClock(startedAt)}` : '',
+      completedAt ? `finished ${formatClock(completedAt)}` : '',
+      Number.isFinite(durationMs) ? `duration ${formatDuration(durationMs)}` : '',
+    ].filter(Boolean).join(' · ');
+
+    item.append(summary, meta, pre);
     if (eventData) appendDiffAction(item, eventData);
     request.listEl.appendChild(item);
     updateGroupSummary(request);
@@ -375,20 +421,41 @@ export function createActivityLogController({
     const key = keyForToolEvent(event);
     const running = runningToolEls.get(key);
     const existing = running?.toolEl;
+    const completedAt = Date.now();
     if (existing) {
       existing.className = event.is_error ? 'tool error' : 'tool';
-      existing.open = true;
+      existing.open = false;
       existing.dataset.status = event.is_error ? 'failed' : 'done';
+      existing.dataset.completedAt = String(completedAt);
+      const startedAt = Number(existing.dataset.startedAt || completedAt);
+      const durationMs = Math.max(0, completedAt - startedAt);
       existing.querySelector('summary').innerHTML =
-        `<span class="tool-icon">${event.is_error ? '✗' : '✓'}</span> ${event.tool_name} ${event.is_error ? 'failed' : 'done'}`;
+        `<span class="tool-icon">${event.is_error ? '✗' : '✓'}</span> ${event.tool_name} ${event.is_error ? 'failed' : 'done'}${durationMs ? ` · ${formatDuration(durationMs)}` : ''}`;
+      const meta = existing.querySelector('.tool-meta');
+      if (meta) {
+        meta.textContent = [
+          `started ${formatClock(startedAt)}`,
+          `finished ${formatClock(completedAt)}`,
+          `duration ${formatDuration(durationMs)}`,
+        ].join(' · ');
+      }
       existing.querySelector('pre').textContent = formatToolPayload(event.output);
       appendDiffAction(existing, event);
       runningToolEls.delete(key);
+      if (running.request) running.request.lastActivityAt = completedAt;
       updateGroupSummary(running.request || currentRequest);
-      onPersistTool(buildToolEntry(event.tool_name, event.tool_input, event.output, event.is_error, existing.dataset.status, event));
+      onPersistTool(buildToolEntry(event.tool_name, event.tool_input, event.output, event.is_error, existing.dataset.status, {
+        ...event,
+        startedAt,
+        completedAt,
+        durationMs,
+      }));
       scheduleCollapse(running.request || currentRequest);
     } else {
-      const toolEl = appendTool(event.tool_name, event.tool_input, event.output, event.is_error, true, event);
+      const toolEl = appendTool(event.tool_name, event.tool_input, event.output, event.is_error, true, {
+        ...event,
+        completedAt,
+      });
       scheduleCollapse(currentRequest);
     }
     onStatsUpdate(event.tool_name, !event.is_error);
