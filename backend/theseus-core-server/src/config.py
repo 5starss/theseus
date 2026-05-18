@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     SPRING_BOOT_INTERNAL_API_KEY: str = "theseus-local-internal-api-key"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
+    BILLING_OUTBOX_SCHEDULER_ENABLED: bool = False
     BILLING_OUTBOX_BATCH_SIZE: int = 10
     BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
     SANDBOX_IMAGE: str = "theseus-sandbox:py311-tools"

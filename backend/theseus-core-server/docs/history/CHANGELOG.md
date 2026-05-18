@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 163 — Billing outbox scheduler 기본 비활성화 (2026-05-18)
+
+#### `src` / 설정
+- `BILLING_OUTBOX_SCHEDULER_ENABLED` 설정을 추가하고 기본값을 `false`로 두어 Core 기동 시 billing outbox flush scheduler가 자동 시작되지 않도록 변경
+- `setup_scheduler()`가 설정 비활성화 상태에서는 `AsyncIOScheduler`를 생성하지 않고 `None`을 반환하도록 가드 추가
+- `.env.example`에 billing outbox scheduler, batch size, flush interval 기본값을 명시
+
+#### 검증
+- `python -m py_compile src/config.py src/builder/worker.py`
+- `BILLING_OUTBOX_SCHEDULER_ENABLED=false` smoke: `setup_scheduler()`가 `None` 반환
+- `BILLING_OUTBOX_SCHEDULER_ENABLED=true` smoke: `billing-outbox-flush` job 등록 확인
+- `git diff --check -- backend/theseus-core-server/src/config.py backend/theseus-core-server/src/builder/worker.py backend/theseus-core-server/.env.example`
+
+---
+
 ### 🛠️ Session 162 — Custom Tool 전용 유지보수 도구와 sandbox 활성화 검증 강화 (2026-05-18)
 
 #### `theseus_engine`
