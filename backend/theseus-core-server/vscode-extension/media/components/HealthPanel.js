@@ -56,10 +56,25 @@ export function renderHealthPanel({
   meta.className = 'health-meta';
   const settings = health?.settings || {};
   const runner = health?.runner || {};
+  const localDaemon = health?.localDaemon || {};
+  const server = health?.server || {};
+  const customTools = health?.customTools || {};
   const extension = settings.extension || {};
   meta.textContent = [
     extension.version ? `extension: ${extension.version}` : '',
     extension.builtAt ? `builtAt: ${extension.builtAt}` : '',
+    localDaemon.status ? `Local daemon: ${localDaemon.status}` : '',
+    localDaemon.pid ? `daemon pid: ${localDaemon.pid}` : '',
+    localDaemon.port ? `daemon port: ${localDaemon.port}` : '',
+    localDaemon.session ? `session: ${localDaemon.session}` : '',
+    localDaemon.workspace ? `daemon workspace: ${localDaemon.workspace}` : '',
+    server.status ? `Server URL: ${server.status}` : '',
+    server.url ? `serverUrl: ${server.url}` : 'serverUrl: standalone',
+    server.detail ? `server detail: ${server.detail}` : '',
+    Number.isFinite(customTools.availableCount) || Number.isFinite(customTools.unavailableCount)
+      ? `Custom tools: ${customTools.availableCount || 0} available, ${customTools.unavailableCount || 0} unavailable${customTools.inactiveCount ? `, ${customTools.inactiveCount} inactive` : ''}`
+      : '',
+    customTools.source ? `custom tool source: ${customTools.source}` : '',
     settings.corePath ? `corePath: ${settings.corePath}` : 'corePath: not configured',
     settings.workspacePath ? `workspacePath: ${settings.workspacePath}` : '',
     settings.runnerPath ? `runnerPath: ${settings.runnerPath}` : '',
@@ -67,10 +82,7 @@ export function renderHealthPanel({
       ? `customToolRoots: ${settings.customToolRoots.join(' | ')}`
       : '',
     settings.pythonPath ? `pythonPath: ${settings.pythonPath}` : '',
-    settings.serverUrl ? `serverUrl: ${settings.serverUrl}` : 'serverUrl: standalone',
     runner.runtimeMode ? `runtime: ${runner.runtimeMode}` : '',
-    runner.daemonPid ? `pid: ${runner.daemonPid}` : '',
-    runner.daemonPort ? `daemon: ${runner.daemonPort}` : '',
   ].filter(Boolean).join('\n');
 
   panelEl.append(header, list, meta);

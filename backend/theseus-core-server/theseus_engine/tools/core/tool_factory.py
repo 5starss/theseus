@@ -43,6 +43,7 @@ log = logging.getLogger(__name__)
 DEFAULT_PERMISSION_LEVEL = 1
 MIN_PERMISSION_LEVEL = 1
 MAX_PERMISSION_LEVEL = 5
+_CUSTOM_TOOL_LOAD_WARNING_KEYS: Set[str] = set()
 
 
 def _coerce_permission_level(value: Any) -> int:
@@ -60,6 +61,7 @@ def _coerce_permission_level(value: Any) -> int:
 
 MISSING_MODULE_PACKAGE_ALIASES = {
     "pynvml": "nvidia-ml-py",
+    "speedtest": "speedtest-cli",
     "cv2": "opencv-python",
     "PIL": "Pillow",
     "yaml": "PyYAML",
@@ -101,6 +103,22 @@ def _install_candidates(
         if safe and safe not in candidates:
             candidates.append(safe)
     return candidates
+
+
+def _custom_tool_log_dedup_key(file_path: str, message: str) -> str:
+    return f"{os.path.normcase(os.path.abspath(file_path))}:{message}"
+
+
+def _log_custom_tool_load_warning(file_path: str, message: str) -> str:
+    """Log each custom-tool load failure once per process lifetime."""
+
+    key = _custom_tool_log_dedup_key(file_path, message)
+    if key in _CUSTOM_TOOL_LOAD_WARNING_KEYS:
+        log.debug("Skipped invalid custom tool %s: %s", file_path, message)
+    else:
+        _CUSTOM_TOOL_LOAD_WARNING_KEYS.add(key)
+        log.warning("Skipped invalid custom tool %s: %s", file_path, message)
+    return key
 
 
 def _sanitize_generated_code(code: str) -> str:
@@ -653,6 +671,7 @@ def _tool_inventory_item(
     if not os.path.exists(file_path):
         item["loadState"] = "unavailable"
         item["importError"] = f"Missing module file: {os.path.basename(file_path)}"
+        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, item["importError"])
         return item
 
     is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
@@ -663,6 +682,7 @@ def _tool_inventory_item(
         missing_modules = _extract_missing_modules(msg)
         item["loadState"] = "unavailable"
         item["importError"] = msg
+        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, msg)
         item["missingModules"] = missing_modules
         item["installCandidates"] = _install_candidates(
             dependencies=dependencies,
@@ -824,9 +844,9 @@ def load_custom_tools(
                     normalize_tool_meta(meta_path, tool_class, module_name)
 
                 except Exception as e:
-                    log.warning("Failed to instantiate tool from %s: %s", file_path, e)
+                    msg = str(e)
+                    log_key = _log_custom_tool_load_warning(file_path, msg)
                     if load_report is not None:
-                        msg = str(e)
                         missing_modules = _extract_missing_modules(msg)
                         load_report.append({
                             "toolName": module_name,
@@ -845,11 +865,12 @@ def load_custom_tools(
                                 missing_modules=missing_modules,
                             ),
                             "importError": msg,
+                            "logDedupKey": log_key,
                             "canInstall": bool(missing_modules),
                             "canRegister": False,
                         })
             else:
-                log.warning("Skipped invalid custom tool %s: %s", file_path, msg)
+                log_key = _log_custom_tool_load_warning(file_path, msg)
                 if load_report is not None:
                     missing_modules = _extract_missing_modules(msg)
                     load_report.append({
@@ -869,6 +890,7 @@ def load_custom_tools(
                             missing_modules=missing_modules,
                         ),
                         "importError": msg,
+                        "logDedupKey": log_key,
                         "canInstall": bool(missing_modules),
                         "canRegister": False,
                     })

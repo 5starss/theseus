@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-import { getConfiguredPythonPath, getCustomToolSearchRoots, getPythonPath } from '../workspace/WorkspaceContext';
+import { getExplicitPythonPath, getCustomToolSearchRoots, getPythonPath } from '../workspace/WorkspaceContext';
 
 const execFileAsync = promisify(execFile);
 const PYTHON_PROBE_MAX_BUFFER = 1024 * 1024 * 4;
@@ -148,7 +148,7 @@ function mergeProbeSummary(
   base: CustomToolSummary,
   probe: PythonInventoryItem | undefined,
 ): CustomToolSummary {
-  const hasInstallPython = Boolean(getConfiguredPythonPath());
+  const hasInstallPython = Boolean(getExplicitPythonPath());
   if (!probe) {
     const validation = validateCustomToolPair(base.metadataPath);
     return {
@@ -267,7 +267,7 @@ export async function installCustomToolDependencies(
   if (!packages.length) {
     return { success: false, message: 'No safe dependency install candidates were found.' };
   }
-  const configuredPythonExec = getConfiguredPythonPath();
+  const configuredPythonExec = getExplicitPythonPath();
   if (!configuredPythonExec) {
     return { success: false, message: 'theseus.pythonPath is not configured.' };
   }

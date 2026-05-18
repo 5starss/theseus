@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as http from 'http';
+import * as https from 'https';
 
 import { resolveReadableUri, saveAssetToWorkspace } from '../assets/AssetStore';
 import { TheseusSessionManager } from '../session/SessionManager';
@@ -76,6 +78,55 @@ function toolEventKey(event: RunnerEvent): string {
   const id = typeof event.tool_use_id === 'string' ? event.tool_use_id : '';
   const name = typeof event.tool_name === 'string' ? event.tool_name : 'tool';
   return id || name;
+}
+
+function requestWithTimeout(url: URL, timeoutMs: number): Promise<{ statusCode: number; statusMessage: string }> {
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? https : http;
+    const request = client.request(url, { method: 'GET', timeout: timeoutMs }, response => {
+      response.resume();
+      response.on('end', () => resolve({
+        statusCode: response.statusCode || 0,
+        statusMessage: response.statusMessage || '',
+      }));
+    });
+    request.on('timeout', () => {
+      request.destroy(new Error(`timeout after ${timeoutMs}ms`));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+async function probeExternalServer(serverUrl: string): Promise<JsonObject> {
+  const raw = String(serverUrl || '').trim();
+  if (!raw) {
+    return { status: 'standalone', url: '', detail: 'Standalone mode; no external Theseus server URL configured.' };
+  }
+  let healthUrl: URL;
+  try {
+    const base = new URL(raw.endsWith('/') ? raw : `${raw}/`);
+    healthUrl = new URL('health', base);
+  } catch (err) {
+    return { status: 'unreachable', url: raw, detail: `Invalid serverUrl: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  try {
+    const response = await requestWithTimeout(healthUrl, 1500);
+    const ok = response.statusCode >= 200 && response.statusCode < 500;
+    return {
+      status: ok ? 'connected' : 'unreachable',
+      url: raw,
+      healthUrl: healthUrl.toString(),
+      detail: `GET /health -> ${response.statusCode}${response.statusMessage ? ` ${response.statusMessage}` : ''}`,
+    };
+  } catch (err) {
+    return {
+      status: 'unreachable',
+      url: raw,
+      healthUrl: healthUrl.toString(),
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 function isInsidePath(child: string, parent: string): boolean {
@@ -332,6 +383,12 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   private readonly sessionController: SessionController;
   private activeChanges: ComposerChangeItem[] = [];
   private readonly toolStarts = new Map<string, number>();
+  private latestCustomToolInventory: unknown[] = [];
+  private latestCustomToolSource = '';
+  private runtimeRefreshTimer: NodeJS.Timeout | undefined;
+  private runtimeRefreshReason = '';
+  private hostRefreshTimer: NodeJS.Timeout | undefined;
+  private hostRefreshReason = '';
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -344,6 +401,10 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
       event => this.postRunnerEvent(event),
     );
     this.sessionManager.onEvent((event) => {
+      if (event.type === 'customToolInventoryUpdated' && Array.isArray(event.tools)) {
+        this.latestCustomToolInventory = event.tools;
+        this.latestCustomToolSource = typeof event.source === 'string' ? event.source : 'runner';
+      }
       this.postRunnerEvent(event);
       if (event.type === 'RunnerReady') {
         this.refreshRuntimeToolRegistry('runner_ready');
@@ -397,7 +458,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     if (this.sessionManager.hasProcess) {
       this.refreshRuntimeToolRegistry('webview_attach');
     } else {
-      void this.refreshCustomTools();
+      this.refreshCustomToolsOnce('webview_attach');
     }
   }
 
@@ -419,20 +480,52 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
 
   async refreshCustomTools(): Promise<void> {
     const tools = await loadCustomToolSummaries();
+    this.latestCustomToolInventory = tools;
+    this.latestCustomToolSource = 'host';
     this.messageQueue.post({
       type: 'runnerEvent',
       event: { type: 'customToolsLoaded', source: 'host', tools },
     });
   }
 
-  private refreshRuntimeToolRegistry(reason: string): void {
-    this.sessionManager.refreshToolRegistry(reason);
-    if (!this.sessionManager.hasProcess) {
-      void this.refreshCustomTools();
+  queueCustomToolRefresh(reason = 'watcher'): void {
+    if (this.sessionManager.hasProcess) {
+      this.refreshRuntimeToolRegistry(reason);
+    } else {
+      this.refreshCustomToolsOnce(reason);
     }
   }
 
-  private postHealthStatus(): void {
+  private refreshCustomToolsOnce(reason: string, debounceMs = 650): void {
+    this.hostRefreshReason = reason;
+    if (this.hostRefreshTimer) clearTimeout(this.hostRefreshTimer);
+    this.hostRefreshTimer = setTimeout(() => {
+      this.hostRefreshTimer = undefined;
+      const scheduledReason = this.hostRefreshReason;
+      void this.refreshCustomTools().catch(err => {
+        this.postRunnerEvent({
+          type: 'customToolValidation',
+          success: false,
+          message: `Custom tool inventory refresh failed (${scheduledReason}): ${err instanceof Error ? err.message : String(err)}`,
+        });
+      });
+    }, debounceMs);
+  }
+
+  private refreshRuntimeToolRegistry(reason: string, debounceMs = 650): void {
+    if (!this.sessionManager.hasProcess) {
+      this.refreshCustomToolsOnce(reason, debounceMs);
+      return;
+    }
+    this.runtimeRefreshReason = reason;
+    if (this.runtimeRefreshTimer) clearTimeout(this.runtimeRefreshTimer);
+    this.runtimeRefreshTimer = setTimeout(() => {
+      this.runtimeRefreshTimer = undefined;
+      this.sessionManager.refreshToolRegistry(this.runtimeRefreshReason);
+    }, debounceMs);
+  }
+
+  private async postHealthStatus(): Promise<void> {
     const coreRoot = getCoreRoot(this.context) || '';
     const workspaceCwd = getWorkspaceCwd() || '';
     const config = vscode.workspace.getConfiguration('theseus');
@@ -443,6 +536,18 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     const serverUrl = config.get<string>('serverUrl') || '';
     const status = this.sessionManager.status;
     const customToolRoots = getCustomToolSearchRoots();
+    const server = await probeExternalServer(serverUrl);
+    const toolInventory = Array.isArray(this.latestCustomToolInventory) ? this.latestCustomToolInventory : [];
+    const availableCount = toolInventory.filter(item => isRecord(item) && item.loadState === 'available').length;
+    const unavailableCount = toolInventory.filter(item => isRecord(item) && item.loadState === 'unavailable').length;
+    const inactiveCount = toolInventory.filter(item => isRecord(item) && item.loadState === 'inactive').length;
+    const daemonStatus = status.processRunning
+      ? status.lifecycle === 'busy'
+        ? 'Running'
+        : status.lifecycle === 'starting' || status.lifecycle === 'starting_stale'
+          ? 'Starting'
+          : 'Ready'
+      : 'Stopped';
     this.postRunnerEvent({
       type: 'healthStatus',
       settings: {
@@ -456,6 +561,23 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         workspaceCwd,
         pythonExec,
         customToolRoots,
+      },
+      localDaemon: {
+        status: daemonStatus,
+        pid: status.daemonPid,
+        port: status.daemonPort,
+        workspace: status.workspaceCwd || workspaceCwd,
+        session: status.session,
+        startedAt: status.daemonStartedAt,
+        runtimeMode: status.runtimeMode,
+      },
+      server,
+      customTools: {
+        source: this.latestCustomToolSource || (status.processRunning ? 'runner' : 'host'),
+        availableCount,
+        unavailableCount,
+        inactiveCount,
+        totalCount: toolInventory.length,
       },
       runner: {
         running: status.running,
@@ -489,10 +611,24 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           detail: String(status.lifecycle || 'stopped'),
         },
         {
+          label: 'Local daemon',
+          status: status.processRunning ? 'ok' : 'warn',
+          detail: [
+            daemonStatus,
+            status.daemonPid ? `pid ${status.daemonPid}` : '',
+            status.daemonPort ? `port ${status.daemonPort}` : '',
+          ].filter(Boolean).join(' · '),
+        },
+        {
+          label: 'Server URL',
+          status: server.status === 'unreachable' ? 'warn' : 'ok',
+          detail: String(server.detail || server.status || 'standalone'),
+        },
+        {
           label: 'Custom tools',
-          status: customToolRoots.length ? 'ok' : 'warn',
+          status: customToolRoots.length ? unavailableCount ? 'warn' : 'ok' : 'warn',
           detail: customToolRoots.length
-            ? customToolRoots.join(' | ')
+            ? `${availableCount} available, ${unavailableCount} unavailable${inactiveCount ? `, ${inactiveCount} inactive` : ''}`
             : 'corePath 또는 workspacePath를 확인하세요.',
         },
       ],
@@ -675,7 +811,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand('workbench.action.openSettings', 'theseus');
           break;
         case 'getHealth':
-          this.postHealthStatus();
+          void this.postHealthStatus();
           break;
         case 'explainProblem':
           vscode.commands.executeCommand('theseus.explainProblem');
@@ -724,7 +860,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           if (this.sessionManager.hasProcess) {
             this.refreshRuntimeToolRegistry('inventory_request');
           } else {
-            await this.refreshCustomTools();
+            this.refreshCustomToolsOnce('inventory_request', 150);
           }
           break;
         case 'refreshToolRegistry':
