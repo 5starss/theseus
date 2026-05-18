@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Sparkles, Wrench, Settings, UserCircle, LogOut, User, Key, Check, X } from 'lucide-react';
+import { Wrench, Settings, UserCircle, LogOut, User, Key, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useProjectStore } from '../stores/useProjectStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -62,11 +62,11 @@ export function Sidebar({ projectId }: SidebarProps) {
 
         {/* Brand Section */}
         <div
-          className="px-6 mb-8 flex items-center gap-3 cursor-pointer group transition-all duration-200 active:scale-[0.98]"
+          className="px-6 mb-8 flex items-center gap-2 cursor-pointer group transition-all duration-200 active:scale-[0.98]"
           onClick={() => navigate('/')}
         >
-          <div className="w-8 h-8 rounded bg-blue-400 flex items-center justify-center shrink-0">
-            <Sparkles className="w-4 h-4 text-[#003a6b]" />
+          <div className="w-8 h-8 rounded overflow-hidden flex items-center justify-center shrink-0">
+            <img src="/theseus_blue.png" alt="Theseus Logo" className="w-full h-full object-cover" />
           </div>
           <div className="flex flex-col">
             <h1 className="font-['Space_Grotesk'] font-bold text-xl text-blue-400 tracking-[-1px] leading-tight" style={{ textShadow: '0px 0px 10px rgba(96,165,250,0.4)' }}>

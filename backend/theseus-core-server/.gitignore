@@ -201,3 +201,5 @@ OpenHarness/
 # VSCode extension local build artifacts
 vscode-extension/node_modules/
 vscode-extension/out/
+
+theseus_engine/custom_tools/projects/*/
