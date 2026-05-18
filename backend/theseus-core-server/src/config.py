@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     SPRING_BOOT_INTERNAL_API_KEY: str = "theseus-local-internal-api-key"
     AUTH_TIMEOUT_SECONDS: int = 5
     INTERNAL_API_TIMEOUT_SECONDS: int = 10
+    BILLING_OUTBOX_SCHEDULER_ENABLED: bool = False
     BILLING_OUTBOX_BATCH_SIZE: int = 10
     BILLING_OUTBOX_FLUSH_INTERVAL_SECONDS: int = 30
     SANDBOX_IMAGE: str = "theseus-sandbox:py311-tools"
@@ -112,8 +113,10 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: str = "theseus-core"
     THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
     THESEUS_LOCAL_REPORT_ROOT: str = "reports"
+    THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE: bool = False
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
+    THESEUS_CUSTOM_TOOLS_HOST_DIR: Optional[str] = None
 
     # Sandbox shared workdir settings.
     # When Core runs inside a Docker container and controls the host Docker daemon,

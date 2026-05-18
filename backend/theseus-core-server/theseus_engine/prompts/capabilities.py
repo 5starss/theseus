@@ -79,6 +79,9 @@ _CUSTOM_TOOL_RECOVERY_PROMPT = """\
  - If the user asks to list, search, or inspect available custom tools, call `tool_search` with the user's intent instead of answering from memory.
  - If the user asks for all custom tools, use a broad language-neutral query such as `custom tools`.
  - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
+ - Existing project custom tool artifacts are not normal workspace files. Do not use `read_file`, `edit_file`, or `write_file` on a custom tool artifact root such as `/opt/theseus/custom_tools` or the Core container custom tool mount.
+ - To inspect an existing project custom tool source, use `custom_tool_read_source` with `project_id` plus `tool_name` or `module_name`.
+ - To repair an existing project custom tool source, use `custom_tool_read_source` first, then `custom_tool_update_source` with the complete replacement source. The update tool stages, validates, sandbox-verifies, and only then replaces the active artifact.
  - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
  - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.
  - Do not call an unavailable custom tool by name until it appears in your current tool schema.\
@@ -101,6 +104,9 @@ multiprocessing, signal, pty, resource, tempfile, webbrowser, pickle, or shelve.
  - Do not execute shell commands or arbitrary local programs from generated custom tools.
  - Do not read or write arbitrary local files unless the approved plan explicitly names \
 safe read-only paths.
+ - If a generated custom tool must use another active Theseus tool, call it only with \
+`await context.call_tool("tool_name", {...})`. Do not read `context.metadata["tool_registry"]` \
+directly or import another tool module by file path.
  - For system metrics, prefer psutil and read-only /proc or /sys data. Do not call \
 nvidia-smi directly from a generated custom tool.
  - If a core requirement depends on a prohibited command or module, expose the limitation \
@@ -120,6 +126,11 @@ helper/output BaseModel classes are allowed when useful
    (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
    (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
  - IMPORTANT: Do NOT use ToolResult.from_error() or ToolResult(status=..., data=...) — they don't exist.
+ - When a tool needs threshold-based detail analysis, first collect summary metrics inside \
+the current tool, then call active detail tools with `await context.call_tool("cpu_monitor", {"top_n": 10})` \
+or the matching tool schema. Handle `is_error=True` results in the final report.
+ - Nested tool calls are for bounded diagnostic composition. Do not call the same tool with \
+the same arguments repeatedly, and do not use nested calls for write/edit/bash/reboot-style actions.
  - Generated custom tools must follow the shared Theseus security rules below.
  - You CANNOT create a tool and call it in the SAME turn. Call `create_tool`, wait for \
 the success result, and ONLY THEN call the newly created tool in your next response.\

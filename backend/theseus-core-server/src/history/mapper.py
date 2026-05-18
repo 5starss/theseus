@@ -29,12 +29,12 @@ _TOOL_RESULT_MESSAGE_TYPES = {
     "TOOL_EXECUTION_RESULT",
     "TOOL_EXECUTION_COMPLETED",
 }
-_TOOL_NOTICE_PREFIXES = (
-    "Tool execution:",
+# Started/tool-call notices are persisted for UI/audit only. Replaying them as
+# assistant context can make a fresh request look like an old tool call is still
+# in progress, so only completed tool results are projected into LLM history.
+_TOOL_RESULT_NOTICE_PREFIXES = (
     "Tool result:",
     "Tool completed:",
-    "도구 실행:",
-    "툴 실행:",
     "툴 결과:",
 )
 
@@ -98,7 +98,7 @@ def _project_tool_history_notice(record: HistoryMessageRecord) -> str | None:
     content = record.content or ""
 
     if message_type in _TOOL_CALL_MESSAGE_TYPES:
-        return _summarize_tool_history_record("이전 도구 호출", content, content_type)
+        return None
     if message_type in _TOOL_RESULT_MESSAGE_TYPES:
         return _summarize_tool_history_record("이전 도구 실행 결과", content, content_type)
     if (
@@ -109,7 +109,7 @@ def _project_tool_history_notice(record: HistoryMessageRecord) -> str | None:
             projected_json_notice = _project_system_notice_json_tool_history(content)
             if projected_json_notice is not None:
                 return projected_json_notice
-        if any(content.startswith(prefix) for prefix in _TOOL_NOTICE_PREFIXES):
+        if any(content.startswith(prefix) for prefix in _TOOL_RESULT_NOTICE_PREFIXES):
             return _limit_tool_history_context(content)
     return None
 
@@ -129,18 +129,14 @@ def _project_system_notice_json_tool_history(content: str) -> str | None:
         or ""
     ).upper()
     if notice_type in _TOOL_CALL_MESSAGE_TYPES:
-        return _summarize_tool_history_record(
-            "이전 도구 호출",
-            json.dumps(payload, ensure_ascii=False),
-            "JSON",
-        )
+        return None
     if notice_type in _TOOL_RESULT_MESSAGE_TYPES:
         return _summarize_tool_history_record(
             "이전 도구 실행 결과",
             json.dumps(payload, ensure_ascii=False),
             "JSON",
         )
-    if any(content.startswith(prefix) for prefix in _TOOL_NOTICE_PREFIXES):
+    if any(content.startswith(prefix) for prefix in _TOOL_RESULT_NOTICE_PREFIXES):
         return _limit_tool_history_context(content)
     return None
 

@@ -43,6 +43,7 @@ log = logging.getLogger(__name__)
 DEFAULT_PERMISSION_LEVEL = 1
 MIN_PERMISSION_LEVEL = 1
 MAX_PERMISSION_LEVEL = 5
+_CUSTOM_TOOL_LOAD_WARNING_KEYS: Set[str] = set()
 
 
 def _coerce_permission_level(value: Any) -> int:
@@ -60,6 +61,7 @@ def _coerce_permission_level(value: Any) -> int:
 
 MISSING_MODULE_PACKAGE_ALIASES = {
     "pynvml": "nvidia-ml-py",
+    "speedtest": "speedtest-cli",
     "cv2": "opencv-python",
     "PIL": "Pillow",
     "yaml": "PyYAML",
@@ -101,6 +103,57 @@ def _install_candidates(
         if safe and safe not in candidates:
             candidates.append(safe)
     return candidates
+
+
+def _custom_tool_log_dedup_key(file_path: str, message: str) -> str:
+    return f"{os.path.normcase(os.path.abspath(file_path))}:{message}"
+
+
+def _log_custom_tool_load_warning(file_path: str, message: str) -> str:
+    """Log each custom-tool load failure once per process lifetime.
+
+    Import-failed custom tools are recoverable inventory entries. Repeating the
+    same warning on every registry refresh makes local daemon startup look like
+    a daemon/server failure, so subsequent identical failures are debug-only.
+    """
+
+    key = _custom_tool_log_dedup_key(file_path, message)
+    if key in _CUSTOM_TOOL_LOAD_WARNING_KEYS:
+        log.debug("Skipped invalid custom tool %s: %s", file_path, message)
+    else:
+        _CUSTOM_TOOL_LOAD_WARNING_KEYS.add(key)
+        log.warning("Skipped invalid custom tool %s: %s", file_path, message)
+    return key
+
+
+def _path_within(path: str, root: str) -> bool:
+    try:
+        normalized_path = os.path.abspath(path)
+        normalized_root = os.path.abspath(root)
+        return os.path.commonpath([normalized_path, normalized_root]) == normalized_root
+    except (OSError, ValueError):
+        return False
+
+
+def _is_project_custom_tool_dir(path: str) -> bool:
+    project_root = get_project_custom_tools_dir()
+    return _path_within(path, project_root)
+
+
+def _metadata_requires_sandbox(meta: Dict[str, Any]) -> bool:
+    project_id = str(meta.get("projectId") or "").strip()
+    return bool(meta) and project_id not in {"", "local"}
+
+
+def _metadata_is_sandbox_verified(meta: Dict[str, Any]) -> bool:
+    validation = meta.get("validationResult") or {}
+    sandbox = meta.get("sandboxResult") or {}
+    return (
+        meta.get("status") == "active"
+        and bool(meta.get("isActive"))
+        and bool(validation.get("success"))
+        and bool(sandbox.get("success"))
+    )
 
 
 def _sanitize_generated_code(code: str) -> str:
@@ -544,6 +597,8 @@ def normalize_tool_meta(
         "permissionLevel": permission_level,
         "status":        normalized.get("status", "active"),
         "isActive":      normalized.get("isActive", True),
+        "sandboxVerified": normalized.get("sandboxVerified", False),
+        "activationSource": normalized.get("activationSource", "standalone_without_sandbox"),
         "validationResult": normalized.get("validationResult") or {
             "success": True,
             "status": "validated",
@@ -637,6 +692,10 @@ def _tool_inventory_item(
         "permissionLevel": meta.get("permissionLevel", ""),
         "status": str(meta.get("status") or "unknown"),
         "isActive": bool(meta.get("isActive", True)),
+        "validationSuccess": bool((meta.get("validationResult") or {}).get("success")),
+        "sandboxVerified": bool((meta.get("sandboxResult") or {}).get("success")),
+        "sandboxResult": meta.get("sandboxResult") or {},
+        "activationSource": meta.get("activationSource"),
         "dependencies": dependencies,
         "missingModules": [],
         "installCandidates": [],
@@ -644,15 +703,21 @@ def _tool_inventory_item(
         "loadState": "available",
         "canInstall": False,
         "canRegister": False,
+        "canEditSource": False,
     }
 
     if not item["isActive"] or item["status"] not in {"unknown", "active"}:
         item["loadState"] = "inactive"
         return item
+    if _metadata_requires_sandbox(meta) and not _metadata_is_sandbox_verified(meta):
+        item["loadState"] = "inactive"
+        item["importError"] = "Project custom tool is not sandbox verified."
+        return item
 
     if not os.path.exists(file_path):
         item["loadState"] = "unavailable"
         item["importError"] = f"Missing module file: {os.path.basename(file_path)}"
+        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, item["importError"])
         return item
 
     is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
@@ -663,6 +728,7 @@ def _tool_inventory_item(
         missing_modules = _extract_missing_modules(msg)
         item["loadState"] = "unavailable"
         item["importError"] = msg
+        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, msg)
         item["missingModules"] = missing_modules
         item["installCandidates"] = _install_candidates(
             dependencies=dependencies,
@@ -679,6 +745,7 @@ def _tool_inventory_item(
     )
     item["status"] = "active"
     item["canRegister"] = True
+    item["canEditSource"] = item["sandboxVerified"]
     return item
 
 
@@ -759,6 +826,12 @@ def load_custom_tools(
     loaded: List[str] = []
 
     for custom_tools_dir in _custom_tool_dirs(extra_dirs):
+        if _is_project_custom_tool_dir(custom_tools_dir):
+            log.debug(
+                "Skipping project custom tool directory in global loader: %s",
+                custom_tools_dir,
+            )
+            continue
         if not os.path.isdir(custom_tools_dir):
             if os.path.normcase(custom_tools_dir) == os.path.normcase(CUSTOM_TOOLS_DIR):
                 os.makedirs(custom_tools_dir, exist_ok=True)
@@ -824,9 +897,9 @@ def load_custom_tools(
                     normalize_tool_meta(meta_path, tool_class, module_name)
 
                 except Exception as e:
-                    log.warning("Failed to instantiate tool from %s: %s", file_path, e)
+                    msg = str(e)
+                    log_key = _log_custom_tool_load_warning(file_path, msg)
                     if load_report is not None:
-                        msg = str(e)
                         missing_modules = _extract_missing_modules(msg)
                         load_report.append({
                             "toolName": module_name,
@@ -845,11 +918,12 @@ def load_custom_tools(
                                 missing_modules=missing_modules,
                             ),
                             "importError": msg,
+                            "logDedupKey": log_key,
                             "canInstall": bool(missing_modules),
                             "canRegister": False,
                         })
             else:
-                log.warning("Skipped invalid custom tool %s: %s", file_path, msg)
+                log_key = _log_custom_tool_load_warning(file_path, msg)
                 if load_report is not None:
                     missing_modules = _extract_missing_modules(msg)
                     load_report.append({
@@ -869,6 +943,7 @@ def load_custom_tools(
                             missing_modules=missing_modules,
                         ),
                         "importError": msg,
+                        "logDedupKey": log_key,
                         "canInstall": bool(missing_modules),
                         "canRegister": False,
                     })
@@ -888,6 +963,8 @@ def load_custom_tools_for_project(
     로드 조건 (``meta.json`` 기준):
       - ``isActive == True``
       - ``status == "active"``
+      - ``validationResult.success == True``
+      - ``sandboxResult.success == True``
 
     이 함수는 standalone(CLI/TUI)에서도 ``project_id``가 주어지면
     프로젝트 격리 로딩을 지원하기 위해 ``theseus_engine`` 안에 존재한다.
@@ -949,16 +1026,20 @@ def load_custom_tools_for_project(
 
         # ── meta.json active 체크 ────────────────────────────
         if meta is not None:
-            if not meta.get("isActive", True):
-                log.info("Skipped inactive project tool: %s", module_name)
-                continue
-            if meta.get("status", "active") != "active":
+            if not _metadata_is_sandbox_verified(meta):
                 log.info(
-                    "Skipped non-active project tool: %s (status=%s)",
+                    "Skipped inactive or unverified project tool: %s "
+                    "(status=%s isActive=%s validationSuccess=%s sandboxSuccess=%s)",
                     module_name,
                     meta.get("status"),
+                    meta.get("isActive"),
+                    (meta.get("validationResult") or {}).get("success"),
+                    (meta.get("sandboxResult") or {}).get("success"),
                 )
                 continue
+        else:
+            log.info("Skipped project tool without trusted metadata: %s", module_name)
+            continue
 
         # ── 코드 검증 + 로드 ─────────────────────────────────
         is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
@@ -1272,8 +1353,20 @@ class ToolCreatorTool(BaseTool):
             except RuntimeError as exc:
                 if str(exc) != "server_tooling_unavailable":
                     raise
-                # src.tooling 없는 환경(CLI 전용 배포)에서는 standalone으로 폴백
-                return await self._execute_standalone(arguments, context)
+                return ToolResult(
+                    output=(
+                        "❌ Server create_tool pipeline is unavailable in a server "
+                        "execution context. Refusing standalone fallback because it "
+                        "would activate a project custom tool without Core sandbox "
+                        "verification."
+                    ),
+                    is_error=True,
+                    metadata={
+                        "status": "server_tooling_unavailable",
+                        "activationSource": "blocked_server_standalone_fallback",
+                        "sandboxVerified": False,
+                    },
+                )
 
             if result.status == "created" and context.metadata.get("active_registry") is not None:
                 instance = context.metadata["tool_registry"].get(arguments.tool_name)
@@ -1374,6 +1467,8 @@ class ToolCreatorTool(BaseTool):
             "permissionLevel": getattr(tool_class, "permission_level", arguments.permission_level),
             "status": "active",
             "isActive": True,
+            "sandboxVerified": False,
+            "activationSource": "standalone_without_sandbox",
             "validationResult": {
                 "success": True,
                 "status": "validated",
@@ -1392,6 +1487,8 @@ class ToolCreatorTool(BaseTool):
             "metadata_path": meta_path,
             "permission_level": getattr(tool_class, "permission_level", arguments.permission_level),
             "status": "created",
+            "sandboxVerified": False,
+            "activationSource": "standalone_without_sandbox",
         }
 
         # 6. 런타임 ToolRegistry 및 RBAC에 즉시 등록

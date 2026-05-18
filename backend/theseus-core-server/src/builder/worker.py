@@ -51,6 +51,10 @@ def setup_scheduler():
     Phase 2.2 scheduler bootstrap.
     Returns an AsyncIOScheduler instance, or None if APScheduler is unavailable.
     """
+    if not settings.BILLING_OUTBOX_SCHEDULER_ENABLED:
+        logger.warning("Billing outbox scheduler is disabled by configuration.")
+        return None
+
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
     except ImportError:

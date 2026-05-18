@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-import { findMetaFiles, getCustomToolSearchRoots, getPythonPath } from '../workspace/WorkspaceContext';
+import { getExplicitPythonPath, getCustomToolSearchRoots, getPythonPath } from '../workspace/WorkspaceContext';
 
 const execFileAsync = promisify(execFile);
 const PYTHON_PROBE_MAX_BUFFER = 1024 * 1024 * 4;
@@ -23,6 +23,7 @@ export type CustomToolSummary = {
   installCandidates?: string[];
   dependencies?: string[];
   canInstall?: boolean;
+  installDisabledReason?: string;
   canRegister?: boolean;
   validationResult?: unknown;
   modulePath?: string;
@@ -83,6 +84,28 @@ function customToolDirsFromRoots(roots: string[]): string[] {
   return uniqueStrings(candidates.map(candidate => fs.existsSync(candidate) ? candidate : undefined));
 }
 
+function listRuntimeMetadataFiles(roots: string[]): string[] {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  for (const dir of customToolDirsFromRoots(roots)) {
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith('.meta.json') || name.startsWith('_')) continue;
+      const filePath = path.join(dir, name);
+      const key = pathKey(filePath);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      files.push(filePath);
+    }
+  }
+  return files;
+}
+
 function pathKey(filePath: string | undefined): string {
   return path.normalize(String(filePath || '')).toLowerCase();
 }
@@ -125,6 +148,7 @@ function mergeProbeSummary(
   base: CustomToolSummary,
   probe: PythonInventoryItem | undefined,
 ): CustomToolSummary {
+  const hasInstallPython = Boolean(getExplicitPythonPath());
   if (!probe) {
     const validation = validateCustomToolPair(base.metadataPath);
     return {
@@ -141,15 +165,20 @@ function mergeProbeSummary(
   }
   const loadState = String(probe.loadState || (probe.isActive === false ? 'inactive' : 'available'));
   const importError = typeof probe.importError === 'string' ? probe.importError : '';
+  const installCandidates = safePackageNames(probe.installCandidates);
+  const canInstall = hasInstallPython && Boolean(probe.canInstall) && installCandidates.length > 0;
   return {
     ...base,
     ...probe,
     loadState,
     importError,
     missingModules: safePackageNames(probe.missingModules),
-    installCandidates: safePackageNames(probe.installCandidates),
+    installCandidates,
     dependencies: safePackageNames(probe.dependencies),
-    canInstall: Boolean(probe.canInstall) && safePackageNames(probe.installCandidates).length > 0,
+    canInstall,
+    installDisabledReason: !canInstall && installCandidates.length > 0 && !hasInstallPython
+      ? 'Set theseus.pythonPath to install dependencies.'
+      : '',
     canRegister: Boolean(probe.canRegister) && loadState === 'available',
     validationResult: {
       success: loadState === 'available',
@@ -238,8 +267,8 @@ export async function installCustomToolDependencies(
   if (!packages.length) {
     return { success: false, message: 'No safe dependency install candidates were found.' };
   }
-  const pythonExec = getPythonPath();
-  if (!pythonExec) {
+  const configuredPythonExec = getExplicitPythonPath();
+  if (!configuredPythonExec) {
     return { success: false, message: 'theseus.pythonPath is not configured.' };
   }
   const choice = await vscode.window.showWarningMessage(
@@ -258,7 +287,7 @@ export async function installCustomToolDependencies(
     : process.env;
   try {
     await execFileAsync(
-      pythonExec,
+      configuredPythonExec,
       ['-m', 'pip', 'install', ...packages],
       { cwd: coreRoot || undefined, env, maxBuffer: PYTHON_PROBE_MAX_BUFFER },
     );
@@ -287,24 +316,13 @@ export async function loadCustomToolSummaries(): Promise<CustomToolSummary[]> {
   if (!roots.length) return [];
 
   const seen = new Set<string>();
-  const patterns = [
-    'theseus_engine/custom_tools/*.meta.json',
-    '**/theseus_engine/custom_tools/*.meta.json',
-    'custom_tools/*.meta.json',
-    '**/custom_tools/*.meta.json',
-    'custom_tools/projects/**/*.meta.json',
-    '**/custom_tools/projects/**/*.meta.json',
-  ];
-  const uris = (await Promise.all(
-    roots.flatMap(root => patterns.map(pattern => findMetaFiles(pattern, root))),
-  )).flat();
+  const metadataFiles = listRuntimeMetadataFiles(roots);
 
   const probeItems = await runPythonInventoryProbe(roots).catch(() => []);
   const probeByMetadata = new Map(probeItems.map(item => [pathKey(item.metadataPath), item]));
   const probeByModule = new Map(probeItems.map(item => [pathKey(item.modulePath), item]));
   const tools: CustomToolSummary[] = [];
-  for (const uri of uris) {
-    const metadataPath = uri.fsPath;
+  for (const metadataPath of metadataFiles) {
     if (seen.has(metadataPath)) continue;
     seen.add(metadataPath);
 

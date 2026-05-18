@@ -52,6 +52,7 @@ export class StdioRunnerClient implements RunnerClient {
           ...process.env,
           PYTHONPATH: extraPython,
           THESEUS_SERVER_URL: config.serverUrl,
+          THESEUS_CORE_ROOT: config.coreRoot,
           THESEUS_INITIAL_SESSION: initialSession,
           PYTHONIOENCODING: 'utf-8',
           PYTHONUTF8: '1',

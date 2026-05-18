@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import type { RunnerEvent } from '../../shared/protocol';
 import {
   createLocalSession,
@@ -26,7 +27,11 @@ function makeUntitledSessionName(): string {
   ].join('');
 }
 
+const SESSION_COMMAND_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
+
 export class SessionController {
+  private pendingSessionCommand: { disposable: vscode.Disposable; timer: NodeJS.Timeout } | undefined;
+
   constructor(
     private readonly sessionManager: TheseusSessionManager,
     private readonly postRunnerEvent: (event: RunnerEvent) => void,
@@ -49,6 +54,7 @@ export class SessionController {
       return;
     }
     if (this.isBlockedByActiveRun()) {
+      this.postStatus(`세션 전환: 현재 run이 끝나면 새 세션으로 전환합니다: ${sessionName}`);
       this.waitForReadyThenSend(`/session new ${JSON.stringify(sessionName)}`);
       return;
     }
@@ -63,6 +69,7 @@ export class SessionController {
       return;
     }
     if (this.isBlockedByActiveRun()) {
+      this.postStatus(`세션 전환: 현재 run이 끝나면 전환합니다: ${name}`);
       this.waitForReadyThenSwitch(name);
       return;
     }
@@ -81,7 +88,7 @@ export class SessionController {
    * - busy 상태여도 interrupt하지 않음.
    * - starting/stale 상태면 기다리기만 함
    * 상태 transition을 이벤트로 구독해 race-free하게 대기한다.
-   * 최대 10초 후에도 ready가 안 되면 local fallback 또는 busy notice.
+   * 긴 run은 정상일 수 있으므로 짧은 타임아웃으로 runner를 재시작하지 않는다.
    */
   private waitForReadyThenSwitch(name: string): void {
     this.waitForReadyThenSend(`/session switch ${JSON.stringify(name)}`, () => {
@@ -90,10 +97,13 @@ export class SessionController {
   }
 
   private waitForReadyThenSend(command: string, fallback?: () => void): void {
+    this.pendingSessionCommand?.disposable.dispose();
+    if (this.pendingSessionCommand?.timer) clearTimeout(this.pendingSessionCommand.timer);
     let settled = false;
     const finishWithFallback = () => {
       if (this.canRouteToRunner()) this.sessionManager.send(command);
-      else fallback?.();
+      else if (fallback) fallback();
+      else this.postStatus('세션 전환: 현재 run이 아직 진행 중입니다. 완료 후 다시 시도해 주세요.');
     };
 
     const disposable = this.sessionManager.onEvent(() => {
@@ -102,23 +112,27 @@ export class SessionController {
         settled = true;
         clearTimeout(timer);
         disposable.dispose();
+        this.pendingSessionCommand = undefined;
         this.sessionManager.send(command);
       }
     });
 
-    // 안전망: 10초 후에도 ready가 안 되면 fallback
+    // 안전망: 장시간 ready가 안 되면 runner 재시작 없이 fallback 또는 안내만 남긴다.
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       disposable.dispose();
+      if (this.pendingSessionCommand?.timer === timer) this.pendingSessionCommand = undefined;
       finishWithFallback();
-    }, 10000);
+    }, SESSION_COMMAND_WAIT_TIMEOUT_MS);
+    this.pendingSessionCommand = { disposable, timer };
 
     // 즉시 ready로 transition한 경우 대비
     if (this.canRouteToRunner()) {
       settled = true;
       clearTimeout(timer);
       disposable.dispose();
+      this.pendingSessionCommand = undefined;
       this.sessionManager.send(command);
     }
   }
@@ -131,6 +145,7 @@ export class SessionController {
       return;
     }
     if (this.isBlockedByActiveRun()) {
+      this.postStatus(`세션 삭제: 현재 run이 끝나면 삭제합니다: ${name}`);
       this.waitForReadyThenSend(`/session delete ${JSON.stringify(name)}`);
       return;
     }
@@ -150,6 +165,7 @@ export class SessionController {
       return;
     }
     if (this.isBlockedByActiveRun()) {
+      this.postStatus(`세션 이름 변경: 현재 run이 끝나면 변경합니다: ${oldName} → ${newName}`);
       this.waitForReadyThenSend(`/session rename ${JSON.stringify(oldName)} ${JSON.stringify(newName)}`);
       return;
     }
@@ -222,6 +238,13 @@ export class SessionController {
       code: 'session_error',
       message: error instanceof Error ? error.message : String(error),
       state: this.sessionManager.currentState,
+    });
+  }
+
+  private postStatus(message: string): void {
+    this.postRunnerEvent({
+      type: 'StatusEvent',
+      message,
     });
   }
 

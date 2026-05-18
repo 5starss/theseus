@@ -6,7 +6,7 @@ import { DaemonRunnerClient, errorMessage, isDaemonConnectionError, isDaemonHttp
 import { killPidTree } from './ProcessUtils';
 import { RunnerStateStore } from './RunnerStateStore';
 import { StdioRunnerClient } from './StdioRunnerClient';
-import type { DaemonRunStatus, DaemonRunnerState, DaemonStatus, RunnerProcess, RunnerRuntimeMode, TheseusSessionMetadata } from './runnerTypes';
+import type { ActiveRunSnapshot, DaemonRunStatus, DaemonRunnerState, DaemonStatus, RunnerProcess, RunnerRuntimeMode, TheseusSessionMetadata } from './runnerTypes';
 // ── Session manager ─────────────────────────────────────────────────
 
 type TheseusSessionState =
@@ -84,8 +84,16 @@ function isExpectedStopReason(reason: string | undefined): boolean {
   return !!reason && EXPECTED_STOP_REASONS.has(reason);
 }
 
+function stripRecoverableCustomToolWarnings(stderr: string): string {
+  return stderr
+    .split(/\r?\n/)
+    .filter(line => !/Skipped invalid custom tool .*Error during module execution: .*No module named/i.test(line))
+    .join('\n');
+}
+
 function classifyProcessFailure(stderr: string, code: number | null): TheseusDiagnosticCode {
-  if (/ModuleNotFoundError|ImportError|No module named/i.test(stderr)) return 'python_import_failed';
+  const fatalStderr = stripRecoverableCustomToolWarnings(stderr);
+  if (/ModuleNotFoundError|ImportError|No module named/i.test(fatalStderr)) return 'python_import_failed';
   return code === 0 || code === null ? 'runner_error' : 'crash_exit';
 }
 
@@ -109,6 +117,7 @@ export class TheseusSessionManager implements vscode.Disposable {
   private runtimeMode: RunnerRuntimeMode = 'local-daemon';
   private daemon: DaemonRunnerState | undefined;
   private activeRunId: string | undefined;
+  private activeRunStatus: ActiveRunSnapshot | undefined;
   private activeRunEventCount = 0;
   private daemonHeartbeatFailures = 0;
   private daemonStreamReconnectAttempt = 0;
@@ -164,7 +173,9 @@ export class TheseusSessionManager implements vscode.Disposable {
   get status(): RunnerEvent {
     const processRunning = this.hasProcess;
     const attachableStdio = !!this.proc && !this.daemon && processRunning && !!this.lastReadyEvent;
-    const effectiveState = this.state === 'stale' && attachableStdio ? 'ready' : this.state;
+    const hasActiveRun = !!this.activeRunId || !!this.activeRunStatus;
+    const rawState = hasActiveRun && ['ready', 'waiting_input'].includes(this.state) ? 'busy' : this.state;
+    const effectiveState = rawState === 'stale' && attachableStdio ? 'ready' : rawState;
     const lifecycle = effectiveState === 'stale' && processRunning ? 'starting_stale' : effectiveState;
     return {
       type: 'RunnerStatus',
@@ -182,9 +193,13 @@ export class TheseusSessionManager implements vscode.Disposable {
       runtimeMode: this.runtimeMode,
       daemonPid: this.daemon?.pid ?? this.proc?.pid,
       daemonPort: this.daemon?.port,
+      daemonStartedAt: this.daemon?.startedAt,
       session: this.lastReadyEvent?.session || this.preferredSessionName,
       lastEventAt: this.lastEventAt,
       lastHeartbeatAt: this.lastHeartbeatAt,
+      activeRunId: this.activeRunId,
+      activeRunStatus: this.activeRunStatus?.status,
+      activeRun: this.activeRunStatus,
       exitReason: this.exitReason,
       pendingInput: this.pendingInput.length,
       lastDiagnostic: this.lastDiagnostic,
@@ -274,6 +289,7 @@ export class TheseusSessionManager implements vscode.Disposable {
     this.daemon = undefined;
     this.abortController?.abort();
     this.activeRunId = undefined;
+    this.activeRunStatus = undefined;
     this.activeRunEventCount = 0;
     this.daemonHeartbeatFailures = 0;
     this.daemonStreamReconnectAttempt = 0;
@@ -425,7 +441,34 @@ export class TheseusSessionManager implements vscode.Disposable {
   refreshToolRegistry(reason = 'manual'): void {
     const payload = JSON.stringify({ type: 'refreshToolRegistry', reason });
     if (this.daemon) {
-      void this.sendDaemon(payload);
+      void this.daemonClient.request(
+        this.daemon,
+        'POST',
+        '/control/tool-registry/refresh',
+        { reason },
+      ).then(response => {
+        const events = Array.isArray(response.events) ? response.events : [];
+        for (const raw of events) {
+          const event = asRunnerEvent(raw);
+          if (event) this.emit(event);
+        }
+        void this.pollDaemonStatus({ emitStatus: true });
+      }).catch(err => {
+        if (isDaemonHttpStatus(err, 404)) {
+          this.emit({
+            type: 'StatusEvent',
+            message: 'Tool registry refresh is not supported by the currently attached daemon. Restart Theseus to use the newer registry controls.',
+          });
+          this.emit({ type: 'toolRegistryUpdated', source: 'daemon_unsupported', reason, availableTools: [], unavailableCount: 0 });
+          void this.pollDaemonStatus({ emitStatus: true });
+          return;
+        }
+        if (isDaemonConnectionError(err)) {
+          this.markDaemonConnectionLost(errorMessage(err));
+          return;
+        }
+        this.emitDiagnostic('send_failed', errorMessage(err));
+      });
       return;
     }
     if (!this.proc) {
@@ -634,6 +677,7 @@ export class TheseusSessionManager implements vscode.Disposable {
       return false;
     } finally {
       this.activeRunId = undefined;
+      this.activeRunStatus = undefined;
       this.activeRunEventCount = 0;
       this.daemonStreamReconnectAttempt = 0;
       if (!keepBusyState && this.daemon && this.lastReadyEvent && (this.state === 'busy' || this.state === 'stale')) {
@@ -740,6 +784,7 @@ export class TheseusSessionManager implements vscode.Disposable {
     this.daemon = undefined;
     this.proc = undefined;
     this.activeRunId = undefined;
+    this.activeRunStatus = undefined;
     this.activeRunEventCount = 0;
     this.daemonHeartbeatFailures = 0;
     this.daemonStreamReconnectAttempt = 0;
@@ -764,6 +809,18 @@ export class TheseusSessionManager implements vscode.Disposable {
     }
     const lastEventAt = typeof status.lastEventAt === 'number' ? status.lastEventAt : undefined;
     if (lastEventAt) this.lastEventAt = lastEventAt > 1_000_000_000_000 ? lastEventAt : Math.round(lastEventAt * 1000);
+    const activeRun = status.runs?.find(run => !TERMINAL_DAEMON_RUN_STATUSES.has(String(run.status || '')));
+    if (activeRun) {
+      this.activeRunId = typeof activeRun.runId === 'string' ? activeRun.runId : this.activeRunId;
+      this.activeRunStatus = {
+        runId: typeof activeRun.runId === 'string' ? activeRun.runId : this.activeRunId,
+        status: typeof activeRun.status === 'string' ? activeRun.status : undefined,
+        updatedAt: typeof activeRun.updatedAt === 'number' ? activeRun.updatedAt : undefined,
+        eventCount: typeof activeRun.eventCount === 'number' ? activeRun.eventCount : undefined,
+      };
+    } else {
+      this.activeRunStatus = undefined;
+    }
     if (this.daemon) {
       this.daemon = {
         ...this.daemon,

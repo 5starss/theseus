@@ -16,6 +16,8 @@ from src.tooling.service import (
     ServerToolCreationRequest,
     ToolCreationError,
     activate_tool_artifact,
+    cleanup_failed_tool_artifact,
+    cleanup_report_line,
     persist_draft_tool,
     read_tool_metadata,
     run_tool_sandbox_gate_for_artifact,
@@ -296,6 +298,7 @@ class ToolBuilder:
             run_id=event.run_id,
         )
 
+        paths = None
         try:
             paths, metadata = persist_draft_tool(
                 creation_request,
@@ -313,14 +316,27 @@ class ToolBuilder:
                 tool_class=tool_class,
                 registry=None,
                 tool_permissions=None,
+                activation_source="server_toolbuild",
             )
             metadata = read_tool_metadata(paths)
         except ToolCreationError as exc:
+            errors = list(exc.errors)
+            if paths is not None:
+                cleanup_result = cleanup_failed_tool_artifact(
+                    paths,
+                    request=creation_request,
+                    failure_stage=exc.stage,
+                    failure_code=exc.stage.upper(),
+                    failure_message=exc.message,
+                    storage_root=self.storage_root,
+                    require_request_match=True,
+                )
+                errors.append(cleanup_report_line(cleanup_result))
             raise ToolRepairFailure(
                 stage=exc.stage,
                 code=exc.stage.upper(),
                 message=exc.message,
-                metadata={"errors": exc.errors},
+                metadata={"errors": errors},
             ) from exc
 
         merged_metadata = dict(metadata)
@@ -412,6 +428,12 @@ class ToolBuilder:
             "- Implement async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult.\n"
             "- Return ToolResult(output=<string or JSON-serializable value>) on success.\n"
             "- Return ToolResult(output=<clear error>, is_error=True) on handled failures.\n"
+            "- If this tool must invoke another active Theseus tool, use "
+            "await context.call_tool(\"tool_name\", {\"arg\": \"value\"}) and handle "
+            "ToolResult.is_error. Do not read context.metadata['tool_registry'] directly.\n"
+            "- Use nested tool calls only for bounded diagnostic composition; do not "
+            "repeat the same tool and arguments, and do not use nested calls for "
+            "write/edit/bash/reboot-style actions.\n"
             "- Avoid embedding executable Python source inside another Python source string. "
             "Prefer helper functions, constants, and JSON payloads.\n"
             "- If embedding Python code inside a Python string, use triple single quotes for the outer "

@@ -146,7 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
     } else {
       vscode.window.showWarningMessage(validationMessage);
     }
-    void provider.refreshCustomTools();
+    provider.queueCustomToolRefresh(`watcher_${action}`);
   });
 
   context.subscriptions.push(

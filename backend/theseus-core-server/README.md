@@ -182,6 +182,10 @@ Remote Workspace는 Core가 외부 서버에 SSH로 접근해 파일/로그/리�
   remote tool만 노출합니다.
 - AGENT도 기본은 read-only이며, resolver 결과의 `allowWriteExecution=true`일
   때만 `remote_write_file`, `remote_edit_file`, `remote_run_command`가 노출됩니다.
+- 운영자가 `THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE=true`를 설정하면
+  resolver 결과와 무관하게 AGENT에서 `remote_write_file`, `remote_edit_file`을
+  노출할 수 있습니다. 이 override는 파일 수정만 허용하며 `remote_run_command`는
+  계속 `allowWriteExecution=true`가 필요합니다.
 - `remote_run_command`는 shell chaining, command substitution, pipe-to-shell,
   basePath 밖 path argument를 Core에서 차단합니다.
 

@@ -105,6 +105,26 @@ README의 핵심 차별점 중 하나가 자연어 기반 툴 생성이다. 현�
 - 생성 코드 실행은 항상 샌드박스 경유
 - 호스트 직접 실행 경로 제거
 
+### 3.3.1 Custom Tool 실패 복구 루프
+
+프로젝트별 custom tool은 생성 후에도 런타임 오류, sandbox 의존성 누락, 잘못된 psutil 속성 접근처럼 실제 사용 중에 실패할 수 있다. 현재는 전용 유지보수 도구(`custom_tool_read_source`, `custom_tool_update_source`)로 source를 읽고 staged update를 검증한 뒤 active artifact를 교체할 수 있는 기반이 마련됐다. 다음 단계는 이 기능을 agent loop에 연결해 “실패 감지 → 원인 분류 → 수정안 생성 → 검증된 교체” 흐름을 자동화하는 것이다.
+
+해야 할 일:
+
+- 툴 실행 실패를 `code_bug`, `dependency_missing`, `sandbox_infra_error`, `permission_denied`, `tool_name_conflict`처럼 재시도 정책이 다른 유형으로 분류
+- 실패한 tool의 `project_id`, `tool_name`, `module_name`, sandbox 상태, source path를 history/runtime context에 보존
+- 코드 버그로 판단되는 경우 `custom_tool_read_source`로 기존 source를 읽고, 수정안을 생성한 뒤 `custom_tool_update_source`로 staged validation + sandbox gate를 통과할 때만 교체
+- sandbox 인프라 오류나 권한 오류는 코드 수정 루프로 진입하지 않고 운영 조치 또는 사용자 승인 필요 상태로 종료
+- 같은 실패 구현을 반복하지 않도록 `blockedImplementation`, `retryPolicy`, `suggestedAlternatives`를 다음 PLAN/AGENT 입력에 주입
+- nested tool call 기반 report/orchestrator tool은 하위 tool 실패를 parent output에 묻지 말고 repair 후보로 기록
+
+완료 기준:
+
+- 에이전트가 custom tool 런타임 오류를 단순 보고로 끝내지 않고, 수정 가능한 코드 결함인지 먼저 분류함
+- 수정 가능한 실패는 기존 active tool을 보존한 채 staged update와 sandbox 검증을 거쳐 교체됨
+- 수정 불가능한 실패는 원인, recoverable 여부, 필요한 운영 조치가 사용자에게 명확히 표시됨
+- 실패한 artifact 파일이 이름 충돌만 유발하지 않도록 cleanup/audit/debug 기록이 남음
+
 ### 3.4 Validator 4종 서버 편입
 
 README는 4가지 도메인 특화 validator를 명시하고 있지만, 현재 서버 구조에는 대부분 비어 있다. `ToolValidator` 수준의 AST 검증만으로는 README가 말한 전체 파이프라인을 충족하지 못한다.
@@ -201,16 +221,19 @@ AI 파트는 이들과 맞물리되, 주도 우선순위는 Plan/Tooling/RAG/Obs
 3. `sandbox-enforced-tool-execution`
 - 생성 코드 실행의 샌드박스 강제 연결
 
-4. `validator-pipeline`
+4. `custom-tool-repair-loop`
+- custom tool 실패 분류, source read/update, staged sandbox 검증, 실패 context 기반 재계획
+
+5. `validator-pipeline`
 - 4종 validator 서버 파이프라인 정리
 
-5. `rag-tool-integration`
+6. `rag-tool-integration`
 - KB 검색 도구를 실제 레지스트리에 편입
 
-6. `ai-observability`
+7. `ai-observability`
 - LangSmith/tracing/운영 로그 정리
 
-7. `multi-turn-state`
+8. `multi-turn-state`
 - 세션/승인 상태/장기 워크플로우 고도화
 
 ---

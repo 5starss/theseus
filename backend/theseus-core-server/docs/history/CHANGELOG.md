@@ -4,6 +4,169 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 163 — Billing outbox scheduler 기본 비활성화 (2026-05-18)
+
+#### `src` / 설정
+- `BILLING_OUTBOX_SCHEDULER_ENABLED` 설정을 추가하고 기본값을 `false`로 두어 Core 기동 시 billing outbox flush scheduler가 자동 시작되지 않도록 변경
+- `setup_scheduler()`가 설정 비활성화 상태에서는 `AsyncIOScheduler`를 생성하지 않고 `None`을 반환하도록 가드 추가
+- `.env.example`에 billing outbox scheduler, batch size, flush interval 기본값을 명시
+
+#### 검증
+- `python -m py_compile src/config.py src/builder/worker.py`
+- `BILLING_OUTBOX_SCHEDULER_ENABLED=false` smoke: `setup_scheduler()`가 `None` 반환
+- `BILLING_OUTBOX_SCHEDULER_ENABLED=true` smoke: `billing-outbox-flush` job 등록 확인
+- `git diff --check -- backend/theseus-core-server/src/config.py backend/theseus-core-server/src/builder/worker.py backend/theseus-core-server/.env.example`
+
+---
+
+### 🛠️ Session 162 — Custom Tool 전용 유지보수 도구와 sandbox 활성화 검증 강화 (2026-05-18)
+
+#### `theseus_engine`
+- `custom_tool_read_source`, `custom_tool_update_source` core tool을 추가해 `/opt/theseus/custom_tools` 같은 env/volume 기반 artifact를 일반 `read_file/edit_file`이 아니라 project/tool 식별자 기반 전용 도구로만 읽고 수정하도록 분리
+- `tool_search` custom tool inventory 출력에 source path, metadata path, sandbox 검증 여부, 유지보수 도구 안내를 포함
+- project custom tool loader가 `status=active`, `isActive=true`, `validationResult.success=true`, `sandboxResult.success=true`를 모두 만족할 때만 registry에 등록하도록 강화
+- global custom tool loader가 project artifact root 하위 파일을 우회 로드하지 않도록 차단하고, standalone 생성 artifact에는 `activationSource=standalone_without_sandbox`, `sandboxVerified=false` metadata를 남김
+- prompt에 기존 custom tool 수정은 `custom_tool_read_source` → `custom_tool_update_source`를 사용하고 일반 파일 도구로 custom tool root를 수정하지 말라는 규칙을 추가
+
+#### `src`
+- `src.tooling.service`에 project custom tool source read/update helper를 추가하고, update는 staged artifact에서 `ToolValidator`와 Core sandbox gate를 통과한 뒤에만 active artifact를 교체하도록 구현
+- sandbox 실패 또는 권한 오류 시 기존 active artifact를 유지하고 staged 실패 artifact만 cleanup하도록 정리
+- PLAN draft의 generated custom tool `target_files`가 `THESEUS_PROJECT_CUSTOM_TOOLS_DIR/{projectId}` 기반 runtime path로 정규화되도록 수정
+- `THESEUS_CUSTOM_TOOLS_HOST_DIR` 설정을 추가해 host bind mount path는 debug/display hint로만 사용할 수 있게 함
+- ToolBuild activation metadata에 `activationSource=server_toolbuild`, sandbox 통과 artifact에는 `sandboxVerified=true`를 기록
+
+#### 검증
+- `python -m py_compile src/tooling/service.py src/tool_build/builder.py src/config.py src/tool_plan/planner.py theseus_engine/tools/core/custom_tool_maintenance_tool.py theseus_engine/tools/core/__init__.py theseus_engine/tools/core/tool_factory.py theseus_engine/core/tool_visibility.py theseus_engine/tools/core/tool_search_tool.py theseus_engine/prompts/capabilities.py theseus_engine/prompts/plan.py tests/test_custom_tool_maintenance.py`
+- `python -m unittest discover -s tests`
+- `python -m compileall -q src theseus_engine`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 161 — VSCode Extension 로컬 데몬 / custom tool import 오류 표시 분리 (2026-05-18)
+
+#### `theseus_engine`
+- `custom_tools` import 실패는 callable registry에서 제외하되 `unavailable` inventory로 남기고, 같은 `modulePath + importError` 조합은 데몬 생명주기 동안 warning 1회만 출력하도록 dedupe
+- `ModuleNotFoundError: speedtest`의 안전한 설치 후보를 `speedtest-cli`로 매핑해 dependency recovery UX에서 실제 pip 패키지명을 제안
+- unavailable inventory 항목에 `logDedupKey`를 포함해 반복 refresh 중 같은 실패 원인을 추적할 수 있게 보강
+
+#### `vscode-extension`
+- recoverable custom tool import warning을 runner fatal import 오류와 분리해, 데몬 프로세스가 정상 `/health`/`/status`에 붙는 상황에서 서버/데몬 실패로 오인하지 않도록 분류
+- `RunnerReady`, WebView attach, watcher, 수동 refresh가 겹칠 때 runtime/host custom tool refresh를 debounce하여 같은 import 검증이 짧은 시간에 반복되지 않도록 정리
+- Custom Tool dependency 설치는 명시적으로 설정된 `theseus.pythonPath`가 있을 때만 활성화하고, 기본 `python` fallback에는 자동 설치하지 않도록 제한
+- Health 패널에 `Local daemon`, `Server URL`, `Custom tools` 상태를 분리해 pid/port/session, standalone/connected/unreachable, available/unavailable counts를 별도로 표시
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media/main.js`
+- `node --check media/dispatcher.js`
+- `node --check media/components/CustomTools.js`
+- `node --check media/components/HealthPanel.js`
+- `python -m py_compile theseus_engine/daemon.py theseus_engine/runner_runtime.py theseus_engine/tools/core/tool_factory.py`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 160 — VSCode Extension 작업 상태 가시성 개선 (2026-05-18)
+
+#### `vscode-extension`
+- Theseus Composer의 multi-file change 항목에 `createdAt` / `updatedAt` / `completedAt` / `failedAt` / `durationMs` / `errorMessage`를 포함해 실패 시각과 경과 시간을 표시하도록 개선
+- Composer 패널이 변경 때마다 전체 HTML을 재생성하지 않고 WebView message로 change list만 갱신하도록 바꿔 성공/실패 이력이 깜빡이거나 사라지는 문제를 줄임
+- `SessionController`를 세션 생성/전환/삭제/rename/export의 단일 경로로 사용하게 정리하고, busy 상태의 세션 변경은 runner 재시작 없이 현재 run 완료 후 적용 대기 안내로 처리
+- runner status에 active run id/status와 last event/heartbeat 시간을 포함해 WebView가 실제 run 진행 여부를 판단할 수 있게 보강
+- `AgentLoopStatus` / assistant streaming / tool execution 이벤트를 기준으로 상단 loop chip에 `Thinking`, `Running tool`, `Answering`, `Stalled` 같은 사용자용 상태와 마지막 이벤트 경과 시간을 표시
+- tool/activity accordion은 tool이 없는 일반 응답에서도 loop status를 표시하고, 실행 중 자동 펼침 및 완료 후 자동 접힘 정책으로 정리
+- tool call 항목에 시작 시각, 완료 시각, duration, 실패 여부를 표시하고 완료된 tool detail은 기본 접힘 상태로 전환
+- ready 회복 시 stale/retry성 system message와 restart banner가 채팅에 남지 않도록 transient message 분류를 보강
+- 구버전 daemon에서 registry refresh control endpoint가 없을 때 일반 `send_failed`로 노출하지 않고 지원 불가 안내와 상태 갱신으로 처리
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media/main.js`
+- `node --check media/dispatcher.js`
+- `node --check media/components/ActivityLog.js`
+- `node --check media/components/RunnerStatus.js`
+- `node --check media/components/CustomTools.js`
+- `python -m py_compile theseus_engine/daemon.py theseus_engine/runner_runtime.py`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 159 — Remote Workspace 파일 수정 override 설정 추가 (2026-05-18)
+
+#### `src` / 설정
+- `THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE` 설정을 추가해 API Server resolver의 `allowWriteExecution=false`인 Remote Workspace도 AGENT 모드에서 `remote_write_file`, `remote_edit_file`을 노출할 수 있게 함
+- override는 파일 쓰기/수정 도구만 대상으로 하며, `remote_run_command`는 기존처럼 `allowWriteExecution=true`일 때만 노출되도록 분리
+- `backend/theseus-core-server/.env.example`과 `infra/docker/prod/.env.example`에 운영 설정 설명을 추가
+
+#### 문서
+- README와 prompt architecture map에 Remote Workspace 파일 수정 override와 command 실행 권한의 차이를 기록
+
+---
+
+### 🛠️ Session 158 — Nested custom tool call runtime 지원 (2026-05-18)
+
+#### `theseus_engine` / `src`
+- generated custom tool이 다른 active tool을 안전하게 호출할 수 있도록 `ToolExecutionContext.call_tool()` 공식 API를 추가
+- nested call은 기존 QueryEngine tool execution pipeline을 재사용해 registry lookup, input validation, RBAC/permission, hook, output normalization을 동일하게 통과하도록 연결
+- cycle guard, max depth, 같은 tool+arguments 반복 차단, parent당/전체 nested call budget, write/edit/bash/reboot 계열 nested 차단을 추가
+- nested 실행 요약은 parent tool 완료 metadata의 `nestedToolCalls`에 남겨 디버깅과 감사 추적 근거로 활용할 수 있게 정리
+- sandbox gate stub에도 `call_tool()`을 추가하되 sandbox 검증 중 실제 nested 실행은 수행하지 않고 error `ToolResult`를 반환하도록 유지
+- generated tool 프롬프트와 ToolBuild 지침에 `context.call_tool("tool_name", {...})` 사용 규칙과 nested call 제한을 추가
+
+#### 테스트
+- invoker 없는 context, 정상 nested 호출, cycle guard, depth limit, duplicate guard, blocked tool name을 검증하는 단위 테스트 추가
+
+---
+
+### 🛠️ Session 157 — Tool started history projection 제외 (2026-05-18)
+
+#### `src`
+- `TOOL_EXECUTION_STARTED` / `TOOL_CALL` / `TOOL_USE` 기록은 UI와 감사 로그용으로만 유지하고, 다음 LLM 요청 history에는 assistant context로 재주입하지 않도록 `src/history/mapper.py`를 수정
+- `TOOL_EXECUTION_COMPLETED` / tool result 기록은 기존처럼 “이전 도구 실행 결과” assistant context로 유지해 실제 완료 결과만 다음 턴의 근거로 사용되도록 정리
+- legacy text notice 중 `Tool execution:`처럼 시작 상태에 가까운 기록도 LLM history projection 대상에서 제외하고, `Tool result:` / `Tool completed:` 계열만 유지
+
+#### 테스트
+- started tool notice가 `to_engine_messages()`에서 제외되고 completed result는 계속 projection되는지 검증하는 history mapper 단위 테스트 추가
+
+---
+
+### 🛠️ Session 156 — VSCode Extension custom tool registry 정합성 수정 (2026-05-18)
+
+#### `theseus_engine`
+- local daemon에 `POST /control/tool-registry/refresh` control endpoint를 추가해 registry refresh가 일반 LLM `/runs`와 충돌하지 않도록 분리
+- active run 중 registry refresh 요청이 들어오면 즉시 409로 실패하지 않고 pending refresh로 보관한 뒤 run 종료 직후 자동 적용하도록 정리
+- workspace/repo root 실행과 core root 실행에서 같은 custom tool 후보를 보도록 `workspace_custom_tool_dirs()` 공통 helper를 추가하고 runner loader 경로 계산에 연결
+- daemon `--core-root` 값을 `THESEUS_CORE_ROOT`로 동기화해 local daemon이 core 내부 custom tool 경로를 놓치지 않도록 보강
+
+#### `vscode-extension`
+- `refreshToolRegistry`가 daemon 모드에서 `/runs`를 만들지 않고 daemon control endpoint를 호출하도록 변경
+- WebView Custom Tools 목록은 runner가 보낸 `customToolInventoryUpdated`를 우선 source of truth로 사용하고, host probe는 runner stopped 상태의 preview/fallback으로 제한
+- extension host의 custom tool scan을 runner가 실제 로드하는 direct custom tool root 기준으로 좁혀 UI에만 보이는 tool 후보가 생기지 않도록 정리
+- dependency 설치는 명시적으로 설정된 `theseus.pythonPath`가 있을 때만 가능하게 제한하고, `python` fallback 환경에 임의 설치하지 않도록 수정
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media\main.js`
+- `node --check media\dispatcher.js`
+- `node --check media\components\CustomTools.js`
+- `python -m py_compile theseus_engine\daemon.py theseus_engine\runner_runtime.py theseus_engine\core\engine_builder.py theseus_engine\tools\core\tool_factory.py theseus_engine\tools\core\custom_tool_paths.py`
+
+---
+
+### 🛠️ Session 155 — ToolBuild 실패 artifact cleanup 재적용 (2026-05-18)
+
+#### `src`
+- ToolBuild/create_tool이 validation, sandbox, activation 단계에서 실패하면 activation 전 남은 `.py`/`.meta.json` 실패 artifact를 cleanup하도록 `src/tooling/service.py`에 공통 helper를 추가
+- `active` Tool, metadata 없는 orphan 파일, project tool root 밖 경로는 자동 삭제하지 않고 기존처럼 conflict/manual 확인 대상으로 유지
+- inactive failed/stale artifact는 새 build 전에 cleanup 후 같은 이름 재생성을 허용하고, active Tool은 계속 `tool_name_conflict`로 차단
+- `src/tool_build/builder.py`의 ToolBuild validation/sandbox/activation 실패 경로도 같은 cleanup helper를 호출해 실패 artifact가 후속 생성 요청을 막지 않도록 보강
+
+#### 테스트
+- 실패 artifact cleanup, active 보호, metadata 없는 orphan conflict, project root 밖 cleanup 차단을 검증하는 단위 테스트 추가
+
+---
+
 ### 🛠️ Session 154 — Prompt 언어 중립화 보강 (2026-05-18)
 
 #### `src` / `theseus_engine`

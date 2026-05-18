@@ -30,7 +30,7 @@ export function renderRunnerStatusBar({
         : 'Stopped';
   const detail = [
     label,
-    loopStatus?.text && loopStatus.text !== 'idle' ? loopStatus.text : '',
+    loopStatus?.text && String(loopStatus.text).toLowerCase() !== 'idle' ? loopStatus.text : '',
     runnerState?.runtimeMode || '',
     runnerState?.daemonPort ? `:${runnerState.daemonPort}` : '',
   ].filter(Boolean).join(' · ');
@@ -40,6 +40,8 @@ export function renderRunnerStatusBar({
     detailEl.title = [
       detail,
       runnerState?.lastDiagnostic?.message ? `Last diagnostic: ${runnerState.lastDiagnostic.message}` : '',
+      runnerState?.activeRunId ? `active run: ${runnerState.activeRunId} (${runnerState.activeRunStatus || 'running'})` : '',
+      runnerState?.lastEventAt ? `last event: ${new Date(runnerState.lastEventAt).toLocaleTimeString()}` : '',
       runnerState?.workspaceCwd ? `cwd: ${runnerState.workspaceCwd}` : '',
     ].filter(Boolean).join('\n');
     detailEl.className = `runner-status-detail ${label.toLowerCase()}`;
@@ -74,13 +76,13 @@ export function formatAgentLoopStatus(event) {
   const toolName = event.tool_name || '';
   const count = Number.isInteger(event.tool_count) ? `${event.tool_count} tools` : '';
   const labels = {
-    model_start: `${turn} thinking`,
-    model_complete: count ? `${turn} planned ${count}` : `${turn} answered`,
-    waiting: count ? `${turn} running ${count}` : `${turn} running tools`,
-    tool_start: toolName ? `${turn} tool ${toolName}` : `${turn} tool running`,
+    model_start: `${turn} Thinking`,
+    model_complete: count ? `${turn} Planning tools ${count}` : `${turn} Answered`,
+    waiting: count ? `${turn} Running ${count}` : `${turn} Waiting for tools`,
+    tool_start: toolName ? `${turn} Running tool ${toolName}` : `${turn} Running tool`,
     tool_complete: toolName ? `${turn} ${toolName} ${event.is_error ? 'failed' : 'done'}` : `${turn} tool done`,
-    complete: 'idle',
-    error: 'loop error',
+    complete: 'Idle',
+    error: 'Loop error',
   };
   const state = event.is_error || phase === 'error'
     ? 'error'
@@ -128,12 +130,20 @@ export function applyRunnerStatusEvent({
     daemonPort: event.daemonPort || runnerState.daemonPort,
     lastEventAt: event.lastEventAt || runnerState.lastEventAt,
     lastHeartbeatAt: event.lastHeartbeatAt || runnerState.lastHeartbeatAt,
+    activeRunId: event.activeRunId || runnerState.activeRunId,
+    activeRunStatus: event.activeRunStatus || runnerState.activeRunStatus,
+    activeRun: event.activeRun || runnerState.activeRun,
+    stalledReason: event.stalledReason || runnerState.stalledReason,
     pendingInput: Number.isInteger(event.pendingInput) ? event.pendingInput : runnerState.pendingInput,
     exitReason: event.exitReason || runnerState.exitReason,
   };
 
   if (nextState.running) {
-    setLoopStatusText('idle', 'idle');
+      if (nextState.state === 'busy' || nextState.lifecycle === 'busy') {
+        setLoopStatusText('running', 'Running');
+      } else {
+        setLoopStatusText('idle', 'Idle');
+      }
     updateSession(event.session || nextState.session || 'default');
     if (nextState.pendingSubmitText) {
       const text = nextState.pendingSubmitText;

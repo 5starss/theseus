@@ -61,8 +61,21 @@ export function getRunnerPath(): string {
   return getTheseusPathSetting('runnerPath');
 }
 
+export function getConfiguredPythonPath(): string {
+  return getTheseusPathSetting('pythonPath');
+}
+
+export function getExplicitPythonPath(): string {
+  const inspected = vscode.workspace.getConfiguration('theseus').inspect<string>('pythonPath');
+  const raw = inspected?.workspaceFolderValue
+    ?? inspected?.workspaceValue
+    ?? inspected?.globalValue
+    ?? '';
+  return expandTheseusPath(typeof raw === 'string' ? raw : '');
+}
+
 export function getPythonPath(): string {
-  return getTheseusPathSetting('pythonPath') || 'python';
+  return getConfiguredPythonPath() || 'python';
 }
 
 export function getRuntimeModeSetting(): RuntimeModeSetting {
@@ -203,9 +216,9 @@ export function getCustomToolSearchRoots(): string[] {
   if (corePath) roots.add(corePath);
   const fallbackCore = getCoreRootPathFallback();
   if (fallbackCore) roots.add(fallbackCore);
-  for (const folder of vscode.workspace.workspaceFolders ?? []) {
-    roots.add(folder.uri.fsPath);
-    if (hasTheseusEngine(folder.uri.fsPath)) roots.add(folder.uri.fsPath);
+  if (workspace) {
+    const nestedCore = path.join(workspace, 'backend', 'theseus-core-server');
+    if (hasTheseusEngine(nestedCore)) roots.add(nestedCore);
   }
   return [...roots];
 }
