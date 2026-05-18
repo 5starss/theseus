@@ -74,12 +74,18 @@ SANDBOX_ALLOWED_DEPENDENCIES = frozenset(
         "markdownify",
         "beautifulsoup4",
         "PyYAML",
+        "requests",
+        "httpx",
+        "numpy",
+        "packaging",
+        "python-dotenv",
     }
 )
 SANDBOX_IMPORT_PACKAGE_ALIASES = {
     "pynvml": "nvidia-ml-py",
     "bs4": "beautifulsoup4",
     "yaml": "PyYAML",
+    "dotenv": "python-dotenv",
 }
 MISSING_MODULE_RE = re.compile(r"No module named ['\"]([^'\"]+)['\"]")
 

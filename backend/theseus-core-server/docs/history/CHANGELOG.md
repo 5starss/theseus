@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 153 — ToolBuild sandbox 의존성/image 정책 최종 정리 (2026-05-18)
+
+#### `src` / `theseus_engine`
+- ToolBuild sandbox gate에서 `No module named ...` / `sandbox_missing_dependency`가 발생했을 때 `module name` 문자열 때문에 `TOOL_NAME_CONFLICT`로 오분류되던 문제를 수정
+- sandbox 의존성 누락은 `SANDBOX_MISSING_DEPENDENCY`로 분류하고 자동 repair를 중단해, 이미 생성된 draft artifact를 중복 Tool 생성 문제로 오해하지 않도록 정리
+- `SANDBOX_ALLOWED_DEPENDENCIES`와 import alias 목록을 확장해 `requests`, `httpx`, `numpy`, `packaging`, `python-dotenv` / `dotenv` 같은 generated-tool 검증용 의존성을 허용
+
+#### 설정 / Sandbox
+- `Dockerfile.sandbox`는 Core 전체 `requirements.txt`를 설치하지 않고 `requirements-sandbox.txt`만 설치하도록 최종 정리
+- `requirements-sandbox.txt`에는 generated-tool compile/import/구조 검증에 필요한 공용 sandbox 의존성(`pydantic`, `psutil`, `nvidia-ml-py`, `markdownify`, `beautifulsoup4`, `PyYAML`, `requests`, `httpx`, `numpy`, `packaging`, `python-dotenv`)만 유지
+- sandbox image build 시 `pip check`와 핵심 import smoke를 수행하고, Core startup sandbox check도 `/sandbox/requirements/requirements-sandbox.txt`와 동일 import 목록을 검증하도록 보강
+- Core 기본 `SANDBOX_IMAGE`를 `theseus-sandbox:py311-tools`로 변경하고, prod compose와 `.env.example`도 같은 image tag 및 수동/CI rebuild 안내를 사용하도록 정리
+
+#### 테스트
+- `tests/test_tool_repair_classification.py`를 추가해 `psutil` 누락은 이름 충돌이 아니며, 실제 `moduleName/fileName` 충돌 메시지는 계속 `TOOL_NAME_CONFLICT`로 분류되는지 검증
+
+---
+
 ### 🛠️ Session 152 — Core Server 책임 분리 리팩토링 1차 (2026-05-18)
 
 #### `src` / `theseus_engine`
@@ -27,8 +45,8 @@
 - server `/stream` engine metadata에 프로젝트 custom tool inventory를 포함해 `tool_search`가 active/unavailable custom tool 후보를 조회하고 사용자 요청 시 커스텀 툴 목록을 설명할 수 있게 보강
 
 #### 설정 / Sandbox
-- `requirements-sandbox.txt`와 `Dockerfile.sandbox`를 추가해 generated-tool sandbox gate용 최소 의존성(`pydantic`, `psutil`, `nvidia-ml-py`, `markdownify`, `beautifulsoup4`, `PyYAML`)을 별도 이미지로 관리
-- `.env.example`의 `SANDBOX_IMAGE` 예시를 `theseus-sandbox:py311-tools`로 변경하고, Docker image는 자동 build하지 않으며 수동/CI build 후 Core 재시작이 필요하다는 안내를 추가
+- `requirements-sandbox.txt`와 `Dockerfile.sandbox`를 추가해 generated-tool sandbox gate용 의존성을 Core 런타임 의존성과 분리
+- `.env.example`의 `SANDBOX_IMAGE` 예시를 `theseus-sandbox:py311-tools`로 변경하고, Docker image는 자동 build하지 않으며 `requirements-sandbox.txt` 변경 후 수동/CI build와 Core 재시작이 필요하다는 안내를 추가
 - generated custom tool 산출물은 git 추적 대상에서 제외하고 `theseus_engine/custom_tools/.gitkeep`, `theseus_engine/custom_tools/projects/.gitkeep`만 저장소에 남기도록 `.gitignore`를 정리
 - `THESEUS_CUSTOM_TOOLS_DIR` / `THESEUS_PROJECT_CUSTOM_TOOLS_DIR` 설정을 추가해 서버 ToolBuild 저장 경로, PLAN 기존 Tool metadata 조회 경로, runtime project custom tool loader가 같은 container-side mount path를 사용하도록 정리
 - prod compose에서 host `/opt/theseus/custom_tools` bind mount 대상인 `/backend/theseus-core-server/theseus_engine/custom_tools/projects`를 Core 환경변수로 함께 주입해 volume 설정과 코드의 저장/로드 기준을 명시적으로 연결

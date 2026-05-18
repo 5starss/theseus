@@ -81,8 +81,16 @@ class ToolRepairFailure(RuntimeError):
         return self.code == "PERMISSION_VALIDATION_FAILED"
 
     @property
+    def is_dependency_failure(self) -> bool:
+        return self.code == "SANDBOX_MISSING_DEPENDENCY"
+
+    @property
     def blocks_automatic_retry(self) -> bool:
-        return self.is_tool_name_conflict or self.is_permission_validation_failure
+        return (
+            self.is_tool_name_conflict
+            or self.is_permission_validation_failure
+            or self.is_dependency_failure
+        )
 
     def to_prompt_text(self) -> str:
         parts = [
@@ -117,6 +125,7 @@ class ToolRepairResult(Generic[T, S]):
             if self.last_failure is not None and (
                 self.last_failure.is_tool_name_conflict
                 or self.last_failure.is_permission_validation_failure
+                or self.last_failure.is_dependency_failure
             ):
                 return base
             if self.last_failure is not None:
@@ -417,13 +426,19 @@ def classify_repair_failure(code: str, message: str) -> str:
     normalized = (code or "").strip().upper()
     lowered = message.lower()
     if (
+        "sandbox_missing_dependency" in lowered
+        or re.search(r"\bno module named ['\"]", lowered)
+        or normalized in {"SANDBOX_MISSING_DEPENDENCY", "MISSING_DEPENDENCY"}
+    ):
+        return "SANDBOX_MISSING_DEPENDENCY"
+    if (
         "이미 존재" in lowered
         or "already exists" in lowered
         or "duplicate" in lowered
         or "file name" in lowered
         or "filename" in lowered
-        or "module name" in lowered
-        or "modulename" in lowered
+        or "module name conflict" in lowered
+        or "modulename=" in lowered
         or normalized in {"TOOL_NAME_CONFLICT", "NAME_CONFLICT", "DUPLICATE_TOOL"}
     ):
         return "TOOL_NAME_CONFLICT"
@@ -444,6 +459,7 @@ def _needs_user_feedback(failure: ToolRepairFailure, should_stop: bool) -> bool:
         failure.is_policy_violation
         or failure.is_tool_name_conflict
         or failure.is_permission_validation_failure
+        or failure.is_dependency_failure
     )
 
 
@@ -452,6 +468,8 @@ def _recovery_feedback_message(failure: ToolRepairFailure) -> str | None:
         return _tool_name_conflict_feedback_message(failure)
     if failure.is_permission_validation_failure:
         return _permission_feedback_message(failure)
+    if failure.is_dependency_failure:
+        return _dependency_feedback_message(failure)
     if failure.is_policy_violation:
         return _policy_feedback_message(failure)
     return None
@@ -513,6 +531,18 @@ def _permission_feedback_message(failure: ToolRepairFailure) -> str:
         "recoverable=true. retry_policy=requires_corrected_permission_level. "
         "권한은 위험도나 신뢰도 점수가 아니라 실행 권한 등급입니다. "
         "1~5 중 하나의 정수 permissionLevel로 다시 지정해야 합니다. "
+        f"원본 오류: {failure.message}"
+    )
+
+
+def _dependency_feedback_message(failure: ToolRepairFailure) -> str:
+    return (
+        "sandbox 의존성 누락 때문에 자동 repair를 중단했습니다. "
+        "recoverable=true. retry_policy=requires_environment_update. "
+        "이미 생성된 draft artifact는 같은 승인 계획에서 재사용/재검증할 수 있으며, "
+        "새 Tool 이름으로 반복 생성하지 않아야 합니다. "
+        "requirements-sandbox.txt와 Dockerfile.sandbox 기준으로 sandbox image를 rebuild하고 "
+        "Core를 재시작한 뒤 같은 승인 작업을 다시 실행해야 합니다. "
         f"원본 오류: {failure.message}"
     )
 
