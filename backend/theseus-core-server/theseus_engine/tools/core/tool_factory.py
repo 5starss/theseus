@@ -31,12 +31,31 @@ from theseus_engine.tools.tool_repair import (
 
 log = logging.getLogger(__name__)
 
-# Directory where generated custom tools are stored
-# 구조: backend/theseus-core-server/theseus_engine/tools/core/tool_factory.py
-# 타겟: backend/theseus-core-server/theseus_engine/custom_tools/
-CUSTOM_TOOLS_DIR = os.path.abspath(
+_DEFAULT_CUSTOM_TOOLS_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "custom_tools")
 )
+CUSTOM_TOOLS_DIR = os.path.abspath(
+    os.getenv("THESEUS_CUSTOM_TOOLS_DIR", "").strip() or _DEFAULT_CUSTOM_TOOLS_DIR
+)
+PROJECT_CUSTOM_TOOLS_DIR = os.path.abspath(
+    os.getenv("THESEUS_PROJECT_CUSTOM_TOOLS_DIR", "").strip()
+    or os.path.join(CUSTOM_TOOLS_DIR, "projects")
+)
+
+
+def get_custom_tools_dir() -> str:
+    """Return the configured custom tool root directory."""
+    return os.path.abspath(
+        os.getenv("THESEUS_CUSTOM_TOOLS_DIR", "").strip() or CUSTOM_TOOLS_DIR
+    )
+
+
+def get_project_custom_tools_dir() -> str:
+    """Return the configured project custom tool root directory."""
+    return os.path.abspath(
+        os.getenv("THESEUS_PROJECT_CUSTOM_TOOLS_DIR", "").strip()
+        or os.path.join(get_custom_tools_dir(), "projects")
+    )
 
 # Default permission level for tools without explicit permission_level
 DEFAULT_PERMISSION_LEVEL = 1
@@ -114,7 +133,7 @@ def _custom_tool_dirs(extra_dirs: Optional[List[str | os.PathLike[str]]] = None)
     """Return custom tool directories in load order, de-duplicated."""
     dirs: List[str] = []
     seen: Set[str] = set()
-    raw_dirs: List[str | os.PathLike[str]] = [CUSTOM_TOOLS_DIR]
+    raw_dirs: List[str | os.PathLike[str]] = [get_custom_tools_dir()]
     env_dir = os.getenv("THESEUS_CUSTOM_TOOLS_DIR", "").strip()
     if env_dir:
         raw_dirs.extend(part.strip() for part in env_dir.split(os.pathsep) if part.strip())
@@ -889,7 +908,7 @@ def load_custom_tools_for_project(
     Returns:
         성공적으로 로드된 툴 이름 목록.
     """
-    project_dir = os.path.join(CUSTOM_TOOLS_DIR, "projects", project_id)
+    project_dir = os.path.join(get_project_custom_tools_dir(), project_id)
     loaded: List[str] = []
 
     if not os.path.isdir(project_dir):

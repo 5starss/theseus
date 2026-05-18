@@ -264,11 +264,13 @@ def get_query_engine(
     tool_permissions = dict(inferred_permissions)
     tool_permissions.update(build_context.project_tool_permissions)
 
+    custom_tool_inventory: list[dict[str, Any]] = []
     if build_context.project_id:
         loaded_tools = load_custom_tools_for_project(
             full_registry,
             project_id=build_context.project_id,
             tool_permissions=tool_permissions,
+            load_report=custom_tool_inventory,
         )
     else:
         loaded_tools = load_custom_tools(full_registry, tool_permissions)
@@ -356,6 +358,7 @@ def get_query_engine(
             "tool_registry": full_registry,
             "active_registry": active_registry,
             "tool_permissions": tool_permissions,
+            "custom_tool_inventory": custom_tool_inventory,
             "llm_client": api_client,
             "model_name": model_name,
             "tool_repair_policy": ToolRepairPolicy.from_env(),

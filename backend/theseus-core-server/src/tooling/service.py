@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from src.config import settings
+
 log = logging.getLogger(__name__)
 
 DEFAULT_PERMISSION_LEVEL = 1
@@ -35,10 +37,26 @@ def _sanitize_generated_code(code: str) -> str:
     code = code.replace("\x00", "")
     code = re.sub(r"\\ +\n", "\\\n", code)
     return code
-CUSTOM_TOOLS_DIR = (
+_DEFAULT_CUSTOM_TOOLS_DIR = (
     Path(__file__).resolve().parents[2] / "theseus_engine" / "custom_tools"
 )
-PROJECT_TOOLS_DIR = CUSTOM_TOOLS_DIR / "projects"
+
+
+def _configured_path(value: str | None, default: Path) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    return Path(raw).expanduser().resolve()
+
+
+CUSTOM_TOOLS_DIR = _configured_path(
+    settings.THESEUS_CUSTOM_TOOLS_DIR,
+    _DEFAULT_CUSTOM_TOOLS_DIR,
+)
+PROJECT_TOOLS_DIR = _configured_path(
+    settings.THESEUS_PROJECT_CUSTOM_TOOLS_DIR,
+    CUSTOM_TOOLS_DIR / "projects",
+)
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 
 STATUS_DRAFT_SAVED = "draft_saved"
@@ -47,6 +65,23 @@ STATUS_VALIDATION_FAILED = "validation_failed"
 STATUS_SANDBOX_PASSED = "sandbox_passed"
 STATUS_SANDBOX_FAILED = "sandbox_failed"
 STATUS_ACTIVE = "active"
+
+SANDBOX_ALLOWED_DEPENDENCIES = frozenset(
+    {
+        "pydantic",
+        "psutil",
+        "nvidia-ml-py",
+        "markdownify",
+        "beautifulsoup4",
+        "PyYAML",
+    }
+)
+SANDBOX_IMPORT_PACKAGE_ALIASES = {
+    "pynvml": "nvidia-ml-py",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+}
+MISSING_MODULE_RE = re.compile(r"No module named ['\"]([^'\"]+)['\"]")
 
 
 def _tool_validator_cls():
@@ -442,6 +477,127 @@ def _sandbox_metadata(result: dict[str, Any]) -> dict[str, Any]:
     return {"sandboxResult": result}
 
 
+def _sandbox_failure_text(result: dict[str, Any]) -> str:
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    candidates = [
+        result.get("error"),
+        result.get("logs"),
+        metadata.get("error"),
+        metadata.get("stdout"),
+        metadata.get("stderr"),
+    ]
+    return "\n".join(str(item) for item in candidates if item)
+
+
+def _missing_modules_from_sandbox_result(result: dict[str, Any]) -> list[str]:
+    found: list[str] = []
+    for module_name in MISSING_MODULE_RE.findall(_sandbox_failure_text(result)):
+        if module_name not in found:
+            found.append(module_name)
+    return found
+
+
+def _sandbox_install_candidates(module_names: list[str]) -> list[str]:
+    candidates: list[str] = []
+    for module_name in module_names:
+        package_name = SANDBOX_IMPORT_PACKAGE_ALIASES.get(module_name, module_name)
+        if package_name not in candidates:
+            candidates.append(package_name)
+    return candidates
+
+
+def _metadata_dependencies(metadata: dict[str, Any]) -> list[str]:
+    dependencies = metadata.get("dependencies") or []
+    if not isinstance(dependencies, list):
+        return []
+    result: list[str] = []
+    for item in dependencies:
+        name = str(item.get("name") if isinstance(item, dict) else item or "").strip()
+        if name and name not in result:
+            result.append(name)
+    return result
+
+
+def _project_tool_inventory_item(
+    *,
+    project_id: str,
+    paths: ServerToolArtifactPaths,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "toolName": str(metadata.get("toolName") or paths.module_name),
+        "fileName": paths.module_path.name,
+        "moduleName": paths.module_name,
+        "modulePath": str(paths.module_path.resolve()),
+        "metadataPath": str(paths.metadata_path.resolve()),
+        "projectId": project_id,
+        "displayName": metadata.get("displayName"),
+        "displayDescription": metadata.get("displayDescription") or metadata.get("description"),
+        "permissionLevel": metadata.get("permissionLevel", DEFAULT_PERMISSION_LEVEL),
+        "status": str(metadata.get("status") or "unknown"),
+        "isActive": bool(metadata.get("isActive", True)),
+        "dependencies": _metadata_dependencies(metadata),
+        "missingModules": [],
+        "installCandidates": [],
+        "importError": "",
+        "loadState": "available",
+        "canInstall": False,
+        "canRegister": False,
+    }
+
+    if not paths.module_path.exists():
+        item["loadState"] = "unavailable"
+        item["importError"] = f"Missing module file: {paths.module_path.name}"
+        return item
+    if not _is_tool_active_metadata(metadata):
+        item["loadState"] = "inactive"
+        return item
+
+    is_valid, message, tool_class = _tool_validator_cls().validate_and_load_module(
+        paths.module_name,
+        str(paths.module_path),
+    )
+    if not is_valid or tool_class is None:
+        missing_modules = MISSING_MODULE_RE.findall(str(message or ""))
+        item["loadState"] = "unavailable"
+        item["importError"] = str(message or "import failed")
+        item["missingModules"] = missing_modules
+        item["installCandidates"] = _sandbox_install_candidates(missing_modules)
+        item["canInstall"] = bool(item["installCandidates"])
+        return item
+
+    item["toolName"] = getattr(tool_class, "name", item["toolName"])
+    item["permissionLevel"] = getattr(
+        tool_class,
+        "permission_level",
+        item["permissionLevel"],
+    )
+    item["canRegister"] = True
+    return item
+
+
+def _classify_sandbox_dependency_failure(result: dict[str, Any]) -> dict[str, Any]:
+    missing_modules = _missing_modules_from_sandbox_result(result)
+    if not missing_modules:
+        return result
+
+    enriched = dict(result)
+    metadata = dict(enriched.get("metadata") or {})
+    candidates = _sandbox_install_candidates(missing_modules)
+    metadata.update(
+        {
+            "errorType": "sandbox_missing_dependency",
+            "missingModules": missing_modules,
+            "installCandidates": candidates,
+            "allowedSandboxDependencies": sorted(SANDBOX_ALLOWED_DEPENDENCIES),
+            "sandboxImage": settings.SANDBOX_IMAGE,
+        }
+    )
+    enriched["metadata"] = metadata
+    enriched["errorType"] = "sandbox_missing_dependency"
+    return enriched
+
+
 def _format_sandbox_failure_message(result: dict[str, Any]) -> str:
     message = result.get("error") or "Sandbox gate failed."
     metadata = result.get("metadata") or {}
@@ -456,11 +612,24 @@ def _format_sandbox_failure_message(result: dict[str, Any]) -> str:
         "timedOut": result.get("timedOut", False),
         "resourceLimited": result.get("resourceLimited", False),
     }
+    if error_type == "sandbox_missing_dependency":
+        missing_modules = metadata.get("missingModules") or []
+        install_candidates = metadata.get("installCandidates") or []
+        dependency_details = (
+            f"sandbox 원인=sandbox_missing_dependency, "
+            f"누락 모듈={missing_modules}, 설치 후보={install_candidates}, "
+            f"sandboxImage={metadata.get('sandboxImage') or settings.SANDBOX_IMAGE}. "
+            "requirements-sandbox.txt에 허용된 의존성을 추가하고 "
+            "Dockerfile.sandbox로 sandbox image를 수동 rebuild한 뒤 Core를 재시작해야 합니다. "
+            "ToolBuild 중에는 pip install이나 Docker build를 수행하지 않습니다. "
+        )
+    else:
+        dependency_details = ""
     details = ", ".join(f"{key}={value}" for key, value in summary.items())
     return (
         "생성된 Tool 파일을 직접 실행하지 않고 Core sandbox gate에서 "
         "컴파일/import/구조를 검증하는 중 실패했습니다. "
-        f"{message} ({details})"
+        f"{dependency_details}{message} ({details})"
     )
 
 
@@ -567,6 +736,7 @@ async def run_tool_sandbox_gate_for_artifact(
         tool_name=normalize_tool_name(request.tool_name),
         tool_code=paths.module_path.read_text(encoding="utf-8"),
     )
+    result = _classify_sandbox_dependency_failure(result)
     status = STATUS_SANDBOX_PASSED if result["success"] else STATUS_SANDBOX_FAILED
     _record_stage_metadata(
         paths,
@@ -787,6 +957,7 @@ def load_active_tools_for_project(
     project_id: str,
     tool_permissions: dict[str, int] | None = None,
     storage_root: Path = PROJECT_TOOLS_DIR,
+    load_report: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     project_dir = storage_root / _slugify_segment(project_id)
     if not project_dir.is_dir():
@@ -804,6 +975,13 @@ def load_active_tools_for_project(
         except Exception as exc:
             log.warning("Failed to read project tool metadata. meta=%s error=%s", metadata_path, exc)
             continue
+        inventory_item = _project_tool_inventory_item(
+            project_id=project_id,
+            paths=paths,
+            metadata=metadata,
+        )
+        if load_report is not None:
+            load_report.append(inventory_item)
         if not paths.module_path.exists():
             log.warning(
                 "Skipped project tool because module file is missing. projectId=%s meta=%s module=%s",
@@ -834,7 +1012,10 @@ def load_active_tools_for_project(
             )
             continue
         try:
-            registry.register(tool_class())
+            instance = tool_class()
+            setattr(instance, "_theseus_custom_tool", True)
+            setattr(instance, "_theseus_project_id", project_id)
+            registry.register(instance)
             loaded.append(tool_class.name)
             if tool_permissions is not None:
                 tool_permissions[tool_class.name] = getattr(
@@ -866,10 +1047,12 @@ def load_custom_tools_for_project(
     project_id: str,
     tool_permissions: dict[str, int] | None = None,
     storage_root: Path = PROJECT_TOOLS_DIR,
+    load_report: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     return load_active_tools_for_project(
         registry,
         project_id=project_id,
         tool_permissions=tool_permissions,
         storage_root=storage_root,
+        load_report=load_report,
     )

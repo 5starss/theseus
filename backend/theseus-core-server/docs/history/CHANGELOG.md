@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 151 — Tool 경로 정합성 및 Sandbox 의존성 이미지 분리 (2026-05-18)
+
+#### `src` / `theseus_engine`
+- PLAN draft 생성 시 프로젝트별 generated tool artifact root(`theseus_engine/custom_tools/projects/{projectId}/`)를 LLM 입력과 runtime reminder에 주입해 서버 프로젝트 Tool 경로가 실제 저장 경로와 일치하도록 보강
+- generated custom tool 계획에서 전역 `theseus_engine/custom_tools/*.py` 경로가 나오면 저장/표시용 structured plan과 plan snapshot에서 프로젝트별 경로로 정규화
+- prompt의 신규 Tool `target_files` 지침을 전역 경로 고정 대신 runtime-provided project artifact root 우선 정책으로 수정
+- ToolBuild metadata의 선언 의존성을 sandbox allowlist와 대조하고, sandbox gate의 `No module named ...` 실패를 `sandbox_missing_dependency`로 분류해 이름 충돌과 의존성 누락 원인이 섞이지 않도록 메시지를 정리
+- server `/stream` engine metadata에 프로젝트 custom tool inventory를 포함해 `tool_search`가 active/unavailable custom tool 후보를 조회하고 사용자 요청 시 커스텀 툴 목록을 설명할 수 있게 보강
+
+#### 설정 / Sandbox
+- `requirements-sandbox.txt`와 `Dockerfile.sandbox`를 추가해 generated-tool sandbox gate용 최소 의존성(`pydantic`, `psutil`, `nvidia-ml-py`, `markdownify`, `beautifulsoup4`, `PyYAML`)을 별도 이미지로 관리
+- `.env.example`의 `SANDBOX_IMAGE` 예시를 `theseus-sandbox:py311-tools`로 변경하고, Docker image는 자동 build하지 않으며 수동/CI build 후 Core 재시작이 필요하다는 안내를 추가
+- generated custom tool 산출물은 git 추적 대상에서 제외하고 `theseus_engine/custom_tools/.gitkeep`, `theseus_engine/custom_tools/projects/.gitkeep`만 저장소에 남기도록 `.gitignore`를 정리
+- `THESEUS_CUSTOM_TOOLS_DIR` / `THESEUS_PROJECT_CUSTOM_TOOLS_DIR` 설정을 추가해 서버 ToolBuild 저장 경로, PLAN 기존 Tool metadata 조회 경로, runtime project custom tool loader가 같은 container-side mount path를 사용하도록 정리
+- prod compose에서 host `/opt/theseus/custom_tools` bind mount 대상인 `/backend/theseus-core-server/theseus_engine/custom_tools/projects`를 Core 환경변수로 함께 주입해 volume 설정과 코드의 저장/로드 기준을 명시적으로 연결
+
+---
+
 ### 🛠️ Session 150 — Agent loop pending action 자동 continuation (2026-05-18)
 
 #### `theseus_engine`
