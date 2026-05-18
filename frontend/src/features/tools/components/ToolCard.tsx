@@ -39,10 +39,10 @@ export function ToolCard({ tool, onClick }: ToolCardProps) {
           </p>
         </div>
 
-        {/* 하단 푸터 (실행하기) */}
-        <div className="mt-auto pt-3 flex items-center justify-between">
+        {/* 하단 푸터 (상세 정보) */}
+        <div className="mt-auto pt-3 flex items-center justify-between border-t border-slate-800/30">
           <span className="text-xs font-medium text-slate-500 uppercase tracking-wider group-hover:text-slate-300 transition-colors">
-            실행하기
+            상세 정보
           </span>
           <ArrowRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-colors transform group-hover:translate-x-1" />
         </div>
