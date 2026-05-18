@@ -202,4 +202,9 @@ OpenHarness/
 vscode-extension/node_modules/
 vscode-extension/out/
 
-theseus_engine/custom_tools/projects/*/
+# Generated custom tools are runtime artifacts.
+/theseus_engine/custom_tools/*
+!/theseus_engine/custom_tools/.gitkeep
+!/theseus_engine/custom_tools/projects/
+/theseus_engine/custom_tools/projects/*
+!/theseus_engine/custom_tools/projects/.gitkeep
