@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 152 — Core Server 책임 분리 리팩토링 1차 (2026-05-18)
+
+#### `src` / `theseus_engine`
+- `ToolPlanPlanner` 내부에 집중돼 있던 PLAN draft execution spec 검증을 `src/tool_plan/execution_spec_validator.py`로 분리해 structural/safety/quality 검증 책임을 독립 모듈에서 관리하도록 정리
+- PLAN draft 사용자 표시 Markdown 조립을 `src/tool_plan/display_markdown.py`로 분리하고, planner는 plan snapshot 생성과 저장 계약 처리 중심으로 남기도록 1차 축소
+- QueryEngine의 assistant pending-action 자동 continuation 판단을 `theseus_engine/engine/agent_loop_control.py`로 분리해 LLM loop 본문에서 stop_reason/끝말 판정 규칙을 분리
+- custom tool 저장/로드 경로 계산을 `theseus_engine/tools/core/custom_tool_paths.py`로 분리하고, `tool_factory.py`는 해당 값을 re-export해 기존 import 호환을 유지
+
+#### 테스트
+- `tests/` 디렉터리를 다시 추적 가능한 테스트 위치로 열고, PLAN execution spec validator, agent auto-continuation 판단, ToolValidator 보조 Pydantic 모델 허용 규칙을 단위 테스트로 추가
+
+---
+
 ### 🛠️ Session 151 — Tool 경로 정합성 및 Sandbox 의존성 이미지 분리 (2026-05-18)
 
 #### `src` / `theseus_engine`
