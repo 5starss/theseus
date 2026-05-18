@@ -71,6 +71,8 @@ services:
       - theseus-prod-network
 
   theseus-sandbox-image:
+    profiles:
+      - sandbox-build
     build:
       context: ../../../backend/theseus-core-server
       dockerfile: Dockerfile.sandbox
@@ -174,8 +176,6 @@ services:
         condition: service_completed_successfully
       theseus-api-server:
         condition: service_started
-      theseus-sandbox-image:
-        condition: service_completed_successfully
       theseus-core-permissions:
         condition: service_completed_successfully
     networks:
