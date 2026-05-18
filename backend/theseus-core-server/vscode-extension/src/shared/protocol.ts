@@ -75,6 +75,11 @@ export type RunnerStatusEvent = RunnerBaseEvent<'RunnerStatus'> & {
   runtimeMode?: Nullable<string>;
   runnerPath?: Nullable<string>;
   daemonPort?: Nullable<number>;
+  lastEventAt?: Nullable<number>;
+  lastHeartbeatAt?: Nullable<number>;
+  activeRunId?: Nullable<string>;
+  activeRunStatus?: Nullable<string>;
+  stalledReason?: Nullable<string>;
   lastDiagnostic?: RunnerEvent;
 };
 
@@ -388,7 +393,12 @@ function isKnownRunnerEventShape(value: JsonObject, type: string): boolean {
         && optionalBoolean(value.processRunning)
         && optionalString(value.lifecycle)
         && optionalString(value.state)
-        && optionalNumber(value.daemonPort);
+        && optionalNumber(value.daemonPort)
+        && optionalNumber(value.lastEventAt)
+        && optionalNumber(value.lastHeartbeatAt)
+        && optionalString(value.activeRunId)
+        && optionalString(value.activeRunStatus)
+        && optionalString(value.stalledReason);
     case 'RunnerDiagnostic':
     case 'RunnerError':
     case 'ErrorEvent':

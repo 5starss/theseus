@@ -80,6 +80,10 @@ class RunRequest(BaseModel):
     mode: str | None = None
 
 
+class ToolRegistryRefreshRequest(BaseModel):
+    reason: str | None = None
+
+
 class PermissionResponseRequest(BaseModel):
     approved: bool
 
@@ -110,6 +114,7 @@ class DaemonState:
         self.initialized = False
         self.last_event_at: float | None = None
         self._lock = asyncio.Lock()
+        self.pending_registry_refresh_reason: str | None = None
         self.runtime = runtime_factory() if runtime_factory else EditorRuntime(
             model=model,
             user_level=user_level,
@@ -197,9 +202,58 @@ class DaemonState:
             await self._append(run, {"type": "ErrorEvent", "message": str(exc), "recoverable": True, "error_type": "unknown"})
             await self._set_run_status(run, "error")
         finally:
+            await self._flush_pending_tool_registry_refresh(run)
             self._permission_run.reset(permission_token)
             await self._notify_run(run)
             self._prune_runs()
+
+    def _refresh_tool_registry_events(self, reason: str) -> list[dict[str, Any]]:
+        if not hasattr(self.runtime, "refresh_tool_registry_events"):
+            return [{
+                "type": "ErrorEvent",
+                "message": "이 runtime은 tool registry refresh를 지원하지 않습니다.",
+                "recoverable": True,
+                "error_type": "unsupported_control_command",
+            }]
+        try:
+            return list(self.runtime.refresh_tool_registry_events(reason))
+        except Exception as exc:
+            return [{
+                "type": "ErrorEvent",
+                "message": f"tool registry 새로고침 실패: {exc}",
+                "recoverable": True,
+                "error_type": "tool_registry_refresh_failed",
+            }]
+
+    async def request_tool_registry_refresh(
+        self,
+        reason: str = "manual",
+    ) -> dict[str, Any]:
+        await self.initialize()
+        active = self._active_run()
+        if active is not None:
+            self.pending_registry_refresh_reason = reason
+            return {
+                "queued": True,
+                "events": [{
+                    "type": "StatusEvent",
+                    "message": (
+                        "현재 실행이 끝난 뒤 tool registry를 새로고침합니다."
+                    ),
+                }],
+            }
+        async with self._lock:
+            events = self._refresh_tool_registry_events(reason)
+            self.last_event_at = time.time()
+            return {"queued": False, "events": events}
+
+    async def _flush_pending_tool_registry_refresh(self, run: RunState) -> None:
+        reason = self.pending_registry_refresh_reason
+        if not reason:
+            return
+        self.pending_registry_refresh_reason = None
+        for event in self._refresh_tool_registry_events(reason):
+            await self._append(run, event)
 
     async def permission_prompt(self, tool_name: str, prompt_msg: str) -> bool:
         run = self._permission_run.get()
@@ -351,6 +405,15 @@ def create_app(state: DaemonState) -> FastAPI:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return {"runId": run.run_id}
 
+    @app.post("/control/tool-registry/refresh", dependencies=[Depends(require_auth)])
+    async def refresh_tool_registry(
+        request: ToolRegistryRefreshRequest,
+    ) -> JSONResponse:
+        result = await state.request_tool_registry_refresh(
+            request.reason or "manual",
+        )
+        return JSONResponse(result)
+
     @app.get("/runs/{run_id}/events", dependencies=[Depends(require_auth)])
     async def run_events(run_id: str, after: int = 0):
         run = state.runs.get(run_id)
@@ -466,6 +529,8 @@ def resolve_model(arg_model: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     workspace = Path(args.workspace).resolve()
+    if args.core_root:
+        os.environ["THESEUS_CORE_ROOT"] = str(Path(args.core_root).resolve())
     token = args.token or secrets.token_urlsafe(32)
     model = resolve_model(args.model)
     session_id = f"daemon-{int(time.time() * 1000)}-{secrets.token_hex(4)}"

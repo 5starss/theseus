@@ -3,15 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { resolveReadableUri, saveAssetToWorkspace } from '../assets/AssetStore';
-import {
-  createLocalSession,
-  deleteLocalSession,
-  exportLocalSession,
-  listLocalSessionSummaries,
-  renameLocalSession,
-  switchLocalSession,
-  type LocalSessionActionResult,
-} from '../session/LocalSessionStore';
 import { TheseusSessionManager } from '../session/SessionManager';
 import {
   asHostToWebviewMessage,
@@ -42,6 +33,7 @@ import {
 } from '../workspace/WorkspaceContext';
 import { getChangedFile, TheseusDiffContentProvider } from './DiffProvider';
 import { renderChatViewHtml } from './ChatViewHtml';
+import { SessionController } from './controllers/SessionController';
 
 async function openChangedFileDiff(
   diffProvider: TheseusDiffContentProvider,
@@ -80,19 +72,10 @@ function scalarText(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function makeUntitledSessionName(): string {
-  const now = new Date();
-  const pad = (value: number, size = 2) => String(value).padStart(size, '0');
-  return [
-    'session',
-    now.getFullYear(),
-    pad(now.getMonth() + 1),
-    pad(now.getDate()),
-    pad(now.getHours()),
-    pad(now.getMinutes()),
-    pad(now.getSeconds()),
-    pad(now.getMilliseconds(), 3),
-  ].join('');
+function toolEventKey(event: RunnerEvent): string {
+  const id = typeof event.tool_use_id === 'string' ? event.tool_use_id : '';
+  const name = typeof event.tool_name === 'string' ? event.tool_name : 'tool';
+  return id || name;
 }
 
 function isInsidePath(child: string, parent: string): boolean {
@@ -340,13 +323,15 @@ class WebviewMessageQueue {
   }
 }
 
-import { ComposerPanel } from '../composer/ComposerPanel';
+import { ComposerPanel, type ComposerChangeItem } from '../composer/ComposerPanel';
 
 export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = 'theseus.chatView';
   private view: vscode.WebviewView | undefined;
   private readonly messageQueue = new WebviewMessageQueue(() => this.view?.webview);
-  private activeChanges: any[] = [];
+  private readonly sessionController: SessionController;
+  private activeChanges: ComposerChangeItem[] = [];
+  private readonly toolStarts = new Map<string, number>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -354,15 +339,45 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     private readonly diffProvider: TheseusDiffContentProvider,
     private readonly onStartRunner: () => void,
   ) {
+    this.sessionController = new SessionController(
+      this.sessionManager,
+      event => this.postRunnerEvent(event),
+    );
     this.sessionManager.onEvent((event) => {
       this.postRunnerEvent(event);
+      if (event.type === 'RunnerReady') {
+        this.refreshRuntimeToolRegistry('runner_ready');
+      }
       if (event.type === 'RunnerDiagnostic') {
         this.messageQueue.post({ type: 'diagnostic', diagnostic: event });
       }
 
+      if (event.type === 'ToolExecutionStarted') {
+        this.toolStarts.set(toolEventKey(event), Date.now());
+      }
+
       const changed = getChangedFile(event);
-      if (changed) {
-        this.activeChanges.push(changed);
+      if (changed && event.type === 'ToolExecutionCompleted') {
+        const now = Date.now();
+        const startedAt = this.toolStarts.get(toolEventKey(event)) || now;
+        this.toolStarts.delete(toolEventKey(event));
+        const isFailed = event.is_error === true;
+        const item: ComposerChangeItem = {
+          id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+          path: changed.path,
+          relativePath: changed.relative_path,
+          status: isFailed ? 'failed' : 'success',
+          success: !isFailed,
+          createdAt: startedAt,
+          updatedAt: now,
+          completedAt: isFailed ? undefined : now,
+          failedAt: isFailed ? now : undefined,
+          durationMs: Math.max(0, now - startedAt),
+          errorMessage: isFailed ? String(event.output || event.message || 'Tool execution failed.') : undefined,
+          toolName: typeof event.tool_name === 'string' ? event.tool_name : 'tool',
+          event,
+        };
+        this.activeChanges = [item, ...this.activeChanges].slice(0, 50);
         ComposerPanel.createOrShow(this.context.extensionUri);
         ComposerPanel.updateChanges(this.activeChanges);
       }
@@ -379,85 +394,15 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     this.sessionManager.reattachIfPossible('post_session_state');
     this.postRunnerEvent(this.sessionManager.status);
     this.messageQueue.post({ type: 'historySnapshot', history: this.sessionManager.historySnapshot });
-    void this.refreshCustomTools();
+    if (this.sessionManager.hasProcess) {
+      this.refreshRuntimeToolRegistry('webview_attach');
+    } else {
+      void this.refreshCustomTools();
+    }
   }
 
   private postRunnerEvent(event: RunnerEvent): void {
     this.messageQueue.post({ type: 'runnerEvent', event });
-  }
-
-  private localSessionWorkspace(): string | undefined {
-    const status = this.sessionManager.status;
-    return typeof status.workspaceCwd === 'string' ? status.workspaceCwd : getWorkspaceCwd();
-  }
-
-  private currentSessionName(): string {
-    return this.sessionManager.preferredSessionName;
-  }
-
-  private postLocalSessionSnapshot(snapshot: LocalSessionActionResult): void {
-    this.sessionManager.setPreferredSession(snapshot.current);
-    this.postRunnerEvent({
-      type: 'SessionListEvent',
-      source: 'local',
-      current: snapshot.current,
-      sessions: snapshot.sessions,
-    });
-    this.postRunnerEvent({
-      type: 'SessionChangedEvent',
-      source: 'local',
-      current: snapshot.current,
-      history: snapshot.history,
-      planState: snapshot.planState,
-    });
-  }
-
-  private postLocalSessionError(error: unknown): void {
-    this.postRunnerEvent({
-      type: 'RunnerDiagnostic',
-      code: 'session_error',
-      message: error instanceof Error ? error.message : String(error),
-      state: this.sessionManager.currentState,
-    });
-  }
-
-  private canRouteSessionCommandToRunner(): boolean {
-    const status = this.sessionManager.status;
-    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
-    return !!status.processRunning && ['ready', 'waiting_input'].includes(state);
-  }
-
-  private isSessionChangeBlockedByActiveRun(): boolean {
-    const status = this.sessionManager.status;
-    const state = typeof status.state === 'string' ? status.state : this.sessionManager.currentState;
-    return !!status.processRunning && (state === 'busy' || this.sessionManager.currentState === 'busy');
-  }
-
-  private postTransientNotice(message: string, tone = 'hint'): void {
-    this.messageQueue.post({ type: 'transientNotice', message, tone });
-  }
-
-  private syncSessionCommandWhenReady(command: string): void {
-    if (!this.sessionManager.hasProcess) return;
-    if (this.canRouteSessionCommandToRunner()) {
-      this.sessionManager.send(command);
-      return;
-    }
-
-    let settled = false;
-    const disposable = this.sessionManager.onEvent(() => {
-      if (settled || !this.canRouteSessionCommandToRunner()) return;
-      settled = true;
-      clearTimeout(timer);
-      disposable.dispose();
-      this.sessionManager.send(command);
-    });
-
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      disposable.dispose();
-    }, 15000);
   }
 
   refreshActiveCursor(): void {
@@ -476,17 +421,15 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     const tools = await loadCustomToolSummaries();
     this.messageQueue.post({
       type: 'runnerEvent',
-      event: { type: 'customToolsLoaded', tools },
-    });
-    this.messageQueue.post({
-      type: 'runnerEvent',
-      event: { type: 'customToolInventoryUpdated', source: 'host', tools },
+      event: { type: 'customToolsLoaded', source: 'host', tools },
     });
   }
 
   private refreshRuntimeToolRegistry(reason: string): void {
     this.sessionManager.refreshToolRegistry(reason);
-    void this.refreshCustomTools();
+    if (!this.sessionManager.hasProcess) {
+      void this.refreshCustomTools();
+    }
   }
 
   private postHealthStatus(): void {
@@ -685,119 +628,22 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           }
           break;
         case 'getSessions':
-          {
-            const current = this.currentSessionName();
-            const workspaceCwd = this.localSessionWorkspace();
-            this.postRunnerEvent({
-              type: 'SessionListEvent',
-              source: 'local',
-              current,
-              sessions: listLocalSessionSummaries(workspaceCwd, current),
-            });
-          }
+          this.sessionController.postList();
           break;
         case 'newSession':
-          {
-            const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim() : makeUntitledSessionName();
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session new ${JSON.stringify(name)}`);
-            } else if (this.isSessionChangeBlockedByActiveRun()) {
-              this.syncSessionCommandWhenReady(`/session new ${JSON.stringify(name)}`);
-              this.postTransientNotice(`현재 응답 완료 후 새 세션으로 전환합니다: ${name}`);
-            } else {
-              try {
-                this.postLocalSessionSnapshot(createLocalSession(this.localSessionWorkspace(), name));
-                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(name)}`);
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            }
-          }
+          this.sessionController.newSession(msg.name);
           break;
         case 'switchSession':
-          if (typeof msg.name === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session switch ${JSON.stringify(msg.name)}`);
-            } else if (this.isSessionChangeBlockedByActiveRun()) {
-              this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.name)}`);
-              this.postTransientNotice(`현재 응답 완료 후 세션을 전환합니다: ${msg.name}`);
-            } else {
-              try {
-                this.postLocalSessionSnapshot(switchLocalSession(this.localSessionWorkspace(), msg.name));
-                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.name)}`);
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            }
-          }
+          this.sessionController.switchSession(msg.name);
           break;
         case 'deleteSession':
-          if (typeof msg.name === 'string') {
-            const target = msg.name.trim();
-            const current = this.currentSessionName();
-            if (target && target !== current) {
-              try {
-                const snapshot = deleteLocalSession(this.localSessionWorkspace(), target, current);
-                this.postRunnerEvent({
-                  type: 'SessionListEvent',
-                  source: 'local',
-                  current,
-                  sessions: snapshot.sessions,
-                });
-              } catch (err) {
-                if (this.canRouteSessionCommandToRunner()) {
-                  this.sessionManager.send(`/session delete ${JSON.stringify(target)}`);
-                } else {
-                  this.postLocalSessionError(err);
-                }
-              }
-            } else if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session delete ${JSON.stringify(msg.name)}`);
-            } else if (this.isSessionChangeBlockedByActiveRun()) {
-              this.syncSessionCommandWhenReady(`/session delete ${JSON.stringify(msg.name)}`);
-              this.postTransientNotice(`현재 응답 완료 후 세션을 삭제합니다: ${msg.name}`);
-            } else {
-              try {
-                const snapshot = deleteLocalSession(this.localSessionWorkspace(), msg.name, this.currentSessionName());
-                this.postLocalSessionSnapshot(snapshot);
-                this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(snapshot.current)}`);
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            }
-          }
+          this.sessionController.deleteSession(msg.name);
           break;
         case 'renameSession':
-          if (typeof msg.oldName === 'string' && typeof msg.newName === 'string') {
-            if (this.canRouteSessionCommandToRunner()) {
-              this.sessionManager.send(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
-            } else if (this.isSessionChangeBlockedByActiveRun()) {
-              this.syncSessionCommandWhenReady(`/session rename ${JSON.stringify(msg.oldName)} ${JSON.stringify(msg.newName)}`);
-              this.postTransientNotice(`현재 응답 완료 후 세션 이름을 변경합니다: ${msg.oldName} → ${msg.newName}`);
-            } else {
-              try {
-                const wasCurrent = msg.oldName === this.currentSessionName();
-                this.postLocalSessionSnapshot(renameLocalSession(this.localSessionWorkspace(), msg.oldName, msg.newName, this.currentSessionName()));
-                if (wasCurrent) {
-                  this.syncSessionCommandWhenReady(`/session switch ${JSON.stringify(msg.newName)}`);
-                }
-              } catch (err) {
-                this.postLocalSessionError(err);
-              }
-            }
-          }
+          this.sessionController.renameSession(msg.oldName, msg.newName);
           break;
         case 'exportSession':
-          if (typeof msg.name === 'string' && typeof msg.format === 'string') {
-            try {
-              this.postRunnerEvent({
-                type: 'SessionExportedEvent',
-                ...exportLocalSession(this.localSessionWorkspace(), msg.name, msg.format),
-              });
-            } catch (err) {
-              this.postLocalSessionError(err);
-            }
-          }
+          this.sessionController.exportSession(msg.name, msg.format);
           break;
         case 'reviewPlan':
           if (msg.action === 'approve') this.sessionManager.send('/plan approve');
@@ -875,7 +721,11 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           this.refreshActiveCursor();
           break;
         case 'getCustomTools':
-          await this.refreshCustomTools();
+          if (this.sessionManager.hasProcess) {
+            this.refreshRuntimeToolRegistry('inventory_request');
+          } else {
+            await this.refreshCustomTools();
+          }
           break;
         case 'refreshToolRegistry':
           this.refreshRuntimeToolRegistry('manual_refresh');
@@ -982,7 +832,6 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     });
 
     this.refreshActiveCursor();
-    void this.refreshCustomTools();
     this.postSessionState();
   }
 }

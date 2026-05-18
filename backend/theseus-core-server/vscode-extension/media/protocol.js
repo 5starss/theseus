@@ -148,7 +148,12 @@
           && optionalBoolean(event.processRunning)
           && optionalString(event.lifecycle)
           && optionalString(event.state)
-          && optionalNumber(event.daemonPort);
+          && optionalNumber(event.daemonPort)
+          && optionalNumber(event.lastEventAt)
+          && optionalNumber(event.lastHeartbeatAt)
+          && optionalString(event.activeRunId)
+          && optionalString(event.activeRunStatus)
+          && optionalString(event.stalledReason);
       case 'RunnerDiagnostic':
       case 'RunnerError':
       case 'ErrorEvent':

@@ -14,6 +14,7 @@ from theseus_engine.tools.core import (
     load_custom_tools_for_project,
     ToolSearchTool,
 )
+from theseus_engine.tools.core.custom_tool_paths import workspace_custom_tool_dirs
 from theseus_engine.tools.tool_repair import ToolRepairPolicy
 from theseus_engine.core.tool_retriever import ESSENTIAL_TOOL_NAMES
 from theseus_engine.core.tool_visibility import (
@@ -41,17 +42,7 @@ THESEUS_DYNAMIC_TOOL_RETRIEVAL = (
 
 def _workspace_custom_tool_dirs(cwd: Path) -> list[Path]:
     """Return custom tool dirs owned by the active workspace."""
-    candidates = [cwd / "custom_tools", cwd / "theseus_engine" / "custom_tools"]
-    seen: set[str] = set()
-    result: list[Path] = []
-    for path in candidates:
-        resolved = path.resolve()
-        key = os.path.normcase(str(resolved))
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(resolved)
-    return result
+    return workspace_custom_tool_dirs(cwd)
 
 
 def _resolve_skill_injection_enabled(value: Optional[bool]) -> bool:

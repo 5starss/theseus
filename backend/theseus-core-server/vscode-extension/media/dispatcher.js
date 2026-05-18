@@ -2,6 +2,7 @@ export function createEventDispatcher(ctx) {
   return function dispatch(event) {
     switch (event.type) {
       case 'AssistantTextDelta':
+        ctx.touchLoopActivity?.('running', 'Answering');
         if (!ctx.currentAssistantEl) {
           const { article, body } = ctx.createTypingIndicator();
           ctx.currentAssistantArticle = article;
@@ -188,8 +189,8 @@ export function createEventDispatcher(ctx) {
             break;
           }
         }
-        ctx.setGenerating(false);
         if (/PLAN 승인\/거부는 WAIT_FOR_REVIEW 상태에서만 가능합니다\./.test(event.message || '')) {
+          ctx.setGenerating(false);
           ctx.clearSavedPlan();
           break;
         }
@@ -197,6 +198,15 @@ export function createEventDispatcher(ctx) {
           ctx.appendTransientMessage('system', event.message || '', 'hint', 4000);
           break;
         }
+        if (/Request failed; retrying|Model rejected max_tokens|도구 호출 없이 작업 진행 의도/i.test(event.message || '')) {
+          ctx.toolPanel.note({
+            key: `status:${event.message || ''}`,
+            label: event.message || 'status',
+            state: 'running',
+          });
+          break;
+        }
+        ctx.setGenerating(false);
         ctx.appendMessageEl('system', event.message || '', 'info');
         break;
 
@@ -319,11 +329,13 @@ export function createEventDispatcher(ctx) {
         break;
 
       case 'customToolsLoaded':
-        ctx.renderCustomTools(event.tools || []);
+        if (!ctx.isRunnerProcessLive?.()) {
+          ctx.renderCustomTools(event.tools || [], event.source || 'host');
+        }
         break;
 
       case 'customToolInventoryUpdated':
-        ctx.renderCustomTools(event.tools || []);
+        ctx.renderCustomTools(event.tools || [], event.source || 'runner');
         break;
 
       case 'customToolsChanged': {
@@ -343,11 +355,10 @@ export function createEventDispatcher(ctx) {
 
       case 'customToolInstallProgress':
         ctx.appendMessageEl('system', event.message || 'Custom tool dependency install updated.', event.success ? 'info' : 'warn');
-        ctx.vscode.postMessage({ type: 'getCustomTools' });
+        if (!event.success) ctx.vscode.postMessage({ type: 'getCustomTools' });
         break;
 
       case 'toolRegistryUpdated':
-        ctx.vscode.postMessage({ type: 'getCustomTools' });
         break;
 
       case 'healthStatus':
