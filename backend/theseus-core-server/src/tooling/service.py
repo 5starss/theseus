@@ -65,6 +65,15 @@ STATUS_VALIDATION_FAILED = "validation_failed"
 STATUS_SANDBOX_PASSED = "sandbox_passed"
 STATUS_SANDBOX_FAILED = "sandbox_failed"
 STATUS_ACTIVE = "active"
+FAILED_ARTIFACT_CLEANUP_STATUSES = frozenset(
+    {
+        STATUS_DRAFT_SAVED,
+        STATUS_VALIDATION_FAILED,
+        STATUS_VALIDATED,
+        STATUS_SANDBOX_FAILED,
+        STATUS_SANDBOX_PASSED,
+    }
+)
 
 SANDBOX_ALLOWED_DEPENDENCIES = frozenset(
     {
@@ -321,9 +330,138 @@ def build_tool_paths(
     )
 
 
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def _artifact_paths_are_guarded(
+    paths: ServerToolArtifactPaths,
+    *,
+    storage_root: Path,
+) -> bool:
+    return (
+        _path_is_within(paths.project_dir, storage_root)
+        and _path_is_within(paths.module_path, paths.project_dir)
+        and _path_is_within(paths.metadata_path, paths.project_dir)
+    )
+
+
+def _read_metadata_for_cleanup(paths: ServerToolArtifactPaths) -> dict[str, Any]:
+    try:
+        return json.loads(paths.metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _metadata_marks_active(metadata: dict[str, Any]) -> bool:
+    return (
+        str(metadata.get("status") or "").lower() == STATUS_ACTIVE
+        or metadata.get("isActive") is True
+    )
+
+
+def cleanup_report_line(report: dict[str, Any] | None) -> str:
+    if not report:
+        return "cleanup=not_attempted"
+    if report.get("cleanupSucceeded"):
+        deleted = ",".join(report.get("deletedFiles") or [])
+        return f"cleanup=deleted_failed_artifact({deleted})"
+    reason = report.get("skippedReason") or report.get("cleanupError") or "unknown"
+    return f"cleanup=skipped({reason})"
+
+
+def cleanup_failed_tool_artifact(
+    paths: ServerToolArtifactPaths,
+    *,
+    request: ServerToolCreationRequest | None = None,
+    failure_stage: str = "",
+    failure_code: str = "",
+    failure_message: str = "",
+    storage_root: Path = PROJECT_TOOLS_DIR,
+    require_request_match: bool = True,
+) -> dict[str, Any]:
+    """Delete inactive failed build artifacts after preserving failure context."""
+
+    report: dict[str, Any] = {
+        "cleanupAttempted": False,
+        "cleanupSucceeded": False,
+        "deletedFiles": [],
+        "skippedReason": None,
+        "failureStage": failure_stage,
+        "failureCode": failure_code or failure_stage,
+        "message": failure_message,
+        "moduleName": paths.module_name,
+        "fileName": paths.module_path.name,
+        "modulePath": str(paths.module_path),
+        "metadataPath": str(paths.metadata_path),
+    }
+
+    try:
+        if not paths.metadata_path.exists():
+            report["skippedReason"] = "metadata_missing"
+            return report
+
+        if not _artifact_paths_are_guarded(paths, storage_root=storage_root):
+            report["skippedReason"] = "outside_project_tool_root"
+            return report
+
+        metadata = _read_metadata_for_cleanup(paths)
+        status = str(metadata.get("status") or "").lower()
+        is_active = _metadata_marks_active(metadata)
+        report.update(
+            {
+                "toolName": metadata.get("toolName"),
+                "projectId": metadata.get("projectId"),
+                "planId": metadata.get("planId"),
+                "metadataStatus": status,
+                "isActive": is_active,
+                "latestTraceId": metadata.get("latestTraceId"),
+            }
+        )
+
+        if is_active:
+            report["skippedReason"] = "active_artifact"
+            return report
+        if status not in FAILED_ARTIFACT_CLEANUP_STATUSES:
+            report["skippedReason"] = "untrusted_status"
+            return report
+        if require_request_match and request is not None:
+            mismatches: list[str] = []
+            if str(metadata.get("projectId") or "") != str(request.project_id):
+                mismatches.append("projectId")
+            if str(metadata.get("planId") or "") != str(request.plan_id):
+                mismatches.append("planId")
+            if str(metadata.get("moduleName") or "") != str(paths.module_name):
+                mismatches.append("moduleName")
+            if mismatches:
+                report["skippedReason"] = "request_mismatch:" + ",".join(mismatches)
+                return report
+
+        report["cleanupAttempted"] = True
+        for file_path in (paths.module_path, paths.metadata_path):
+            if file_path.exists():
+                file_path.unlink()
+                report["deletedFiles"].append(file_path.name)
+        report["cleanupSucceeded"] = (
+            not paths.module_path.exists() and not paths.metadata_path.exists()
+        )
+        if not report["cleanupSucceeded"]:
+            report["skippedReason"] = "delete_incomplete"
+        return report
+    except Exception as exc:
+        report["cleanupError"] = str(exc)
+        return report
+
+
 def _assert_no_conflicting_tool_artifact(
     request: ServerToolCreationRequest,
     paths: ServerToolArtifactPaths,
+    *,
+    storage_root: Path = PROJECT_TOOLS_DIR,
 ) -> None:
     if not paths.module_path.exists() and not paths.metadata_path.exists():
         return
@@ -335,11 +473,28 @@ def _assert_no_conflicting_tool_artifact(
         except Exception:
             existing_metadata = {}
 
-    same_plan = str(existing_metadata.get("planId") or "") == str(request.plan_id)
     status = str(existing_metadata.get("status") or "").lower()
-    inactive_same_plan_retry = same_plan and status not in {STATUS_ACTIVE, "active"}
-    if inactive_same_plan_retry:
-        return
+    if (
+        existing_metadata
+        and not _metadata_marks_active(existing_metadata)
+        and status in FAILED_ARTIFACT_CLEANUP_STATUSES
+    ):
+        cleanup_report = cleanup_failed_tool_artifact(
+            paths,
+            request=None,
+            failure_stage="stale_artifact_conflict",
+            failure_code="stale_inactive_artifact",
+            failure_message="Inactive generated tool artifact blocked a new build.",
+            storage_root=storage_root,
+            require_request_match=False,
+        )
+        if cleanup_report.get("cleanupSucceeded"):
+            return
+        if not paths.module_path.exists() and not paths.metadata_path.exists():
+            return
+        cleanup_line = cleanup_report_line(cleanup_report)
+    else:
+        cleanup_line = "cleanup=not_attempted"
 
     existing_name = existing_metadata.get("toolName") or request.tool_name
     raise ToolCreationError(
@@ -348,6 +503,8 @@ def _assert_no_conflicting_tool_artifact(
             "이미 존재하는 Tool 파일명입니다. "
             f"toolName={existing_name}, moduleName={paths.module_name}, fileName={paths.module_path.name}. "
             "recoverable=true. retry_policy=do_not_retry_same_input. "
+            f"{cleanup_line}. "
+            "active Tool은 삭제하지 않습니다. metadata가 없거나 상태를 신뢰할 수 없는 artifact는 수동 확인이 필요합니다. "
             "기존 Tool 재사용, 기존 Tool 확장, 새 이름 제안, 또는 교체 승인 요청 중 하나를 선택해야 합니다."
         ),
         errors=[
@@ -355,6 +512,7 @@ def _assert_no_conflicting_tool_artifact(
             f"moduleName={paths.module_name}",
             f"fileName={paths.module_path.name}",
             "retry_policy=do_not_retry_same_input",
+            cleanup_line,
         ],
     )
 
@@ -677,7 +835,7 @@ def persist_draft_tool(
     code = _sanitize_generated_code(code)
     _validate_python_syntax_or_raise(code, request)
     paths = build_tool_paths(request.project_id, normalized_name, storage_root=storage_root)
-    _assert_no_conflicting_tool_artifact(request, paths)
+    _assert_no_conflicting_tool_artifact(request, paths, storage_root=storage_root)
     paths.project_dir.mkdir(parents=True, exist_ok=True)
     paths.module_path.write_text(code, encoding="utf-8")
     metadata = _base_metadata(request, paths, tool_name=normalized_name)
@@ -905,6 +1063,8 @@ async def create_tool_for_server(
             trace_id=active_metadata.get("latestTraceId"),
         )
     except ToolCreationError as exc:
+        failed_metadata: dict[str, Any] = {}
+        cleanup_result: dict[str, Any] | None = None
         if paths is not None and paths.metadata_path.exists():
             failed_metadata = read_tool_metadata(paths)
             _audit_log(
@@ -918,21 +1078,47 @@ async def create_tool_for_server(
                 stage=exc.stage,
                 errors=exc.errors,
             )
+            cleanup_result = cleanup_failed_tool_artifact(
+                paths,
+                request=request,
+                failure_stage=exc.stage,
+                failure_code=exc.stage,
+                failure_message=exc.message,
+                storage_root=storage_root,
+                require_request_match=True,
+            )
+            _audit_log(
+                "tool_creation_failed_artifact_cleanup",
+                trace_id=failed_metadata.get("latestTraceId"),
+                tool_name=failed_metadata.get("toolName", request.tool_name),
+                project_id=request.project_id,
+                plan_id=request.plan_id,
+                user_id=request.creator_user_id,
+                chat_session_id=request.chat_session_id,
+                stage=exc.stage,
+                cleanup=cleanup_result,
+            )
+        errors = list(exc.errors)
+        if cleanup_result is not None:
+            errors.append(cleanup_report_line(cleanup_result))
         return ServerToolCreationResult(
             status="rejected",
             stage=exc.stage,
             tool_name=_safe_tool_name(request.tool_name),
             message=exc.message,
-            module_path=str(paths.module_path) if paths is not None else None,
-            metadata_path=str(paths.metadata_path) if paths is not None else None,
-            errors=exc.errors,
-            trace_id=read_tool_metadata(paths).get("latestTraceId")
+            module_path=str(paths.module_path) if paths is not None and paths.module_path.exists() else None,
+            metadata_path=str(paths.metadata_path)
             if paths is not None and paths.metadata_path.exists()
             else None,
+            errors=errors,
+            trace_id=failed_metadata.get("latestTraceId"),
         )
     except Exception as exc:
+        failed_metadata: dict[str, Any] = {}
+        cleanup_result: dict[str, Any] | None = None
         if paths is not None and paths.metadata_path.exists():
             metadata = read_tool_metadata(paths)
+            failed_metadata = metadata
             _audit_log(
                 "tool_creation_unexpected_failure",
                 trace_id=metadata.get("latestTraceId"),
@@ -943,17 +1129,39 @@ async def create_tool_for_server(
                 chat_session_id=request.chat_session_id,
                 error=str(exc),
             )
+            cleanup_result = cleanup_failed_tool_artifact(
+                paths,
+                request=request,
+                failure_stage="unexpected",
+                failure_code="unexpected",
+                failure_message=str(exc),
+                storage_root=storage_root,
+                require_request_match=True,
+            )
+            _audit_log(
+                "tool_creation_unexpected_artifact_cleanup",
+                trace_id=metadata.get("latestTraceId"),
+                tool_name=metadata.get("toolName", request.tool_name),
+                project_id=request.project_id,
+                plan_id=request.plan_id,
+                user_id=request.creator_user_id,
+                chat_session_id=request.chat_session_id,
+                cleanup=cleanup_result,
+            )
+        errors = [str(exc)]
+        if cleanup_result is not None:
+            errors.append(cleanup_report_line(cleanup_result))
         return ServerToolCreationResult(
             status="rejected",
             stage="unexpected",
             tool_name=_safe_tool_name(request.tool_name),
             message=f"Unexpected tool creation failure: {exc}",
-            module_path=str(paths.module_path) if paths is not None else None,
-            metadata_path=str(paths.metadata_path) if paths is not None else None,
-            errors=[str(exc)],
-            trace_id=read_tool_metadata(paths).get("latestTraceId")
+            module_path=str(paths.module_path) if paths is not None and paths.module_path.exists() else None,
+            metadata_path=str(paths.metadata_path)
             if paths is not None and paths.metadata_path.exists()
             else None,
+            errors=errors,
+            trace_id=failed_metadata.get("latestTraceId"),
         )
 
 
