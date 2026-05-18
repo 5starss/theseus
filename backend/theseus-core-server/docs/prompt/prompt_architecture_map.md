@@ -119,6 +119,7 @@ Remote Workspace가 선택된 요청에서도 Core/local worktree 도구를 무�
 - ASK와 PLAN Drafting/Review는 local/remote 읽기 중심이며 write/edit/bash는 제외됩니다.
 - AGENT와 승인된 PLAN Executing은 현재 사용자 등급이 허용하는 local tool을 사용할 수 있습니다.
 - Remote Workspace 쓰기/명령은 별도 `allowWriteExecution=true`가 있어야만 `remote_write_file`, `remote_edit_file`, `remote_run_command`가 노출됩니다.
+- 운영자가 `THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE=true`를 설정하면 `allowWriteExecution=false`인 Remote Workspace도 AGENT에서 `remote_write_file`, `remote_edit_file`만 노출됩니다. `remote_run_command`는 계속 `allowWriteExecution=true`가 필요합니다.
 - remote 분석 결과를 local report artifact로 저장할 때는 `local_write_report`를 우선 사용합니다.
 
 #### 1.2 모드별 프롬프트

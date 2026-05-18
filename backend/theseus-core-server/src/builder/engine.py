@@ -111,7 +111,13 @@ def _allows_remote_write_execution(
 ) -> bool:
     del plan_phase
     if mode == AgentMode.AGENT:
-        return bool(remote_workspace and remote_workspace.allow_write_execution)
+        return bool(
+            remote_workspace
+            and (
+                remote_workspace.allow_write_execution
+                or settings.THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE
+            )
+        )
     return False
 
 
@@ -252,7 +258,10 @@ def get_query_engine(
         for tool in build_remote_read_analysis_tools(build_context.remote_workspace):
             full_registry.register(tool)
         if allow_remote_write_execution:
-            for tool in build_remote_write_execution_tools(build_context.remote_workspace):
+            for tool in build_remote_write_execution_tools(
+                build_context.remote_workspace,
+                include_command=build_context.remote_workspace.allow_write_execution,
+            ):
                 full_registry.register(tool)
     remote_workspace_runtime_key = (
         register_remote_workspace_config(build_context.remote_workspace)
