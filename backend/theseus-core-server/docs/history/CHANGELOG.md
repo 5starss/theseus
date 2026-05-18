@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 155 — ToolBuild 실패 artifact cleanup 재적용 (2026-05-18)
+
+#### `src`
+- ToolBuild/create_tool이 validation, sandbox, activation 단계에서 실패하면 activation 전 남은 `.py`/`.meta.json` 실패 artifact를 cleanup하도록 `src/tooling/service.py`에 공통 helper를 추가
+- `active` Tool, metadata 없는 orphan 파일, project tool root 밖 경로는 자동 삭제하지 않고 기존처럼 conflict/manual 확인 대상으로 유지
+- inactive failed/stale artifact는 새 build 전에 cleanup 후 같은 이름 재생성을 허용하고, active Tool은 계속 `tool_name_conflict`로 차단
+- `src/tool_build/builder.py`의 ToolBuild validation/sandbox/activation 실패 경로도 같은 cleanup helper를 호출해 실패 artifact가 후속 생성 요청을 막지 않도록 보강
+
+#### 테스트
+- 실패 artifact cleanup, active 보호, metadata 없는 orphan conflict, project root 밖 cleanup 차단을 검증하는 단위 테스트 추가
+
+---
+
 ### 🛠️ Session 154 — Prompt 언어 중립화 보강 (2026-05-18)
 
 #### `src` / `theseus_engine`

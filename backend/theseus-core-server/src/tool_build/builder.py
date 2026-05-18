@@ -16,6 +16,8 @@ from src.tooling.service import (
     ServerToolCreationRequest,
     ToolCreationError,
     activate_tool_artifact,
+    cleanup_failed_tool_artifact,
+    cleanup_report_line,
     persist_draft_tool,
     read_tool_metadata,
     run_tool_sandbox_gate_for_artifact,
@@ -296,6 +298,7 @@ class ToolBuilder:
             run_id=event.run_id,
         )
 
+        paths = None
         try:
             paths, metadata = persist_draft_tool(
                 creation_request,
@@ -316,11 +319,23 @@ class ToolBuilder:
             )
             metadata = read_tool_metadata(paths)
         except ToolCreationError as exc:
+            errors = list(exc.errors)
+            if paths is not None:
+                cleanup_result = cleanup_failed_tool_artifact(
+                    paths,
+                    request=creation_request,
+                    failure_stage=exc.stage,
+                    failure_code=exc.stage.upper(),
+                    failure_message=exc.message,
+                    storage_root=self.storage_root,
+                    require_request_match=True,
+                )
+                errors.append(cleanup_report_line(cleanup_result))
             raise ToolRepairFailure(
                 stage=exc.stage,
                 code=exc.stage.upper(),
                 message=exc.message,
-                metadata={"errors": exc.errors},
+                metadata={"errors": errors},
             ) from exc
 
         merged_metadata = dict(metadata)
