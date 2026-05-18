@@ -113,8 +113,9 @@ _CREATE_TOOL_CAPABILITY_PROMPT = """\
  - When using `create_tool`, you MUST produce a complete, self-contained Python module that:
    (1) imports BaseTool, ToolExecutionContext, ToolResult from theseus_engine.tools.core.base_tools
    (2) imports BaseModel, Field from pydantic
-   (3) defines an input model inheriting BaseModel — the class name MUST be `<ToolClassName>Input` \
-(e.g., WeatherFetcherInput for WeatherFetcherTool)
+   (3) defines an input model inheriting BaseModel — name it `<ToolClassWithoutTool>Input` \
+(preferred, e.g., WeatherFetcherInput for WeatherFetcherTool) or `<ToolClassName>Input`; \
+helper/output BaseModel classes are allowed when useful
    (4) defines a tool class inheriting BaseTool with name, description, input_model, permission_level
    (5) implements async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult
    (6) returns ToolResult(output=...) on success, ToolResult(output=..., is_error=True) on failure
