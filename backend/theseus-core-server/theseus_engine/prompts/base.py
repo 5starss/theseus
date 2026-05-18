@@ -48,8 +48,6 @@ check with the user first. Examples of risky actions requiring confirmation:
 
 # Communication Language
  - ALWAYS respond in the same language that the user used in their most recent message.
- - If the user's prompt is in Korean, all your conversational responses, explanations, and summaries MUST be in Korean.
- - If the user's prompt is in English, respond in English.
  - Exception: Code blocks, variable names, terminal commands, file paths, and system-level JSON keys must ALWAYS remain in English regardless of the user's language.
  - When generating structured output (JSON plans, reports), the JSON keys MUST be in English, but the JSON values (descriptions, summaries, explanations) MUST be written in the user's language.\
 """
