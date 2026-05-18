@@ -84,8 +84,16 @@ function isExpectedStopReason(reason: string | undefined): boolean {
   return !!reason && EXPECTED_STOP_REASONS.has(reason);
 }
 
+function stripRecoverableCustomToolWarnings(stderr: string): string {
+  return stderr
+    .split(/\r?\n/)
+    .filter(line => !/Skipped invalid custom tool .*Error during module execution: .*No module named/i.test(line))
+    .join('\n');
+}
+
 function classifyProcessFailure(stderr: string, code: number | null): TheseusDiagnosticCode {
-  if (/ModuleNotFoundError|ImportError|No module named/i.test(stderr)) return 'python_import_failed';
+  const fatalStderr = stripRecoverableCustomToolWarnings(stderr);
+  if (/ModuleNotFoundError|ImportError|No module named/i.test(fatalStderr)) return 'python_import_failed';
   return code === 0 || code === null ? 'runner_error' : 'crash_exit';
 }
 
@@ -185,6 +193,7 @@ export class TheseusSessionManager implements vscode.Disposable {
       runtimeMode: this.runtimeMode,
       daemonPid: this.daemon?.pid ?? this.proc?.pid,
       daemonPort: this.daemon?.port,
+      daemonStartedAt: this.daemon?.startedAt,
       session: this.lastReadyEvent?.session || this.preferredSessionName,
       lastEventAt: this.lastEventAt,
       lastHeartbeatAt: this.lastHeartbeatAt,

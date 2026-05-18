@@ -65,6 +65,15 @@ export function getConfiguredPythonPath(): string {
   return getTheseusPathSetting('pythonPath');
 }
 
+export function getExplicitPythonPath(): string {
+  const inspected = vscode.workspace.getConfiguration('theseus').inspect<string>('pythonPath');
+  const raw = inspected?.workspaceFolderValue
+    ?? inspected?.workspaceValue
+    ?? inspected?.globalValue
+    ?? '';
+  return expandTheseusPath(typeof raw === 'string' ? raw : '');
+}
+
 export function getPythonPath(): string {
   return getConfiguredPythonPath() || 'python';
 }

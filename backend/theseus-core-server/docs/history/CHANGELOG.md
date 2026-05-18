@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 161 — VSCode Extension 로컬 데몬 / custom tool import 오류 표시 분리 (2026-05-18)
+
+#### `theseus_engine`
+- `custom_tools` import 실패는 callable registry에서 제외하되 `unavailable` inventory로 남기고, 같은 `modulePath + importError` 조합은 데몬 생명주기 동안 warning 1회만 출력하도록 dedupe
+- `ModuleNotFoundError: speedtest`의 안전한 설치 후보를 `speedtest-cli`로 매핑해 dependency recovery UX에서 실제 pip 패키지명을 제안
+- unavailable inventory 항목에 `logDedupKey`를 포함해 반복 refresh 중 같은 실패 원인을 추적할 수 있게 보강
+
+#### `vscode-extension`
+- recoverable custom tool import warning을 runner fatal import 오류와 분리해, 데몬 프로세스가 정상 `/health`/`/status`에 붙는 상황에서 서버/데몬 실패로 오인하지 않도록 분류
+- `RunnerReady`, WebView attach, watcher, 수동 refresh가 겹칠 때 runtime/host custom tool refresh를 debounce하여 같은 import 검증이 짧은 시간에 반복되지 않도록 정리
+- Custom Tool dependency 설치는 명시적으로 설정된 `theseus.pythonPath`가 있을 때만 활성화하고, 기본 `python` fallback에는 자동 설치하지 않도록 제한
+- Health 패널에 `Local daemon`, `Server URL`, `Custom tools` 상태를 분리해 pid/port/session, standalone/connected/unreachable, available/unavailable counts를 별도로 표시
+
+#### 검증
+- `npm.cmd run compile`
+- `node --check media/main.js`
+- `node --check media/dispatcher.js`
+- `node --check media/components/CustomTools.js`
+- `node --check media/components/HealthPanel.js`
+- `python -m py_compile theseus_engine/daemon.py theseus_engine/runner_runtime.py theseus_engine/tools/core/tool_factory.py`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 160 — VSCode Extension 작업 상태 가시성 개선 (2026-05-18)
 
 #### `vscode-extension`
