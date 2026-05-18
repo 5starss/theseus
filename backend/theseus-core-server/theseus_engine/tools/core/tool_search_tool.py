@@ -187,8 +187,18 @@ class ToolSearchTool(BaseTool):
                 lines.append(
                     f"  - **{item.get('toolName') or item.get('fileName')}** "
                     f"({item.get('loadState', 'unknown')}, file={item.get('fileName', '?')}, "
-                    f"level={item.get('permissionLevel', '?')})"
+                    f"level={item.get('permissionLevel', '?')}, "
+                    f"sandboxVerified={item.get('sandboxVerified', False)})"
                 )
+                if item.get("modulePath"):
+                    lines.append(f"    Source: {item.get('modulePath')}")
+                if item.get("metadataPath"):
+                    lines.append(f"    Metadata: {item.get('metadataPath')}")
+                if item.get("canEditSource"):
+                    lines.append(
+                        "    Maintenance: use custom_tool_read_source, then "
+                        "custom_tool_update_source for safe edits."
+                    )
                 description = item.get("displayDescription") or item.get("description")
                 if description:
                     lines.append(f"    Description: {description}")
@@ -307,6 +317,10 @@ class ToolSearchTool(BaseTool):
                 item.get("description", ""),
                 item.get("status", ""),
                 item.get("loadState", ""),
+                item.get("modulePath", ""),
+                item.get("metadataPath", ""),
+                str(item.get("sandboxVerified", "")),
+                "editable" if item.get("canEditSource") else "",
                 " ".join(str(value) for value in item.get("dependencies", []) or []),
             ]
             haystack = " ".join(str(part) for part in haystack_parts if part)
@@ -336,6 +350,8 @@ def _tokenize_tool_search_text(text: str) -> set[str]:
         "툴": {"tool"},
         "도구": {"tool"},
         "커스텀": {"custom"},
+        "수정": {"edit", "update", "repair", "maintenance"},
+        "복구": {"repair", "recover", "maintenance"},
     }
     tokens = {
         token.lower()

@@ -31,6 +31,7 @@ PLAN_DRAFTING_ALLOWED_TOOLS = frozenset(
         "memory_read",
         "memory_list",
         "tool_search",
+        "custom_tool_read_source",
         "brief",
     }
 )

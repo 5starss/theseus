@@ -256,7 +256,7 @@ def _project_custom_tools_dir() -> Path:
 
 
 def _project_custom_tool_artifact_root(project_id: int | str | None) -> str:
-    return f"theseus_engine/custom_tools/projects/{_slugify_project_id(project_id)}"
+    return str((_project_custom_tools_dir() / _slugify_project_id(project_id)).resolve()).replace("\\", "/")
 
 
 def _project_custom_tool_artifact_context(project_id: int | str | None) -> str:
@@ -282,17 +282,21 @@ def _normalize_project_custom_tool_path(
 ) -> str:
     text = str(value)
     normalized = text.replace("\\", "/").strip()
+    artifact_root = _project_custom_tool_artifact_root(project_id)
+    if normalized.startswith(artifact_root):
+        return text
     global_prefix = "theseus_engine/custom_tools/"
     project_prefix = "theseus_engine/custom_tools/projects/"
-    if not normalized.startswith(global_prefix) or normalized.startswith(project_prefix):
-        return text
     if not normalized.endswith((".py", ".meta.json")):
         return text
-
-    relative = normalized[len(global_prefix) :]
-    if "/" in relative:
-        return text
-    return f"{_project_custom_tool_artifact_root(project_id)}/{Path(relative).name}"
+    if normalized.startswith(project_prefix):
+        return f"{artifact_root}/{Path(normalized).name}"
+    if normalized.startswith(global_prefix):
+        relative = normalized[len(global_prefix) :]
+        if "/" in relative:
+            return text
+        return f"{artifact_root}/{Path(relative).name}"
+    return text
 
 
 def _normalize_project_custom_tool_paths(value: Any, project_id: int | str | None) -> Any:

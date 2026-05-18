@@ -39,9 +39,17 @@
 ### 2.3 `theseus_engine/tools/core/tool_factory.py` (수정)
 
 - `load_custom_tools_for_project(registry, project_id, tool_permissions)` 함수 추가
-  - 경로: `custom_tools/projects/<project_id>/*.py`
-  - 조건: `isActive=True` && `status="active"` 인 것만 로드
+  - 경로: `THESEUS_PROJECT_CUSTOM_TOOLS_DIR/<project_id>/*.py`
+  - 조건: `isActive=True` && `status="active"` && `validationResult.success=True` && `sandboxResult.success=True` 인 것만 로드
 - `normalize_tool_meta()` — `runtimeMode` 필드 추가
+
+### 2.3.1 Custom Tool 유지보수 전용 경로
+
+- 일반 `read_file` / `edit_file`은 workspace 내부 파일만 대상으로 유지
+- 서버 project custom tool source는 `custom_tool_read_source` / `custom_tool_update_source`로만 조회·수정
+- `custom_tool_update_source`는 staged artifact에 수정 코드를 저장한 뒤 `ToolValidator`와 sandbox gate를 통과한 경우에만 기존 active artifact를 교체
+- 실패 시 기존 active artifact는 유지하고 staged artifact는 cleanup
+- tool 실행 실패 후 자동 복구 루프는 실패 유형을 먼저 분류하고, 코드 결함일 때만 전용 update 도구를 사용
 
 ### 2.4 `theseus_engine/tools/core/__init__.py` (수정)
 

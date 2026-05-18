@@ -79,6 +79,9 @@ _CUSTOM_TOOL_RECOVERY_PROMPT = """\
  - If the user asks to list, search, or inspect available custom tools, call `tool_search` with the user's intent instead of answering from memory.
  - If the user asks for all custom tools, use a broad language-neutral query such as `custom tools`.
  - `tool_search` only makes already-registered callable tools available. It cannot directly call or register a Python file that failed to import.
+ - Existing project custom tool artifacts are not normal workspace files. Do not use `read_file`, `edit_file`, or `write_file` on a custom tool artifact root such as `/opt/theseus/custom_tools` or the Core container custom tool mount.
+ - To inspect an existing project custom tool source, use `custom_tool_read_source` with `project_id` plus `tool_name` or `module_name`.
+ - To repair an existing project custom tool source, use `custom_tool_read_source` first, then `custom_tool_update_source` with the complete replacement source. The update tool stages, validates, sandbox-verifies, and only then replaces the active artifact.
  - If a relevant custom tool is reported as unavailable, explain that the tool exists but is not callable until its import/dependency issue is resolved.
  - Prefer the extension's Custom Tools recovery flow for unavailable tools: install approved dependencies, retry load, then refresh the registry.
  - Do not call an unavailable custom tool by name until it appears in your current tool schema.\

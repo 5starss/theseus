@@ -16,7 +16,7 @@ Theseus는 두 가지 배포 형태로 실행된다.
 | 진입점 | `theseus_cli.py`, `cli_main.py` | `src/routes/stream.py` (FastAPI SSE) |
 | 인증 | 없음 (로컬 사용자) | Spring Boot JWT → `SessionContext` |
 | 권한 소스 | `theseus_engine/custom_tools/*.meta.json` + 파일시스템 | DB (Spring Backend) + `src/auth/permissions.py` |
-| 툴 저장 위치 | `theseus_engine/custom_tools/` | `theseus_engine/custom_tools/projects/<project_id>/` |
+| 툴 저장 위치 | `theseus_engine/custom_tools/` | `THESEUS_PROJECT_CUSTOM_TOOLS_DIR/<project_id>/` |
 | 툴 생성 파이프라인 | `tool_factory.py` (단순: 코드 검증 → 저장) | `src/tooling/service.py` (계획 가드 → 검증 → 샌드박스 → 활성화) |
 | 메타 관리 | local `.meta.json` | local `.meta.json` + DB 레코드 (예정) |
 | RBAC 체커 | `TheseusPermissionChecker` (파일 기반 level) | `TheseusPermissionChecker` (DB 조회 level) |
@@ -51,7 +51,7 @@ Standalone:    load_custom_tools(registry, tool_permissions)
                 → .meta.json 정규화
 
 Server:        load_custom_tools_for_project(registry, project_id=..., tool_permissions=...)
-                → custom_tools/projects/<project_id>/*.meta.json 스캔
+                → THESEUS_PROJECT_CUSTOM_TOOLS_DIR/<project_id>/*.meta.json 스캔
                 → isActive=True && sandboxResult.success=True 인 것만 로드
 ```
 
@@ -191,6 +191,26 @@ class ToolPermissionProvider(ABC):
 | 메타 저장 | `.meta.json` (로컬) | `.meta.json` + DB 레코드 (Spring Backend) |
 | 권한 동기화 | `StandalonePermissionProvider.sync_tool()` | `ServerPermissionProvider.sync_tool()` |
 | 런타임 등록 | `full_registry` + `active_registry` 즉시 | `full_registry` + `active_registry` 즉시 |
+
+### 5-2-1. 서버 custom tool 유지보수 / 실패 복구
+
+Server-Connected 모드의 project custom tool은 일반 `read_file` / `edit_file`로 직접 수정하지 않는다. 해당 도구들은 workspace 경계를 유지하고, project artifact root는 전용 유지보수 도구만 접근한다.
+
+| 단계 | 동작 |
+|------|------|
+| 실패 감지 | Tool 실행 결과, sandbox 결과, ToolBuild 실패 notice에서 `project_id`, `tool_name`, `module_name`, 실패 stage/code를 추출 |
+| source 조회 | `custom_tool_read_source(project_id, tool_name 또는 module_name)`로 active source, metadata, `sandboxResult`, runtime path 조회 |
+| 원인 분류 | 코드 결함, 의존성 누락, sandbox 인프라 오류, 권한 오류, 이름 충돌을 구분 |
+| 안전 수정 | 코드 결함일 때만 `custom_tool_update_source(...)` 사용. staged artifact를 만들고 `ToolValidator` + sandbox gate 통과 시에만 active artifact 교체 |
+| 실패 처리 | update 실패 시 기존 active artifact 유지, staged artifact cleanup, 실패 원인과 retry policy를 history/debug/audit에 보존 |
+| 재계획 | 같은 구현 반복을 피하도록 다음 PLAN/AGENT 입력에 실패 원인과 대체 구현 방향을 주입 |
+
+정책:
+
+- `custom_tool_update_source`는 AGENT 또는 승인된 PLAN Executing에서만 노출한다.
+- sandbox 인프라 오류, permission denied, project root 밖 경로, metadata 없는 orphan 파일은 자동 수정하지 않는다.
+- `sandboxResult.success=true`가 아닌 artifact는 inventory에는 남길 수 있지만 active registry에는 등록하지 않는다.
+- 기존 active tool 교체는 항상 staged validation + sandbox success 이후에만 수행한다.
 
 ### 5-3. RBAC 평가
 
