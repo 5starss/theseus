@@ -59,6 +59,10 @@ prompt-toolkit>=3.0.0
 markdownify>=1.2.2
 beautifulsoup4>=4.12.0
 
+# ── System Metrics / Demo Tools ────────────────────────────────────────────────
+psutil
+nvidia-ml-py
+
 # ── Infrastructure ────────────────────────────────────────────────────────────
 docker==7.1.0
 boto3
