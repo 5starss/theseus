@@ -15,6 +15,7 @@ export function ToolList() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedTool, setSelectedTool] = useState<ToolItem | null>(null);
+  const [fetchTrigger, setFetchTrigger] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -43,7 +44,7 @@ export function ToolList() {
     return () => {
       isMounted = false;
     };
-  }, [projectId]);
+  }, [projectId, fetchTrigger]);
 
   const handleToolClick = (tool: ToolItem) => {
     setSelectedTool(tool);
@@ -138,6 +139,7 @@ export function ToolList() {
           projectId={projectId}
           toolItem={selectedTool}
           onClose={() => setSelectedTool(null)}
+          onDeleteSuccess={() => setFetchTrigger(prev => prev + 1)}
         />
       )}
     </>
