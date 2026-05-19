@@ -28,6 +28,7 @@ import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolPlanGroupRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRepository;
 import com.theseus.api.domain.tool.repository.ToolPlanRunRepository;
+import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.SystemRole;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
@@ -73,6 +74,9 @@ class ChatSessionServiceTest {
 	@Mock
 	private ToolPlanGroupRepository toolPlanGroupRepository;
 
+	@Mock
+	private ToolRepository toolRepository;
+
 	private ChatSessionService service;
 	private TestFixture fixture;
 
@@ -86,7 +90,8 @@ class ChatSessionServiceTest {
 			userRepository,
 			toolPlanRunRepository,
 			toolPlanRepository,
-			toolPlanGroupRepository
+			toolPlanGroupRepository,
+			toolRepository
 		);
 		fixture = createFixture();
 	}

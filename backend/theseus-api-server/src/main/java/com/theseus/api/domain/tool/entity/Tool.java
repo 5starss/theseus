@@ -179,6 +179,13 @@ public class Tool {
 
 	public void delete() {
 		status = ToolStatus.DELETED;
+		releaseFileNameForReuse();
+	}
+
+	public void releaseFileNameForReuse() {
+		if (ToolStatus.DELETED.equals(status)) {
+			fileName = createDeletedFileName(fileName);
+		}
 	}
 
 	public boolean isDraft() {
@@ -227,5 +234,17 @@ public class Tool {
 		}
 
 		return fileName;
+	}
+
+	private String createDeletedFileName(String originalFileName) {
+		String deletionKey = id == null ? String.valueOf(System.nanoTime()) : String.valueOf(id);
+		String prefix = "deleted_" + deletionKey + "_";
+		int maxOriginalLength = 120 - prefix.length();
+		String retainedOriginalName = originalFileName;
+		if (retainedOriginalName.length() > maxOriginalLength) {
+			retainedOriginalName = retainedOriginalName.substring(retainedOriginalName.length() - maxOriginalLength);
+		}
+
+		return prefix + retainedOriginalName;
 	}
 }

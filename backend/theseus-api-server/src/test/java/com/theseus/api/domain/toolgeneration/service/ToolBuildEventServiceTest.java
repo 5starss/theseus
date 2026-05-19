@@ -36,6 +36,7 @@ import com.theseus.api.domain.toolgeneration.dto.ToolPlanRunState;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildArtifactPayload;
 import com.theseus.api.domain.toolgeneration.event.ToolBuildEvent;
 import com.theseus.api.domain.user.entity.User;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -90,7 +91,7 @@ class ToolBuildEventServiceTest {
 		ToolBuildEvent event = createCompletedEvent();
 		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
 		when(toolRepository.findBySourceToolPlan(fixture.toolPlan())).thenReturn(Optional.empty());
-		when(toolRepository.existsByProjectAndFileName(fixture.project(), "incident_recovery.py")).thenReturn(false);
+		when(toolRepository.existsActiveByProjectAndFileName(fixture.project(), "incident_recovery.py")).thenReturn(false);
 		when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> {
 			Tool savedTool = invocation.getArgument(0);
 			ReflectionTestUtils.setField(savedTool, "id", 900L);
@@ -166,7 +167,7 @@ class ToolBuildEventServiceTest {
 		ToolBuildEvent event = createCompletedEvent();
 		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
 		when(toolRepository.findBySourceToolPlan(fixture.toolPlan())).thenReturn(Optional.empty());
-		when(toolRepository.existsByProjectAndFileName(fixture.project(), "incident_recovery.py")).thenReturn(true);
+		when(toolRepository.existsActiveByProjectAndFileName(fixture.project(), "incident_recovery.py")).thenReturn(true);
 
 		// When
 		toolBuildEventService.handleCompleted(event);
@@ -191,7 +192,38 @@ class ToolBuildEventServiceTest {
 	}
 
 	@Test
-	@DisplayName("build failed 이벤트는 Tool을 생성하지 않고 run/group을 실패 처리한다")
+	@DisplayName("DELETED Tool fileName is released before creating a replacement Tool")
+	void handleCompletedReleasesDeletedToolFileNameBeforeCreate() throws Exception {
+		// Given
+		TestFixture fixture = createApprovedBuildFixture();
+		ToolPlanRun buildRun = createBuildRun(fixture);
+		Tool deletedTool = createDeletedToolWithSameFileName(fixture);
+		ToolBuildEvent event = createCompletedEvent();
+		when(toolPlanRunRepository.findByRunIdForUpdate(RUN_ID)).thenReturn(Optional.of(buildRun));
+		when(toolRepository.findBySourceToolPlan(fixture.toolPlan())).thenReturn(Optional.empty());
+		when(toolRepository.findByProjectAndFileNameAndStatus(
+			fixture.project(),
+			"incident_recovery.py",
+			ToolStatus.DELETED
+		)).thenReturn(List.of(deletedTool));
+		when(toolRepository.existsActiveByProjectAndFileName(fixture.project(), "incident_recovery.py")).thenReturn(false);
+		when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> {
+			Tool savedTool = invocation.getArgument(0);
+			ReflectionTestUtils.setField(savedTool, "id", 901L);
+			return savedTool;
+		});
+
+		// When
+		toolBuildEventService.handleCompleted(event);
+
+		// Then
+		assertThat(deletedTool.getFileName()).isEqualTo("deleted_700_incident_recovery.py");
+		verify(toolRepository).save(any(Tool.class));
+		assertThat(buildRun.getStatus()).isEqualTo(ToolPlanRunStatus.COMPLETED);
+	}
+
+	@Test
+	@DisplayName("build failed event does not create a Tool and marks run/group as failed")
 	void handleFailedDoesNotCreateTool() {
 		// Given
 		TestFixture fixture = createApprovedBuildFixture();
@@ -416,6 +448,18 @@ class ToolBuildEventServiceTest {
 			.status(ToolStatus.APPROVED)
 			.build();
 		ReflectionTestUtils.setField(tool, "id", 900L);
+		return tool;
+	}
+
+	private Tool createDeletedToolWithSameFileName(TestFixture fixture) {
+		Tool tool = Tool.builder()
+			.project(fixture.project())
+			.chatSession(fixture.chatSession())
+			.createdByProjectMember(fixture.creator())
+			.fileName("incident_recovery.py")
+			.status(ToolStatus.DELETED)
+			.build();
+		ReflectionTestUtils.setField(tool, "id", 700L);
 		return tool;
 	}
 

@@ -25,6 +25,8 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 
 	List<Tool> findByProjectAndStatusNotOrderByUpdatedAtDesc(Project project, ToolStatus status);
 
+	List<Tool> findByProjectAndFileNameAndStatus(Project project, String fileName, ToolStatus status);
+
 	@Query(
 		value = """
 			select tool
@@ -106,6 +108,18 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 	Optional<Tool> findByProjectAndFileName(Project project, String fileName);
 
 	boolean existsByProjectAndFileName(Project project, String fileName);
+
+	@Query("""
+		select case when count(tool) > 0 then true else false end
+		from Tool tool
+		where tool.project = :project
+			and tool.fileName = :fileName
+			and tool.status <> com.theseus.api.domain.tool.entity.ToolStatus.DELETED
+	""")
+	boolean existsActiveByProjectAndFileName(
+		@Param("project") Project project,
+		@Param("fileName") String fileName
+	);
 
 	boolean existsByProjectAndFileNameAndStatusNot(Project project, String fileName, ToolStatus status);
 
