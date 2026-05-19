@@ -225,6 +225,8 @@ def default_generated_tool_execution_spec(plan_json: dict[str, Any]) -> dict[str
             break
     return {
         "tool_name": tool_name,
+        "permissionLevel": 1,
+        "permission_rationale": "Default least-privilege level for a generated read-only tool plan unless the approved capability requires more.",
         "validation_strategy": "core_sandbox_gate",
         "mvp_scope": [
             "Generate one Theseus custom tool as a BaseTool module.",
@@ -255,6 +257,16 @@ def collect_execution_spec_quality_warnings(
     warnings: list[str] = []
     strategy = str(execution_spec.get("validation_strategy") or "").strip()
     is_generated_sandbox_plan = generated_tool_request and strategy == "core_sandbox_gate"
+
+    if generated_tool_request:
+        permission_level = execution_spec.get("permissionLevel")
+        if permission_level is None:
+            permission_level = execution_spec.get("permission_level")
+        if permission_level is None or str(permission_level).strip() == "":
+            warnings.append(
+                "품질 보완: generated tool execution_spec.permissionLevel을 1~5 정수로 명시하면 "
+                "승인/생성 단계의 RBAC 판단이 명확해집니다."
+            )
 
     mvp_exclusions = execution_spec.get("mvp_exclusions")
     if not isinstance(mvp_exclusions, list) or not mvp_exclusions:

@@ -1205,6 +1205,16 @@ class ToolPlanPlanner:
         if tool_name:
             lines.append(f"도구 이름: `{tool_name}`")
 
+        permission_level = execution_spec.get("permissionLevel")
+        if permission_level is None:
+            permission_level = execution_spec.get("permission_level")
+        if permission_level is not None and str(permission_level).strip():
+            line = f"권한 레벨: `{str(permission_level).strip()}`"
+            rationale = str(execution_spec.get("permission_rationale") or "").strip()
+            if rationale:
+                line += f" — {rationale}"
+            lines.append(line)
+
         validation_strategy = str(execution_spec.get("validation_strategy") or "").strip()
         if validation_strategy:
             lines.append(f"검증 전략: `{validation_strategy}`")
@@ -1349,6 +1359,8 @@ class ToolPlanPlanner:
                 break
         return {
             "tool_name": tool_name,
+            "permissionLevel": 1,
+            "permission_rationale": "Default least-privilege level for a generated read-only tool plan unless the approved capability requires more.",
             "validation_strategy": "core_sandbox_gate",
             "mvp_scope": [
                 "Generate one Theseus custom tool as a BaseTool module.",
@@ -1470,6 +1482,16 @@ class ToolPlanPlanner:
         warnings: list[str] = []
         strategy = str(execution_spec.get("validation_strategy") or "").strip()
         is_generated_sandbox_plan = generated_tool_request and strategy == "core_sandbox_gate"
+
+        if generated_tool_request:
+            permission_level = execution_spec.get("permissionLevel")
+            if permission_level is None:
+                permission_level = execution_spec.get("permission_level")
+            if permission_level is None or str(permission_level).strip() == "":
+                warnings.append(
+                    "품질 보완: generated tool execution_spec.permissionLevel을 1~5 정수로 명시하면 "
+                    "승인/생성 단계의 RBAC 판단이 명확해집니다."
+                )
 
         mvp_exclusions = execution_spec.get("mvp_exclusions")
         if not isinstance(mvp_exclusions, list) or not mvp_exclusions:
