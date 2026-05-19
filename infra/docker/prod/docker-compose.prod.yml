@@ -95,7 +95,8 @@ services:
         set -eu
         mkdir -p /sandbox-temp /custom-tools /debug-dumps
         chown -R 999:999 /sandbox-temp /custom-tools /debug-dumps
-        chmod 770 /sandbox-temp /custom-tools /debug-dumps
+        chmod 770 /sandbox-temp
+        chmod 775 /custom-tools /debug-dumps
     restart: "no"
     volumes:
       - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:/sandbox-temp
