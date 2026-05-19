@@ -588,7 +588,11 @@ export class TheseusSessionManager implements vscode.Disposable {
   private async attachExistingDaemon(workspaceCwd: string, coreRoot: string, expectedPid?: number): Promise<boolean> {
     const state = this.runnerState.readDaemon(workspaceCwd, { coreRoot });
     if (!state || state.mode !== 'local-daemon' || !state.port || !state.token) return false;
-    if (expectedPid && state.pid && state.pid !== expectedPid) return false;
+    if (expectedPid && state.pid && state.pid !== expectedPid) {
+      this.output.appendLine(
+        `[Theseus] daemon runner state pid=${state.pid} differs from spawned pid=${expectedPid}; attempting authenticated attach.`,
+      );
+    }
     if (state.workspaceCwd && !sameWorkspacePath(state.workspaceCwd, workspaceCwd)) return false;
 
     const previousDaemon = this.daemon;
@@ -624,9 +628,14 @@ export class TheseusSessionManager implements vscode.Disposable {
       };
       this.applyDaemonStatus(status);
       this.clearTimers();
-      this.startHeartbeatMonitor();
-      this.setState(this.pendingInput.length ? 'waiting_input' : 'ready');
-      this.flushPendingInput();
+      this.emit(this.lastReadyEvent || {
+        type: 'RunnerReady',
+        mode: runtimeMode,
+        model: typeof status.model === 'string' ? status.model : undefined,
+        cwd: String(status.workspaceCwd || workspaceCwd),
+        session: typeof status.session === 'string' ? status.session : 'default',
+        sessionId: this.sessionId,
+      });
       this.output.appendLine(`[Theseus] attached local daemon pid=${state.pid} port=${state.port} session=${state.sessionId || 'unknown'}`);
       return true;
     } catch (err) {
@@ -833,7 +842,7 @@ export class TheseusSessionManager implements vscode.Disposable {
     }
     this.lastReadyEvent = {
       type: 'RunnerReady',
-      mode: 'local-daemon',
+      mode: this.runtimeMode,
       model: typeof status.model === 'string' ? status.model : this.lastReadyEvent?.model,
       cwd: typeof status.workspaceCwd === 'string' ? status.workspaceCwd : this.lastReadyEvent?.cwd,
       session: typeof status.session === 'string' ? status.session : this.lastReadyEvent?.session || 'default',
@@ -1092,9 +1101,12 @@ export class TheseusSessionManager implements vscode.Disposable {
     this.readyTimer = setTimeout(() => {
       if (this.state !== 'starting') return;
       this.setState('stale', { code: 'ready_timeout' });
+      const message = this.runtimeMode === 'local-daemon' || this.runtimeMode === 'bundled-daemon'
+        ? `Local daemon has not become attachable after ${Math.round(this.readyTimeoutMs / 1000)}s. The Python process is still running.`
+        : `Runner has not emitted RunnerReady after ${Math.round(this.readyTimeoutMs / 1000)}s. The Python process is still running.`;
       this.emitDiagnostic(
         'ready_timeout',
-        `Runner has not emitted RunnerReady after ${Math.round(this.readyTimeoutMs / 1000)}s. The Python process is still running.`,
+        message,
       );
     }, this.readyTimeoutMs);
   }

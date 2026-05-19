@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 168 — Background task 복구/중지 안정화 (2026-05-19)
+
+#### `theseus_engine`
+- background task manager가 실행 task의 record/log를 `THESEUS_TASK_DATA_DIR` 또는 `THESEUS_DATA_DIR/tasks` 하위에 workspace hash별로 저장하도록 확장
+- Core/runner 재시작 후에도 `task_list`, `task_get`, `task_output`, `task_stop`이 workspace 기준 persisted task record를 다시 읽어 상태와 출력 로그를 조회할 수 있도록 보강
+- task 생성 시 PID, cwd, log path, process identity를 저장하고, 중지 시 PID 재사용 여부를 확인해 다른 프로세스를 잘못 종료하지 않도록 방어
+- Windows는 `taskkill`/ctypes fallback, POSIX는 process group 기반으로 process tree를 종료하도록 정리
+- `bash` 도구에서 `nohup`, `disown`, `start-process`, `start-job`, trailing `&` 등 background 실행 패턴을 차단하고 장기 실행 프로세스는 `task_create`를 사용하도록 안내
+- `task_get`, `task_list`, `task_output`, `task_stop`이 `context.cwd`를 전달해 workspace별 task record를 조회하도록 수정
+
+#### VSCode Extension
+- local daemon attach 시 저장된 runner PID가 방금 spawn한 PID와 달라도 즉시 실패하지 않고 인증된 attach를 시도하도록 완화
+- daemon attach 성공 시 `RunnerReady` 이벤트를 명시적으로 emit하고, status 적용 시 현재 runtime mode를 유지하도록 보강
+- daemon ready timeout 메시지를 daemon/runtime 모드에 맞게 구체화
+- `Tool registry refreshed:` 상태 메시지를 일반 시스템 메시지 대신 tool panel note로 표시
+- 변경된 extension 소스를 반영해 `theseus-vscode-0.0.1.vsix`를 갱신
+
+#### 테스트
+- `tests/test_task_manager_recovery.py`를 추가해 persisted PID task stop, 죽은 PID의 `exited` 전환, PID 재사용 방어를 검증
+- `python -m py_compile theseus_engine/tasks/manager.py theseus_engine/tools/core/bash_tool.py`
+- `python -m unittest tests.test_task_manager_recovery`
+- `python -m unittest discover tests`
+
+---
+
 ### 🛠️ Session 167 — Billing outbox worker DB 세션 수명 분리 (2026-05-18)
 
 #### `src` / 설정

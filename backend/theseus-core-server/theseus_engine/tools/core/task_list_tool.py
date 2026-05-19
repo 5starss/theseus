@@ -31,7 +31,10 @@ class TaskListTool(BaseTool):
     async def execute(
         self, arguments: TaskListInput, context: ToolExecutionContext
     ) -> ToolResult:
-        tasks = get_task_manager().list_tasks(status=arguments.status)
+        tasks = get_task_manager().list_tasks(
+            status=arguments.status,
+            cwd=context.cwd,
+        )
         if not tasks:
             return ToolResult(output="(No running tasks)")
         lines = [

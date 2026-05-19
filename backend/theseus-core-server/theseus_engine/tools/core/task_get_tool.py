@@ -28,7 +28,7 @@ class TaskGetTool(BaseTool):
     async def execute(
         self, arguments: TaskGetInput, context: ToolExecutionContext
     ) -> ToolResult:
-        task = get_task_manager().get_task(arguments.task_id)
+        task = get_task_manager().get_task(arguments.task_id, cwd=context.cwd)
         if task is None:
             return ToolResult(
                 output=f"Task not found: {arguments.task_id}",

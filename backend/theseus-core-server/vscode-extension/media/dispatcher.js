@@ -206,6 +206,14 @@ export function createEventDispatcher(ctx) {
           });
           break;
         }
+        if (/^Tool registry refreshed:/i.test(event.message || '')) {
+          ctx.toolPanel.note({
+            key: 'tool-registry-refreshed',
+            label: event.message || 'Tool registry refreshed.',
+            state: 'info',
+          });
+          break;
+        }
         ctx.setGenerating(false);
         ctx.appendMessageEl('system', event.message || '', 'info');
         break;
