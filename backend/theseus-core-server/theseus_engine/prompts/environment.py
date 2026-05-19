@@ -52,7 +52,7 @@ def _get_environment_section() -> str:
         f"- Architecture: {arch}",
         f"- Shell: {shell}",
         f"- Working directory: {cwd}",
-        f"- Date: {date}",
+        f"- Date: {date} (UTC)",
         f"- Python: {python_version}",
         f"- Python executable: {python_exec}",
     ]
