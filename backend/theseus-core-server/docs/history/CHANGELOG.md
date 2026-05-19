@@ -31,6 +31,7 @@
 #### Frontend
 - ToolPlan SSE `progress` 코드(`PLAN_DRAFTING`, `PLAN_STRUCTURING` 등)를 사용자 표시용 문장으로 변환
 - PLAN 생성 중 assistant placeholder가 아직 비어 있어도 processing 로그 영역에 최신 progress 메시지가 표시되도록 보강
+- PLAN 패널에 `개요`, `보완 필요`, `검증 기준` 상위 섹션을 읽기 전용으로 작게 노출해 task field feedback UI의 과밀도를 피하면서 누락 정보를 보완
 
 #### 검증
 - `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\processor.py backend\theseus-core-server\src\tool_generation\processor.py`
