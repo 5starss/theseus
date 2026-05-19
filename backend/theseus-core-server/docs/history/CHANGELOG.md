@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 174 — PLAN Draft JSON structured output 옵션 추가 (2026-05-19)
+
+#### `src` / `theseus_engine`
+- 현재 PLAN Drafting prompt의 JSON 예시 형태를 canonical schema로 분리하고, 마지막 PLAN 합성 단계에서 raw JSON structured output을 시도하도록 보강
+- `ApiMessageRequest`에 `response_format` / `extra_body` 옵션을 추가하고 OpenAI-compatible/vLLM 요청에 전달해 `json_schema` 또는 `structured_outputs` 기반 고정 JSON 출력을 사용할 수 있게 함
+- PLAN research/tool loop는 그대로 유지하고, 최종 formatter call은 `tools=[]`로 호출해 structured output이 tool call을 방해하지 않도록 분리
+- `CORE_TOOL_PLAN_STRUCTURED_OUTPUT_MODE=auto|response_format|vllm_structured_outputs|strict|off` 설정을 추가하고 `.env.example`에 운영 모드 설명을 기록
+
+#### 테스트
+- `tests/test_plan_structured_output.py`를 추가해 PLAN schema 주요 필드, OpenAI-compatible structured output 파라미터 전달, raw JSON/Markdown JSON 파싱을 검증
+
+---
+
 ### 🛠️ Session 173 — Prompt 정책 정합성 및 예시 편향 축소 (2026-05-19)
 
 #### `theseus_engine`

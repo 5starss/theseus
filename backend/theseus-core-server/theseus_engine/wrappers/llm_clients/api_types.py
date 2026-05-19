@@ -48,6 +48,8 @@ class ApiMessageRequest:
     max_tokens: int = 4096
     tools: list[dict[str, Any]] = field(default_factory=list)
     debug_context: dict[str, Any] = field(default_factory=dict)
+    response_format: dict[str, Any] | None = None
+    extra_body: dict[str, Any] | None = None
 
 
 # ── Stream Events ─────────────────────────────────────────────
