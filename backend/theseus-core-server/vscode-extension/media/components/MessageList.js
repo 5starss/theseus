@@ -25,6 +25,16 @@ export function isTransientSystemText(text) {
     'Prompt too long; compacting and retrying',
     'View > Output > "Theseus"',
     'Settings changed.',
+    'Custom tool validation',
+    'Custom tool dependency install',
+    'Dependency installation',
+    'Installed dependencies:',
+    'Tool registry refreshed',
+    'Change review updated',
+    '되돌릴 파일',
+    'Dependency installation cancelled',
+    'No install candidates',
+    'Python path is not explicitly configured',
   ].some(fragment => value.includes(fragment));
 }
 

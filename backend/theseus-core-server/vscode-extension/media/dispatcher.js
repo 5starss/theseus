@@ -147,11 +147,13 @@ export function createEventDispatcher(ctx) {
 
       case 'RunnerExited':
         ctx.applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'exited', state: 'exited' });
+        ctx.setGenerating(false);
         ctx.appendTransientMessage('system', 'Runner stopped.', 'warn');
         break;
 
       case 'RunnerStopped':
         ctx.applyRunnerStatus({ ...event, type: 'RunnerStatus', running: false, processRunning: false, lifecycle: 'stopped', state: 'stopped' });
+        ctx.setGenerating(false);
         ctx.appendTransientMessage('system', 'Runner stopped gracefully.', 'warn');
         break;
 
@@ -358,11 +360,26 @@ export function createEventDispatcher(ctx) {
       }
 
       case 'customToolValidation':
-        ctx.appendMessageEl('system', event.message || '', event.success ? 'info' : 'warn');
+        ctx.toolPanel.note({
+          key: `custom-tool-validation:${event.message || ''}`,
+          label: event.message || 'Custom tool validation updated.',
+          state: event.success ? 'info' : 'error',
+        });
+        if (!event.success) {
+          ctx.appendTransientMessage('system', event.message || 'Custom tool validation failed.', 'warn', 5000);
+        }
         break;
 
       case 'customToolInstallProgress':
-        ctx.appendMessageEl('system', event.message || 'Custom tool dependency install updated.', event.success ? 'info' : 'warn');
+        ctx.toolPanel.note({
+          key: `custom-tool-install:${Array.isArray(event.packages) ? event.packages.join(',') : event.message || 'install'}`,
+          label: event.message || 'Custom tool dependency install updated.',
+          detail: Array.isArray(event.packages) && event.packages.length ? event.packages.join(', ') : '',
+          state: event.success ? 'info' : 'error',
+        });
+        if (!event.success) {
+          ctx.appendTransientMessage('system', event.message || 'Custom tool dependency install failed.', 'warn', 5000);
+        }
         if (!event.success) ctx.vscode.postMessage({ type: 'getCustomTools' });
         break;
 
@@ -379,7 +396,14 @@ export function createEventDispatcher(ctx) {
         if (event.id) ctx.changeReviews = ctx.changeReviews.filter(item => item.id !== event.id);
         ctx.persistState();
         ctx.renderChangeReviewPanel();
-        ctx.appendMessageEl('system', event.message || 'Change review updated.', event.success === false ? 'warn' : 'info');
+        ctx.toolPanel.note({
+          key: `change-review:${event.id || event.path || event.message || 'updated'}`,
+          label: event.message || 'Change review updated.',
+          state: event.success === false ? 'error' : 'info',
+        });
+        if (event.success === false) {
+          ctx.appendTransientMessage('system', event.message || 'Change review failed.', 'warn', 5000);
+        }
         break;
 
       case 'assetSaved':
@@ -392,12 +416,20 @@ export function createEventDispatcher(ctx) {
         break;
 
       case 'settingsChanged':
-        ctx.appendMessageEl(
+        ctx.toolPanel.note({
+          key: 'settings-changed',
+          label: event.restartRequired
+            ? 'Settings changed. Restart Theseus to apply them.'
+            : 'Settings changed. They will apply on the next Start.',
+          state: 'info',
+        });
+        ctx.appendTransientMessage(
           'system',
           event.restartRequired
             ? 'Settings changed. Restart Theseus to apply them.'
             : 'Settings changed. They will apply on the next Start.',
           'warn',
+          5000,
         );
         break;
 
