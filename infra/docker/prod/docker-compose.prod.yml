@@ -150,8 +150,8 @@ services:
       CORE_KAFKA_BOOTSTRAP_SERVERS: theseus-prod-kafka:29092
       DOCKER_HOST: unix:///var/run/docker.sock
       THESEUS_DATA_DIR: ${THESEUS_DATA_DIR:-/home/appuser/.theseus/data}
-      THESEUS_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools
-      THESEUS_PROJECT_CUSTOM_TOOLS_DIR: /backend/theseus-core-server/theseus_engine/custom_tools/projects
+      THESEUS_CUSTOM_TOOLS_DIR: /custom-tools
+      THESEUS_PROJECT_CUSTOM_TOOLS_DIR: /custom-tools
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-theseus-sandbox:py311-tools}
       SANDBOX_HOST_TEMP_ROOT: ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
       SANDBOX_CONTAINER_TEMP_ROOT: ${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
@@ -165,7 +165,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${SANDBOX_HOST_TEMP_ROOT:-/tmp/theseus-sandbox-shared}:${SANDBOX_CONTAINER_TEMP_ROOT:-/tmp/theseus-sandbox-shared}
-      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/backend/theseus-core-server/theseus_engine/custom_tools/projects
+      - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/custom-tools
       - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/var/log/theseus/debug/dumps
       - ${REMOTE_WORKSPACE_KEY_HOST_PATH:-/secure/theseus/keys/ssafy-ec2-key.pem}:/home/appuser/.ssh/ssafy-ec2-key.pem:ro
     ports:
