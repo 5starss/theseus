@@ -58,6 +58,14 @@ _DEFAULT_PROJECT_CUSTOM_TOOLS_DIR = (
 MAX_EXISTING_CUSTOM_TOOLS_IN_PROMPT = 20
 MAX_EXISTING_TOOL_FIELD_LENGTH = 800
 
+_PLAN_PROGRESS_CHUNK_MESSAGES = {
+    "PLAN_DRAFTING": "PLAN 초안을 작성하고 있습니다.\n",
+    "PLAN_STRUCTURING": "PLAN 구조를 정규화하고 표시 형식으로 정리하고 있습니다.\n",
+    "PLAN_FEEDBACK": "검증 결과를 바탕으로 사용자 안내를 준비하고 있습니다.\n",
+    "PLAN_VALIDATING": "PLAN 스냅샷과 실행 명세를 검증하고 있습니다.\n",
+    "PLAN_COMPLETED": "PLAN 초안이 준비되었습니다.\n",
+}
+
 _CUSTOM_TOOL_SECURITY_RULES = """\
 Generated Theseus custom tool security rules:
 - Do not import or call subprocess, os.system, os.popen, shutil, socket, ctypes,
@@ -439,10 +447,12 @@ class ToolPlanPlanner:
         *,
         progress_callback: ProgressCallback | None = None,
         chunk_callback: ChunkCallback | None = None,
+        status_chunk_callback: ChunkCallback | None = None,
         checkpoint: dict | None = None,
         checkpoint_callback: CheckpointCallback | None = None,
     ) -> ToolPlanResult | ToolPlanSkippedResult:
         await self._emit_progress(progress_callback, "PLAN_DRAFTING", 10)
+        await self._emit_status_chunk(status_chunk_callback, "PLAN_DRAFTING")
         remote_workspace = await resolve_remote_workspace_config(
             project_id=event.project_id,
             remote_workspace_id=event.remote_workspace_id,
@@ -460,10 +470,12 @@ class ToolPlanPlanner:
         _raw_markdown, structured_plan = generated
 
         await self._emit_progress(progress_callback, "PLAN_STRUCTURING", 75)
+        await self._emit_status_chunk(status_chunk_callback, "PLAN_STRUCTURING")
         try:
             validation_warnings = self._validate_execution_spec_if_required(structured_plan, event)
         except ToolPlanPlannerError as exc:
             await self._emit_progress(progress_callback, "PLAN_FEEDBACK", 95)
+            await self._emit_status_chunk(status_chunk_callback, "PLAN_FEEDBACK")
             feedback = await self._generate_validation_failure_feedback(
                 event,
                 structured_plan=structured_plan,
@@ -486,8 +498,10 @@ class ToolPlanPlanner:
         display_markdown = self._build_markdown(snapshot)
 
         await self._emit_progress(progress_callback, "PLAN_VALIDATING", 90)
+        await self._emit_status_chunk(status_chunk_callback, "PLAN_VALIDATING")
         self._validate_snapshot(snapshot)
         await self._emit_progress(progress_callback, "PLAN_COMPLETED", 100)
+        await self._emit_status_chunk(status_chunk_callback, "PLAN_COMPLETED")
 
         return ToolPlanResult(
             rawMarkdown=display_markdown,
@@ -2048,6 +2062,10 @@ class ToolPlanPlanner:
         result = callback(message, rate)
         if result is not None:
             await result
+
+    async def _emit_status_chunk(self, callback: ChunkCallback | None, message: str) -> None:
+        content = _PLAN_PROGRESS_CHUNK_MESSAGES.get(message, "")
+        await self._emit_chunk(callback, content)
 
     async def _emit_chunk(self, callback: ChunkCallback | None, content: str) -> None:
         if callback is None or not content:
