@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 179 — Theseus prompt 최소 톤 지침 재정리 (2026-05-19)
+
+#### `theseus_engine`
+- `S14P31A308-429`의 세부 persona/명명 의도/감정 톤 지침을 걷어내고, 공통 system prompt를 커밋 이전 구조에 가깝게 복원
+- 최소 지침으로 `professional, analytical AI agent` 정체성과 사용자 최신 언어를 따르는 언어 중립 응답 원칙만 추가
+
+#### 테스트
+- `tests/test_prompt_rendering.py`에 최소 분석형 agent 지침과 사용자 최신 언어 추종 원칙만 검증하도록 회귀 테스트를 조정
+- ASK/AGENT/PLAN/COORDINATOR 렌더링 prompt에 특정 언어 예시가 직접 포함되지 않도록 회귀 검증을 추가
+
+---
+
 ### 🛠️ Session 178 — 서버 민감 도구 자동 승인 정책 설정 추가 (2026-05-19)
 
 #### `src`
