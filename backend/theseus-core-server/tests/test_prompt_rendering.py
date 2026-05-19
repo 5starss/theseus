@@ -39,6 +39,29 @@ class PromptRenderingTest(unittest.TestCase):
         self.assertIn("generated tool's required permission level", prompt)
         self.assertIn("not as disclosure of the user's own RBAC level", prompt)
 
+    def test_persona_guidance_is_shared_across_core_modes(self) -> None:
+        prompts = [
+            build_system_prompt(mode=AgentMode.ASK, available_tools=[]),
+            build_system_prompt(mode=AgentMode.AGENT, available_tools=[]),
+            build_system_prompt(
+                mode=AgentMode.PLAN,
+                plan_phase=PlanPhase.DRAFTING,
+                available_tools=[],
+            ),
+        ]
+
+        for prompt in prompts:
+            with self.subTest(prompt=prompt[:40]):
+                self.assertIn("# Identity / Product Persona", prompt)
+                self.assertIn("Theseus AI, the enterprise", prompt)
+                self.assertIn("create, modify, replace, and evolve tools", prompt)
+                self.assertIn("Do not invent mythological or philosophical rationale", prompt)
+                self.assertIn("authoritative context", prompt)
+                self.assertIn("professional honorific language", prompt)
+                self.assertIn("Do NOT use emoji", prompt)
+                self.assertIn("Avoid jokes, excessive exclamation", prompt)
+                self.assertIn("Do NOT evaluate or flatter", prompt)
+
     def test_tool_use_prompt_distinguishes_tools_from_shell_commands(self) -> None:
         self.assertIn("use the `glob` tool instead of shell `find` or `ls`", TOOL_USE_CAPABILITY_PROMPT)
         self.assertIn("use the `grep` tool instead of shell `grep` or `rg`", TOOL_USE_CAPABILITY_PROMPT)

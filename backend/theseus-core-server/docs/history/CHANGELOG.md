@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 177 — Theseus persona prompt 공통 지침 보강 (2026-05-19)
+
+#### `theseus_engine`
+- ASK/AGENT/PLAN 공통 system prompt에 Theseus AI의 제품 정체성, 현재 mode/tool schema 기반 역할 설명, 제품명 의도 추측 금지 지침을 추가
+- 한국어 응답의 사무적 존댓말, 이모지/농담/과한 감탄 배제, 사용자 의견 평가/칭찬 표현 금지 등 persona tone 정책을 공통 prompt에 명시
+
+#### 테스트
+- `tests/test_prompt_rendering.py`에 ASK/AGENT/PLAN 공통 prompt가 persona와 tone 지침을 포함하는지 검증하는 회귀 테스트를 추가
+
+---
+
 ### 🛠️ Session 176 — Custom tool registry/inventory 정합성 보강 (2026-05-19)
 
 #### `theseus_engine`
