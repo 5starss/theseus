@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Copy, Check, CheckCircle } from 'lucide-react';
+import { Copy, Check, CheckCircle, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
 import type { ChatMessage } from '../../types/chat';
 
@@ -10,7 +10,90 @@ interface MessageItemProps {
   isLoadingDots: boolean;
 }
 
-export function MessageItem({ msg, isLast, isGenerating, isLoadingDots }: MessageItemProps) {
+interface ToolExecutionNotice {
+  noticeType: 'TOOL_EXECUTION_STARTED' | 'TOOL_EXECUTION_COMPLETED' | 'TOOL_EXECUTION_FAILED';
+  toolName: string;
+  toolUseId: string;
+  toolInput?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  status?: string;
+}
+
+function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const isStarted = notice.noticeType === 'TOOL_EXECUTION_STARTED';
+  const isCompleted = notice.noticeType === 'TOOL_EXECUTION_COMPLETED';
+  const isFailed = notice.noticeType === 'TOOL_EXECUTION_FAILED';
+
+  return (
+    <div className="flex flex-col gap-2 w-full text-slate-300 font-sans">
+      <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)]">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className={`p-1.5 rounded-md shrink-0 ${isStarted ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+              isCompleted ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                'bg-red-500/10 text-red-400 border border-red-500/20'
+            }`}>
+            {isStarted && <Play className="w-3.5 h-3.5 animate-pulse" />}
+            {isCompleted && <CheckCircle2 className="w-3.5 h-3.5" />}
+            {isFailed && <AlertTriangle className="w-3.5 h-3.5" />}
+          </div>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold font-['Space_Grotesk']">
+              {isStarted ? 'Tool Execution Started' : isCompleted ? 'Tool Execution Completed' : 'Tool Execution Failed'}
+            </span>
+            <span className="text-xs font-bold text-slate-200 truncate">
+              도구 호출: <code className="text-blue-400 px-1 py-0.5 bg-blue-950/40 rounded border border-blue-800/30 text-[11px] font-mono">{notice.toolName}</code>
+            </span>
+          </div>
+        </div>
+
+        {(notice.toolInput || notice.output || notice.error) && (
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 rounded px-2 py-1 cursor-pointer transition-all active:scale-95 shrink-0"
+          >
+            <span>{isOpen ? 'Close' : 'Details'}</span>
+            {isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+        )}
+      </div>
+
+      {isOpen && (
+        <div className="flex flex-col gap-2.5 p-3 rounded-lg bg-[#0c1322] border border-slate-800/80 animate-fade-in font-mono text-[11px] leading-relaxed max-w-full overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]">
+          {notice.toolInput && (
+            <div className="flex flex-col gap-1 max-w-full">
+              <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Input Arguments</span>
+              <pre className="p-2 rounded bg-slate-950/40 text-blue-300 border border-slate-900/60 overflow-x-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(notice.toolInput, null, 2)}
+              </pre>
+            </div>
+          )}
+
+          {isCompleted && notice.output && (
+            <div className="flex flex-col gap-1 max-w-full">
+              <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Execution Output</span>
+              <pre className="p-2 rounded bg-slate-950/40 text-slate-400 border border-slate-900/60 overflow-x-auto max-h-[250px] overflow-y-auto whitespace-pre-wrap break-all">
+                {notice.output}
+              </pre>
+            </div>
+          )}
+
+          {isFailed && notice.error && (
+            <div className="flex flex-col gap-1 max-w-full">
+              <span className="text-[9px] text-red-400/80 uppercase tracking-wider font-bold">Error Output</span>
+              <pre className="p-2 rounded bg-red-950/10 text-red-300 border border-red-950/20 overflow-x-auto whitespace-pre-wrap break-all">
+                {notice.error}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function MessageItem({ msg, isLoadingDots }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -23,9 +106,23 @@ export function MessageItem({ msg, isLast, isGenerating, isLoadingDots }: Messag
     }
   };
 
+  const isToolNotice = (() => {
+    if (msg.content.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(msg.content);
+        return !!(parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_'));
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  })();
+
+  const isMessageLoading = msg.senderType === 'ASSISTANT' && !msg.content.trim();
+
   const renderContent = () => {
     if (msg.senderType === 'ASSISTANT') {
-      if (!msg.content && isLast && isGenerating) {
+      if (isMessageLoading) {
         return (
           <div className="flex items-center gap-1.5 py-2 px-1">
             <div className="w-1.5 h-1.5 bg-blue-400/60 rounded-full animate-bounce" />
@@ -37,10 +134,15 @@ export function MessageItem({ msg, isLast, isGenerating, isLoadingDots }: Messag
       return <MarkdownViewer content={msg.content} />;
     }
 
-    // TOOL_FEEDBACK 타입이거나 내용이 JSON 형태인 경우 파싱 시도
-    if (msg.messageType === 'TOOL_FEEDBACK' || msg.content.trim().startsWith('{')) {
+    if (msg.content.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(msg.content);
+
+        if (parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_')) {
+          const notice = parsed as ToolExecutionNotice;
+          return <ToolExecutionNoticeView notice={notice} />;
+        }
+
         if (parsed.feedbackItems && Array.isArray(parsed.feedbackItems)) {
           return (
             <div className="space-y-1">
@@ -86,16 +188,19 @@ export function MessageItem({ msg, isLast, isGenerating, isLoadingDots }: Messag
     return <div className="whitespace-pre-wrap leading-relaxed text-[15px] break-words">{msg.content}</div>;
   };
 
-  const showCopyButton = msg.content && !isLoadingDots && (msg.senderType === 'USER' || msg.senderType === 'ASSISTANT');
+  const showCopyButton = msg.content && !isLoadingDots && !isMessageLoading && (msg.senderType === 'USER' || msg.senderType === 'ASSISTANT');
 
   return (
     <div className={`flex ${msg.senderType === 'USER' ? 'justify-end' : 'justify-start'}`}>
-      <div className={`relative group max-w-[70%] ${isLoadingDots ? 'px-4 py-2' : 'p-4'} rounded-lg overflow-x-auto ${msg.senderType === 'USER'
-        ? 'bg-slate-700 text-slate-100 shadow-md'
-        : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM' ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
-          : `bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] ${isLoadingDots ? 'w-fit' : 'w-full'}`
+      <div className={`relative group max-w-[75%] ${isLoadingDots || isMessageLoading ? 'px-4 py-2' : 'p-4'} rounded-lg overflow-x-auto ${msg.senderType === 'USER'
+          ? 'bg-slate-700 text-slate-100 shadow-md'
+          : isToolNotice
+            ? 'bg-slate-900/30 border border-slate-800/60 text-slate-300 w-full shadow-lg'
+            : msg.senderType === 'SYSTEM_NOTICE' || msg.senderType === 'SYSTEM'
+              ? 'bg-slate-800/50 border border-slate-700 text-slate-400 text-xs italic text-center mx-auto'
+              : `bg-[#1c2b3c] border-l-2 border-[#a4c9ff] text-[#d4e4fa] ${isLoadingDots || isMessageLoading ? 'w-fit' : 'w-full'}`
         }`}>
-        
+
         {showCopyButton && (
           <button
             onClick={handleCopy}

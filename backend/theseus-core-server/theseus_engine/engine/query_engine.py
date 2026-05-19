@@ -49,10 +49,13 @@ from theseus_engine.engine.stream_events import (
     ToolExecutionStarted,
     extract_plan_json,
 )
-from theseus_engine.engine.agent_loop_control import (
+from theseus_engine.engine.loop_decision import (
     AGENT_AUTO_CONTINUE_MAX,
     AUTO_CONTINUE_PROMPT,
-    should_auto_continue_after_assistant,
+    LoopContinuationDecision,
+    LoopDecisionContext,
+    decide_loop_continuation,
+    parse_semantic_decision_payload,
 )
 from theseus_engine.engine.tool_execution_state import is_remote_workspace_tool
 from theseus_engine.skills.injection import (
@@ -901,22 +904,102 @@ def _assistant_text(message: ConversationMessage) -> str:
     )
 
 
-def _should_auto_continue_after_assistant(
+def _current_user_goal(tool_metadata: dict[str, object] | None) -> str | None:
+    if not isinstance(tool_metadata, dict):
+        return None
+    state = tool_metadata.get("task_focus_state")
+    if not isinstance(state, dict):
+        return None
+    goal = state.get("goal")
+    return str(goal) if goal else None
+
+
+def _semantic_loop_evaluator_prompt() -> str:
+    return (
+        "You classify whether an agent loop should continue after an assistant "
+        "message ended without tool calls. Return JSON only with keys: "
+        "action, confidence, reason, next_prompt. action must be one of "
+        "continue, stop, ask_user, verify, retry_tool_error. Continue only when "
+        "the assistant clearly promised immediate work that still requires a "
+        "tool or follow-up model turn. Stop when the answer appears final. "
+        "Use ask_user when the assistant requested confirmation, approval, or a choice."
+    )
+
+
+async def _semantic_loop_evaluator(
+    *,
+    context: QueryContext,
+    decision_context: LoopDecisionContext,
+    fallback: LoopContinuationDecision,
+) -> LoopContinuationDecision | None:
+    try:
+        timeout_seconds = max(
+            0.5,
+            float(os.getenv("THESEUS_AGENT_LOOP_SEMANTIC_TIMEOUT_SECONDS", "4")),
+        )
+    except (TypeError, ValueError):
+        timeout_seconds = 4.0
+    payload = {
+        "mode": decision_context.mode,
+        "plan_phase": decision_context.plan_phase,
+        "stop_reason": decision_context.stop_reason,
+        "assistant_text": decision_context.assistant_text[:2500],
+        "tool_error": decision_context.tool_error,
+        "user_goal": decision_context.user_goal,
+        "fallback": fallback.to_metadata(),
+    }
+    final_text = ""
+    request = ApiMessageRequest(
+        model=context.model,
+        messages=[
+            ConversationMessage.from_user_text(
+                "Classify this agent loop state:\n"
+                + json.dumps(payload, ensure_ascii=False, indent=2)
+            )
+        ],
+        system_prompt=_semantic_loop_evaluator_prompt(),
+        max_tokens=256,
+        tools=[],
+        debug_context={
+            **_llm_debug_context(context.tool_metadata),
+            "loop_decision_evaluator": True,
+        },
+    )
+    async with asyncio.timeout(timeout_seconds):
+        async for event in context.api_client.stream_message(request):
+            if isinstance(event, ApiMessageCompleteEvent):
+                final_text = _assistant_text(event.message)
+    return parse_semantic_decision_payload(final_text, fallback)
+
+
+async def _decide_auto_continue_after_assistant(
     *,
     context: QueryContext,
     final_message: ConversationMessage,
     stop_reason: str | None,
     tool_call_count: int,
     auto_continue_count: int,
-) -> bool:
+) -> LoopContinuationDecision:
     mode = str((context.tool_metadata or {}).get("agent_mode") or "").upper()
-    return should_auto_continue_after_assistant(
-        final_text=_assistant_text(final_message),
+    plan_phase = str((context.tool_metadata or {}).get("plan_phase") or "")
+    decision_context = LoopDecisionContext(
+        mode=mode,
+        plan_phase=plan_phase,
         stop_reason=stop_reason,
+        assistant_text=_assistant_text(final_message),
         tool_call_count=tool_call_count,
         auto_continue_count=auto_continue_count,
-        has_available_tools=bool(context.tool_registry.to_api_schema()),
-        mode=mode,
+        available_tools=bool(context.tool_registry.to_api_schema()),
+        user_goal=_current_user_goal(context.tool_metadata),
+        max_auto_continue=AGENT_AUTO_CONTINUE_MAX,
+    )
+    return await decide_loop_continuation(
+        decision_context,
+        semantic_evaluator=lambda ctx, fallback: _semantic_loop_evaluator(
+            context=context,
+            decision_context=ctx,
+            fallback=fallback,
+        ),
     )
 
 
@@ -1093,25 +1176,29 @@ async def run_query(
                 ), None
 
         if not tool_calls:
-            if _should_auto_continue_after_assistant(
+            loop_decision = await _decide_auto_continue_after_assistant(
                 context=context,
                 final_message=final_message,
                 stop_reason=final_stop_reason,
                 tool_call_count=len(tool_calls),
                 auto_continue_count=auto_continue_count,
-            ):
+            )
+            if loop_decision.should_resume:
                 auto_continue_count += 1
-                pending_auto_continue = ConversationMessage.from_user_text(AUTO_CONTINUE_PROMPT)
+                pending_auto_continue = ConversationMessage.from_user_text(
+                    loop_decision.resume_prompt or AUTO_CONTINUE_PROMPT
+                )
                 yield AgentLoopStatus(
                     phase="waiting",
                     turn=turn_count,
-                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    message="루프 판정기가 추가 진행이 필요하다고 판단해 agent loop를 이어갑니다.",
                     tool_count=0,
+                    metadata=loop_decision.to_metadata(),
                 ), usage
                 yield StatusEvent(
-                    message="도구 호출 없이 작업 진행 의도를 감지해 agent loop를 한 번 더 이어갑니다.",
+                    message="루프 판정기가 추가 진행이 필요하다고 판단해 agent loop를 이어갑니다.",
                     metadata={
-                        "reason": "assistant_pending_action_without_tool_call",
+                        **loop_decision.to_metadata(),
                         "stopReason": final_stop_reason,
                         "autoContinueCount": auto_continue_count,
                         "maxAutoContinue": AGENT_AUTO_CONTINUE_MAX,
@@ -1125,6 +1212,7 @@ async def run_query(
                         "event": HookEvent.STOP.value,
                         "stop_reason": "tool_uses_empty",
                         "model_stop_reason": final_stop_reason,
+                        "loop_decision": loop_decision.to_metadata(),
                     },
                 )
             yield AgentLoopStatus(
@@ -1132,6 +1220,7 @@ async def run_query(
                 turn=turn_count,
                 message="Agent loop completed without pending tool calls.",
                 tool_count=0,
+                metadata=loop_decision.to_metadata(),
             ), usage
             return
 

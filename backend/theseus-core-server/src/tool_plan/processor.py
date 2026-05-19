@@ -74,13 +74,15 @@ class ToolPlanProcessor:
             result = await self.planner.plan(
                 event,
                 progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
-                chunk_callback=lambda content: self.publish_chunk(event, content),
+                # Stream only the normalized Markdown plan, not raw PLAN draft deltas.
+                chunk_callback=None,
                 checkpoint=self.load_agent_checkpoint(event.run_id),
                 checkpoint_callback=lambda checkpoint: self.save_agent_checkpoint(event.run_id, checkpoint),
             )
             if isinstance(result, ToolPlanSkippedResult):
                 await self.publish_skipped(event, result.message)
                 return
+            await self.publish_markdown_chunks(event, result.raw_markdown)
             await self.publish_completed(event, result)
         except ToolPlanPublishError:
             logger.error("ToolPlan event publish failed. runId=%s", event.run_id, exc_info=True)
@@ -193,6 +195,24 @@ class ToolPlanProcessor:
             content=content,
         )
         await self.publish_event(event.run_id, chunk)
+
+    async def publish_markdown_chunks(self, event: ToolPlanRequestEvent, content: str) -> None:
+        for chunk in self._split_markdown_chunks(content):
+            await self.publish_chunk(event, chunk)
+
+    @staticmethod
+    def _split_markdown_chunks(content: str) -> list[str]:
+        lines = content.splitlines(keepends=True)
+        if len(lines) <= 4:
+            return [content] if content else []
+
+        chunks: list[str] = []
+        step = max(4, len(lines) // 3)
+        for start in range(0, len(lines), step):
+            chunk = "".join(lines[start : start + step])
+            if chunk:
+                chunks.append(chunk)
+        return chunks
 
     async def publish_completed(self, event: ToolPlanRequestEvent, result) -> None:
         completed = ToolPlanCompletedEvent(

@@ -8,6 +8,7 @@ import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.user.entity.User;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -107,6 +108,7 @@ class ToolTest {
 	void deleteChangesStatusToDeleted() {
 		// Given
 		Tool tool = createTool(null);
+		ReflectionTestUtils.setField(tool, "id", 7L);
 
 		// When
 		tool.delete();
@@ -114,6 +116,7 @@ class ToolTest {
 		// Then
 		assertThat(tool.getStatus()).isEqualTo(ToolStatus.DELETED);
 		assertThat(tool.isDeleted()).isTrue();
+		assertThat(tool.getFileName()).isEqualTo("deleted_7_sales-summary-tool");
 	}
 
 	@Test

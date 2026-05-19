@@ -4,6 +4,129 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 178 — 서버 민감 도구 자동 승인 정책 설정 추가 (2026-05-19)
+
+#### `src`
+- 서버 `/stream` 경로에서 `bash` 같은 민감 도구를 승인 없이 자동 허용할지 제어하는 `THESEUS_SERVER_SENSITIVE_TOOL_POLICY=reject|allow` 설정을 추가
+- 기본값은 기존과 동일하게 `reject`로 유지하고, `allow`일 때만 RBAC와 현재 mode tool visibility를 통과한 민감 도구의 human-confirm gate를 서버에서 자동 통과하도록 연결
+
+#### 문서 / 테스트
+- `.env.example`과 README 환경 변수 표에 서버 민감 도구 정책 설정을 추가
+- `tests/test_server_sensitive_tool_policy.py`로 기본 차단과 명시적 자동 허용 동작을 검증
+
+---
+
+### 🛠️ Session 177 — Theseus persona prompt 공통 지침 보강 (2026-05-19)
+
+#### `theseus_engine`
+- ASK/AGENT/PLAN 공통 system prompt에 Theseus AI의 제품 정체성, 현재 mode/tool schema 기반 역할 설명, 제품명 의도 추측 금지 지침을 추가
+- 한국어 응답의 사무적 존댓말, 이모지/농담/과한 감탄 배제, 사용자 의견 평가/칭찬 표현 금지 등 persona tone 정책을 공통 prompt에 명시
+
+#### 테스트
+- `tests/test_prompt_rendering.py`에 ASK/AGENT/PLAN 공통 prompt가 persona와 tone 지침을 포함하는지 검증하는 회귀 테스트를 추가
+
+---
+
+### 🛠️ Session 176 — Custom tool registry/inventory 정합성 보강 (2026-05-19)
+
+#### `theseus_engine`
+- custom tool inventory 판정과 실제 registry 로딩 기준을 통일해, `isActive=false` 또는 `status=inactive`인 tool이 UI에서는 inactive인데 runner에서는 callable로 남는 문제를 방지
+- import 실패 custom tool report의 `canInstall`을 실제 safe install 후보 존재 여부와 일치하도록 정리
+- project custom tool loader도 `load_report`를 받을 수 있게 확장해 meta 미검증, 파일 누락, import 실패, instantiate 실패 tool이 조용히 사라지지 않고 `inactive`/`unavailable` inventory로 남도록 보강
+- local runner 초기화 직후 `customToolInventoryUpdated` / `toolRegistryUpdated`를 함께 발행해 Health/Custom Tools UI가 runner ready 직후 빈 custom tool count로 보이지 않게 개선
+
+#### VSCode Extension
+- HealthPanel의 Server URL 진단에 실행 중인 daemon은 `theseus.serverUrl` 변경을 runner 재시작 후 반영한다는 안내를 포함
+
+#### 검증
+- `python -m py_compile backend/theseus-core-server/theseus_engine/daemon.py backend/theseus-core-server/theseus_engine/runner_runtime.py backend/theseus-core-server/theseus_engine/core/engine_builder.py backend/theseus-core-server/theseus_engine/tools/core/tool_factory.py`
+- `npm.cmd run compile`
+- `node --check backend/theseus-core-server/vscode-extension/media/main.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/dispatcher.js`
+
+---
+
+### 🛠️ Session 175 — PLAN 최종 Markdown 스트림 및 권한 리뷰 보정 (2026-05-19)
+
+#### `src` / 프롬프트
+- ToolPlan worker가 PLAN Drafting 중간 LLM delta를 그대로 chunk로 흘리지 않고, Core가 파싱/정규화한 최종 Markdown만 chunk 이벤트로 발행하도록 보정
+- PLAN 표시 Markdown의 실행 스펙 영역에 generated tool `permissionLevel`과 `permission_rationale`을 노출해 승인 전 권한 수준을 확인할 수 있게 정리
+- PLAN Review prompt에서 `execution_spec.permissionLevel`과 `execution_spec.permission_rationale` 필드 수정 예시를 명시해 리뷰 중 권한 보정이 가능하도록 안내
+
+#### 테스트
+- `tests/test_tool_plan_processor_chunks.py`, `tests/test_plan_display_markdown.py`, `tests/test_plan_review_permission_prompt.py`를 추가해 raw JSON chunk 차단, 권한 레벨 표시, 리뷰 prompt 필드 안내를 검증
+
+---
+
+### 🛠️ Session 174 — PLAN Draft JSON structured output 옵션 추가 (2026-05-19)
+
+#### `src` / `theseus_engine`
+- 현재 PLAN Drafting prompt의 JSON 예시 형태를 canonical schema로 분리하고, 마지막 PLAN 합성 단계에서 raw JSON structured output을 시도하도록 보강
+- `ApiMessageRequest`에 `response_format` / `extra_body` 옵션을 추가하고 OpenAI-compatible/vLLM 요청에 전달해 `json_schema` 또는 `structured_outputs` 기반 고정 JSON 출력을 사용할 수 있게 함
+- PLAN research/tool loop는 그대로 유지하고, 최종 formatter call은 `tools=[]`로 호출해 structured output이 tool call을 방해하지 않도록 분리
+- `CORE_TOOL_PLAN_STRUCTURED_OUTPUT_MODE=auto|response_format|vllm_structured_outputs|strict|off` 설정을 추가하고 `.env.example`에 운영 모드 설명을 기록
+
+#### 테스트
+- `tests/test_plan_structured_output.py`를 추가해 PLAN schema 주요 필드, OpenAI-compatible structured output 파라미터 전달, raw JSON/Markdown JSON 파싱을 검증
+
+---
+
+### 🛠️ Session 173 — Prompt 정책 정합성 및 예시 편향 축소 (2026-05-19)
+
+#### `theseus_engine`
+- RBAC prompt에서 일반 사용자 응답의 내부 권한 노출 금지와 PLAN/generated tool `execution_spec.permissionLevel` 예외를 분리해 설명하도록 정리
+- PLAN Drafting fallback capability를 실제 visibility 정책에 맞춰 read/planning 중심으로 조정하고 `bash` 기본 노출을 제거
+- PLAN Drafting JSON 예시에서 Docker/API command 세부 예시를 중립적인 generated tool schema로 축소해 unrelated tool 생성 계획이 Docker audit 형태로 끌리는 문제를 줄임
+- Coordinator DECOMPOSE는 작업 분해 JSON만 만들고, DISPATCH에서만 `agent` tool 호출을 지시하도록 phase 책임을 분리
+- tool-use 문구에서 shell command와 tool 이름을 명확히 구분하고, Environment date가 UTC 기준임을 표시
+
+#### 테스트
+- `tests/test_prompt_rendering.py`를 추가해 PLAN fallback tools, permissionLevel 예외, Coordinator phase 분리, UTC date 표시를 검증
+
+---
+
+### 🛠️ Session 172 — PLAN generated tool permissionLevel 명세 보강 (2026-05-19)
+
+#### `src` / 프롬프트
+- PLAN Drafting JSON schema의 `execution_spec`에 generated custom tool용 `permissionLevel`과 `permission_rationale` 필드를 명시하도록 보강
+- generated tool 계획은 최소 권한 원칙으로 1~5 정수 `permissionLevel`을 선택하고, BaseTool `permission_level` 및 이후 `create_tool.permission_level`과 일치해야 한다는 규칙을 추가
+- 자동 생성되는 generated tool default `execution_spec`에도 `permissionLevel=1`과 rationale을 포함하고, Markdown 표시에서 권한 레벨을 노출하도록 정리
+- generated tool 계획에서 `permissionLevel`이 누락되면 hard fail이 아니라 품질 보완 warning으로 안내하도록 회귀 테스트 추가
+
+---
+
+### 🛠️ Session 171 — vLLM served model 자동 탐색 지원 (2026-05-19)
+
+#### `theseus_engine`
+- `THESEUS_MODEL=vllm` 또는 `vllm/...` 모델 prefix를 사용할 때 OpenAI-compatible 클라이언트가 요청 전 `/v1/models`를 조회해 실제 served model id를 자동 선택하도록 보강
+- 요청 모델명이 서버의 served model 목록에 있으면 그대로 사용하고, 없으면 `THESEUS_VLLM_MODEL` / `VLLM_MODEL` 우선값 또는 첫 번째 served model id를 fallback으로 사용하도록 정리
+- vLLM 서버가 모델명 불일치로 404를 반환하는 경우 cached model id를 비우고 `/v1/models`를 다시 조회해 1회 재시도하도록 보강
+- `THESEUS_VLLM_AUTO_DISCOVER_MODEL=false`로 자동 탐색을 끌 수 있게 하고, `.env.example`에 vLLM 자동 탐색/우선 모델 설정 예시를 추가
+
+#### 테스트
+- `tests/test_openai_compat_model_discovery.py`를 추가해 `/v1/models` 응답 파싱, served model 선택 우선순위, `vllm` prefix 자동 탐색 활성화를 검증
+
+---
+
+### 🛠️ Session 170 — Agent loop 의미분석 기반 재진입 판정 (2026-05-19)
+
+#### `theseus_engine`
+- `loop_decision.py`를 추가해 QueryEngine, local runner, TUI가 공통 `LoopContinuationDecision`으로 자동 재진입 여부를 판단하도록 정리
+- 기존 `하겠습니다/읽겠습니다/잠시만`류 문구는 강제 continue가 아니라 후보 신호로 낮추고, 최종 답변/사용자 승인 요청/권한 차단 문구는 `stop` 또는 `ask_user`로 분류하도록 보강
+- `THESEUS_AGENT_LOOP_DECISION_MODE=heuristic|semantic|hybrid`와 semantic timeout 설정을 추가해 명확한 구조 신호는 즉시 처리하고 애매한 pending-action 문장만 선택적으로 evaluator를 타도록 구성
+- `AgentLoopStatus.metadata`에 loop decision, reason, confidence, trigger signals를 담아 auto-resume 원인을 추적할 수 있게 확장
+- `agent_loop_control.py`는 기존 import 호환 façade로 유지하고 새 판정기를 호출하도록 변경
+
+#### Runtime
+- `query_engine.py`의 agent loop auto-continue 판단을 공통 decision module로 교체하고, stop hook/status metadata에 판정 결과를 남기도록 보강
+- `runner_runtime.py`와 `tui_main.py`의 PLAN/AGENT auto-resume 로직도 같은 판정기를 사용하도록 맞춰 hard-coded marker 기준이 서로 갈라지지 않게 정리
+
+#### 설정/테스트
+- `.env.example`에 `THESEUS_AGENT_LOOP_DECISION_MODE`와 `THESEUS_AGENT_LOOP_SEMANTIC_TIMEOUT_SECONDS` 예시 추가
+- `tests/test_agent_loop_control.py`에 final-answer 문구, user decision, PLAN verification, tool-error recovery, semantic low-confidence 회귀 테스트 추가
+
+---
+
 ### 🛠️ Session 169 — Custom tool 삭제 후 active registry 제외 (2026-05-19)
 
 #### `src`

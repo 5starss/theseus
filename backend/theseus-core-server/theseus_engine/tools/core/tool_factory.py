@@ -669,7 +669,7 @@ def _inventory_candidate_from_meta(
     return module_name, os.path.join(custom_tools_dir, file_name), meta_path, meta
 
 
-def _tool_inventory_item(
+def _base_tool_inventory_item(
     *,
     module_name: str,
     file_path: str,
@@ -706,36 +706,88 @@ def _tool_inventory_item(
         "canEditSource": False,
     }
 
+    return item
+
+
+def _mark_tool_inventory_inactive(
+    item: Dict[str, Any],
+    message: str = "",
+) -> Dict[str, Any]:
+    item["loadState"] = "inactive"
+    item["canInstall"] = False
+    item["canRegister"] = False
+    if message:
+        item["importError"] = message
+    return item
+
+
+def _mark_tool_inventory_unavailable(
+    item: Dict[str, Any],
+    message: str,
+) -> Dict[str, Any]:
+    missing_modules = _extract_missing_modules(message)
+    install_candidates = _install_candidates(
+        dependencies=list(item.get("dependencies") or []),
+        missing_modules=missing_modules,
+    )
+    item["loadState"] = "unavailable"
+    item["importError"] = message
+    item["logDedupKey"] = _custom_tool_log_dedup_key(
+        str(item.get("modulePath") or item.get("fileName") or ""),
+        message,
+    )
+    item["missingModules"] = missing_modules
+    item["installCandidates"] = install_candidates
+    item["canInstall"] = bool(install_candidates)
+    item["canRegister"] = False
+    return item
+
+
+def _log_unavailable_inventory_item(item: Dict[str, Any]) -> None:
+    if item.get("loadState") != "unavailable":
+        return
+    message = str(item.get("importError") or "").strip()
+    file_path = str(item.get("modulePath") or "").strip()
+    if not message or not file_path:
+        return
+    item["logDedupKey"] = _log_custom_tool_load_warning(file_path, message)
+
+
+def _evaluate_tool_inventory_item(
+    *,
+    module_name: str,
+    file_path: str,
+    meta_path: str | None,
+    meta: Dict[str, Any] | None,
+) -> Tuple[Dict[str, Any], Type[BaseTool] | None]:
+    meta = meta or {}
+    item = _base_tool_inventory_item(
+        module_name=module_name,
+        file_path=file_path,
+        meta_path=meta_path,
+        meta=meta,
+    )
+
     if not item["isActive"] or item["status"] not in {"unknown", "active"}:
-        item["loadState"] = "inactive"
-        return item
+        return _mark_tool_inventory_inactive(item), None
     if _metadata_requires_sandbox(meta) and not _metadata_is_sandbox_verified(meta):
-        item["loadState"] = "inactive"
-        item["importError"] = "Project custom tool is not sandbox verified."
-        return item
+        return _mark_tool_inventory_inactive(
+            item,
+            "Project custom tool is not sandbox verified.",
+        ), None
 
     if not os.path.exists(file_path):
-        item["loadState"] = "unavailable"
-        item["importError"] = f"Missing module file: {os.path.basename(file_path)}"
-        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, item["importError"])
-        return item
+        return _mark_tool_inventory_unavailable(
+            item,
+            f"Missing module file: {os.path.basename(file_path)}",
+        ), None
 
     is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
         module_name,
         file_path,
     )
     if not is_valid or tool_class is None:
-        missing_modules = _extract_missing_modules(msg)
-        item["loadState"] = "unavailable"
-        item["importError"] = msg
-        item["logDedupKey"] = _custom_tool_log_dedup_key(file_path, msg)
-        item["missingModules"] = missing_modules
-        item["installCandidates"] = _install_candidates(
-            dependencies=dependencies,
-            missing_modules=missing_modules,
-        )
-        item["canInstall"] = bool(item["installCandidates"])
-        return item
+        return _mark_tool_inventory_unavailable(item, msg), None
 
     item["toolName"] = getattr(tool_class, "name", item["toolName"])
     item["permissionLevel"] = getattr(
@@ -746,6 +798,22 @@ def _tool_inventory_item(
     item["status"] = "active"
     item["canRegister"] = True
     item["canEditSource"] = item["sandboxVerified"]
+    return item, tool_class
+
+
+def _tool_inventory_item(
+    *,
+    module_name: str,
+    file_path: str,
+    meta_path: str | None,
+    meta: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    item, _tool_class = _evaluate_tool_inventory_item(
+        module_name=module_name,
+        file_path=file_path,
+        meta_path=meta_path,
+        meta=meta,
+    )
     return item
 
 
@@ -845,108 +913,45 @@ def load_custom_tools(
             file_path = os.path.join(custom_tools_dir, filename)
             meta_path = os.path.join(custom_tools_dir, f"{module_name}.meta.json")
             meta = _read_tool_meta(meta_path)
-            dependencies = [
-                dep
-                for dep in (_safe_dependency_name(item) for item in meta.get("dependencies", []) or [])
-                if dep
-            ]
 
-            is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
-                module_name, file_path
+            report_item, tool_class = _evaluate_tool_inventory_item(
+                module_name=module_name,
+                file_path=file_path,
+                meta_path=meta_path,
+                meta=meta,
             )
-            if is_valid and tool_class is not None:
-                try:
-                    instance = tool_class()
-                    registry.register(instance)
-                    loaded.append(tool_class.name)
-                    if load_report is not None:
-                        load_report.append({
-                            "toolName": tool_class.name,
-                            "fileName": filename,
-                            "moduleName": module_name,
-                            "modulePath": os.path.abspath(file_path),
-                            "metadataPath": os.path.abspath(meta_path),
-                            "permissionLevel": getattr(
-                                tool_class,
-                                "permission_level",
-                                DEFAULT_PERMISSION_LEVEL,
-                            ),
-                            "status": "active",
-                            "isActive": True,
-                            "loadState": "available",
-                            "dependencies": dependencies,
-                            "missingModules": [],
-                            "installCandidates": [],
-                            "importError": "",
-                            "canInstall": False,
-                            "canRegister": True,
-                        })
-
-                    # 툴의 permission_level을 RBAC 맵에 자동 등록
-                    level = getattr(
-                        tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL
-                    )
-                    if tool_permissions is not None:
-                        tool_permissions[tool_class.name] = level
-                        log.info(
-                            "Custom tool loaded: %s (level=%d, file=%s)",
-                            tool_class.name, level, file_path,
-                        )
-
-                    # meta.json 정규화 (누락·이름 오류 교정)
-                    normalize_tool_meta(meta_path, tool_class, module_name)
-
-                except Exception as e:
-                    msg = str(e)
-                    log_key = _log_custom_tool_load_warning(file_path, msg)
-                    if load_report is not None:
-                        missing_modules = _extract_missing_modules(msg)
-                        load_report.append({
-                            "toolName": module_name,
-                            "fileName": filename,
-                            "moduleName": module_name,
-                            "modulePath": os.path.abspath(file_path),
-                            "metadataPath": os.path.abspath(meta_path),
-                            "permissionLevel": "",
-                            "status": "unknown",
-                            "isActive": True,
-                            "loadState": "unavailable",
-                            "dependencies": dependencies,
-                            "missingModules": missing_modules,
-                            "installCandidates": _install_candidates(
-                                dependencies=dependencies,
-                                missing_modules=missing_modules,
-                            ),
-                            "importError": msg,
-                            "logDedupKey": log_key,
-                            "canInstall": bool(missing_modules),
-                            "canRegister": False,
-                        })
-            else:
-                log_key = _log_custom_tool_load_warning(file_path, msg)
+            if report_item.get("loadState") != "available" or tool_class is None:
+                _log_unavailable_inventory_item(report_item)
                 if load_report is not None:
-                    missing_modules = _extract_missing_modules(msg)
-                    load_report.append({
-                        "toolName": module_name,
-                        "fileName": filename,
-                        "moduleName": module_name,
-                        "modulePath": os.path.abspath(file_path),
-                        "metadataPath": os.path.abspath(meta_path),
-                        "permissionLevel": "",
-                        "status": "unknown",
-                        "isActive": True,
-                        "loadState": "unavailable",
-                        "dependencies": dependencies,
-                        "missingModules": missing_modules,
-                        "installCandidates": _install_candidates(
-                            dependencies=dependencies,
-                            missing_modules=missing_modules,
-                        ),
-                        "importError": msg,
-                        "logDedupKey": log_key,
-                        "canInstall": bool(missing_modules),
-                        "canRegister": False,
-                    })
+                    load_report.append(report_item)
+                continue
+
+            try:
+                instance = tool_class()
+                registry.register(instance)
+                loaded.append(tool_class.name)
+                if load_report is not None:
+                    load_report.append(report_item)
+
+                # 툴의 permission_level을 RBAC 맵에 자동 등록
+                level = getattr(
+                    tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL
+                )
+                if tool_permissions is not None:
+                    tool_permissions[tool_class.name] = level
+                    log.info(
+                        "Custom tool loaded: %s (level=%d, file=%s)",
+                        tool_class.name, level, file_path,
+                    )
+
+                # meta.json 정규화 (누락·이름 오류 교정)
+                normalize_tool_meta(meta_path, tool_class, module_name)
+
+            except Exception as e:
+                _mark_tool_inventory_unavailable(report_item, str(e))
+                _log_unavailable_inventory_item(report_item)
+                if load_report is not None:
+                    load_report.append(report_item)
 
     return loaded
 
@@ -955,6 +960,7 @@ def load_custom_tools_for_project(
     registry: ToolRegistry,
     project_id: str,
     tool_permissions: Optional[Dict[str, int]] = None,
+    load_report: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """프로젝트 격리 경로에서 커스텀 툴을 로드합니다.
 
@@ -991,25 +997,33 @@ def load_custom_tools_for_project(
         return loaded
 
     seen_files: Set[str] = set()
-    candidates: List[Tuple[str, str, Optional[Dict[str, Any]]]] = []
+    candidates: List[Tuple[str, str, str | None, Optional[Dict[str, Any]], str]] = []
 
     for filename in sorted(os.listdir(project_dir)):
         if not filename.endswith(".meta.json") or filename.startswith("_"):
             continue
         meta_path = os.path.join(project_dir, filename)
+        fallback_stem = filename.removesuffix(".meta.json")
         try:
             with open(meta_path, encoding="utf-8") as f:
                 meta = json.load(f)
         except Exception as exc:
             log.warning("Failed to read project tool meta %s: %s", meta_path, exc)
+            seen_files.add(os.path.normcase(f"{fallback_stem}.py"))
+            candidates.append((
+                fallback_stem,
+                f"{fallback_stem}.py",
+                meta_path,
+                None,
+                f"Project custom tool metadata cannot be read: {exc}",
+            ))
             continue
 
-        fallback_stem = filename.removesuffix(".meta.json")
         file_name = os.path.basename(str(meta.get("fileName") or f"{fallback_stem}.py"))
         if not file_name.endswith(".py") or file_name.startswith("_"):
             file_name = f"{fallback_stem}.py"
         module_name = str(meta.get("moduleName") or file_name[:-3]).strip() or file_name[:-3]
-        candidates.append((module_name, file_name, meta))
+        candidates.append((module_name, file_name, meta_path, meta, ""))
         seen_files.add(os.path.normcase(file_name))
 
     for filename in sorted(os.listdir(project_dir)):
@@ -1017,43 +1031,76 @@ def load_custom_tools_for_project(
             continue
         if os.path.normcase(filename) in seen_files:
             continue
-        candidates.append((filename[:-3], filename, None))
+        candidates.append((
+            filename[:-3],
+            filename,
+            None,
+            None,
+            "Project custom tool requires trusted metadata.",
+        ))
 
-    for module_name, filename, meta in candidates:
+    for module_name, filename, meta_path, meta, meta_error in candidates:
         file_path = os.path.join(project_dir, filename)
+        report_item = _base_tool_inventory_item(
+            module_name=module_name,
+            file_path=file_path,
+            meta_path=meta_path,
+            meta=meta or {},
+        )
         if not os.path.exists(file_path):
+            _mark_tool_inventory_unavailable(
+                report_item,
+                f"Missing module file: {os.path.basename(file_path)}",
+            )
+            _log_unavailable_inventory_item(report_item)
+            if load_report is not None:
+                load_report.append(report_item)
             continue
 
         # ── meta.json active 체크 ────────────────────────────
-        if meta is not None:
-            if not _metadata_is_sandbox_verified(meta):
-                log.info(
-                    "Skipped inactive or unverified project tool: %s "
-                    "(status=%s isActive=%s validationSuccess=%s sandboxSuccess=%s)",
-                    module_name,
-                    meta.get("status"),
-                    meta.get("isActive"),
-                    (meta.get("validationResult") or {}).get("success"),
-                    (meta.get("sandboxResult") or {}).get("success"),
-                )
-                continue
-        else:
+        if meta is None:
+            _mark_tool_inventory_inactive(report_item, meta_error)
             log.info("Skipped project tool without trusted metadata: %s", module_name)
+            if load_report is not None:
+                load_report.append(report_item)
+            continue
+        if not _metadata_is_sandbox_verified(meta):
+            _mark_tool_inventory_inactive(
+                report_item,
+                "Project custom tool is not sandbox verified.",
+            )
+            log.info(
+                "Skipped inactive or unverified project tool: %s "
+                "(status=%s isActive=%s validationSuccess=%s sandboxSuccess=%s)",
+                module_name,
+                meta.get("status"),
+                meta.get("isActive"),
+                (meta.get("validationResult") or {}).get("success"),
+                (meta.get("sandboxResult") or {}).get("success"),
+            )
+            if load_report is not None:
+                load_report.append(report_item)
             continue
 
         # ── 코드 검증 + 로드 ─────────────────────────────────
-        is_valid, msg, tool_class = ToolValidator.validate_and_load_module(
-            module_name,
-            file_path,
+        report_item, tool_class = _evaluate_tool_inventory_item(
+            module_name=module_name,
+            file_path=file_path,
+            meta_path=meta_path,
+            meta=meta,
         )
-        if not is_valid or tool_class is None:
-            log.warning("Skipped invalid project tool %s: %s", filename, msg)
+        if report_item.get("loadState") != "available" or tool_class is None:
+            _log_unavailable_inventory_item(report_item)
+            if load_report is not None:
+                load_report.append(report_item)
             continue
 
         try:
             instance = tool_class()
             registry.register(instance)
             loaded.append(tool_class.name)
+            if load_report is not None:
+                load_report.append(report_item)
 
             level = getattr(tool_class, "permission_level", DEFAULT_PERMISSION_LEVEL)
             if tool_permissions is not None:
@@ -1067,7 +1114,10 @@ def load_custom_tools_for_project(
                 filename,
             )
         except Exception as exc:
-            log.warning("Failed to instantiate project tool %s: %s", filename, exc)
+            _mark_tool_inventory_unavailable(report_item, str(exc))
+            _log_unavailable_inventory_item(report_item)
+            if load_report is not None:
+                load_report.append(report_item)
 
     return loaded
 

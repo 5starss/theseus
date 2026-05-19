@@ -23,6 +23,7 @@ from theseus_engine.wrappers.llm_clients.api_types import (
 from theseus_engine.wrappers.llm_clients.anthropic_client import TheseusAnthropicClient
 from theseus_engine.wrappers.llm_clients.openai_compat_client import (
     TheseusOpenAICompatClient,
+    _apply_openai_request_options,
     _convert_messages_to_openai,
     _convert_tools_to_openai,
     _token_limit_param_for_model,
@@ -90,6 +91,13 @@ def _looks_like_placeholder_api_key(value: str) -> bool:
     )
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class TheseusGeminiClient(TheseusOpenAICompatClient):
     """OpenAICompatibleClient that preserves Gemini's ``extra_content``
     (thought_signature) across multi-turn tool-calling conversations.
@@ -120,6 +128,7 @@ class TheseusGeminiClient(TheseusOpenAICompatClient):
         if openai_tools:
             params["tools"] = openai_tools
             params.pop("stream_options", None)
+        _apply_openai_request_options(params, request)
 
         # --- DEBUG: Dump final params sent to Gemini ---
         dump_debug_payload(
@@ -291,11 +300,21 @@ class TheseusLLMClient(SupportsStreamingMessages):
             )
 
         # 5. vLLM / Custom OpenAI Compatible
-        elif model_lower.startswith("vllm/"):
+        elif model_lower == "vllm" or model_lower.startswith("vllm/"):
             base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
             api_key = os.getenv("OPENAI_API_KEY", "vllm")
             return TheseusOpenAICompatClient(
-                api_key=api_key, base_url=base_url, timeout=120.0,
+                api_key=api_key,
+                base_url=base_url,
+                timeout=120.0,
+                auto_discover_model=_env_flag(
+                    "THESEUS_VLLM_AUTO_DISCOVER_MODEL",
+                    True,
+                ),
+                preferred_model=(
+                    os.getenv("THESEUS_VLLM_MODEL")
+                    or os.getenv("VLLM_MODEL")
+                ),
             )
 
         # 6. Default (OpenAI: gpt-4o, o1, etc.)
@@ -375,6 +394,8 @@ class TheseusLLMClient(SupportsStreamingMessages):
             max_tokens=request.max_tokens,
             tools=request.tools,
             debug_context=request.debug_context,
+            response_format=request.response_format,
+            extra_body=request.extra_body,
         )
 
         # 도구 호출 추적 초기화 (이번 턴)

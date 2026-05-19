@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_PLAN_REQUEST: str = "theseus.tool-plan.request"
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
     CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE: Literal["strict", "warn", "off"] = "strict"
+    CORE_TOOL_PLAN_STRUCTURED_OUTPUT_MODE: Literal[
+        "auto",
+        "response_format",
+        "vllm_structured_outputs",
+        "strict",
+        "off",
+    ] = "auto"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30
@@ -114,6 +121,7 @@ class Settings(BaseSettings):
     THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
     THESEUS_LOCAL_REPORT_ROOT: str = "reports"
     THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE: bool = False
+    THESEUS_SERVER_SENSITIVE_TOOL_POLICY: Literal["reject", "allow"] = "reject"
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_CUSTOM_TOOLS_HOST_DIR: Optional[str] = None

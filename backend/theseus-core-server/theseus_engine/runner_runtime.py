@@ -31,6 +31,11 @@ from theseus_engine.core.plan_flow import (
     contains_execution_complete,
     contains_verification_complete,
 )
+from theseus_engine.engine.loop_decision import (
+    AGENT_AUTO_CONTINUE_MAX,
+    LoopDecisionContext,
+    classify_loop_continuation,
+)
 from theseus_engine.core.tool_visibility import (
     ToolVisibilityPolicy,
     build_visible_registry,
@@ -431,6 +436,48 @@ class EditorRuntime:
     async def _default_permission_prompt(self, tool_name: str, prompt_msg: str) -> bool:
         return True
 
+    def _current_custom_tool_inventory(self) -> list[dict[str, Any]]:
+        if self.engine is None:
+            return []
+        metadata = getattr(self.engine, "tool_metadata", None)
+        if not isinstance(metadata, dict):
+            return []
+        report = metadata.get("custom_tool_inventory")
+        if not isinstance(report, list):
+            return []
+        return [item for item in report if isinstance(item, dict)]
+
+    def _custom_tool_inventory_events(
+        self,
+        report: list[dict[str, Any]],
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        available = [
+            str(item.get("toolName"))
+            for item in report
+            if item.get("loadState") == "available" and item.get("toolName")
+        ]
+        unavailable = [
+            item
+            for item in report
+            if item.get("loadState") == "unavailable"
+        ]
+        return [
+            {
+                "type": "customToolInventoryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "tools": report,
+            },
+            {
+                "type": "toolRegistryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "availableTools": available,
+                "unavailableCount": len(unavailable),
+            },
+        ]
+
     async def initialize(self) -> list[dict[str, Any]]:
         if self.initialized:
             return []
@@ -460,7 +507,7 @@ class EditorRuntime:
             self.engine.load_messages(initial_messages)
         self._restore_plan_state(self.sessions.load_plan(self.sessions.current_name))
         self.initialized = True
-        return [
+        events = [
             {
                 "type": "RunnerReady",
                 "mode": "json",
@@ -482,6 +529,13 @@ class EditorRuntime:
                 "planState": self._current_plan_state_for_ui(),
             },
         ]
+        events.extend(
+            self._custom_tool_inventory_events(
+                self._current_custom_tool_inventory(),
+                "startup",
+            )
+        )
+        return events
 
     def set_mode(self, mode: str, *, announce: bool = True) -> list[dict[str, Any]]:
         normalized = mode.strip().lower()
@@ -536,6 +590,32 @@ class EditorRuntime:
             self.engine._tool_registry = active_registry
             self.engine.tool_metadata["active_registry"] = active_registry
 
+    def _decide_loop_resume(
+        self,
+        *,
+        accumulated_text: str,
+        tool_called: bool,
+        tool_error: bool,
+        auto_resume_count: int,
+    ):
+        registry = None
+        if self.engine is not None:
+            metadata = getattr(self.engine, "tool_metadata", None)
+            if isinstance(metadata, dict):
+                registry = metadata.get("active_registry")
+        return classify_loop_continuation(
+            LoopDecisionContext(
+                mode=_phase_value(getattr(self.sm, "mode", "")),
+                plan_phase=_phase_value(getattr(self.sm, "plan_phase", "")),
+                assistant_text=accumulated_text,
+                tool_call_count=0 if tool_error else int(tool_called),
+                tool_error=tool_error,
+                auto_continue_count=auto_resume_count,
+                available_tools=bool(_registry_tool_names(registry)),
+                max_auto_continue=AGENT_AUTO_CONTINUE_MAX,
+            )
+        )
+
     def _reload_custom_tool_registry(self) -> list[dict[str, Any]]:
         """Reload custom tools into the full registry and update load inventory."""
         if self.full_registry is None or self.engine is None:
@@ -560,38 +640,19 @@ class EditorRuntime:
 
     def refresh_tool_registry_events(self, reason: str = "manual") -> list[dict[str, Any]]:
         report = self._reload_custom_tool_registry()
-        available = [
-            str(item.get("toolName"))
-            for item in report
-            if item.get("loadState") == "available" and item.get("toolName")
-        ]
-        unavailable = [
-            item
-            for item in report
-            if item.get("loadState") == "unavailable"
-        ]
-        return [
-            {
-                "type": "customToolInventoryUpdated",
-                "source": "runner",
-                "reason": reason,
-                "tools": report,
-            },
-            {
-                "type": "toolRegistryUpdated",
-                "source": "runner",
-                "reason": reason,
-                "availableTools": available,
-                "unavailableCount": len(unavailable),
-            },
+        events = self._custom_tool_inventory_events(report, reason)
+        available_count = sum(1 for item in report if item.get("loadState") == "available")
+        unavailable_count = sum(1 for item in report if item.get("loadState") == "unavailable")
+        events.append(
             {
                 "type": "StatusEvent",
                 "message": (
-                    f"Tool registry refreshed: {len(available)} available"
-                    + (f", {len(unavailable)} unavailable." if unavailable else ".")
+                    f"Tool registry refreshed: {available_count} available"
+                    + (f", {unavailable_count} unavailable." if unavailable_count else ".")
                 ),
             },
-        ]
+        )
+        return events
 
     def _active_tool_names(self) -> tuple[str, ...]:
         """Return the engine's current active tool names for prompt capability gating."""
@@ -1114,8 +1175,14 @@ class EditorRuntime:
                         self._clear_plan_runtime()
                         self.sessions.clear_plan(self.sessions.current_name)
 
+                loop_decision = self._decide_loop_resume(
+                    accumulated_text=accumulated_text,
+                    tool_called=tool_called,
+                    tool_error=tool_error,
+                    auto_resume_count=auto_resume_count,
+                )
                 should_resume = False
-                resume_prompt = PLAN_CONTINUE_PROMPT
+                resume_prompt = loop_decision.resume_prompt or PLAN_CONTINUE_PROMPT
                 if self.sm.mode == self.AgentMode.PLAN:
                     if transitioned_to_verifying:
                         should_resume = True
@@ -1126,11 +1193,9 @@ class EditorRuntime:
                         self.PlanPhase.EXECUTING,
                         self.PlanPhase.VERIFYING,
                     ):
-                        if tool_error:
-                            should_resume = True
-                            resume_prompt = PLAN_TOOL_ERROR_PROMPT
-                        elif not tool_called:
-                            should_resume = True
+                        should_resume = loop_decision.should_resume
+                elif self.sm.mode == self.AgentMode.AGENT and tool_error:
+                    should_resume = loop_decision.action == "retry_tool_error"
                 if should_resume and auto_resume_count < max_auto_resume:
                     auto_resume_count += 1
                     current_prompt = resume_prompt

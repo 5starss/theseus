@@ -132,7 +132,10 @@ async def setup_engine(
     custom_tool_inventory: list[dict] = []
     if project_id:
         loaded_tools = load_custom_tools_for_project(
-            full_registry, project_id, project_tool_permissions,
+            full_registry,
+            project_id,
+            project_tool_permissions,
+            load_report=custom_tool_inventory,
         )
     else:
         loaded_tools = load_custom_tools(

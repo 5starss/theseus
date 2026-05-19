@@ -134,6 +134,8 @@ def summarize_api_message_request(request: Any) -> dict[str, Any]:
         "historyToolResultCount": tool_result_count,
         "historyToolNames": sorted(set(history_tool_names)),
         "toolHistoryMessages": tool_history_messages,
+        "hasResponseFormat": bool(getattr(request, "response_format", None)),
+        "hasExtraBody": bool(getattr(request, "extra_body", None)),
     }
 
 
@@ -175,6 +177,8 @@ def summarize_openai_params(params: dict[str, Any]) -> dict[str, Any]:
         "providerToolResultCount": provider_tool_result_count,
         "providerToolNames": sorted(set(provider_tool_names)),
         "hasTools": bool(tools),
+        "hasResponseFormat": bool(params.get("response_format")),
+        "hasExtraBody": bool(params.get("extra_body")),
     }
 
 

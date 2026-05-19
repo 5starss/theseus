@@ -111,6 +111,7 @@ class AgentLoopStatus:
     tool_use_id: str | None = None
     tool_count: int | None = None
     is_error: bool = False
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

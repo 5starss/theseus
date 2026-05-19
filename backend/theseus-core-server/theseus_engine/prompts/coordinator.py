@@ -12,7 +12,7 @@ Rules:
  - Output a work plan as a JSON list: [{\"id\": 1, \"description\": \"...\", \"prompt\": \"...\"}]
  - Sub-tasks should NOT depend on each other's results unless absolutely necessary.
  - Aim for 2-6 sub-tasks. More is not better — merge related work.
- - After outputting the JSON, call `agent` tool once for each sub-task to dispatch workers.\
+ - Do NOT dispatch workers in this phase. Dispatch happens only in Coordinator DISPATCH phase.\
 """
 
 _COORDINATOR_DISPATCH_PROMPT = """\
@@ -21,6 +21,7 @@ _COORDINATOR_DISPATCH_PROMPT = """\
 Workers are running. Your job is to monitor progress and handle dependencies.
 
 Rules:
+ - Call the `agent` tool once for each approved self-contained sub-task when dispatch is needed.
  - Use task_output to check worker results.
  - If a worker fails, diagnose the error and either retry or adapt the remaining plan.
  - Do NOT start synthesis until all critical workers have completed.\

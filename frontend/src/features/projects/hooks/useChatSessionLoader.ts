@@ -36,7 +36,7 @@ function planStatusFrom(status?: string | null) {
 function isRunningPlan(currentPlan: CurrentPlanRecovery | null): currentPlan is CurrentPlanRecovery & { runId: string } {
   return Boolean(
     currentPlan?.runId
-      && (currentPlan.status === 'REQUESTED' || currentPlan.status === 'GENERATING' || currentPlan.status === 'BUILDING')
+    && (currentPlan.status === 'REQUESTED' || currentPlan.status === 'GENERATING' || currentPlan.status === 'BUILDING')
   );
 }
 

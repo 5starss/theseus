@@ -108,16 +108,24 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
   },
   "execution_spec": {
     "tool_name": "snake_case logical tool name when the request is for a generated tool",
+    "permissionLevel": 1,
+    "permission_rationale": "Least-privilege reason for the requested generated tool permission level",
     "validation_strategy": "core_sandbox_gate for generated Theseus custom tools; omit for pure remote/operator diagnostics",
     "mvp_scope": ["Concrete read-only capabilities included in the first version"],
     "mvp_exclusions": ["Write operations, recovery actions, or integrations intentionally excluded"],
     "status_values": ["PASS", "WARNING", "FAIL", "SKIPPED", "INFO"],
+    "implementation_constraints": [
+      "Import BaseTool, ToolExecutionContext, and ToolResult from theseus_engine.tools.core.base_tools",
+      "Define one Pydantic input model and one BaseTool subclass",
+      "Return ToolResult with JSON-serializable output",
+      "Do not use subprocess, shell execution, or arbitrary local program execution"
+    ],
     "inputs": [
       {
-        "name": "required_containers",
-        "type": "array[string]",
-        "required": true,
-        "description": "Project-specific container names to inspect"
+        "name": "input_name",
+        "type": "string",
+        "required": false,
+        "description": "Input accepted by the generated tool or diagnostic"
       }
     ],
     "outputs": {
@@ -133,53 +141,11 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
       ]
     },
     "command_policy": {
-      "allowlist": ["docker ps", "docker inspect", "docker logs", "df", "free", "top", "uptime", "curl", "grep", "awk", "sed -n"],
-      "denylist": ["docker exec", "docker stop", "docker restart", "docker rm", "docker compose up", "docker compose down", "rm", "mv", "cp", "chmod", "chown", "systemctl", "service", "kill", "reboot", "shutdown", "kubectl"]
+      "allowlist": ["Only include concrete read-only commands for OS/Docker/log diagnostics"],
+      "denylist": ["Data-changing, destructive, or shell-execution patterns excluded from MVP"]
     },
-    "api_checks": [
-      {
-        "name": "health-check",
-        "method": "GET",
-        "path": "/health",
-        "expected_statuses": [200],
-        "requires_auth": false,
-        "read_only": true,
-        "timeout_seconds": 5,
-        "latency_warning_ms": 1000
-      }
-    ],
-    "steps": [
-      {
-        "step_id": "docker_container_audit",
-        "description": "Docker container state audit",
-        "commands": [
-          {
-            "command": "docker inspect <container_name> --format='Name={{.Name}} Status={{.State.Status}} RestartCount={{.RestartCount}} ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'",
-            "type": "read_only",
-            "timeout_seconds": 10,
-            "failure_policy": "fail",
-            "parse_strategy": "key_value"
-          }
-        ],
-        "decision_rules": [
-          {
-            "condition": "State.Status is not running OR OOMKilled is true",
-            "status": "FAIL",
-            "message": "A required container is not healthy enough for post-deploy operation."
-          },
-          {
-            "condition": "Health is none",
-            "status": "SKIPPED",
-            "message": "Docker healthcheck is not configured; do not treat this as failure."
-          }
-        ],
-        "json_mapping": {
-          "evidence": "Parsed key-value fields used for the decision",
-          "sanitized_output": "Secret-free command output",
-          "recommendation": "Operator action or next read-only diagnostic step"
-        }
-      }
-    ],
+    "api_checks": [],
+    "steps": [],
     "markdown_report_example": "Human-readable report layout summarizing PASS/WARNING/FAIL/SKIPPED/INFO results"
   },
   "action_plan": {
@@ -214,13 +180,19 @@ Do NOT add `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, or `python3 -
 as execution steps for generated tools. After approval, `create_tool` runs the Core \
 Docker sandbox gate, which compiles/imports the module and checks the BaseTool subclass, \
 required attributes, and execute signature before activation.
+ - Generated Theseus custom tool plans MUST include `execution_spec.permissionLevel` \
+as an integer from 1 to 5 and a short `execution_spec.permission_rationale`. Choose the \
+lowest level that satisfies the tool. The generated BaseTool class `permission_level` \
+and later `create_tool.permission_level` must match this planned value.
  - Generated Theseus custom tools are not operating-system command plans. Their \
 `execution_spec.steps[]` may be empty when validation is delegated to `core_sandbox_gate`; \
 instead, include implementation constraints such as BaseTool imports, Pydantic input model, \
 async `execute(arguments, context)`, ToolResult output shape, dependency policy, and \
 MVP exclusions.
- - `execution_spec.steps[]` MUST include concrete read-only commands only when the capability \
-runs against an operating system, Docker host, Remote Workspace, API endpoint, or logs.
+ - `execution_spec.steps[]` and `command_policy` MUST include concrete read-only commands \
+only when the capability runs against an operating system, Docker host, Remote Workspace, \
+API endpoint, or logs. Generated custom tools using `core_sandbox_gate` usually use \
+`steps: []` and describe implementation constraints instead.
  - Every command entry MUST include `command`, `type`, `timeout_seconds`, `failure_policy`, \
 and `parse_strategy`. Use `type: "read_only"` for MVP diagnostics.
  - Every step MUST include `decision_rules` with concrete `condition`, `status`, and \
@@ -281,8 +253,10 @@ the plan will NOT proceed to execution until the user explicitly approves.
 Supported fields: problem, solution, target_files, expected_effect, description, tier. \
 Example: `task-1.solution: use httpx instead of requests`, `task-2.tier: change to T1`
  - **<section>.<field>: <feedback>**: Modify a top-level plan section field. \
-Supported: context.risks, verification.success_criteria, action_plan.immediate, etc. \
-Example: `verification.success_criteria: add response time under 1s condition`
+Supported: context.risks, verification.success_criteria, action_plan.immediate, \
+execution_spec.permissionLevel, execution_spec.permission_rationale, etc. \
+Example: `verification.success_criteria: add response time under 1s condition`, \
+`execution_spec.permissionLevel: change to 2 because the tool inspects process metrics`
  - **question or feedback**: Answer the question or incorporate the feedback, update the \
 plan accordingly, and present the revised plan for another review cycle.
  - **cancel**: Abort the plan and return to Agent mode.

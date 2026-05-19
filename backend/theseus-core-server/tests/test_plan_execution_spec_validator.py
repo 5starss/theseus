@@ -83,6 +83,28 @@ class PlanExecutionSpecValidatorTest(unittest.TestCase):
 
         self.assertEqual([], result.errors)
         self.assertEqual("core_sandbox_gate", plan["execution_spec"]["validation_strategy"])
+        self.assertEqual(1, plan["execution_spec"]["permissionLevel"])
+        self.assertIn("permission_rationale", plan["execution_spec"])
+
+    def test_generated_tool_missing_permission_level_is_quality_warning(self) -> None:
+        plan = {
+            "goal": "CPU 모니터링 커스텀 툴 생성",
+            "execution_spec": {
+                "tool_name": "cpu_monitor",
+                "validation_strategy": "core_sandbox_gate",
+                "mvp_exclusions": ["write actions"],
+                "steps": [],
+            },
+        }
+
+        result = validate_execution_spec_if_required(
+            plan,
+            _event("CPU 모니터링 Tool 만들어줘"),
+            validation_mode="strict",
+        )
+
+        self.assertEqual([], result.errors)
+        self.assertTrue(any("permissionLevel" in item for item in result.warnings))
 
 
 if __name__ == "__main__":

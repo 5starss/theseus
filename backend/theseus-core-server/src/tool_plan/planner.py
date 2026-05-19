@@ -30,6 +30,10 @@ from src.tool_plan.schemas import (
     ToolPlanResult,
     ToolPlanSkippedResult,
 )
+from src.tool_plan.structured_output_schema import (
+    plan_draft_response_format,
+    plan_draft_vllm_extra_body,
+)
 from theseus_engine.engine.stream_events import extract_plan_json
 from theseus_engine.models.modes import AgentMode, PlanPhase
 from theseus_engine.models.messages import ConversationMessage, TextBlock
@@ -137,6 +141,24 @@ Rules:
   replacement via approval, or a different toolName/moduleName/fileName.
 - Do not claim that remote analysis, tool execution, or file writing succeeded.
 - Keep the response concise and practical.
+"""
+
+_PLAN_STRUCTURED_OUTPUT_SYSTEM_PROMPT = """\
+You are Theseus in PLAN mode.
+
+Convert the candidate PLAN draft into the existing Theseus PLAN Draft JSON
+shape. Return only one valid JSON object. Do not wrap it in Markdown and do not
+add commentary.
+
+Rules:
+- Preserve the user's requested implementation intent and the existing PLAN
+  structure: goal, context, alternatives, tasks, verification, execution_spec,
+  and action_plan.
+- Keep JSON keys in English.
+- Keep JSON values in the same language used by the user's request.
+- Do not invent completed work or tool execution.
+- If execution_spec is present, preserve its existing fields and values unless
+  they need harmless normalization to fit the canonical PLAN shape.
 """
 
 _EXECUTION_SPEC_KEYWORDS = (
@@ -521,14 +543,13 @@ class ToolPlanPlanner:
             chunk_callback=chunk_callback,
         )
 
-        payload = extract_plan_json(loop_result.final_text)
+        payload = await self._structured_plan_payload(
+            event,
+            candidate_text=loop_result.final_text,
+            remote_workspace=remote_workspace,
+        )
         if payload is None:
-            try:
-                parsed = json.loads(self._extract_json_object(loop_result.final_text))
-                if isinstance(parsed, dict):
-                    payload = parsed
-            except Exception:
-                payload = None
+            payload = self._parse_plan_payload(loop_result.final_text)
         if payload is None:
             message = self._plain_chat_response(loop_result.final_text)
             if message:
@@ -537,6 +558,145 @@ class ToolPlanPlanner:
                 "Invalid PLAN draft LLM output: no PLAN JSON block was found."
             )
         return loop_result.final_text, payload
+
+    async def _structured_plan_payload(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        candidate_text: str,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    ) -> dict[str, Any] | None:
+        mode = settings.CORE_TOOL_PLAN_STRUCTURED_OUTPUT_MODE
+        if mode == "off":
+            return None
+
+        attempts = self._structured_output_attempts(mode)
+        if not attempts:
+            return None
+
+        prompt = self._build_structured_output_prompt(
+            event,
+            candidate_text=candidate_text,
+            remote_workspace=remote_workspace,
+        )
+        messages = [ConversationMessage.from_user_text(prompt)]
+        errors: list[str] = []
+
+        for attempt_name, request_options in attempts:
+            try:
+                final_text = ""
+                collected_text: list[str] = []
+                async for llm_event in self.llm_client.stream_message(
+                    ApiMessageRequest(
+                        model=self.model_name,
+                        messages=messages,
+                        system_prompt=_PLAN_STRUCTURED_OUTPUT_SYSTEM_PROMPT,
+                        max_tokens=4096,
+                        tools=[],
+                        debug_context={
+                            "run_id": event.run_id,
+                            "project_id": event.project_id,
+                            "chat_session_id": event.chat_session_id,
+                            "agent_mode": event.mode,
+                            "remote_workspace_id": event.remote_workspace_id,
+                            "purpose": "plan_structured_output_formatter",
+                            "structured_output_mode": mode,
+                            "structured_output_attempt": attempt_name,
+                        },
+                        **request_options,
+                    )
+                ):
+                    if isinstance(llm_event, ApiTextDeltaEvent):
+                        collected_text.append(llm_event.text)
+                    elif isinstance(llm_event, ApiMessageCompleteEvent):
+                        final_text = llm_event.message.text
+                payload = self._parse_plan_payload(final_text or "".join(collected_text))
+                if payload is not None:
+                    return payload
+                errors.append(f"{attempt_name}: no parseable PLAN JSON returned")
+            except Exception as exc:
+                errors.append(f"{attempt_name}: {exc}")
+                logger.warning(
+                    "PLAN structured output formatting failed. runId=%s attempt=%s error=%s",
+                    event.run_id,
+                    attempt_name,
+                    exc,
+                    exc_info=True,
+                )
+
+        if mode == "strict":
+            detail = "; ".join(errors) if errors else "structured output unavailable"
+            raise ToolPlanPlannerError(f"PLAN structured JSON output failed: {detail}")
+        return None
+
+    def _structured_output_attempts(
+        self,
+        mode: str,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        response_format_attempt = (
+            "response_format",
+            {"response_format": plan_draft_response_format()},
+        )
+        vllm_attempt = (
+            "vllm_structured_outputs",
+            {"extra_body": plan_draft_vllm_extra_body()},
+        )
+        if mode == "response_format":
+            return [response_format_attempt]
+        if mode == "vllm_structured_outputs":
+            return [vllm_attempt]
+        if mode == "strict":
+            attempts = [response_format_attempt]
+            if self._is_vllm_model():
+                attempts.append(vllm_attempt)
+            return attempts
+        if mode == "auto":
+            attempts = [response_format_attempt]
+            if self._is_vllm_model():
+                attempts.append(vllm_attempt)
+            return attempts
+        return []
+
+    def _is_vllm_model(self) -> bool:
+        normalized = str(self.model_name or "").strip().lower()
+        return normalized == "vllm" or normalized.startswith("vllm/")
+
+    def _build_structured_output_prompt(
+        self,
+        event: ToolPlanRequestEvent,
+        *,
+        candidate_text: str,
+        remote_workspace: RemoteWorkspaceConnectionConfig | None,
+    ) -> str:
+        remote_context = (
+            {
+                "remoteWorkspaceId": event.remote_workspace_id,
+                "basePath": remote_workspace.base_path if remote_workspace else None,
+                "allowWriteExecution": (
+                    remote_workspace.allow_write_execution
+                    if remote_workspace
+                    else None
+                ),
+            }
+            if event.remote_workspace_id is not None
+            else None
+        )
+        request_text = (
+            self._regeneration_request_summary(event)
+            if isinstance(event, ToolPlanRegenerationRequestedEvent)
+            else event.prompt
+        )
+        return (
+            "User request:\n"
+            f"{request_text}\n\n"
+            "Runtime project custom tool artifact context:\n"
+            f"{_project_custom_tool_artifact_context(event.project_id)}\n\n"
+            "Remote workspace context:\n"
+            f"{json.dumps(remote_context, ensure_ascii=False, indent=2)}\n\n"
+            "Candidate PLAN draft to normalize:\n"
+            f"{candidate_text}\n\n"
+            "Return the normalized PLAN as the existing Theseus PLAN Draft JSON object only."
+        )
 
     def _build_prompt(self, event: ToolPlanRequestEvent) -> str:
         artifact_context = _project_custom_tool_artifact_context(event.project_id)
@@ -1205,6 +1365,16 @@ class ToolPlanPlanner:
         if tool_name:
             lines.append(f"도구 이름: `{tool_name}`")
 
+        permission_level = execution_spec.get("permissionLevel")
+        if permission_level is None:
+            permission_level = execution_spec.get("permission_level")
+        if permission_level is not None and str(permission_level).strip():
+            line = f"권한 레벨: `{str(permission_level).strip()}`"
+            rationale = str(execution_spec.get("permission_rationale") or "").strip()
+            if rationale:
+                line += f" — {rationale}"
+            lines.append(line)
+
         validation_strategy = str(execution_spec.get("validation_strategy") or "").strip()
         if validation_strategy:
             lines.append(f"검증 전략: `{validation_strategy}`")
@@ -1349,6 +1519,8 @@ class ToolPlanPlanner:
                 break
         return {
             "tool_name": tool_name,
+            "permissionLevel": 1,
+            "permission_rationale": "Default least-privilege level for a generated read-only tool plan unless the approved capability requires more.",
             "validation_strategy": "core_sandbox_gate",
             "mvp_scope": [
                 "Generate one Theseus custom tool as a BaseTool module.",
@@ -1470,6 +1642,16 @@ class ToolPlanPlanner:
         warnings: list[str] = []
         strategy = str(execution_spec.get("validation_strategy") or "").strip()
         is_generated_sandbox_plan = generated_tool_request and strategy == "core_sandbox_gate"
+
+        if generated_tool_request:
+            permission_level = execution_spec.get("permissionLevel")
+            if permission_level is None:
+                permission_level = execution_spec.get("permission_level")
+            if permission_level is None or str(permission_level).strip() == "":
+                warnings.append(
+                    "품질 보완: generated tool execution_spec.permissionLevel을 1~5 정수로 명시하면 "
+                    "승인/생성 단계의 RBAC 판단이 명확해집니다."
+                )
 
         mvp_exclusions = execution_spec.get("mvp_exclusions")
         if not isinstance(mvp_exclusions, list) or not mvp_exclusions:
@@ -1838,6 +2020,17 @@ class ToolPlanPlanner:
         if start >= 0 and end > start:
             return stripped[start:end + 1]
         raise ValueError("No JSON object found")
+
+    @classmethod
+    def _parse_plan_payload(cls, text: str) -> dict[str, Any] | None:
+        payload = extract_plan_json(text)
+        if payload is not None:
+            return payload
+        try:
+            parsed = json.loads(cls._extract_json_object(text))
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     @staticmethod
     def _plain_chat_response(text: str) -> str:
