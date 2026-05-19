@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 176 — Custom tool registry/inventory 정합성 보강 (2026-05-19)
+
+#### `theseus_engine`
+- custom tool inventory 판정과 실제 registry 로딩 기준을 통일해, `isActive=false` 또는 `status=inactive`인 tool이 UI에서는 inactive인데 runner에서는 callable로 남는 문제를 방지
+- import 실패 custom tool report의 `canInstall`을 실제 safe install 후보 존재 여부와 일치하도록 정리
+- project custom tool loader도 `load_report`를 받을 수 있게 확장해 meta 미검증, 파일 누락, import 실패, instantiate 실패 tool이 조용히 사라지지 않고 `inactive`/`unavailable` inventory로 남도록 보강
+- local runner 초기화 직후 `customToolInventoryUpdated` / `toolRegistryUpdated`를 함께 발행해 Health/Custom Tools UI가 runner ready 직후 빈 custom tool count로 보이지 않게 개선
+
+#### VSCode Extension
+- HealthPanel의 Server URL 진단에 실행 중인 daemon은 `theseus.serverUrl` 변경을 runner 재시작 후 반영한다는 안내를 포함
+
+#### 검증
+- `python -m py_compile backend/theseus-core-server/theseus_engine/daemon.py backend/theseus-core-server/theseus_engine/runner_runtime.py backend/theseus-core-server/theseus_engine/core/engine_builder.py backend/theseus-core-server/theseus_engine/tools/core/tool_factory.py`
+- `npm.cmd run compile`
+- `node --check backend/theseus-core-server/vscode-extension/media/main.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/dispatcher.js`
+
+---
+
 ### 🛠️ Session 175 — PLAN 최종 Markdown 스트림 및 권한 리뷰 보정 (2026-05-19)
 
 #### `src` / 프롬프트

@@ -537,6 +537,15 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     const status = this.sessionManager.status;
     const customToolRoots = getCustomToolSearchRoots();
     const server = await probeExternalServer(serverUrl);
+    const serverRuntimeNote = status.processRunning && serverUrl
+      ? 'serverUrl changes apply to the active daemon after runner restart.'
+      : '';
+    const serverForHealth: JsonObject = {
+      ...server,
+      runtimeNote: serverRuntimeNote,
+      detail: [server.detail, serverRuntimeNote].filter(Boolean).join(' · '),
+    };
+    const serverHealthStatus = String(serverForHealth.status || server.status || 'standalone');
     const toolInventory = Array.isArray(this.latestCustomToolInventory) ? this.latestCustomToolInventory : [];
     const availableCount = toolInventory.filter(item => isRecord(item) && item.loadState === 'available').length;
     const unavailableCount = toolInventory.filter(item => isRecord(item) && item.loadState === 'unavailable').length;
@@ -571,7 +580,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         startedAt: status.daemonStartedAt,
         runtimeMode: status.runtimeMode,
       },
-      server,
+      server: serverForHealth,
       customTools: {
         source: this.latestCustomToolSource || (status.processRunning ? 'runner' : 'host'),
         availableCount,
@@ -621,8 +630,8 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         },
         {
           label: 'Server URL',
-          status: server.status === 'unreachable' ? 'warn' : 'ok',
-          detail: String(server.detail || server.status || 'standalone'),
+          status: serverHealthStatus === 'unreachable' ? 'warn' : 'ok',
+          detail: String(serverForHealth.detail || serverHealthStatus),
         },
         {
           label: 'Custom tools',
