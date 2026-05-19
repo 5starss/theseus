@@ -225,6 +225,23 @@ export function ChatArea() {
           <div className="space-y-6">
             {messages.map((msg, idx) => {
               const isLast = idx === messages.length - 1;
+              
+              // 도구 실행 공지 여부 판별
+              const isToolExecutionNotice = (() => {
+                if (msg.content && msg.content.trim().startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(msg.content);
+                    return !!(parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_'));
+                  } catch {
+                    return false;
+                  }
+                }
+                return false;
+              })();
+
+              // 답변이 모두 생성된 완료 상태(!isGenerating)에서는 도구 실행 공지 카드들을 숨김
+              if (isToolExecutionNotice && !isGenerating) return null;
+
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
               if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
