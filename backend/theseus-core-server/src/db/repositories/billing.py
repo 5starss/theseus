@@ -72,6 +72,8 @@ class BillingOutboxRepository:
 
         if records:
             self.db.commit()
+        else:
+            self.db.rollback()
 
         return claimed
 
