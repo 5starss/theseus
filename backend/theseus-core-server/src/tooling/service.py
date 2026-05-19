@@ -59,6 +59,34 @@ PROJECT_TOOLS_DIR = _configured_path(
 )
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 
+import shutil
+def move_tool_to_trash(project_id: str, tool_name: str) -> bool:
+    project_dir = PROJECT_TOOLS_DIR / str(project_id)
+    trash_dir = CUSTOM_TOOLS_DIR / "trash" / str(project_id)
+    
+    base_name = tool_name
+    if base_name.endswith(".py"):
+        base_name = base_name[:-3]
+    if base_name.endswith("_tool"):
+        base_name = base_name[:-5]
+        
+    py_path = project_dir / f"{base_name}_tool.py"
+    meta_path = project_dir / f"{base_name}_tool.meta.json"
+    
+    moved_any = False
+    if py_path.exists() or meta_path.exists():
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        
+        if py_path.exists():
+            shutil.move(str(py_path), str(trash_dir / py_path.name))
+            moved_any = True
+            
+        if meta_path.exists():
+            shutil.move(str(meta_path), str(trash_dir / meta_path.name))
+            moved_any = True
+            
+    return moved_any
+
 STATUS_DRAFT_SAVED = "draft_saved"
 STATUS_VALIDATED = "validated"
 STATUS_VALIDATION_FAILED = "validation_failed"
