@@ -48,6 +48,11 @@ from theseus_engine.core.tool_visibility import (
     can_create_tool_for_state,
 )
 from theseus_engine.core.mode_context import build_mode_runtime_reminders
+from theseus_engine.engine.loop_decision import (
+    AGENT_AUTO_CONTINUE_MAX,
+    LoopDecisionContext,
+    classify_loop_continuation,
+)
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
     AssistantTurnComplete,
@@ -417,8 +422,14 @@ class TheseusTUI(App):
                 )
 
             # ── Auto-Resume 판단 ──────────────────────────────
+            loop_decision = self._decide_loop_resume(
+                accumulated_text=accumulated_text,
+                tool_called=tool_called,
+                tool_error=tool_error,
+                auto_resume_count=auto_resume_count,
+            )
             should_resume = False
-            resume_prompt = PLAN_CONTINUE_PROMPT
+            resume_prompt = loop_decision.resume_prompt or PLAN_CONTINUE_PROMPT
 
             if (
                 self.theseus_sm.mode == AgentMode.PLAN
@@ -429,15 +440,11 @@ class TheseusTUI(App):
                     resume_prompt = PLAN_VERIFICATION_PROMPT
                 elif verification_complete:
                     should_resume = False
-                elif tool_error:
-                    should_resume = True
-                    resume_prompt = PLAN_TOOL_ERROR_PROMPT
-                elif not tool_called:
-                    should_resume = True
+                else:
+                    should_resume = loop_decision.should_resume
 
             elif self.theseus_sm.mode == AgentMode.AGENT and tool_error:
-                should_resume = True
-                resume_prompt = PLAN_TOOL_ERROR_PROMPT
+                should_resume = loop_decision.action == "retry_tool_error"
 
             if should_resume and auto_resume_count < max_auto_resume:
                 auto_resume_count += 1
@@ -716,6 +723,39 @@ class TheseusTUI(App):
         )
         self._bundle.engine.set_plan_drafting(self.theseus_sm.is_plan_drafting)
         self._sync_permission_mode()
+
+    def _active_tool_names(self) -> tuple[str, ...]:
+        if not self._bundle:
+            return ()
+        metadata = getattr(self._bundle.engine, "tool_metadata", None)
+        registry = metadata.get("active_registry") if isinstance(metadata, dict) else None
+        if registry is None:
+            return ()
+        try:
+            return tuple(tool.name for tool in registry.list_tools())
+        except Exception:
+            return ()
+
+    def _decide_loop_resume(
+        self,
+        *,
+        accumulated_text: str,
+        tool_called: bool,
+        tool_error: bool,
+        auto_resume_count: int,
+    ):
+        return classify_loop_continuation(
+            LoopDecisionContext(
+                mode=self.theseus_sm.mode.value,
+                plan_phase=self.theseus_sm.plan_phase.value,
+                assistant_text=accumulated_text,
+                tool_call_count=0 if tool_error else int(tool_called),
+                tool_error=tool_error,
+                auto_continue_count=auto_resume_count,
+                available_tools=bool(self._active_tool_names()),
+                max_auto_continue=AGENT_AUTO_CONTINUE_MAX,
+            )
+        )
 
     # ── UI 렌더링 헬퍼 ──────────────────────────────────────────
 
