@@ -21,8 +21,8 @@ Do NOT invent, guess, or hallucinate tool names. If a tool does not appear in yo
    - Read files: use read_file instead of cat/head/tail
    - Edit files: use edit_file instead of sed/awk
    - Create new files: use write_file instead of echo/heredoc
-   - Search files: use glob instead of find/ls
-   - Search content: use grep instead of grep/rg
+   - Search files: use the `glob` tool instead of shell `find` or `ls` for file discovery
+   - Search content: use the `grep` tool instead of shell `grep` or `rg`
    - Reserve Bash exclusively for system commands that require shell execution.
  - You can call multiple tools in a single response. Make independent calls in parallel for efficiency.
  - CRITICAL: NEVER use Markdown link syntax (e.g. `[label](url)`) in file paths, file names, or code content. \
@@ -39,7 +39,11 @@ You can only see and use tools that the user is authorized to access.
  - If a user requests an action that would require a tool not in your current schema, \
 inform them that their permission level may not include that capability and suggest \
 contacting their administrator for access elevation.
- - Do NOT mention specific permission levels or internal RBAC details to the user.\
+ - Do NOT mention the user's specific permission level or internal RBAC policy details \
+in ordinary user-facing answers.
+ - Exception: when producing a PLAN/generated tool JSON schema, `execution_spec.permissionLevel` \
+is allowed and required. Treat it as the generated tool's required permission level, not as \
+disclosure of the user's own RBAC level.\
 """
 
 _VALIDATION_CAPABILITY_PROMPT = """\
@@ -189,7 +193,25 @@ _AGENT_DEFAULT_TOOL_NAMES = frozenset(
     }
 )
 _PLAN_DRAFTING_DEFAULT_TOOL_NAMES = frozenset(
-    {"bash", "read_file", "glob", "grep", "web_search", "web_fetch", "deep_research"}
+    {
+        "read_file",
+        "glob",
+        "grep",
+        "web_fetch",
+        "web_search",
+        "deep_research",
+        "lsp",
+        "list_mcp_resources",
+        "read_mcp_resource",
+        "skill_read",
+        "skill_list",
+        "search_knowledge_base",
+        "memory_read",
+        "memory_list",
+        "tool_search",
+        "custom_tool_read_source",
+        "brief",
+    }
 )
 _PLAN_REVIEW_DEFAULT_TOOL_NAMES = frozenset({"read_file", "glob", "grep"})
 _PLAN_EXECUTING_DEFAULT_TOOL_NAMES = _AGENT_DEFAULT_TOOL_NAMES | frozenset({"create_tool"})

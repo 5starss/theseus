@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 173 — Prompt 정책 정합성 및 예시 편향 축소 (2026-05-19)
+
+#### `theseus_engine`
+- RBAC prompt에서 일반 사용자 응답의 내부 권한 노출 금지와 PLAN/generated tool `execution_spec.permissionLevel` 예외를 분리해 설명하도록 정리
+- PLAN Drafting fallback capability를 실제 visibility 정책에 맞춰 read/planning 중심으로 조정하고 `bash` 기본 노출을 제거
+- PLAN Drafting JSON 예시에서 Docker/API command 세부 예시를 중립적인 generated tool schema로 축소해 unrelated tool 생성 계획이 Docker audit 형태로 끌리는 문제를 줄임
+- Coordinator DECOMPOSE는 작업 분해 JSON만 만들고, DISPATCH에서만 `agent` tool 호출을 지시하도록 phase 책임을 분리
+- tool-use 문구에서 shell command와 tool 이름을 명확히 구분하고, Environment date가 UTC 기준임을 표시
+
+#### 테스트
+- `tests/test_prompt_rendering.py`를 추가해 PLAN fallback tools, permissionLevel 예외, Coordinator phase 분리, UTC date 표시를 검증
+
+---
+
 ### 🛠️ Session 172 — PLAN generated tool permissionLevel 명세 보강 (2026-05-19)
 
 #### `src` / 프롬프트
