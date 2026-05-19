@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_TOOL_PLAN_REQUEST: str = "theseus.tool-plan.request"
     KAFKA_TOPIC_TOOL_PLAN_EVENT: str = "theseus.tool-plan.event"
     CORE_TOOL_PLAN_EXECUTION_SPEC_VALIDATION_MODE: Literal["strict", "warn", "off"] = "strict"
+    CORE_TOOL_PLAN_STRUCTURED_OUTPUT_MODE: Literal[
+        "auto",
+        "response_format",
+        "vllm_structured_outputs",
+        "strict",
+        "off",
+    ] = "auto"
     KAFKA_TOPIC_TOOL_BUILD_REQUEST: str = "theseus.tool-build.request"
     KAFKA_TOPIC_TOOL_BUILD_EVENT: str = "theseus.tool-build.event"
     CORE_TOOL_PLAN_MAX_AGENT_TURNS: int = 30

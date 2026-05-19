@@ -240,6 +240,18 @@ def _select_served_model(
     return served_model_ids[0]
 
 
+def _apply_openai_request_options(
+    params: dict[str, Any],
+    request: ApiMessageRequest,
+) -> None:
+    """Apply optional provider request extensions carried by ApiMessageRequest."""
+
+    if request.response_format:
+        params["response_format"] = request.response_format
+    if request.extra_body:
+        params["extra_body"] = request.extra_body
+
+
 # ── Client ────────────────────────────────────────────────────
 
 
@@ -323,6 +335,7 @@ class TheseusOpenAICompatClient:
         if openai_tools:
             params["tools"] = openai_tools
             params.pop("stream_options", None)
+        _apply_openai_request_options(params, request)
 
         dump_debug_payload(
             "openai_compat_final_params_summary",
