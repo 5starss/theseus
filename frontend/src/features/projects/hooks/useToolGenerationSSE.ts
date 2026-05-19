@@ -145,6 +145,40 @@ export function useToolGenerationSSE() {
                   store.setCurrentToolId(String(data.toolId));
                 }
                 toast.success('Tool build completed.');
+
+                if (projectId && sessionId) {
+                  try {
+                    const details = await chatApi.getSessionDetails(projectId, sessionId);
+                    const toolPlanId = details.currentPlan?.toolPlanId || data.toolPlanId || null;
+                    const toolPlanGroupId = details.currentPlan?.toolPlanGroupId || data.toolPlanGroupId || null;
+                    const detail = toolPlanId
+                      ? await chatApi.getToolPlanDetail(projectId, sessionId, String(toolPlanId))
+                      : null;
+                    const phase = details.createdTool
+                      ? phaseFromStatus(details.createdTool.status) || 'BUILT'
+                      : phaseFromStatus(details.currentPlan?.status) || 'REVIEW';
+
+                    store.initSession({
+                      messages: details.messages || [],
+                      plan: parseStructuredPlanJson(detail?.structuredPlanJson, 'SSE') || store.currentPlan,
+                      phase,
+                      toolId: details.createdTool?.toolId ? String(details.createdTool.toolId) : null,
+                      toolPlanGroupId: toolPlanGroupId ? String(toolPlanGroupId) : null,
+                      toolPlanId: toolPlanId ? String(toolPlanId) : null,
+                      runId: details.currentPlan?.runId || data.runId || null,
+                      planStatus: details.currentPlan?.status || 'REVIEW',
+                      createdTool: details.createdTool,
+                      toolResult: details.createdTool ? { ...details.createdTool } : null,
+                      title: details.title || store.title,
+                      isClosed: details.isClosed || false,
+                      planVersion: details.currentPlan?.planVersion || detail?.planVersion || data.planVersion || store.planVersion,
+                      draftVersion: details.currentPlan?.planVersion || detail?.planVersion || store.draftVersion,
+                    });
+                  } catch (error) {
+                    console.error('[SSE] Failed to refresh session details for tool build completed:', error);
+                  }
+                }
+
                 disconnectSSE();
                 break;
               }
