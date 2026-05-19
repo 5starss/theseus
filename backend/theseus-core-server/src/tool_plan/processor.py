@@ -71,11 +71,13 @@ class ToolPlanProcessor:
 
         try:
             await self.publish_progress(event, "REQUEST_RECEIVED", 5)
+            await self.publish_chunk(event, "PLAN 요청을 접수했습니다.\n")
             result = await self.planner.plan(
                 event,
                 progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
                 # Stream only the normalized Markdown plan, not raw PLAN draft deltas.
                 chunk_callback=None,
+                status_chunk_callback=lambda content: self.publish_chunk(event, content),
                 checkpoint=self.load_agent_checkpoint(event.run_id),
                 checkpoint_callback=lambda checkpoint: self.save_agent_checkpoint(event.run_id, checkpoint),
             )

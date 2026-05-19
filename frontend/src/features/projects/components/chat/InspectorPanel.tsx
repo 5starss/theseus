@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { CheckCircle, FileCode, Layout, RotateCcw, X } from 'lucide-react';
+import { CheckCircle, FileCode, Layout, MessageSquarePlus, RotateCcw, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { useChatSessionStore } from '../../stores/useChatSessionStore';
 import { chatApi } from '../../api/chat';
@@ -50,7 +50,46 @@ export function InspectorPanel() {
 
   const { connectSSE } = useToolGenerationSSE();
   const [isApproving, setIsApproving] = useState(false);
+  const [activeFeedbackTarget, setActiveFeedbackTarget] = useState<string | null>(null);
   const isReviewable = draftPhase === 'REVIEW' && Boolean(currentToolPlanId);
+
+  const openFeedbackTarget = (target: string) => {
+    if (!isReviewable || isGenerating || isBuilding || isClosed) return;
+    setCommentMode(true);
+    setActiveTab('plan');
+    setActiveFeedbackTarget(target);
+  };
+
+  const renderFeedbackButton = (target: string, label = 'Feedback') => {
+    if (!isReviewable || isGenerating || isBuilding || isClosed) return null;
+    return (
+      <button
+        type="button"
+        title={label}
+        aria-label={label}
+        onClick={() => openFeedbackTarget(target)}
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-700 bg-slate-900/30 text-slate-400 transition-colors hover:border-blue-400/60 hover:bg-blue-400/10 hover:text-blue-200 focus:border-blue-400/60 focus:outline-none"
+      >
+        <MessageSquarePlus className="h-3.5 w-3.5" />
+        <span className="sr-only">{label}</span>
+      </button>
+    );
+  };
+
+  const renderFeedbackInput = (target: string, placeholder = '이 항목에 대한 수정 요청을 입력하세요.') => {
+    if (!commentMode) return null;
+    if (activeFeedbackTarget !== target && draftComments[target] === undefined) return null;
+
+    return (
+      <textarea
+        className="mt-3 min-h-[72px] w-full resize-none rounded-md border border-blue-400/30 bg-[#071827] p-3 text-sm leading-6 text-slate-200 placeholder:text-slate-500 focus:border-blue-400/70 focus:outline-none"
+        placeholder={placeholder}
+        value={draftComments[target] || ''}
+        onChange={(e) => setDraftComment(target, e.target.value)}
+        autoFocus={activeFeedbackTarget === target}
+      />
+    );
+  };
 
   const handleRequestFeedbackClick = async () => {
     if (!commentMode) {
@@ -75,7 +114,7 @@ export function InspectorPanel() {
       senderType: 'USER',
       messageType: 'TOOL_FEEDBACK',
       contentType: 'TEXT',
-      content: `PLAN 수정 요청:\n${feedbackItems.map(item => `- ${item.comment}`).join('\n')}`,
+      content: `PLAN 수정 요청:\n${feedbackItems.map(item => `- ${item.blockId}: ${item.comment}`).join('\n')}`,
       createdAt: new Date().toISOString()
     });
 
@@ -106,6 +145,7 @@ export function InspectorPanel() {
 
       connectSSE(result.sseUrl, 'PLAN', result.runId);
       clearDraftComments();
+      setActiveFeedbackTarget(null);
     } catch (err) {
       console.error('Regeneration plan request failed:', err);
       setIsGenerating(false);
@@ -165,23 +205,59 @@ export function InspectorPanel() {
           <TabsContent value="plan" className="h-full m-0 overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
             {currentPlan ? (
               currentPlan.blocks.map(block => (
-                <div key={block.blockId} className="bg-slate-800/30 border border-slate-700/50 p-4 rounded text-sm text-slate-300 flex flex-col gap-3 group hover:border-slate-600 transition-colors">
-                  <div>
-                    <div className="font-semibold text-blue-200 mb-1 flex items-center gap-2 break-words">
-                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full shrink-0" />
-                      {block.title}
+                <div
+                  key={block.blockId}
+                  className={`group rounded-md border border-slate-700/60 bg-[#0a1624]/70 p-4 text-sm text-slate-300 shadow-sm transition-colors hover:border-slate-600/80 ${
+                    block.parentId ? 'ml-3 border-l-2 border-l-blue-400/30' : ''
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 pb-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <div className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-semibold leading-5 text-blue-100 [overflow-wrap:anywhere]">
+                            {block.title}
+                          </h3>
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
+                            <span className="font-mono text-slate-400">{block.blockId}</span>
+                            {block.tier && <span>{block.tier}</span>}
+                            {block.status && <span>{block.status}</span>}
+                            {block.parentId && <span>Parent {block.parentId}</span>}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-slate-400 leading-relaxed whitespace-pre-wrap break-words">{block.content}</div>
+                    {renderFeedbackButton(block.blockId, 'Task feedback')}
                   </div>
 
-                  {commentMode && (
-                    <div className="mt-2 animate-in slide-in-from-top-2 duration-200">
-                      <textarea
-                        className="w-full bg-[#051424] border border-slate-700 rounded p-2 text-slate-300 text-sm focus:outline-none focus:border-blue-400/50 resize-none min-h-[60px]"
-                        placeholder="이 블록에 대한 수정 요청을 입력하세요."
-                        value={draftComments[block.blockId] || ''}
-                        onChange={(e) => setDraftComment(block.blockId, e.target.value)}
-                      />
+                  {renderFeedbackInput(block.blockId, '이 task 전체에 대한 수정 요청을 입력하세요.')}
+
+                  {block.fields && block.fields.length > 0 ? (
+                    <div className="border-t border-slate-700/50">
+                      {block.fields.map((field, index) => (
+                        <section
+                          key={field.feedbackTarget}
+                          className={`py-3 ${index > 0 ? 'border-t border-slate-800/80' : ''}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 text-xs font-semibold leading-5 text-slate-300">
+                                {field.label}
+                              </div>
+                              <div className="whitespace-pre-wrap text-[13px] leading-6 text-slate-400 [overflow-wrap:anywhere]">
+                                {field.value}
+                              </div>
+                            </div>
+                            {renderFeedbackButton(field.feedbackTarget, `${field.label} feedback`)}
+                          </div>
+                          {renderFeedbackInput(field.feedbackTarget, `${field.label} 항목에 대한 수정 요청을 입력하세요.`)}
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border-t border-slate-700/50 pt-3 text-[13px] leading-6 text-slate-400 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                      {block.content}
                     </div>
                   )}
                 </div>
@@ -235,6 +311,7 @@ export function InspectorPanel() {
                 <button
                   onClick={() => {
                     setCommentMode(false);
+                    setActiveFeedbackTarget(null);
                     clearDraftComments();
                   }}
                   className="flex-1 border border-slate-500 text-slate-300 hover:bg-slate-800 py-3 rounded text-sm transition-colors font-medium flex items-center justify-center gap-2"

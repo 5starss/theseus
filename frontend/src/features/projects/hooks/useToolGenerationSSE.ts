@@ -41,6 +41,20 @@ function planStatusFrom(status?: string | null) {
   return status === 'SKIPPED' ? null : status || null;
 }
 
+const PLAN_PROGRESS_MESSAGES: Record<string, string> = {
+  REQUEST_RECEIVED: 'PLAN 요청을 접수했습니다.',
+  PLAN_DRAFTING: 'PLAN 초안을 작성하고 있습니다.',
+  PLAN_STRUCTURING: 'PLAN 구조를 정규화하고 표시 형식으로 정리하고 있습니다.',
+  PLAN_FEEDBACK: '검증 결과를 바탕으로 사용자 안내를 준비하고 있습니다.',
+  PLAN_VALIDATING: 'PLAN 스냅샷과 실행 명세를 검증하고 있습니다.',
+  PLAN_COMPLETED: 'PLAN 초안이 준비되었습니다.',
+};
+
+function displayProgressMessage(message?: string) {
+  if (!message) return '';
+  return PLAN_PROGRESS_MESSAGES[message] || message;
+}
+
 export function useToolGenerationSSE() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
   const abortRef = useRef<AbortController | null>(null);
@@ -112,13 +126,18 @@ export function useToolGenerationSSE() {
               console.log('[SSE] Connected to ToolPlan stream', data);
               break;
 
-            case 'progress':
+            case 'progress': {
+              const message = displayProgressMessage(data.message);
+              const step = flow === 'PLAN'
+                ? 'PLAN 생성 중'
+                : (message || 'Tool build in progress');
               store.setProgressInfo({
-                step: data.message || 'PLAN generation in progress',
-                message: data.message || '',
+                step,
+                message,
                 percent: data.progressRate ?? 0,
               });
               break;
+            }
 
             case 'chunk':
               if (data.content) {

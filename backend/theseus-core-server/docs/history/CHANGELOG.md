@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 181 — 서버 PLAN 생성 진행 스트림 보강 (2026-05-19)
+
+#### Core / API 연동
+- `ToolPlanPlanner.plan()`에 `status_chunk_callback` 경계를 추가해 raw LLM PLAN delta는 계속 차단하면서도 안전한 PLAN 진행 로그를 `chunk` 이벤트로 스트리밍할 수 있게 함
+- `ToolPlanProcessor`와 legacy `ToolGenerationProcessor`가 PLAN 접수/초안/구조화/검증 진행 메시지를 SSE chunk로 전달하도록 연결
+
+#### Frontend
+- ToolPlan SSE `progress` 코드(`PLAN_DRAFTING`, `PLAN_STRUCTURING` 등)를 사용자 표시용 문장으로 변환
+- PLAN 생성 중 assistant placeholder가 아직 비어 있어도 processing 로그 영역에 최신 progress 메시지가 표시되도록 보강
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\processor.py backend\theseus-core-server\src\tool_generation\processor.py`
+- `python -m unittest discover -s tests -p test_tool_plan_processor_chunks.py`
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 180 — VSCode Extension UI 회귀 정리 및 VSIX 최신성 표시 (2026-05-19)
 
 #### VSCode Extension

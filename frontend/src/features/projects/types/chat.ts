@@ -28,6 +28,17 @@ export interface PlanBlock {
   blockId: string;
   title: string;
   content: string;
+  fields?: PlanField[];
+  parentId?: string | null;
+  tier?: string | null;
+  status?: string | null;
+}
+
+export interface PlanField {
+  fieldId: string;
+  label: string;
+  value: string;
+  feedbackTarget: string;
 }
 
 export interface StructuredPlan {

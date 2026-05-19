@@ -34,10 +34,16 @@ class _CollectingPublisher:
 class _FakePlanner:
     def __init__(self) -> None:
         self.chunk_callback_seen: Any = "unset"
+        self.status_chunk_callback_seen: Any = "unset"
 
     async def plan(self, event, **kwargs):
         del event
         self.chunk_callback_seen = kwargs.get("chunk_callback")
+        self.status_chunk_callback_seen = kwargs.get("status_chunk_callback")
+        if self.status_chunk_callback_seen is not None:
+            result = self.status_chunk_callback_seen("PLAN 초안을 작성하고 있습니다.\n")
+            if result is not None:
+                await result
         return ToolPlanResult(
             rawMarkdown="### 분석 계획\n\n- 최종 표시용 Markdown입니다.\n",
             structuredPlanJson={
@@ -78,6 +84,7 @@ class ToolPlanProcessorChunkTest(unittest.IsolatedAsyncioTestCase):
         await processor.process_plan(event, request_type="GENERATE_PLAN")
 
         self.assertIsNone(planner.chunk_callback_seen)
+        self.assertIsNotNone(planner.status_chunk_callback_seen)
         chunks = [
             item["content"]
             for item in publisher.events
@@ -85,6 +92,8 @@ class ToolPlanProcessorChunkTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(chunks)
         self.assertNotIn("```json", "".join(chunks))
+        self.assertIn("PLAN 요청을 접수했습니다.", "".join(chunks))
+        self.assertIn("PLAN 초안을 작성하고 있습니다.", "".join(chunks))
         self.assertIn("최종 표시용 Markdown", "".join(chunks))
 
 

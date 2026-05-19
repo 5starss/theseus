@@ -61,6 +61,7 @@ class ToolGenerationProcessor:
 
     async def process_generation(self, event: ToolGenerationRequestEvent) -> None:
         try:
+            await self.publish_chunk(event, "PLAN 요청을 접수했습니다.\n")
             result = await self.planner.plan(
                 self._to_tool_plan_requested_event(event),
                 progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
@@ -68,6 +69,7 @@ class ToolGenerationProcessor:
                 # markdown-like chunks, so keep live chunks off this temporary
                 # path and publish the rendered markdown once it is available.
                 chunk_callback=None,
+                status_chunk_callback=lambda content: self.publish_chunk(event, content),
             )
             if isinstance(result, ToolPlanSkippedResult):
                 await self.publish_failed(event, "TOOL_PLAN_SKIPPED", result.message)
@@ -99,10 +101,12 @@ class ToolGenerationProcessor:
                 )
                 return
 
+            await self.publish_chunk(event, "PLAN 요청을 접수했습니다.\n")
             result = await self.planner.plan(
                 self._to_tool_plan_regeneration_requested_event(event),
                 progress_callback=lambda message, rate: self.publish_progress(event, message, rate),
                 chunk_callback=None,
+                status_chunk_callback=lambda content: self.publish_chunk(event, content),
             )
             if isinstance(result, ToolPlanSkippedResult):
                 await self.publish_failed(event, "TOOL_PLAN_SKIPPED", result.message)

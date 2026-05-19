@@ -54,6 +54,11 @@ export function ChatArea() {
   const selectedRemoteWorkspace = remoteWorkspaces.find(
     workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
   );
+  const processingLogText = (
+    messages[messages.length - 1]?.content
+    || progressInfo?.message
+    || 'Initializing stream...'
+  ).replace(/blockId:\s*[\w-]+\s*/gi, '');
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -284,7 +289,7 @@ export function ChatArea() {
                     <div className="bg-[#050c18] rounded-lg p-3 border border-slate-800/50">
                       <div className="font-mono text-[11px] leading-relaxed text-slate-400 break-all max-h-[150px] overflow-y-auto scrollbar-none">
                         <span className="text-blue-500/50 mr-2">$</span>
-                        {(messages[messages.length - 1]?.content || 'Initializing stream...').replace(/blockId:\s*[\w-]+\s*/gi, '')}
+                        {processingLogText}
                         <span className="inline-block w-1.5 h-3.5 bg-blue-500/50 ml-1 animate-pulse" />
                       </div>
                     </div>
