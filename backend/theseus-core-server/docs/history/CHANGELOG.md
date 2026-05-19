@@ -4,6 +4,39 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 180 — VSCode Extension UI 회귀 정리 및 VSIX 최신성 표시 (2026-05-19)
+
+#### VSCode Extension
+- Markdown URL 렌더링 결과를 WebView 내부 링크로만 남기지 않고, `http:` / `https:` 링크 클릭 시 Extension Host의 `openExternal` 경로로 외부 브라우저/IDE 링크 열기가 동작하도록 연결
+- Activity accordion의 고정 높이 제한을 완화하고, tool output preview의 이중 `max-height` 제한을 정리해 긴 tool 호출 결과가 펼침 상태에서 잘리지 않도록 개선
+- tool 실행 중 자동 펼침, 완료 후 자동 접힘 정책은 유지하되, 사용자가 수동으로 펼친 activity는 자동 접힘이 덮어쓰지 않도록 `userOpenOverride` 우선순위를 보강
+- 응답 종료 시 빈 typing article, assistant draft 참조, markdown render RAF, loop status를 함께 정리해 응답 완료 후에도 “현재 응답이 진행 중입니다” 안내가 남는 문제를 줄임
+- custom tool validation/install, change review, settings 변경 같은 운영성 이벤트를 persistent chat article 대신 tool/status activity note 또는 transient warning으로 배치해 채팅 transcript 오염을 줄임
+- 세션 메뉴의 `+`, `x`, rename, export 동작 후 메뉴가 관리 패널로 유지되도록 close 정책을 정리하고, 실제 세션 전환만 화면 전환 동작으로 취급
+- HealthPanel에 extension version, bundle mtime, media mtime, source marker를 표시해 `theseus-vscode-0.0.1.vsix` 버전이 고정되어도 설치된 번들이 최신 빌드인지 확인할 수 있게 개선
+
+#### 패키징 / 문서
+- `verify:package-inputs` 스크립트를 추가해 VSIX 패키징 전 `out/`, `media/`, 핵심 WebView/Host 파일이 포함될 준비가 되어 있는지 확인
+- `package:vsix`가 compile 이후 packaging input 검증을 수행하도록 변경
+- `usage.md`의 Antigravity 설치 흐름을 `npm.cmd run package:vsix` 기준으로 보강하고, HealthPanel marker로 설치 최신성을 확인하는 절차를 추가
+
+#### 검증
+- `npm.cmd run compile`
+- `npm.cmd run verify:package-inputs`
+- `node --check backend/theseus-core-server/vscode-extension/media/main.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/dispatcher.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/ActivityLog.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/SessionMenu.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/HealthPanel.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/MessageList.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/RunnerStatus.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/CustomTools.js`
+- `npm.cmd run package:vsix`
+- VSIX 내부 `extension/media/main.js`, `extension/media/components/ActivityLog.js`, `extension/out/providers/ChatViewProvider.js` 포함 및 `ui-regression-fixes-2026-05-19` marker 확인
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 179 — Theseus prompt 최소 톤 지침 재정리 (2026-05-19)
 
 #### `theseus_engine`

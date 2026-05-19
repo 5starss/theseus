@@ -63,6 +63,8 @@ export function renderHealthPanel({
   meta.textContent = [
     extension.version ? `extension: ${extension.version}` : '',
     extension.builtAt ? `builtAt: ${extension.builtAt}` : '',
+    extension.mediaBuiltAt ? `mediaBuiltAt: ${extension.mediaBuiltAt}` : '',
+    extension.sourceMarker ? `sourceMarker: ${extension.sourceMarker}` : '',
     localDaemon.status ? `Local daemon: ${localDaemon.status}` : '',
     localDaemon.pid ? `daemon pid: ${localDaemon.pid}` : '',
     localDaemon.port ? `daemon port: ${localDaemon.port}` : '',

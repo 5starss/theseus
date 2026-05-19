@@ -80,6 +80,26 @@ function toolEventKey(event: RunnerEvent): string {
   return id || name;
 }
 
+function fileMtimeIso(filePath: string): string {
+  try {
+    return fs.statSync(filePath).mtime.toISOString();
+  } catch {
+    return '';
+  }
+}
+
+function getExtensionBuildInfo(context: vscode.ExtensionContext): JsonObject {
+  const packageJson = context.extension.packageJSON as Record<string, unknown> | undefined;
+  const extensionRoot = context.extensionUri.fsPath;
+  return {
+    version: typeof packageJson?.version === 'string' ? packageJson.version : '',
+    extensionPath: extensionRoot,
+    builtAt: fileMtimeIso(path.join(extensionRoot, 'out', 'extension.js')),
+    mediaBuiltAt: fileMtimeIso(path.join(extensionRoot, 'media', 'main.js')),
+    sourceMarker: 'ui-regression-fixes-2026-05-19',
+  };
+}
+
 function requestWithTimeout(url: URL, timeoutMs: number): Promise<{ statusCode: number; statusMessage: string }> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http;
@@ -570,6 +590,7 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
         workspaceCwd,
         pythonExec,
         customToolRoots,
+        extension: getExtensionBuildInfo(this.context),
       },
       localDaemon: {
         status: daemonStatus,
@@ -678,6 +699,23 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
     const uri = this.resolveUserFilePath(filePath);
     if (!uri) return;
     await vscode.window.showTextDocument(uri, { preview: false });
+  }
+
+  private async openExternalUrl(rawUrl: string | undefined): Promise<void> {
+    const value = String(rawUrl || '').trim();
+    if (!value) return;
+    let uri: vscode.Uri;
+    try {
+      uri = vscode.Uri.parse(value);
+    } catch {
+      vscode.window.showWarningMessage('Theseus: 열 수 없는 URL입니다.');
+      return;
+    }
+    if (uri.scheme !== 'http' && uri.scheme !== 'https') {
+      vscode.window.showWarningMessage('Theseus: http/https URL만 열 수 있습니다.');
+      return;
+    }
+    await vscode.env.openExternal(uri);
   }
 
   private async revertChangedFile(id: string | undefined, filePath: string | undefined, oldContent: string | undefined): Promise<void> {
@@ -938,6 +976,10 @@ export class TheseusChatViewProvider implements vscode.WebviewViewProvider {
           if (typeof msg.path === 'string') {
             await this.openUserFile(msg.path);
           }
+          break;
+        }
+        case 'openExternal': {
+          await this.openExternalUrl(msg.url);
           break;
         }
         case 'revertChangedFile':

@@ -109,12 +109,14 @@ export function applyRunnerStatusEvent({
 }) {
   const lifecycle = normalizeLifecycle(event);
   const previousSessionId = runnerState.sessionId;
+  const stateValue = event.state || lifecycle;
+  const isBusy = stateValue === 'busy' || lifecycle === 'busy';
   const nextState = {
     ...runnerState,
     running: !!event.running,
     processRunning: !!event.processRunning || !!event.running,
     lifecycle,
-    state: event.state || lifecycle,
+    state: stateValue,
     lastStatusAt: Date.now(),
     lastDiagnostic: event.lastDiagnostic || runnerState.lastDiagnostic,
     sessionId: event.sessionId || runnerState.sessionId,
@@ -130,9 +132,15 @@ export function applyRunnerStatusEvent({
     daemonPort: event.daemonPort || runnerState.daemonPort,
     lastEventAt: event.lastEventAt || runnerState.lastEventAt,
     lastHeartbeatAt: event.lastHeartbeatAt || runnerState.lastHeartbeatAt,
-    activeRunId: event.activeRunId || runnerState.activeRunId,
-    activeRunStatus: event.activeRunStatus || runnerState.activeRunStatus,
-    activeRun: event.activeRun || runnerState.activeRun,
+    activeRunId: Object.prototype.hasOwnProperty.call(event, 'activeRunId')
+      ? event.activeRunId
+      : isBusy ? runnerState.activeRunId : undefined,
+    activeRunStatus: Object.prototype.hasOwnProperty.call(event, 'activeRunStatus')
+      ? event.activeRunStatus
+      : isBusy ? runnerState.activeRunStatus : undefined,
+    activeRun: Object.prototype.hasOwnProperty.call(event, 'activeRun')
+      ? event.activeRun
+      : isBusy ? runnerState.activeRun : undefined,
     stalledReason: event.stalledReason || runnerState.stalledReason,
     pendingInput: Number.isInteger(event.pendingInput) ? event.pendingInput : runnerState.pendingInput,
     exitReason: event.exitReason || runnerState.exitReason,

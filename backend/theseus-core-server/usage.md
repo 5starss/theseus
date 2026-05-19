@@ -449,8 +449,11 @@ npm.cmd run compile
 패키징이 필요하면 다음을 실행합니다.
 
 ```powershell
-npx.cmd @vscode/vsce package
+npm.cmd run package:vsix
 ```
+
+`package:vsix`는 `out/`, `media/`, `package.json` 등 VSIX에 들어가야 하는 핵심 입력 파일이 있는지 먼저 확인합니다.
+설치 후 Health 패널의 `sourceMarker`, `builtAt`, `mediaBuiltAt` 값을 보면 현재 설치된 번들이 최신 빌드인지 확인할 수 있습니다.
 
 ### 5.3 Extension에서 가능한 일
 

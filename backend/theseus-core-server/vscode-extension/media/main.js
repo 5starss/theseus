@@ -554,6 +554,31 @@ import { createEventDispatcher } from './dispatcher.js';
     return rendered;
   }
 
+  function resetCurrentAssistantDraft({ removeEmpty = true } = {}) {
+    if (markdownRenderRAF) {
+      cancelAnimationFrame(markdownRenderRAF);
+      markdownRenderRAF = null;
+    }
+    const bodyText = currentAssistantEl?.textContent?.trim() || '';
+    const hasTypingIndicator = !!currentAssistantEl?.querySelector?.('.typing-indicator');
+    if (removeEmpty && currentAssistantArticle && (!currentAssistantTxt.trim() || hasTypingIndicator) && !bodyText) {
+      currentAssistantArticle.remove();
+    }
+    currentAssistantArticle = null;
+    currentAssistantEl = null;
+    currentAssistantTxt = '';
+  }
+
+  function settleLoopStatusAfterGeneration() {
+    const busy = runnerState.state === 'busy'
+      || runnerState.lifecycle === 'busy'
+      || !!runnerState.activeRunId;
+    if (busy) return;
+    if (runnerState.running || runnerState.state === 'ready' || runnerState.lifecycle === 'ready') {
+      setLoopStatus('idle', 'Idle');
+    }
+  }
+
   function renderPlanPanel(plan) {
     renderPlanPanelComponent(plan, {
       panelEl: planPanelEl,
@@ -882,7 +907,14 @@ import { createEventDispatcher } from './dispatcher.js';
   }
 
   function isAgentBusy() {
-    return isGenerating;
+    const state = runnerState.state || '';
+    const lifecycle = runnerState.lifecycle || '';
+    return Boolean(
+      isGenerating
+      || state === 'busy'
+      || lifecycle === 'busy'
+      || runnerState.activeRunId
+    );
   }
 
   function showRunnerRequired(command) {
@@ -1048,6 +1080,15 @@ import { createEventDispatcher } from './dispatcher.js';
       e.target.textContent = 'Copied!';
       setTimeout(() => { e.target.textContent = orig; }, 1500);
     }).catch(() => {});
+  });
+
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest?.('.external-link[data-external-url]');
+    if (!link) return;
+    const url = link.getAttribute('data-external-url') || link.getAttribute('href') || '';
+    if (!url) return;
+    e.preventDefault();
+    vscode.postMessage({ type: 'openExternal', url });
   });
 
   // ── Popup helpers ─────────────────────────────────────────────────
@@ -1271,6 +1312,9 @@ import { createEventDispatcher } from './dispatcher.js';
       currentAssistantArticle = article;
       currentAssistantEl      = body;
       currentAssistantTxt     = '';
+    } else {
+      resetCurrentAssistantDraft();
+      settleLoopStatusAfterGeneration();
     }
     renderRunnerStatus();
   }
