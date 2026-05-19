@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 170 — Agent loop 의미분석 기반 재진입 판정 (2026-05-19)
+
+#### `theseus_engine`
+- `loop_decision.py`를 추가해 QueryEngine, local runner, TUI가 공통 `LoopContinuationDecision`으로 자동 재진입 여부를 판단하도록 정리
+- 기존 `하겠습니다/읽겠습니다/잠시만`류 문구는 강제 continue가 아니라 후보 신호로 낮추고, 최종 답변/사용자 승인 요청/권한 차단 문구는 `stop` 또는 `ask_user`로 분류하도록 보강
+- `THESEUS_AGENT_LOOP_DECISION_MODE=heuristic|semantic|hybrid`와 semantic timeout 설정을 추가해 명확한 구조 신호는 즉시 처리하고 애매한 pending-action 문장만 선택적으로 evaluator를 타도록 구성
+- `AgentLoopStatus.metadata`에 loop decision, reason, confidence, trigger signals를 담아 auto-resume 원인을 추적할 수 있게 확장
+- `agent_loop_control.py`는 기존 import 호환 façade로 유지하고 새 판정기를 호출하도록 변경
+
+#### Runtime
+- `query_engine.py`의 agent loop auto-continue 판단을 공통 decision module로 교체하고, stop hook/status metadata에 판정 결과를 남기도록 보강
+- `runner_runtime.py`와 `tui_main.py`의 PLAN/AGENT auto-resume 로직도 같은 판정기를 사용하도록 맞춰 hard-coded marker 기준이 서로 갈라지지 않게 정리
+
+#### 설정/테스트
+- `.env.example`에 `THESEUS_AGENT_LOOP_DECISION_MODE`와 `THESEUS_AGENT_LOOP_SEMANTIC_TIMEOUT_SECONDS` 예시 추가
+- `tests/test_agent_loop_control.py`에 final-answer 문구, user decision, PLAN verification, tool-error recovery, semantic low-confidence 회귀 테스트 추가
+
+---
+
 ### 🛠️ Session 169 — Custom tool 삭제 후 active registry 제외 (2026-05-19)
 
 #### `src`

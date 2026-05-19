@@ -31,6 +31,11 @@ from theseus_engine.core.plan_flow import (
     contains_execution_complete,
     contains_verification_complete,
 )
+from theseus_engine.engine.loop_decision import (
+    AGENT_AUTO_CONTINUE_MAX,
+    LoopDecisionContext,
+    classify_loop_continuation,
+)
 from theseus_engine.core.tool_visibility import (
     ToolVisibilityPolicy,
     build_visible_registry,
@@ -535,6 +540,32 @@ class EditorRuntime:
         else:
             self.engine._tool_registry = active_registry
             self.engine.tool_metadata["active_registry"] = active_registry
+
+    def _decide_loop_resume(
+        self,
+        *,
+        accumulated_text: str,
+        tool_called: bool,
+        tool_error: bool,
+        auto_resume_count: int,
+    ):
+        registry = None
+        if self.engine is not None:
+            metadata = getattr(self.engine, "tool_metadata", None)
+            if isinstance(metadata, dict):
+                registry = metadata.get("active_registry")
+        return classify_loop_continuation(
+            LoopDecisionContext(
+                mode=_phase_value(getattr(self.sm, "mode", "")),
+                plan_phase=_phase_value(getattr(self.sm, "plan_phase", "")),
+                assistant_text=accumulated_text,
+                tool_call_count=0 if tool_error else int(tool_called),
+                tool_error=tool_error,
+                auto_continue_count=auto_resume_count,
+                available_tools=bool(_registry_tool_names(registry)),
+                max_auto_continue=AGENT_AUTO_CONTINUE_MAX,
+            )
+        )
 
     def _reload_custom_tool_registry(self) -> list[dict[str, Any]]:
         """Reload custom tools into the full registry and update load inventory."""
@@ -1114,8 +1145,14 @@ class EditorRuntime:
                         self._clear_plan_runtime()
                         self.sessions.clear_plan(self.sessions.current_name)
 
+                loop_decision = self._decide_loop_resume(
+                    accumulated_text=accumulated_text,
+                    tool_called=tool_called,
+                    tool_error=tool_error,
+                    auto_resume_count=auto_resume_count,
+                )
                 should_resume = False
-                resume_prompt = PLAN_CONTINUE_PROMPT
+                resume_prompt = loop_decision.resume_prompt or PLAN_CONTINUE_PROMPT
                 if self.sm.mode == self.AgentMode.PLAN:
                     if transitioned_to_verifying:
                         should_resume = True
@@ -1126,11 +1163,9 @@ class EditorRuntime:
                         self.PlanPhase.EXECUTING,
                         self.PlanPhase.VERIFYING,
                     ):
-                        if tool_error:
-                            should_resume = True
-                            resume_prompt = PLAN_TOOL_ERROR_PROMPT
-                        elif not tool_called:
-                            should_resume = True
+                        should_resume = loop_decision.should_resume
+                elif self.sm.mode == self.AgentMode.AGENT and tool_error:
+                    should_resume = loop_decision.action == "retry_tool_error"
                 if should_resume and auto_resume_count < max_auto_resume:
                     auto_resume_count += 1
                     current_prompt = resume_prompt
