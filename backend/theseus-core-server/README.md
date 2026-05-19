@@ -278,6 +278,7 @@ Copy-Item .env.example .env
 | `THESEUS_DYNAMIC_TOOL_RETRIEVAL` | 질의별 top-k tool retrieval 활성화 |
 | `THESEUS_ENABLE_ENGINE_RAG_TOOLS` | 서버 registry에서 standalone engine RAG tool을 명시적으로 활성화 |
 | `THESEUS_ENABLE_AGENT_HOOK` | 파일 작업 AuditLLM/hook 활성화 |
+| `THESEUS_SERVER_SENSITIVE_TOOL_POLICY` | 서버 `/stream`에서 `bash` 등 민감 도구를 승인 없이 자동 허용할지 제어. 기본값은 `reject`, 내부/데모 환경에서만 `allow` 사용 |
 | `THESEUS_DEBUG_DUMP`, `THESEUS_DEBUG_DUMP_DIR` | LLM request/response/debug payload dump 활성화 및 저장 경로 |
 
 ### 5.3 FastAPI 서버 실행

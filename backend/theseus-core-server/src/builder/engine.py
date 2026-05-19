@@ -46,7 +46,7 @@ from theseus_engine.wrappers.llm_clients.theseus_client import TheseusLLMClient
 logger = logging.getLogger(__name__)
 _SERVER_ENGINE_RAG_TOOL_NAMES = frozenset({"search_knowledge_base", "ingest_document"})
 
-ApprovalPolicy = Literal["reject", "allow_safe_only"]
+ApprovalPolicy = Literal["reject", "allow_safe_only", "allow_sensitive"]
 
 
 class EngineInitializationError(ImportError):
@@ -173,6 +173,20 @@ async def _deny_permission_prompt(tool_name: str, reason: str) -> bool:
         reason,
     )
     return False
+
+
+def _server_requires_sensitive_tool_confirmation(
+    build_context: EngineBuildContext,
+) -> bool:
+    """Return whether server execution should ask/deny sensitive tools.
+
+    The default remains fail-closed.  ``allow`` is intended for controlled
+    internal/demo environments where RBAC and tool visibility are enough.
+    """
+
+    if build_context.approval_policy == "allow_sensitive":
+        return False
+    return settings.THESEUS_SERVER_SENSITIVE_TOOL_POLICY != "allow"
 
 
 class ServerHookExecutor:
@@ -341,6 +355,9 @@ def get_query_engine(
         settings=TheseusPermissionSettings(),
         user_level=build_context.user_level,
         tool_permissions=tool_permissions,
+        require_human_confirm=_server_requires_sensitive_tool_confirmation(
+            build_context
+        ),
     )
 
     base_hook_executor = TheseusHookExecutor(

@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 178 — 서버 민감 도구 자동 승인 정책 설정 추가 (2026-05-19)
+
+#### `src`
+- 서버 `/stream` 경로에서 `bash` 같은 민감 도구를 승인 없이 자동 허용할지 제어하는 `THESEUS_SERVER_SENSITIVE_TOOL_POLICY=reject|allow` 설정을 추가
+- 기본값은 기존과 동일하게 `reject`로 유지하고, `allow`일 때만 RBAC와 현재 mode tool visibility를 통과한 민감 도구의 human-confirm gate를 서버에서 자동 통과하도록 연결
+
+#### 문서 / 테스트
+- `.env.example`과 README 환경 변수 표에 서버 민감 도구 정책 설정을 추가
+- `tests/test_server_sensitive_tool_policy.py`로 기본 차단과 명시적 자동 허용 동작을 검증
+
+---
+
 ### 🛠️ Session 177 — Theseus persona prompt 공통 지침 보강 (2026-05-19)
 
 #### `theseus_engine`
