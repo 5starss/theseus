@@ -605,7 +605,7 @@ class ToolPlanPlanner:
                         model=self.model_name,
                         messages=messages,
                         system_prompt=_PLAN_STRUCTURED_OUTPUT_SYSTEM_PROMPT,
-                        max_tokens=4096,
+                        max_tokens=16384,
                         tools=[],
                         debug_context={
                             "run_id": event.run_id,

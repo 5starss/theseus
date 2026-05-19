@@ -26,6 +26,7 @@
 #### Core / API 연동
 - `ToolPlanPlanner.plan()`에 `status_chunk_callback` 경계를 추가해 raw LLM PLAN delta는 계속 차단하면서도 안전한 PLAN 진행 로그를 `chunk` 이벤트로 스트리밍할 수 있게 함
 - `ToolPlanProcessor`와 legacy `ToolGenerationProcessor`가 PLAN 접수/초안/구조화/검증 진행 메시지를 SSE chunk로 전달하도록 연결
+- PLAN structured output formatter의 `max_tokens`를 4096에서 16384로 늘려 긴 PLAN JSON 정규화 중 truncation 위험을 줄임
 
 #### Frontend
 - ToolPlan SSE `progress` 코드(`PLAN_DRAFTING`, `PLAN_STRUCTURING` 등)를 사용자 표시용 문장으로 변환
