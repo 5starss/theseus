@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 169 — Custom tool 삭제 후 active registry 제외 (2026-05-19)
+
+#### `src`
+- FE/API Server의 Tool 삭제 요청으로 Core가 custom tool artifact를 `trash`로 이동할 때 project별 삭제 tombstone을 남기도록 보강
+- project custom tool loader와 server engine visibility 구성에서 삭제 tombstone을 확인해, 삭제된 tool이 같은 프로세스의 active registry에 다시 등록되거나 노출되지 않도록 차단
+- 삭제된 tool의 `.py/.meta.json` 파일이 같은 project root에 다시 나타나도 Core가 해당 프로세스에서는 `loadState=deleted`로 보고 registry 등록을 건너뛰도록 방어
+
+#### `theseus_engine`
+- `ToolRegistry.unregister(name)`을 추가해 runtime이 보유한 active registry에서도 tool을 명시적으로 제거할 수 있는 내부 API를 마련
+
+#### 테스트
+- `tests/test_tool_failed_artifact_cleanup.py`에 trash 이동 후 삭제 tombstone, loader skip, active registry 미등록 회귀 테스트 추가
+
+---
+
 ### 🛠️ Session 168 — Background task 복구/중지 안정화 (2026-05-19)
 
 #### `theseus_engine`

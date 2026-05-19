@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import src.tooling.service as tooling_service
 from src.tooling.service import (
     STATUS_ACTIVE,
     STATUS_SANDBOX_FAILED,
@@ -13,10 +14,15 @@ from src.tooling.service import (
     ServerToolCreationRequest,
     ToolCreationError,
     build_tool_paths,
+    clear_deleted_project_tool_records,
     cleanup_failed_tool_artifact,
+    is_project_tool_deleted,
+    load_active_tools_for_project,
+    move_tool_to_trash,
     persist_draft_tool,
     validate_draft_tool,
 )
+from theseus_engine.tools.core.base_tools import ToolRegistry
 
 
 class _RejectingValidator:
@@ -190,6 +196,61 @@ class ToolFailedArtifactCleanupTest(unittest.TestCase):
             self.assertEqual("outside_project_tool_root", report["skippedReason"])
             self.assertTrue(paths.module_path.exists())
             self.assertTrue(paths.metadata_path.exists())
+
+    def test_trash_move_records_deleted_tool_and_loader_skips_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            project_root = temp_root / "projects"
+            custom_root = temp_root / "custom_tools"
+            project_dir = project_root / "4"
+            project_dir.mkdir(parents=True)
+            module_path = project_dir / "cpu_monitor_tool.py"
+            metadata_path = project_dir / "cpu_monitor_tool.meta.json"
+            metadata = {
+                "toolName": "cpu_monitor",
+                "moduleName": "cpu_monitor_tool",
+                "fileName": "cpu_monitor_tool.py",
+                "projectId": "4",
+                "status": STATUS_ACTIVE,
+                "isActive": True,
+                "validationResult": {"success": True},
+                "sandboxResult": {"success": True},
+            }
+            module_path.write_text("# active cpu monitor\n", encoding="utf-8")
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+            with patch.object(tooling_service, "PROJECT_TOOLS_DIR", project_root), patch.object(
+                tooling_service,
+                "CUSTOM_TOOLS_DIR",
+                custom_root,
+            ):
+                try:
+                    moved = move_tool_to_trash("4", "cpu_monitor_tool.py")
+                    self.assertTrue(moved)
+                    self.assertFalse(module_path.exists())
+                    self.assertFalse(metadata_path.exists())
+                    self.assertTrue(
+                        (custom_root / "trash" / "4" / "cpu_monitor_tool.py").exists()
+                    )
+                    self.assertTrue(is_project_tool_deleted("4", tool_name="cpu_monitor"))
+
+                    module_path.write_text("# accidentally recreated\n", encoding="utf-8")
+                    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+                    registry = ToolRegistry()
+                    load_report: list[dict[str, object]] = []
+
+                    loaded = load_active_tools_for_project(
+                        registry,
+                        project_id="4",
+                        storage_root=project_root,
+                        load_report=load_report,
+                    )
+
+                    self.assertEqual([], loaded)
+                    self.assertIsNone(registry.get("cpu_monitor"))
+                    self.assertEqual("deleted", load_report[0]["loadState"])
+                finally:
+                    clear_deleted_project_tool_records("4")
 
 
 if __name__ == "__main__":

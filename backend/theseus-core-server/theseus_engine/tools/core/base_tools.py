@@ -145,6 +145,10 @@ class ToolRegistry:
         """Register a tool instance."""
         self._tools[tool.name] = tool
 
+    def unregister(self, name: str) -> bool:
+        """Remove a registered tool by name."""
+        return self._tools.pop(name, None) is not None
+
     def get(self, name: str) -> BaseTool | None:
         """Return a registered tool by name."""
         return self._tools.get(name)

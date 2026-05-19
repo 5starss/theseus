@@ -4,6 +4,8 @@ import ast
 import json
 import logging
 import re
+import shutil
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -59,20 +61,122 @@ PROJECT_TOOLS_DIR = _configured_path(
 )
 TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 
-import shutil
+_DELETED_PROJECT_TOOL_NAMES: dict[str, set[str]] = {}
+_DELETED_PROJECT_TOOL_LOCK = threading.RLock()
+
+
+def _deleted_tool_identity_keys(*values: Any) -> set[str]:
+    keys: set[str] = set()
+    for value in values:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        name = Path(raw).name
+        if name.endswith(".meta.json"):
+            name = name[: -len(".meta.json")]
+        elif name.endswith(".py"):
+            name = name[: -len(".py")]
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", name.lower()).strip("_")
+        if not normalized:
+            continue
+        keys.add(normalized)
+        if normalized.endswith("_tool"):
+            logical = normalized[: -len("_tool")]
+            if logical:
+                keys.add(logical)
+        else:
+            keys.add(f"{normalized}_tool")
+    return keys
+
+
+def record_deleted_project_tool(project_id: str | int, *identifiers: Any) -> tuple[str, ...]:
+    """Record a project tool deletion intent for active registry filtering."""
+
+    project_key = _slugify_segment(project_id)
+    keys = _deleted_tool_identity_keys(*identifiers)
+    if not keys:
+        return ()
+    with _DELETED_PROJECT_TOOL_LOCK:
+        bucket = _DELETED_PROJECT_TOOL_NAMES.setdefault(project_key, set())
+        bucket.update(keys)
+        return tuple(sorted(bucket))
+
+
+def clear_deleted_project_tool_records(
+    project_id: str | int | None = None,
+    *identifiers: Any,
+) -> None:
+    """Clear deletion tombstones. Intended for tests and process-local resets."""
+
+    with _DELETED_PROJECT_TOOL_LOCK:
+        if project_id is None:
+            _DELETED_PROJECT_TOOL_NAMES.clear()
+        elif identifiers:
+            bucket = _DELETED_PROJECT_TOOL_NAMES.get(_slugify_segment(project_id))
+            if not bucket:
+                return
+            bucket.difference_update(_deleted_tool_identity_keys(*identifiers))
+            if not bucket:
+                _DELETED_PROJECT_TOOL_NAMES.pop(_slugify_segment(project_id), None)
+        else:
+            _DELETED_PROJECT_TOOL_NAMES.pop(_slugify_segment(project_id), None)
+
+
+def deleted_project_tool_names(project_id: str | int) -> frozenset[str]:
+    with _DELETED_PROJECT_TOOL_LOCK:
+        return frozenset(_DELETED_PROJECT_TOOL_NAMES.get(_slugify_segment(project_id), set()))
+
+
+def is_project_tool_deleted(
+    project_id: str | int,
+    *,
+    tool_name: str | None = None,
+    module_name: str | None = None,
+    file_name: str | None = None,
+) -> bool:
+    keys = _deleted_tool_identity_keys(tool_name, module_name, file_name)
+    if not keys:
+        return False
+    deleted = deleted_project_tool_names(project_id)
+    return any(key in deleted for key in keys)
+
+
 def move_tool_to_trash(project_id: str, tool_name: str) -> bool:
     project_dir = PROJECT_TOOLS_DIR / str(project_id)
     trash_dir = CUSTOM_TOOLS_DIR / "trash" / str(project_id)
-    
-    base_name = tool_name
-    if base_name.endswith(".py"):
+
+    requested_name = Path(str(tool_name or "")).name
+    base_name = requested_name
+    if base_name.endswith(".meta.json"):
+        base_name = base_name[: -len(".meta.json")]
+    elif base_name.endswith(".py"):
         base_name = base_name[:-3]
     if base_name.endswith("_tool"):
         base_name = base_name[:-5]
-        
-    py_path = project_dir / f"{base_name}_tool.py"
-    meta_path = project_dir / f"{base_name}_tool.meta.json"
-    
+
+    module_stem = f"{base_name}_tool"
+    py_path = project_dir / f"{module_stem}.py"
+    meta_path = project_dir / f"{module_stem}.meta.json"
+
+    metadata: dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+
+    record_deleted_project_tool(
+        project_id,
+        requested_name,
+        base_name,
+        module_stem,
+        py_path.name,
+        meta_path.name,
+        metadata.get("toolName"),
+        metadata.get("moduleName"),
+        metadata.get("fileName"),
+    )
+
     moved_any = False
     if py_path.exists() or meta_path.exists():
         trash_dir.mkdir(parents=True, exist_ok=True)
@@ -84,7 +188,7 @@ def move_tool_to_trash(project_id: str, tool_name: str) -> bool:
         if meta_path.exists():
             shutil.move(str(meta_path), str(trash_dir / meta_path.name))
             moved_any = True
-            
+
     return moved_any
 
 STATUS_DRAFT_SAVED = "draft_saved"
@@ -1006,6 +1110,17 @@ def _project_tool_inventory_item(
         "canEditSource": False,
     }
 
+    if is_project_tool_deleted(
+        project_id,
+        tool_name=item["toolName"],
+        module_name=paths.module_name,
+        file_name=paths.module_path.name,
+    ):
+        item["status"] = "deleted"
+        item["isActive"] = False
+        item["loadState"] = "deleted"
+        return item
+
     if not paths.module_path.exists():
         item["loadState"] = "unavailable"
         item["importError"] = f"Missing module file: {paths.module_path.name}"
@@ -1268,6 +1383,14 @@ def activate_tool_artifact(
                 request.permission_level,
             ),
         },
+    )
+    clear_deleted_project_tool_records(
+        request.project_id,
+        request.tool_name,
+        tool_class.name,
+        paths.module_name,
+        paths.module_path.name,
+        paths.metadata_path.name,
     )
     return registered
 
@@ -1836,6 +1959,27 @@ def load_active_tools_for_project(
             paths=paths,
             metadata=metadata,
         )
+        if is_project_tool_deleted(
+            project_id,
+            tool_name=metadata.get("toolName"),
+            module_name=paths.module_name,
+            file_name=paths.module_path.name,
+        ):
+            inventory_item["status"] = "deleted"
+            inventory_item["isActive"] = False
+            inventory_item["loadState"] = "deleted"
+            inventory_item["canRegister"] = False
+            inventory_item["canEditSource"] = False
+            if load_report is not None:
+                load_report.append(inventory_item)
+            log.info(
+                "Skipped deleted project custom tool. projectId=%s toolName=%s module=%s file=%s",
+                project_id,
+                metadata.get("toolName"),
+                paths.module_name,
+                paths.module_path,
+            )
+            continue
         if load_report is not None:
             load_report.append(inventory_item)
         if not paths.module_path.exists():
