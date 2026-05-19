@@ -90,6 +90,13 @@ def _looks_like_placeholder_api_key(value: str) -> bool:
     )
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class TheseusGeminiClient(TheseusOpenAICompatClient):
     """OpenAICompatibleClient that preserves Gemini's ``extra_content``
     (thought_signature) across multi-turn tool-calling conversations.
@@ -291,11 +298,21 @@ class TheseusLLMClient(SupportsStreamingMessages):
             )
 
         # 5. vLLM / Custom OpenAI Compatible
-        elif model_lower.startswith("vllm/"):
+        elif model_lower == "vllm" or model_lower.startswith("vllm/"):
             base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
             api_key = os.getenv("OPENAI_API_KEY", "vllm")
             return TheseusOpenAICompatClient(
-                api_key=api_key, base_url=base_url, timeout=120.0,
+                api_key=api_key,
+                base_url=base_url,
+                timeout=120.0,
+                auto_discover_model=_env_flag(
+                    "THESEUS_VLLM_AUTO_DISCOVER_MODEL",
+                    True,
+                ),
+                preferred_model=(
+                    os.getenv("THESEUS_VLLM_MODEL")
+                    or os.getenv("VLLM_MODEL")
+                ),
             )
 
         # 6. Default (OpenAI: gpt-4o, o1, etc.)

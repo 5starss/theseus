@@ -201,6 +201,45 @@ def _normalize_openai_base_url(base_url: str | None) -> str | None:
     return urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
 
 
+def _extract_model_ids(model_list_response: Any) -> list[str]:
+    data = (
+        model_list_response.get("data")
+        if isinstance(model_list_response, dict)
+        else getattr(model_list_response, "data", None)
+    )
+    if not data:
+        return []
+    ids: list[str] = []
+    for item in data:
+        model_id = (
+            item.get("id")
+            if isinstance(item, dict)
+            else getattr(item, "id", None)
+        )
+        if isinstance(model_id, str) and model_id.strip():
+            ids.append(model_id.strip())
+    return ids
+
+
+def _select_served_model(
+    requested_model: str,
+    served_model_ids: list[str],
+    preferred_model: str | None = None,
+) -> str:
+    if not served_model_ids:
+        raise RuntimeError("OpenAI-compatible server returned no served models.")
+
+    requested = requested_model.strip()
+    if requested in served_model_ids:
+        return requested
+
+    preferred = (preferred_model or "").strip()
+    if preferred and preferred in served_model_ids:
+        return preferred
+
+    return served_model_ids[0]
+
+
 # ── Client ────────────────────────────────────────────────────
 
 
@@ -216,6 +255,8 @@ class TheseusOpenAICompatClient:
         *,
         base_url: str | None = None,
         timeout: float | None = None,
+        auto_discover_model: bool = False,
+        preferred_model: str | None = None,
     ) -> None:
         kwargs: dict[str, Any] = {"api_key": api_key}
         normalized = _normalize_openai_base_url(base_url)
@@ -224,6 +265,9 @@ class TheseusOpenAICompatClient:
         if timeout is not None:
             kwargs["timeout"] = timeout
         self._client = AsyncOpenAI(**kwargs)
+        self._auto_discover_model = auto_discover_model
+        self._preferred_model = preferred_model
+        self._discovered_model: str | None = None
 
     async def stream_message(
         self, request: ApiMessageRequest
@@ -267,14 +311,15 @@ class TheseusOpenAICompatClient:
             request.messages, request.system_prompt
         )
         openai_tools = _convert_tools_to_openai(request.tools) if request.tools else None
+        resolved_model = await self._resolve_served_model(request.model)
 
         params: dict[str, Any] = {
-            "model": request.model,
+            "model": resolved_model,
             "messages": openai_messages,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        params.update(_token_limit_param_for_model(request.model, request.max_tokens))
+        params.update(_token_limit_param_for_model(resolved_model, request.max_tokens))
         if openai_tools:
             params["tools"] = openai_tools
             params.pop("stream_options", None)
@@ -292,7 +337,20 @@ class TheseusOpenAICompatClient:
         usage_data: dict[str, int] = {}
         _think_buf = ""
 
-        stream = await self._client.chat.completions.create(**params)
+        try:
+            stream = await self._client.chat.completions.create(**params)
+        except Exception as exc:
+            if not self._auto_discover_model or not self._is_model_not_found(exc):
+                raise
+            self._discovered_model = None
+            refreshed_model = await self._resolve_served_model(request.model)
+            if refreshed_model == resolved_model:
+                raise
+            params["model"] = refreshed_model
+            params.pop("max_tokens", None)
+            params.pop("max_completion_tokens", None)
+            params.update(_token_limit_param_for_model(refreshed_model, request.max_tokens))
+            stream = await self._client.chat.completions.create(**params)
         async for chunk in stream:
             if not chunk.choices:
                 if chunk.usage:
@@ -386,12 +444,46 @@ class TheseusOpenAICompatClient:
             stop_reason=finish_reason,
         )
 
+    async def _resolve_served_model(self, requested_model: str) -> str:
+        if not self._auto_discover_model:
+            return requested_model
+        if self._discovered_model:
+            return self._discovered_model
+
+        model_list = await self._client.models.list()
+        served_model_ids = _extract_model_ids(model_list)
+        selected = _select_served_model(
+            requested_model,
+            served_model_ids,
+            self._preferred_model,
+        )
+        self._discovered_model = selected
+        log.info(
+            "Resolved OpenAI-compatible served model: requested=%s selected=%s available=%s",
+            requested_model,
+            selected,
+            served_model_ids,
+        )
+        return selected
+
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:
         status = getattr(exc, "status_code", None)
         if status and status in {429, 500, 502, 503}:
             return True
         return isinstance(exc, (ConnectionError, TimeoutError, OSError))
+
+    @staticmethod
+    def _is_model_not_found(exc: Exception) -> bool:
+        status = getattr(exc, "status_code", None)
+        if status != 404:
+            return False
+        message = str(exc).lower()
+        return "model" in message and (
+            "not found" in message
+            or "does not exist" in message
+            or "not served" in message
+        )
 
     @staticmethod
     def _translate_error(exc: Exception) -> TheseusApiError:

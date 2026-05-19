@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 171 — vLLM served model 자동 탐색 지원 (2026-05-19)
+
+#### `theseus_engine`
+- `THESEUS_MODEL=vllm` 또는 `vllm/...` 모델 prefix를 사용할 때 OpenAI-compatible 클라이언트가 요청 전 `/v1/models`를 조회해 실제 served model id를 자동 선택하도록 보강
+- 요청 모델명이 서버의 served model 목록에 있으면 그대로 사용하고, 없으면 `THESEUS_VLLM_MODEL` / `VLLM_MODEL` 우선값 또는 첫 번째 served model id를 fallback으로 사용하도록 정리
+- vLLM 서버가 모델명 불일치로 404를 반환하는 경우 cached model id를 비우고 `/v1/models`를 다시 조회해 1회 재시도하도록 보강
+- `THESEUS_VLLM_AUTO_DISCOVER_MODEL=false`로 자동 탐색을 끌 수 있게 하고, `.env.example`에 vLLM 자동 탐색/우선 모델 설정 예시를 추가
+
+#### 테스트
+- `tests/test_openai_compat_model_discovery.py`를 추가해 `/v1/models` 응답 파싱, served model 선택 우선순위, `vllm` prefix 자동 탐색 활성화를 검증
+
+---
+
 ### 🛠️ Session 170 — Agent loop 의미분석 기반 재진입 판정 (2026-05-19)
 
 #### `theseus_engine`
