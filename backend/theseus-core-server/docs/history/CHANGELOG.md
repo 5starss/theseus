@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+### 🐛 Session 182 — Local extension package requirements ASCII 정리 (2026-05-19)
+
+#### 설치/패키징
+- `scripts/package-local-extension-source.ps1`가 배포 ZIP에 `requirements*.txt`를 복사할 때 non-ASCII 문자를 제거하고 ASCII 인코딩으로 저장하도록 변경
+- 원본 개발용 requirements 파일은 그대로 유지하고, 원클릭 설치 ZIP 내부 파일만 시스템 언어별 Unicode decode 오류를 피하도록 정리
+- 패키징 중 requirements 파일에 non-ASCII byte가 남으면 즉시 실패하도록 검증 추가
+
+#### 문서
+- `README.md`, `usage.md`에 local extension source package의 `requirements*.txt`가 ASCII-only로 복사된다는 내용을 추가
+
+#### 검증
+- PowerShell parser로 `scripts\package-local-extension-source.ps1` 구문 검증 성공
+- local extension source package smoke로 ZIP 내부 `requirements*.txt` ASCII-only 검증 성공
+- `git diff --check` 성공
+
+---
+
 ### 🛠️ Session 181 — 서버 PLAN 생성 진행 스트림 보강 (2026-05-19)
 
 #### Core / API 연동

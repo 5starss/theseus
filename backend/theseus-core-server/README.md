@@ -421,6 +421,8 @@ bash Package-Theseus-LocalExtension.sh
 생성됩니다. 이 패키지는 `theseus_engine`, `theseus_cli`, requirements, VSIX,
 설치/삭제 스크립트, `usage.md`만 포함하며 `src`, `frontend`, `infra`,
 `theseus-api-server`, `.venv`, `build`, `dist`, `tests`, 실제 `.env`는 제외합니다.
+배포 ZIP에 들어가는 `requirements*.txt`는 시스템 언어에 따른 Unicode decode
+문제를 피하기 위해 ASCII-only로 정리되어 복사됩니다.
 
 Windows PowerShell에서는 다음을 실행합니다.
 
