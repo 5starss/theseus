@@ -114,6 +114,16 @@ def _display_execution_spec(execution_spec: dict[str, Any]) -> list[str]:
     if tool_name:
         lines.append(f"도구 이름: `{tool_name}`")
 
+    permission_level = execution_spec.get("permissionLevel")
+    if permission_level is None:
+        permission_level = execution_spec.get("permission_level")
+    if permission_level is not None and str(permission_level).strip():
+        line = f"권한 레벨: `{str(permission_level).strip()}`"
+        rationale = str(execution_spec.get("permission_rationale") or "").strip()
+        if rationale:
+            line += f" - {rationale}"
+        lines.append(line)
+
     validation_strategy = str(execution_spec.get("validation_strategy") or "").strip()
     if validation_strategy:
         lines.append(f"검증 전략: `{validation_strategy}`")

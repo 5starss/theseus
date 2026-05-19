@@ -253,8 +253,10 @@ the plan will NOT proceed to execution until the user explicitly approves.
 Supported fields: problem, solution, target_files, expected_effect, description, tier. \
 Example: `task-1.solution: use httpx instead of requests`, `task-2.tier: change to T1`
  - **<section>.<field>: <feedback>**: Modify a top-level plan section field. \
-Supported: context.risks, verification.success_criteria, action_plan.immediate, etc. \
-Example: `verification.success_criteria: add response time under 1s condition`
+Supported: context.risks, verification.success_criteria, action_plan.immediate, \
+execution_spec.permissionLevel, execution_spec.permission_rationale, etc. \
+Example: `verification.success_criteria: add response time under 1s condition`, \
+`execution_spec.permissionLevel: change to 2 because the tool inspects process metrics`
  - **question or feedback**: Answer the question or incorporate the feedback, update the \
 plan accordingly, and present the revised plan for another review cycle.
  - **cancel**: Abort the plan and return to Agent mode.
