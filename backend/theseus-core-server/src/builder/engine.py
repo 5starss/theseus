@@ -16,7 +16,7 @@ from src.remote_workspace.runtime import (
     register_remote_workspace_config,
 )
 from src.remote_workspace.write_primitives import build_remote_write_execution_tools
-from src.tooling import load_custom_tools_for_project
+from src.tooling import deleted_project_tool_names, load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
@@ -304,6 +304,8 @@ def get_query_engine(
         "on",
     }:
         disabled_tools.update(_SERVER_ENGINE_RAG_TOOL_NAMES)
+    if build_context.project_id:
+        disabled_tools.update(deleted_project_tool_names(build_context.project_id))
 
     visibility_policy = ToolVisibilityPolicy(
         mode=build_context.mode,
