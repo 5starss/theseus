@@ -436,6 +436,48 @@ class EditorRuntime:
     async def _default_permission_prompt(self, tool_name: str, prompt_msg: str) -> bool:
         return True
 
+    def _current_custom_tool_inventory(self) -> list[dict[str, Any]]:
+        if self.engine is None:
+            return []
+        metadata = getattr(self.engine, "tool_metadata", None)
+        if not isinstance(metadata, dict):
+            return []
+        report = metadata.get("custom_tool_inventory")
+        if not isinstance(report, list):
+            return []
+        return [item for item in report if isinstance(item, dict)]
+
+    def _custom_tool_inventory_events(
+        self,
+        report: list[dict[str, Any]],
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        available = [
+            str(item.get("toolName"))
+            for item in report
+            if item.get("loadState") == "available" and item.get("toolName")
+        ]
+        unavailable = [
+            item
+            for item in report
+            if item.get("loadState") == "unavailable"
+        ]
+        return [
+            {
+                "type": "customToolInventoryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "tools": report,
+            },
+            {
+                "type": "toolRegistryUpdated",
+                "source": "runner",
+                "reason": reason,
+                "availableTools": available,
+                "unavailableCount": len(unavailable),
+            },
+        ]
+
     async def initialize(self) -> list[dict[str, Any]]:
         if self.initialized:
             return []
@@ -465,7 +507,7 @@ class EditorRuntime:
             self.engine.load_messages(initial_messages)
         self._restore_plan_state(self.sessions.load_plan(self.sessions.current_name))
         self.initialized = True
-        return [
+        events = [
             {
                 "type": "RunnerReady",
                 "mode": "json",
@@ -487,6 +529,13 @@ class EditorRuntime:
                 "planState": self._current_plan_state_for_ui(),
             },
         ]
+        events.extend(
+            self._custom_tool_inventory_events(
+                self._current_custom_tool_inventory(),
+                "startup",
+            )
+        )
+        return events
 
     def set_mode(self, mode: str, *, announce: bool = True) -> list[dict[str, Any]]:
         normalized = mode.strip().lower()
@@ -591,38 +640,19 @@ class EditorRuntime:
 
     def refresh_tool_registry_events(self, reason: str = "manual") -> list[dict[str, Any]]:
         report = self._reload_custom_tool_registry()
-        available = [
-            str(item.get("toolName"))
-            for item in report
-            if item.get("loadState") == "available" and item.get("toolName")
-        ]
-        unavailable = [
-            item
-            for item in report
-            if item.get("loadState") == "unavailable"
-        ]
-        return [
-            {
-                "type": "customToolInventoryUpdated",
-                "source": "runner",
-                "reason": reason,
-                "tools": report,
-            },
-            {
-                "type": "toolRegistryUpdated",
-                "source": "runner",
-                "reason": reason,
-                "availableTools": available,
-                "unavailableCount": len(unavailable),
-            },
+        events = self._custom_tool_inventory_events(report, reason)
+        available_count = sum(1 for item in report if item.get("loadState") == "available")
+        unavailable_count = sum(1 for item in report if item.get("loadState") == "unavailable")
+        events.append(
             {
                 "type": "StatusEvent",
                 "message": (
-                    f"Tool registry refreshed: {len(available)} available"
-                    + (f", {len(unavailable)} unavailable." if unavailable else ".")
+                    f"Tool registry refreshed: {available_count} available"
+                    + (f", {unavailable_count} unavailable." if unavailable_count else ".")
                 ),
             },
-        ]
+        )
+        return events
 
     def _active_tool_names(self) -> tuple[str, ...]:
         """Return the engine's current active tool names for prompt capability gating."""
