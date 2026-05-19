@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { MessageSquarePlus, MoreVertical, Pencil, Trash2 } from 'lucide-react';
+import { MessageSquarePlus, MoreVertical, Pencil, Trash2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { chatApi } from '@/features/projects/api/chat';
 import { useProjectStore } from '../stores/useProjectStore';
@@ -17,9 +17,10 @@ import {
 interface SessionListProps {
   projectId: string | undefined;
   children?: React.ReactNode;
+  isCollapsed?: boolean;
 }
 
-export function SessionList({ projectId, children }: SessionListProps) {
+export function SessionList({ projectId, children, isCollapsed }: SessionListProps) {
   const navigate = useNavigate();
   const { sessionFetchTrigger, refreshSessions } = useProjectStore();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -108,26 +109,37 @@ export function SessionList({ projectId, children }: SessionListProps) {
 
   return (
     <>
-      <div className="px-4 mb-6">
-        <button
-          onClick={handleNewChat}
-          className="w-full bg-blue-400 hover:bg-blue-500 text-[#003a6b] font-medium text-xs tracking-[0.6px] uppercase py-2 rounded flex items-center justify-center transition-colors"
-        >
-          새 대화
-        </button>
+      <div className={cn(isCollapsed ? "px-1 mb-6 flex justify-center" : "px-4 mb-6")}>
+        {isCollapsed ? (
+          <button
+            onClick={handleNewChat}
+            className="w-10 h-10 bg-blue-400 hover:bg-blue-500 text-[#003a6b] rounded-full flex items-center justify-center transition-all duration-200 shadow-md active:scale-95 cursor-pointer"
+            title="새 대화"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        ) : (
+          <button
+            onClick={handleNewChat}
+            className="w-full bg-blue-400 hover:bg-blue-500 text-[#003a6b] font-medium text-xs tracking-[0.6px] uppercase py-2 rounded flex items-center justify-center transition-colors active:scale-[0.98] cursor-pointer"
+          >
+            새 대화
+          </button>
+        )}
       </div>
 
       {children}
 
-      <div className="flex-1 overflow-y-auto px-4 flex flex-col gap-3 min-h-0">
-        <div className="flex items-center gap-2 px-2 shrink-0">
-          <MessageSquarePlus className="w-3 h-3 text-slate-500" />
-          <h3 className="text-[10px] font-medium text-slate-500 uppercase tracking-[1px]">
-            대화 세션 목록
-          </h3>
-        </div>
-        <ul className="flex flex-col gap-1">
-          {isSessionsLoading ? (
+      {!isCollapsed && (
+        <div className="flex-1 overflow-y-auto px-4 flex flex-col gap-3 min-h-0">
+          <div className="flex items-center gap-2 px-2 shrink-0">
+            <MessageSquarePlus className="w-3 h-3 text-slate-500" />
+            <h3 className="text-[10px] font-medium text-slate-500 uppercase tracking-[1px]">
+              대화 세션 목록
+            </h3>
+          </div>
+          <ul className="flex flex-col gap-1">
+            {isSessionsLoading ? (
             <li className="px-3 py-2 text-[10px] text-slate-500 animate-pulse">
               세션 목록 로딩 중...
             </li>
@@ -182,6 +194,7 @@ export function SessionList({ projectId, children }: SessionListProps) {
           )}
         </ul>
       </div>
+      )}
 
       {isRenameModalOpen && editingSession && (
         <RenameSessionModal
