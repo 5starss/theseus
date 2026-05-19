@@ -34,7 +34,9 @@ class TaskOutputTool(BaseTool):
     ) -> ToolResult:
         try:
             output = get_task_manager().read_task_output(
-                arguments.task_id, max_bytes=arguments.max_bytes
+                arguments.task_id,
+                max_bytes=arguments.max_bytes,
+                cwd=context.cwd,
             )
             return ToolResult(output=output)
         except ValueError as exc:
