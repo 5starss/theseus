@@ -204,64 +204,86 @@ export function InspectorPanel() {
         <div className="flex-1 overflow-hidden min-h-0 relative">
           <TabsContent value="plan" className="h-full m-0 overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
             {currentPlan ? (
-              currentPlan.blocks.map(block => (
-                <div
-                  key={block.blockId}
-                  className={`group rounded-md border border-slate-700/60 bg-[#0a1624]/70 p-4 text-sm text-slate-300 shadow-sm transition-colors hover:border-slate-600/80 ${
-                    block.parentId ? 'ml-3 border-l-2 border-l-blue-400/30' : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3 pb-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start gap-2">
-                        <div className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
-                        <div className="min-w-0">
-                          <h3 className="text-sm font-semibold leading-5 text-blue-100 [overflow-wrap:anywhere]">
-                            {block.title}
-                          </h3>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
-                            <span className="font-mono text-slate-400">{block.blockId}</span>
-                            {block.tier && <span>{block.tier}</span>}
-                            {block.status && <span>{block.status}</span>}
-                            {block.parentId && <span>Parent {block.parentId}</span>}
+              <>
+                {currentPlan.sections && currentPlan.sections.length > 0 && (
+                  <div className="rounded-md border border-slate-700/50 bg-[#071424]/70 px-4 py-3 text-sm text-slate-300">
+                    {currentPlan.sections.map((section, index) => (
+                      <section
+                        key={section.sectionId}
+                        className={`${index > 0 ? 'mt-3 border-t border-slate-800/80 pt-3' : ''}`}
+                      >
+                        <div className={`mb-1 text-xs font-semibold leading-5 ${
+                          section.tone === 'warning' ? 'text-amber-200' : 'text-blue-100'
+                        }`}>
+                          {section.title}
+                        </div>
+                        <div className="whitespace-pre-wrap text-[12px] leading-5 text-slate-400 [overflow-wrap:anywhere]">
+                          {section.content}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                )}
+
+                {currentPlan.blocks.map(block => (
+                  <div
+                    key={block.blockId}
+                    className={`group rounded-md border border-slate-700/60 bg-[#0a1624]/70 p-4 text-sm text-slate-300 shadow-sm transition-colors hover:border-slate-600/80 ${
+                      block.parentId ? 'ml-3 border-l-2 border-l-blue-400/30' : ''
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 pb-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start gap-2">
+                          <div className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-400" />
+                          <div className="min-w-0">
+                            <h3 className="text-sm font-semibold leading-5 text-blue-100 [overflow-wrap:anywhere]">
+                              {block.title}
+                            </h3>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-4 text-slate-500">
+                              <span className="font-mono text-slate-400">{block.blockId}</span>
+                              {block.tier && <span>{block.tier}</span>}
+                              {block.status && <span>{block.status}</span>}
+                              {block.parentId && <span>Parent {block.parentId}</span>}
+                            </div>
                           </div>
                         </div>
                       </div>
+                      {renderFeedbackButton(block.blockId, 'Task feedback')}
                     </div>
-                    {renderFeedbackButton(block.blockId, 'Task feedback')}
-                  </div>
 
-                  {renderFeedbackInput(block.blockId, '이 task 전체에 대한 수정 요청을 입력하세요.')}
+                    {renderFeedbackInput(block.blockId, '이 task 전체에 대한 수정 요청을 입력하세요.')}
 
-                  {block.fields && block.fields.length > 0 ? (
-                    <div className="border-t border-slate-700/50">
-                      {block.fields.map((field, index) => (
-                        <section
-                          key={field.feedbackTarget}
-                          className={`py-3 ${index > 0 ? 'border-t border-slate-800/80' : ''}`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="mb-1 text-xs font-semibold leading-5 text-slate-300">
-                                {field.label}
+                    {block.fields && block.fields.length > 0 ? (
+                      <div className="border-t border-slate-700/50">
+                        {block.fields.map((field, index) => (
+                          <section
+                            key={field.feedbackTarget}
+                            className={`py-3 ${index > 0 ? 'border-t border-slate-800/80' : ''}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-1 text-xs font-semibold leading-5 text-slate-300">
+                                  {field.label}
+                                </div>
+                                <div className="whitespace-pre-wrap text-[13px] leading-6 text-slate-400 [overflow-wrap:anywhere]">
+                                  {field.value}
+                                </div>
                               </div>
-                              <div className="whitespace-pre-wrap text-[13px] leading-6 text-slate-400 [overflow-wrap:anywhere]">
-                                {field.value}
-                              </div>
+                              {renderFeedbackButton(field.feedbackTarget, `${field.label} feedback`)}
                             </div>
-                            {renderFeedbackButton(field.feedbackTarget, `${field.label} feedback`)}
-                          </div>
-                          {renderFeedbackInput(field.feedbackTarget, `${field.label} 항목에 대한 수정 요청을 입력하세요.`)}
-                        </section>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="border-t border-slate-700/50 pt-3 text-[13px] leading-6 text-slate-400 whitespace-pre-wrap [overflow-wrap:anywhere]">
-                      {block.content}
-                    </div>
-                  )}
-                </div>
-              ))
+                            {renderFeedbackInput(field.feedbackTarget, `${field.label} 항목에 대한 수정 요청을 입력하세요.`)}
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="border-t border-slate-700/50 pt-3 text-[13px] leading-6 text-slate-400 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                        {block.content}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 text-sm gap-4">
                 <Layout className="w-12 h-12 opacity-10" />

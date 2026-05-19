@@ -41,8 +41,16 @@ export interface PlanField {
   feedbackTarget: string;
 }
 
+export interface PlanSection {
+  sectionId: string;
+  title: string;
+  content: string;
+  tone?: 'default' | 'warning';
+}
+
 export interface StructuredPlan {
   version: string | number;
+  sections?: PlanSection[];
   blocks: PlanBlock[];
 }
 

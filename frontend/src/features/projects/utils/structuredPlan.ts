@@ -1,4 +1,4 @@
-import type { PlanBlock, PlanField, StructuredPlan } from '../types/chat';
+import type { PlanBlock, PlanField, PlanSection, StructuredPlan } from '../types/chat';
 
 type StructuredPlanRecord = Record<string, unknown>;
 
@@ -54,6 +54,64 @@ function firstValueFrom(record: StructuredPlanRecord, keys: string[]): unknown {
     if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
   }
   return undefined;
+}
+
+function recordFrom(value: unknown): StructuredPlanRecord | null {
+  return isRecord(value) ? value : null;
+}
+
+function labeledBlock(label: string, value: unknown): string | null {
+  const formatted = formattedValueFrom(value);
+  return formatted ? `${label}\n${formatted}` : null;
+}
+
+function warningsFrom(parsed: StructuredPlanRecord): string | null {
+  const validation = recordFrom(parsed.execution_spec_validation);
+  const warnings = validation?.warnings ?? parsed.validationWarnings;
+  return formattedValueFrom(warnings);
+}
+
+function planSectionsFrom(parsed: StructuredPlanRecord): PlanSection[] {
+  const sections: PlanSection[] = [];
+  const context = recordFrom(parsed.context);
+  const verification = recordFrom(parsed.verification);
+
+  const overview = [
+    labeledBlock('목표', parsed.goal ?? parsed.summary ?? parsed.title),
+    labeledBlock('문제 분석', context?.problem_analysis ?? context?.current_state),
+  ].filter((item): item is string => Boolean(item));
+  if (overview.length > 0) {
+    sections.push({
+      sectionId: 'overview',
+      title: '개요',
+      content: overview.join('\n\n'),
+    });
+  }
+
+  const warnings = warningsFrom(parsed);
+  if (warnings) {
+    sections.push({
+      sectionId: 'validation-warnings',
+      title: '보완 필요',
+      content: warnings,
+      tone: 'warning',
+    });
+  }
+
+  const verificationContent = [
+    labeledBlock('성공 기준', verification?.success_criteria),
+    labeledBlock('테스트 명령', verification?.test_commands),
+    labeledBlock('수동 확인', verification?.manual_checks),
+  ].filter((item): item is string => Boolean(item));
+  if (verificationContent.length > 0) {
+    sections.push({
+      sectionId: 'verification',
+      title: '검증 기준',
+      content: verificationContent.join('\n\n'),
+    });
+  }
+
+  return sections;
 }
 
 function versionFrom(parsed: StructuredPlanRecord): string | number {
@@ -146,6 +204,7 @@ export function parseStructuredPlanJson(
     if (Array.isArray(parsed.blocks)) {
       return {
         version: versionFrom(parsed),
+        sections: planSectionsFrom(parsed),
         blocks: parsed.blocks.map(blockFrom),
       };
     }
@@ -153,6 +212,7 @@ export function parseStructuredPlanJson(
     if (Array.isArray(parsed.tasks)) {
       return {
         version: versionFrom(parsed),
+        sections: planSectionsFrom(parsed),
         blocks: parsed.tasks.map(taskBlockFrom),
       };
     }

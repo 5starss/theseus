@@ -6,6 +6,30 @@ import type { StructuredPlan } from '@/features/projects/types/chat';
 
 const previewPlan: StructuredPlan = {
   version: 'dev-preview',
+  sections: [
+    {
+      sectionId: 'overview',
+      title: '개요',
+      content: '목표\nCPU, 메모리, 디스크, 네트워크 상태를 점검하는 툴을 생성합니다.',
+    },
+    {
+      sectionId: 'validation-warnings',
+      title: '보완 필요',
+      content: [
+        'generated tool execution_spec.permissionLevel을 1~5 정수로 명시하면 승인/생성 단계의 RBAC 판단이 명확해집니다.',
+        'execution_spec.outputs.required_result_fields에 evidence, recommendation, sanitized_output를 포함하면 결과 검토성이 좋아집니다.',
+      ].map(item => `- ${item}`).join('\n'),
+      tone: 'warning',
+    },
+    {
+      sectionId: 'verification',
+      title: '검증 기준',
+      content: [
+        '성공 기준\nTool successfully created and reports system status as expected.',
+        '수동 확인\n- /custom-tools/2/system_monitor_tool.py 파일 생성 확인\n- CPU, 메모리, 디스크, 네트워크 상태 출력 확인',
+      ].join('\n\n'),
+    },
+  ],
   blocks: [
     {
       blockId: 'task-1',
