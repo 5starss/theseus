@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 175 — PLAN 최종 Markdown 스트림 및 권한 리뷰 보정 (2026-05-19)
+
+#### `src` / 프롬프트
+- ToolPlan worker가 PLAN Drafting 중간 LLM delta를 그대로 chunk로 흘리지 않고, Core가 파싱/정규화한 최종 Markdown만 chunk 이벤트로 발행하도록 보정
+- PLAN 표시 Markdown의 실행 스펙 영역에 generated tool `permissionLevel`과 `permission_rationale`을 노출해 승인 전 권한 수준을 확인할 수 있게 정리
+- PLAN Review prompt에서 `execution_spec.permissionLevel`과 `execution_spec.permission_rationale` 필드 수정 예시를 명시해 리뷰 중 권한 보정이 가능하도록 안내
+
+#### 테스트
+- `tests/test_tool_plan_processor_chunks.py`, `tests/test_plan_display_markdown.py`, `tests/test_plan_review_permission_prompt.py`를 추가해 raw JSON chunk 차단, 권한 레벨 표시, 리뷰 prompt 필드 안내를 검증
+
+---
+
 ### 🛠️ Session 174 — PLAN Draft JSON structured output 옵션 추가 (2026-05-19)
 
 #### `src` / `theseus_engine`
