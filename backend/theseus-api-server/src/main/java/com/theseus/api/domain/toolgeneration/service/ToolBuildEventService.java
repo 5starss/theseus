@@ -149,7 +149,9 @@ public class ToolBuildEventService {
 		}
 
 		String fileName = requireText(artifact.getFileName());
-		if (toolRepository.existsByProjectAndFileName(toolPlan.getProject(), fileName)) {
+		toolRepository.findByProjectAndFileNameAndStatus(toolPlan.getProject(), fileName, ToolStatus.DELETED)
+			.forEach(Tool::releaseFileNameForReuse);
+		if (toolRepository.existsActiveByProjectAndFileName(toolPlan.getProject(), fileName)) {
 			String code = ErrorCode.DUPLICATE_TOOL_FILE_NAME.getCode();
 			String message = createDuplicateFileNameFailureMessage(fileName);
 			failBuildRun(
