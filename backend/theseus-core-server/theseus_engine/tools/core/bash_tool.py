@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -33,7 +34,9 @@ class BashTool(BaseTool):
         "Run a shell command in the local workspace. "
         "Returns stdout and stderr. "
         "IMPORTANT: Do NOT run interactive commands (e.g. npm init without -y). "
-        "Use non-interactive flags like --yes, -y, --defaults."
+        "Use non-interactive flags like --yes, -y, --defaults. "
+        "Do NOT launch background or long-running processes here; use task_create "
+        "so task_stop can reliably stop them."
     )
     input_model = BashInput
     permission_level = 3  # 높은 권한 — 셸 접근
@@ -179,6 +182,17 @@ def _fmt_timeout(
 
 def _preflight_interactive(command: str) -> str | None:
     low = command.lower()
+    background_markers = (
+        "start-process", "start-job", "nohup ", "disown",
+        "setsid ", "start /b",
+    )
+    if any(m in low for m in background_markers) or re.search(r"(?<!&)&\s*$", command):
+        return (
+            "This command appears to launch a background process. "
+            "Use task_create instead so Theseus records the PID and task_stop "
+            "can stop the process tree later."
+        )
+
     scaffold_markers = (
         "create-next-app", "npm create ", "pnpm create ",
         "yarn create ", "bun create ", "pnpm dlx ",

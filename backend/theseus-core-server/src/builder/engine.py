@@ -16,7 +16,7 @@ from src.remote_workspace.runtime import (
     register_remote_workspace_config,
 )
 from src.remote_workspace.write_primitives import build_remote_write_execution_tools
-from src.tooling import load_custom_tools_for_project
+from src.tooling import deleted_project_tool_names, load_custom_tools_for_project
 from theseus_engine.engine.query_engine import QueryEngine
 from theseus_engine.engine.stream_events import (
     AssistantTextDelta,
@@ -304,21 +304,21 @@ def get_query_engine(
         "on",
     }:
         disabled_tools.update(_SERVER_ENGINE_RAG_TOOL_NAMES)
+    if build_context.project_id:
+        disabled_tools.update(deleted_project_tool_names(build_context.project_id))
 
-    active_registry = build_visible_registry(
-        full_registry,
-        ToolVisibilityPolicy(
-            mode=build_context.mode,
-            plan_phase=plan_phase,
-            user_level=build_context.user_level,
-            tool_permissions=tool_permissions,
-            can_create_tool=can_create_tool,
-            disabled_tools=frozenset(disabled_tools),
-            has_remote_workspace=build_context.remote_workspace is not None,
-            allow_remote_write_execution=allow_remote_write_execution,
-            allow_local_report_write=allow_local_report_write,
-        ),
+    visibility_policy = ToolVisibilityPolicy(
+        mode=build_context.mode,
+        plan_phase=plan_phase,
+        user_level=build_context.user_level,
+        tool_permissions=tool_permissions,
+        can_create_tool=can_create_tool,
+        disabled_tools=frozenset(disabled_tools),
+        has_remote_workspace=build_context.remote_workspace is not None,
+        allow_remote_write_execution=allow_remote_write_execution,
+        allow_local_report_write=allow_local_report_write,
     )
+    active_registry = build_visible_registry(full_registry, visibility_policy)
     allowed_tools = tuple(tool.name for tool in active_registry.list_tools())
     if not allowed_tools and build_context.mode != AgentMode.ASK:
         raise EngineInitializationError(
@@ -366,6 +366,7 @@ def get_query_engine(
         tool_metadata={
             "tool_registry": full_registry,
             "active_registry": active_registry,
+            "search_injectable_tool_names": allowed_tools,
             "tool_permissions": tool_permissions,
             "custom_tool_inventory": custom_tool_inventory,
             "llm_client": api_client,
@@ -379,6 +380,8 @@ def get_query_engine(
             "plan_id": build_context.plan_id,
             "agent_mode": build_context.mode.value,
             "plan_phase": plan_phase.value if plan_phase is not None else None,
+            "user_rbac_level": build_context.user_level,
+            "user_level": build_context.user_level,
             "remote_workspace_id": build_context.remote_workspace_id,
             "local_report_root": settings.THESEUS_LOCAL_REPORT_ROOT,
             REMOTE_WORKSPACE_RUNTIME_KEY: remote_workspace_runtime_key,

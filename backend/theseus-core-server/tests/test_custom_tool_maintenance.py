@@ -140,6 +140,7 @@ class CustomToolMaintenanceTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual("updated", update_result.status)
             self.assertTrue(update_result.sandbox_verified)
+            self.assertEqual([], update_result.errors)
             self.assertIn("new", paths.module_path.read_text(encoding="utf-8"))
             metadata = json.loads(paths.metadata_path.read_text(encoding="utf-8"))
             self.assertEqual("custom_tool_update_source", metadata["activationSource"])
@@ -181,6 +182,36 @@ class CustomToolMaintenanceTest(unittest.IsolatedAsyncioTestCase):
             metadata = json.loads(paths.metadata_path.read_text(encoding="utf-8"))
             self.assertEqual(STATUS_ACTIVE, metadata["status"])
             self.assertTrue(metadata["sandboxResult"]["success"])
+
+    async def test_duplicate_active_tool_name_requires_explicit_module_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_paths = _write_active_tool(root)
+            duplicate_paths = ServerToolArtifactPaths(
+                project_dir=old_paths.project_dir,
+                module_path=old_paths.project_dir / "ram_monitor_v2_tool.py",
+                metadata_path=old_paths.project_dir / "ram_monitor_v2_tool.meta.json",
+                module_name="ram_monitor_v2_tool",
+            )
+            duplicate_paths.module_path.write_text(_tool_code("duplicate"), encoding="utf-8")
+            duplicate_metadata = _active_metadata(duplicate_paths)
+            write_tool_metadata(duplicate_paths, duplicate_metadata)
+
+            ambiguous = read_project_tool_source(
+                project_id="4",
+                tool_name="ram_monitor",
+                storage_root=root,
+            )
+            self.assertEqual("rejected", ambiguous.status)
+            self.assertEqual("ambiguous_tool_identifier", ambiguous.stage)
+
+            selected = read_project_tool_source(
+                project_id="4",
+                module_name="ram_monitor_v2_tool",
+                storage_root=root,
+            )
+            self.assertEqual("read", selected.status)
+            self.assertIn("duplicate", selected.source or "")
 
     def test_project_loaders_skip_unverified_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

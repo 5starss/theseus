@@ -15,13 +15,17 @@ import com.theseus.api.domain.tool.entity.ToolStatus;
 import com.theseus.api.domain.tool.repository.ToolRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
+import com.theseus.api.domain.chat.config.CoreStreamProperties;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 @Service
@@ -33,6 +37,14 @@ public class ToolService {
 	private final ProjectRepository projectRepository;
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
+	private final CoreStreamProperties coreStreamProperties;
+
+	private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+		.connectTimeout(java.time.Duration.ofSeconds(5))
+		.build();
+
+	@Value("${internal.api-key:}")
+	private String internalApiKey;
 
 	/**
 	 * 프로젝트 멤버가 사용할 수 있는 승인 완료 Tool 목록을 조회합니다.
@@ -84,7 +96,7 @@ public class ToolService {
 	}
 
 	/**
-	 * Tool을 논리 삭제 처리합니다.
+	 * Tool을 논리 삭제 처리하고 코어서버의 실제 도구 파일을 휴지통으로 이동시킵니다.
 	 */
 	@Transactional
 	public void deleteTool(AuthenticatedUser currentUser, Long projectId, Long toolId) {
@@ -94,7 +106,32 @@ public class ToolService {
 		validateToolUsePermission(projectMember);
 
 		Tool tool = getToolEntity(project, toolId);
+
+		// 코어서버의 실제 도구 파일(.py, .meta.json) 휴지통 이동 API 호출
+		requestCoreToolDeletion(project.getId(), tool.getFileName());
+
 		tool.delete();
+	}
+
+	private void requestCoreToolDeletion(Long projectId, String fileName) {
+		try {
+			java.net.URI deleteUri = coreStreamProperties.deleteToolUri(projectId, fileName);
+			java.net.http.HttpRequest coreRequest = java.net.http.HttpRequest.newBuilder(deleteUri)
+				.timeout(java.time.Duration.ofSeconds(10))
+				.header("Accept", "application/json")
+				.header("X-Internal-Api-Key", internalApiKey == null ? "" : internalApiKey)
+				.DELETE()
+				.build();
+
+			java.net.http.HttpResponse<String> response = httpClient.send(coreRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				log.warn(">>>> Core Tool deletion failed. status={}, body={}", response.statusCode(), response.body());
+			} else {
+				log.info(">>>> Successfully requested Core Tool deletion to trash. status={}", response.statusCode());
+			}
+		} catch (Exception exception) {
+			log.warn(">>>> Failed to send Tool deletion request to Core server. project={}, file={}", projectId, fileName, exception);
+		}
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {

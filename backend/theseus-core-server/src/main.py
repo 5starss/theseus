@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.builder.worker import setup_scheduler
 from src.config import settings
 from src.db.postgres import init_db
-from src.routes import health, plan, remote_workspace, sandbox, stream
+from src.routes import health, plan, remote_workspace, sandbox, stream, tool
 from src.sandbox.base import SandboxUnavailableError
 from src.sandbox.docker_executor import DockerExecutor, SandboxStartupCheckError
 from src.tool_build.consumer import start_tool_build_consumer
@@ -177,6 +177,7 @@ app.include_router(stream.router, prefix="/api/v1", tags=["Streaming"])
 app.include_router(plan.router, prefix="/api/v1", tags=["Plan"])
 app.include_router(sandbox.router, prefix="/api/v1", tags=["Sandbox"])
 app.include_router(remote_workspace.router, prefix="/api/v1", tags=["RemoteWorkspace"])
+app.include_router(tool.router, prefix="/api/v1", tags=["Tool"])
 
 # 글로벌 예외 처리
 @app.exception_handler(Exception)

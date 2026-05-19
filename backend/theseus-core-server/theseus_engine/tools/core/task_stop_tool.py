@@ -29,7 +29,10 @@ class TaskStopTool(BaseTool):
         self, arguments: TaskStopInput, context: ToolExecutionContext
     ) -> ToolResult:
         try:
-            task = await get_task_manager().stop_task(arguments.task_id)
+            task = await get_task_manager().stop_task(
+                arguments.task_id,
+                cwd=context.cwd,
+            )
             return ToolResult(
                 output=f"✅ Task stopped: {task.id} ({task.description})"
             )
