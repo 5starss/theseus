@@ -54,6 +54,7 @@ public class ChatSessionService {
 	private final ToolPlanRunRepository toolPlanRunRepository;
 	private final ToolPlanRepository toolPlanRepository;
 	private final ToolPlanGroupRepository toolPlanGroupRepository;
+	private final com.theseus.api.domain.tool.repository.ToolRepository toolRepository;
 
 	/**
 	 * 로그인 사용자의 프로젝트 멤버 권한으로 새 채팅 세션을 생성합니다.
@@ -213,7 +214,7 @@ public class ChatSessionService {
 	 * 생성이 완료된 최신 Tool 산출물을 채팅방 복구 응답에 포함합니다.
 	 */
 	private ChatSessionDetailResponse.CreatedToolResponse resolveCreatedTool(ChatSession chatSession) {
-		return toolPlanGroupRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
+		ChatSessionDetailResponse.CreatedToolResponse responseFromGroup = toolPlanGroupRepository.findFirstByProjectAndChatSessionAndStatusOrderByUpdatedAtDesc(
 				chatSession.getProject(),
 				chatSession,
 				ToolPlanGroupStatus.BUILT
@@ -221,5 +222,19 @@ public class ChatSessionService {
 			.map(ToolPlanGroup::getCreatedTool)
 			.map(ChatSessionDetailResponse.CreatedToolResponse::createFrom)
 			.orElse(null);
+
+		if (responseFromGroup != null) {
+			return responseFromGroup;
+		}
+
+		List<com.theseus.api.domain.tool.entity.Tool> activeTools = toolRepository.findByChatSessionAndStatusNotOrderByUpdatedAtDesc(
+			chatSession,
+			com.theseus.api.domain.tool.entity.ToolStatus.DELETED
+		);
+		if (!activeTools.isEmpty()) {
+			return ChatSessionDetailResponse.CreatedToolResponse.createFrom(activeTools.get(0));
+		}
+
+		return null;
 	}
 }

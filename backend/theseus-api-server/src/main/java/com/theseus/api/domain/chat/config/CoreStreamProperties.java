@@ -24,4 +24,9 @@ public record CoreStreamProperties(String baseUrl) {
 		String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
 		return URI.create(normalizedBaseUrl + "/api/v1/remote-workspaces/test-connection");
 	}
+
+	public URI deleteToolUri(Long projectId, String toolName) {
+		String normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+		return URI.create(normalizedBaseUrl + "/api/v1/tools/%d/%s".formatted(projectId, toolName));
+	}
 }

@@ -103,7 +103,11 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
 		@Param("chatSession") ChatSession chatSession
 	);
 
+	Optional<Tool> findByProjectAndFileName(Project project, String fileName);
+
 	boolean existsByProjectAndFileName(Project project, String fileName);
+
+	boolean existsByProjectAndFileNameAndStatusNot(Project project, String fileName, ToolStatus status);
 
 	boolean existsByProjectAndFileNameAndIdNot(Project project, String fileName, Long id);
 
