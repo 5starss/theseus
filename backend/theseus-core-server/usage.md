@@ -368,6 +368,8 @@ Theseus-LocalExtensionSourcePackage/
 
 제외되는 항목은 `src`, `frontend`, `infra`, `backend/theseus-api-server`,
 `.venv`, `build`, `dist`, `tests`, 실제 `.env`, Python cache입니다.
+배포 ZIP에 들어가는 `requirements*.txt`는 시스템 언어에 따른 Unicode decode
+문제를 피하기 위해 ASCII-only로 정리되어 복사됩니다.
 
 받은 사람은 압축을 풀고 `Install-Theseus-Extension.cmd`를 더블클릭하면 됩니다.
 이 패키지는 소스 런타임 배포용이므로 핵심 Python 코드를 숨기는 목적에는
