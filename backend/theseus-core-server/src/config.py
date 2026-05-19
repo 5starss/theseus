@@ -121,6 +121,7 @@ class Settings(BaseSettings):
     THESEUS_REMOTE_LOCAL_REPORT_WRITE_ENABLED: bool = True
     THESEUS_LOCAL_REPORT_ROOT: str = "reports"
     THESEUS_REMOTE_WORKSPACE_FILE_WRITE_OVERRIDE: bool = False
+    THESEUS_SERVER_SENSITIVE_TOOL_POLICY: Literal["reject", "allow"] = "reject"
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_CUSTOM_TOOLS_HOST_DIR: Optional[str] = None
