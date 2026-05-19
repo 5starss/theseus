@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 172 — PLAN generated tool permissionLevel 명세 보강 (2026-05-19)
+
+#### `src` / 프롬프트
+- PLAN Drafting JSON schema의 `execution_spec`에 generated custom tool용 `permissionLevel`과 `permission_rationale` 필드를 명시하도록 보강
+- generated tool 계획은 최소 권한 원칙으로 1~5 정수 `permissionLevel`을 선택하고, BaseTool `permission_level` 및 이후 `create_tool.permission_level`과 일치해야 한다는 규칙을 추가
+- 자동 생성되는 generated tool default `execution_spec`에도 `permissionLevel=1`과 rationale을 포함하고, Markdown 표시에서 권한 레벨을 노출하도록 정리
+- generated tool 계획에서 `permissionLevel`이 누락되면 hard fail이 아니라 품질 보완 warning으로 안내하도록 회귀 테스트 추가
+
+---
+
 ### 🛠️ Session 171 — vLLM served model 자동 탐색 지원 (2026-05-19)
 
 #### `theseus_engine`

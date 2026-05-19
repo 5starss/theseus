@@ -108,6 +108,8 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
   },
   "execution_spec": {
     "tool_name": "snake_case logical tool name when the request is for a generated tool",
+    "permissionLevel": 1,
+    "permission_rationale": "Least-privilege reason for the requested generated tool permission level",
     "validation_strategy": "core_sandbox_gate for generated Theseus custom tools; omit for pure remote/operator diagnostics",
     "mvp_scope": ["Concrete read-only capabilities included in the first version"],
     "mvp_exclusions": ["Write operations, recovery actions, or integrations intentionally excluded"],
@@ -214,6 +216,10 @@ Do NOT add `python3 <tool>.py`, `python3 -m py_compile <tool>.py`, or `python3 -
 as execution steps for generated tools. After approval, `create_tool` runs the Core \
 Docker sandbox gate, which compiles/imports the module and checks the BaseTool subclass, \
 required attributes, and execute signature before activation.
+ - Generated Theseus custom tool plans MUST include `execution_spec.permissionLevel` \
+as an integer from 1 to 5 and a short `execution_spec.permission_rationale`. Choose the \
+lowest level that satisfies the tool. The generated BaseTool class `permission_level` \
+and later `create_tool.permission_level` must match this planned value.
  - Generated Theseus custom tools are not operating-system command plans. Their \
 `execution_spec.steps[]` may be empty when validation is delegated to `core_sandbox_gate`; \
 instead, include implementation constraints such as BaseTool imports, Pydantic input model, \
