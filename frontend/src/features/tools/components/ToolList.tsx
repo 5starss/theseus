@@ -6,6 +6,7 @@ import { ToolCard } from './ToolCard';
 import { Activity, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToolDetailModal } from './ToolDetailModal';
+import { useProjectStore } from '@/features/projects/stores/useProjectStore';
 
 const ITEMS_PER_PAGE = 9;
 
@@ -16,6 +17,9 @@ export function ToolList() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedTool, setSelectedTool] = useState<ToolItem | null>(null);
   const [fetchTrigger, setFetchTrigger] = useState(0);
+  const [updatingToolId, setUpdatingToolId] = useState<number | null>(null);
+  const currentProject = useProjectStore((state) => state.currentProject);
+  const canEditAccessLevel = currentProject?.projectRole === 'ADMIN';
 
   useEffect(() => {
     let isMounted = true;
@@ -48,6 +52,27 @@ export function ToolList() {
 
   const handleToolClick = (tool: ToolItem) => {
     setSelectedTool(tool);
+  };
+
+  const handleAccessLevelChange = async (tool: ToolItem, accessLevel: number) => {
+    if (!projectId || tool.toolGrade === accessLevel) return;
+
+    setUpdatingToolId(tool.toolId);
+    try {
+      const updatedTool = await toolApi.updateToolAccessLevel(projectId, tool.toolId, accessLevel);
+      setTools((prevTools) =>
+        prevTools.map((item) => (item.toolId === updatedTool.toolId ? { ...item, ...updatedTool } : item))
+      );
+      setSelectedTool((prevTool) =>
+        prevTool?.toolId === updatedTool.toolId ? { ...prevTool, ...updatedTool } : prevTool
+      );
+      alert('Tool access level 수정이 완료되었습니다.');
+    } catch (error) {
+      console.error('Failed to update tool access level:', error);
+      alert('Tool access level 수정에 실패했습니다.');
+    } finally {
+      setUpdatingToolId(null);
+    }
   };
 
   // 페이징 계산
@@ -84,6 +109,9 @@ export function ToolList() {
                     key={tool.toolId}
                     tool={tool}
                     onClick={() => handleToolClick(tool)}
+                    canEditAccessLevel={canEditAccessLevel}
+                    isUpdatingAccessLevel={updatingToolId === tool.toolId}
+                    onAccessLevelChange={(accessLevel) => handleAccessLevelChange(tool, accessLevel)}
                   />
                 ))}
               </div>

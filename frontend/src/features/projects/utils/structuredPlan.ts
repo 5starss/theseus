@@ -1,18 +1,18 @@
-import type { PlanBlock, StructuredPlan } from '../types/chat';
+import type { PlanBlock, PlanField, PlanSection, StructuredPlan } from '../types/chat';
 
 type StructuredPlanRecord = Record<string, unknown>;
 
-const TASK_FIELD_LABELS: Array<[string, string]> = [
-  ['problem', 'Problem'],
-  ['solution', 'Solution'],
-  ['expected_effect', 'Expected effect'],
-  ['expectedEffect', 'Expected effect'],
-  ['target_files', 'Target files'],
-  ['targetFiles', 'Target files'],
-  ['risks', 'Risks'],
-  ['tier', 'Tier'],
-  ['parent_id', 'Parent task'],
-  ['parentId', 'Parent task'],
+const TASK_FIELD_SPECS: Array<{ fieldId: string; label: string; keys: string[] }> = [
+  { fieldId: 'problem', label: 'Problem', keys: ['problem'] },
+  { fieldId: 'solution', label: 'Solution', keys: ['solution'] },
+  { fieldId: 'expected_effect', label: 'Expected effect', keys: ['expected_effect', 'expectedEffect'] },
+  { fieldId: 'description', label: 'Description', keys: ['description'] },
+  { fieldId: 'target_files', label: 'Target files', keys: ['target_files', 'targetFiles'] },
+  { fieldId: 'integration_points', label: 'Integration points', keys: ['integration_points', 'integrationPoints'] },
+  { fieldId: 'sequential_dependencies', label: 'Sequential dependencies', keys: ['sequential_dependencies', 'sequentialDependencies'] },
+  { fieldId: 'plan_b', label: 'Plan B', keys: ['plan_b', 'planB'] },
+  { fieldId: 'safe_alternative', label: 'Safe alternative', keys: ['safe_alternative', 'safeAlternative'] },
+  { fieldId: 'risks', label: 'Risks', keys: ['risks'] },
 ];
 
 function isRecord(value: unknown): value is StructuredPlanRecord {
@@ -49,6 +49,71 @@ function formattedValueFrom(value: unknown): string | null {
   return null;
 }
 
+function firstValueFrom(record: StructuredPlanRecord, keys: string[]): unknown {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
+  }
+  return undefined;
+}
+
+function recordFrom(value: unknown): StructuredPlanRecord | null {
+  return isRecord(value) ? value : null;
+}
+
+function labeledBlock(label: string, value: unknown): string | null {
+  const formatted = formattedValueFrom(value);
+  return formatted ? `${label}\n${formatted}` : null;
+}
+
+function warningsFrom(parsed: StructuredPlanRecord): string | null {
+  const validation = recordFrom(parsed.execution_spec_validation);
+  const warnings = validation?.warnings ?? parsed.validationWarnings;
+  return formattedValueFrom(warnings);
+}
+
+function planSectionsFrom(parsed: StructuredPlanRecord): PlanSection[] {
+  const sections: PlanSection[] = [];
+  const context = recordFrom(parsed.context);
+  const verification = recordFrom(parsed.verification);
+
+  const overview = [
+    labeledBlock('목표', parsed.goal ?? parsed.summary ?? parsed.title),
+    labeledBlock('문제 분석', context?.problem_analysis ?? context?.current_state),
+  ].filter((item): item is string => Boolean(item));
+  if (overview.length > 0) {
+    sections.push({
+      sectionId: 'overview',
+      title: '개요',
+      content: overview.join('\n\n'),
+    });
+  }
+
+  const warnings = warningsFrom(parsed);
+  if (warnings) {
+    sections.push({
+      sectionId: 'validation-warnings',
+      title: '보완 필요',
+      content: warnings,
+      tone: 'warning',
+    });
+  }
+
+  const verificationContent = [
+    labeledBlock('성공 기준', verification?.success_criteria),
+    labeledBlock('테스트 명령', verification?.test_commands),
+    labeledBlock('수동 확인', verification?.manual_checks),
+  ].filter((item): item is string => Boolean(item));
+  if (verificationContent.length > 0) {
+    sections.push({
+      sectionId: 'verification',
+      title: '검증 기준',
+      content: verificationContent.join('\n\n'),
+    });
+  }
+
+  return sections;
+}
+
 function versionFrom(parsed: StructuredPlanRecord): string | number {
   const version = parsed.version;
   if (typeof version === 'string' || typeof version === 'number') return version;
@@ -76,9 +141,9 @@ function blockFrom(value: unknown, index: number): PlanBlock {
 }
 
 function taskContentFrom(task: StructuredPlanRecord): string {
-  const parts = TASK_FIELD_LABELS
-    .map(([key, label]) => {
-      const value = formattedValueFrom(task[key]);
+  const parts = TASK_FIELD_SPECS
+    .map(({ keys, label }) => {
+      const value = formattedValueFrom(firstValueFrom(task, keys));
       return value ? `${label}\n${value}` : null;
     })
     .filter((part): part is string => Boolean(part));
@@ -90,6 +155,21 @@ function taskContentFrom(task: StructuredPlanRecord): string {
   return formattedValueFrom(task.content) || JSON.stringify(task, null, 2);
 }
 
+function taskFieldsFrom(task: StructuredPlanRecord, blockId: string): PlanField[] {
+  return TASK_FIELD_SPECS
+    .map(({ fieldId, label, keys }) => {
+      const value = formattedValueFrom(firstValueFrom(task, keys));
+      if (!value) return null;
+      return {
+        fieldId,
+        label,
+        value,
+        feedbackTarget: `${blockId}.${fieldId}`,
+      };
+    })
+    .filter((field): field is PlanField => Boolean(field));
+}
+
 function taskBlockFrom(value: unknown, index: number): PlanBlock {
   if (!isRecord(value)) {
     return {
@@ -99,10 +179,15 @@ function taskBlockFrom(value: unknown, index: number): PlanBlock {
     };
   }
 
+  const blockId = textFrom(value.blockId) || textFrom(value.id) || `task-${index + 1}`;
   return {
-    blockId: textFrom(value.blockId) || textFrom(value.id) || `task-${index + 1}`,
+    blockId,
     title: textFrom(value.title) || textFrom(value.name) || textFrom(value.id) || `Task ${index + 1}`,
     content: taskContentFrom(value),
+    fields: taskFieldsFrom(value, blockId),
+    parentId: textFrom(value.parent_id) || textFrom(value.parentId),
+    tier: textFrom(value.tier),
+    status: textFrom(value.status),
   };
 }
 
@@ -119,6 +204,7 @@ export function parseStructuredPlanJson(
     if (Array.isArray(parsed.blocks)) {
       return {
         version: versionFrom(parsed),
+        sections: planSectionsFrom(parsed),
         blocks: parsed.blocks.map(blockFrom),
       };
     }
@@ -126,6 +212,7 @@ export function parseStructuredPlanJson(
     if (Array.isArray(parsed.tasks)) {
       return {
         version: versionFrom(parsed),
+        sections: planSectionsFrom(parsed),
         blocks: parsed.tasks.map(taskBlockFrom),
       };
     }

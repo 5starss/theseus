@@ -770,7 +770,7 @@ button, textarea { font: inherit; }
   display: flex;
   flex-direction: column;
   gap: 5px;
-  max-height: 180px;
+  max-height: min(45vh, 520px);
   overflow-y: auto;
   padding: 6px 9px;
 }
@@ -780,7 +780,7 @@ button, textarea { font: inherit; }
 }
 
 .activity-list .tool pre {
-  max-height: 100px;
+  max-height: min(38vh, 440px);
 }
 
 .activity-note {
@@ -1272,7 +1272,7 @@ button, textarea { font: inherit; }
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 11px;
   margin: 4px 0 0;
-  max-height: 120px;
+  max-height: min(38vh, 440px);
   overflow: auto;
   padding: 6px 8px;
   white-space: pre-wrap;

@@ -191,6 +191,52 @@ def move_tool_to_trash(project_id: str, tool_name: str) -> bool:
 
     return moved_any
 
+
+def update_tool_permission_level(project_id: str, tool_name: str, permission_level: int) -> bool:
+    if not isinstance(permission_level, int) or permission_level < 1 or permission_level > 5:
+        raise ValueError("permissionLevel must be an integer from 1 to 5.")
+
+    project_dir = PROJECT_TOOLS_DIR / str(project_id)
+    requested_name = Path(str(tool_name or "")).name
+    base_name = requested_name
+    if base_name.endswith(".meta.json"):
+        base_name = base_name[: -len(".meta.json")]
+    elif base_name.endswith(".py"):
+        base_name = base_name[:-3]
+    if base_name.endswith("_tool"):
+        base_name = base_name[:-5]
+
+    module_stem = f"{base_name}_tool"
+    py_path = project_dir / f"{module_stem}.py"
+    meta_path = project_dir / f"{module_stem}.meta.json"
+    if not meta_path.exists():
+        return False
+
+    try:
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        metadata = {}
+    metadata["permissionLevel"] = permission_level
+    metadata["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    meta_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    if py_path.exists():
+        source = py_path.read_text(encoding="utf-8")
+        updated_source, replacement_count = re.subn(
+            r"(^\s*permission_level\s*=\s*)\d+",
+            rf"\g<1>{permission_level}",
+            source,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        if replacement_count:
+            py_path.write_text(updated_source, encoding="utf-8")
+
+    return True
+
 STATUS_DRAFT_SAVED = "draft_saved"
 STATUS_VALIDATED = "validated"
 STATUS_VALIDATION_FAILED = "validation_failed"

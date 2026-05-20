@@ -5,8 +5,78 @@ import type {
   DraftPhase,
   ProgressInfo,
   StructuredPlan,
+  ToolExecutionNotice,
   ToolPlanMode
 } from '../types/chat';
+
+function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<ToolExecutionNotice>;
+    if (
+      typeof parsed.noticeType === 'string'
+      && parsed.noticeType.startsWith('TOOL_EXECUTION_')
+      && typeof parsed.toolName === 'string'
+    ) {
+      return parsed as ToolExecutionNotice;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function toolNoticeExactKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolUseId ? `id:${notice.toolUseId}` : null;
+}
+
+function toolNoticeNameKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolName ? `tool:${notice.toolName}` : null;
+}
+
+function isTerminalToolNotice(notice: ToolExecutionNotice): boolean {
+  return notice.noticeType !== 'TOOL_EXECUTION_STARTED' || notice.isError === true;
+}
+
+function isEmptyAssistantPlaceholder(message: ChatMessage | undefined): boolean {
+  return message?.senderType === 'ASSISTANT' && !message.content.trim();
+}
+
+function isAssistantMessage(message: ChatMessage | undefined): boolean {
+  return message?.senderType === 'ASSISTANT';
+}
+
+function findToolNoticeUpsertIndex(messages: ChatMessage[], notice: ToolExecutionNotice): number {
+  const exactKey = toolNoticeExactKey(notice);
+  const nameKey = toolNoticeNameKey(notice);
+
+  if (exactKey) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const existingNotice = parseToolExecutionNotice(messages[i].content);
+      if (existingNotice && toolNoticeExactKey(existingNotice) === exactKey) {
+        return i;
+      }
+    }
+  }
+
+  if (nameKey) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const existingNotice = parseToolExecutionNotice(messages[i].content);
+      if (
+        existingNotice
+        && toolNoticeNameKey(existingNotice) === nameKey
+        && !isTerminalToolNotice(existingNotice)
+      ) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
 
 interface ChatSessionState {
   messages: ChatMessage[];
@@ -53,6 +123,7 @@ interface ChatSessionState {
   setToolResult: (result: Record<string, unknown> | null) => void;
   setActiveTab: (tab: 'plan' | 'result') => void;
   setIsBuilding: (isBuilding: boolean) => void;
+  upsertToolExecutionNotice: (notice: ToolExecutionNotice) => void;
   addMessage: (msg: ChatMessage) => void;
   completeAssistantPlaceholder: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
@@ -146,6 +217,39 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+
+  upsertToolExecutionNotice: (notice) => set((state) => {
+    const content = JSON.stringify(notice);
+    const messages = [...state.messages];
+    const existingIndex = findToolNoticeUpsertIndex(messages, notice);
+
+    if (existingIndex >= 0) {
+      messages[existingIndex] = {
+        ...messages[existingIndex],
+        senderType: 'SYSTEM_NOTICE',
+        messageType: 'SYSTEM_NOTICE',
+        contentType: 'JSON',
+        content,
+      };
+      return { messages };
+    }
+
+    const message: ChatMessage = {
+      messageId: crypto.randomUUID(),
+      senderType: 'SYSTEM_NOTICE',
+      messageType: 'SYSTEM_NOTICE',
+      contentType: 'JSON',
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    const insertIndex = isEmptyAssistantPlaceholder(messages[messages.length - 1])
+      || (state.isGenerating && isAssistantMessage(messages[messages.length - 1]))
+      ? messages.length - 1
+      : messages.length;
+    messages.splice(insertIndex, 0, message);
+
+    return { messages };
+  }),
 
   completeAssistantPlaceholder: (msg) => set((state) => {
     const messages = [...state.messages];

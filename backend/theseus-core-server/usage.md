@@ -368,6 +368,8 @@ Theseus-LocalExtensionSourcePackage/
 
 제외되는 항목은 `src`, `frontend`, `infra`, `backend/theseus-api-server`,
 `.venv`, `build`, `dist`, `tests`, 실제 `.env`, Python cache입니다.
+배포 ZIP에 들어가는 `requirements*.txt`는 시스템 언어에 따른 Unicode decode
+문제를 피하기 위해 ASCII-only로 정리되어 복사됩니다.
 
 받은 사람은 압축을 풀고 `Install-Theseus-Extension.cmd`를 더블클릭하면 됩니다.
 이 패키지는 소스 런타임 배포용이므로 핵심 Python 코드를 숨기는 목적에는
@@ -449,8 +451,11 @@ npm.cmd run compile
 패키징이 필요하면 다음을 실행합니다.
 
 ```powershell
-npx.cmd @vscode/vsce package
+npm.cmd run package:vsix
 ```
+
+`package:vsix`는 `out/`, `media/`, `package.json` 등 VSIX에 들어가야 하는 핵심 입력 파일이 있는지 먼저 확인합니다.
+설치 후 Health 패널의 `sourceMarker`, `builtAt`, `mediaBuiltAt` 값을 보면 현재 설치된 번들이 최신 빌드인지 확인할 수 있습니다.
 
 ### 5.3 Extension에서 가능한 일
 

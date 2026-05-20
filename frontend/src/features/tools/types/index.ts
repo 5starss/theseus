@@ -1,8 +1,16 @@
 export interface ToolItem {
   toolId: number;
+  projectId?: number;
+  chatSessionId?: number;
+  createdByProjectMemberId?: number;
+  createdByUserId?: number;
+  createdByUserName?: string;
+  fileName?: string;
   displayName: string;
   displayDescription: string;
   status: 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'DELETED';
+  toolGrade?: number;
+  sourceToolPlanId?: number;
   iconName?: string;
 }
 

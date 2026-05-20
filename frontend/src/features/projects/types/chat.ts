@@ -24,14 +24,55 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export type ToolExecutionNoticeType =
+  | 'TOOL_EXECUTION_STARTED'
+  | 'TOOL_EXECUTION_COMPLETED'
+  | 'TOOL_EXECUTION_FAILED';
+
+export interface ToolExecutionNotice {
+  noticeType: ToolExecutionNoticeType;
+  toolName: string;
+  toolUseId?: string | null;
+  toolInput?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  isError?: boolean;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ToolExecutionNoticeGroup {
+  noticeType: 'TOOL_EXECUTION_GROUP';
+  notices: ToolExecutionNotice[];
+}
+
 export interface PlanBlock {
   blockId: string;
   title: string;
   content: string;
+  fields?: PlanField[];
+  parentId?: string | null;
+  tier?: string | null;
+  status?: string | null;
+}
+
+export interface PlanField {
+  fieldId: string;
+  label: string;
+  value: string;
+  feedbackTarget: string;
+}
+
+export interface PlanSection {
+  sectionId: string;
+  title: string;
+  content: string;
+  tone?: 'default' | 'warning';
 }
 
 export interface StructuredPlan {
   version: string | number;
+  sections?: PlanSection[];
   blocks: PlanBlock[];
 }
 

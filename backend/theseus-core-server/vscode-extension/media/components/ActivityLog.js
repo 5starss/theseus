@@ -189,6 +189,10 @@ export function createActivityLogController({
     }
   }
 
+  function isRequestOpen(request) {
+    return !!request?.groupEl?.classList.contains('open');
+  }
+
   function attachAssistant(article) {
     if (!currentRequest || !article) return false;
     const turnEl = ensureTurnContainer(currentRequest);
@@ -380,7 +384,7 @@ export function createActivityLogController({
     request.listEl.appendChild(item);
     updateGroupSummary(request);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    if (!isRunning && !save) {
+    if (!isRunning && !save && request.userOpenOverride !== true) {
       setRequestOpen(request, false);
     }
 
@@ -487,5 +491,6 @@ export function createActivityLogController({
     startRequest,
     attachAssistant,
     finishRequest,
+    isRequestOpen,
   };
 }

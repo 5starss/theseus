@@ -45,7 +45,7 @@ public enum ErrorCode {
     PROJECT_ADMIN_MEMBER_REQUIRED(HttpStatus.CONFLICT, "PMEM-005", "프로젝트 담당자는 ADMIN/진행중 상태를 유지해야 합니다."),
     PROJECT_MEMBER_ACTIVE_USER_REQUIRED(HttpStatus.CONFLICT, "PMEM-006", "활성 사용자만 프로젝트 멤버로 등록할 수 있습니다."),
     INVALID_PROJECT_MEMBER_STATUS(HttpStatus.BAD_REQUEST, "PMEM-007", "지원하지 않는 프로젝트 멤버 상태입니다."),
-    INVALID_PROJECT_MEMBER_ACCESS_LEVEL(HttpStatus.BAD_REQUEST, "PMEM-008", "프로젝트 멤버 accessLevel은 1 이상 99 이하만 지정할 수 있습니다."),
+    INVALID_PROJECT_MEMBER_ACCESS_LEVEL(HttpStatus.BAD_REQUEST, "PMEM-008", "프로젝트 멤버 accessLevel은 1 이상 5 이하만 지정할 수 있습니다."),
 
     // RemoteWorkspace
     REMOTE_WORKSPACE_NOT_FOUND(HttpStatus.NOT_FOUND, "RWSP-001", "RemoteWorkspace를 찾을 수 없습니다."),
@@ -71,6 +71,7 @@ public enum ErrorCode {
     TOOL_FILE_NAME_REQUIRED(HttpStatus.BAD_REQUEST, "TOOL-010", "Tool 파일명은 비어 있을 수 없습니다."),
     TOOL_DRAFT_VERSION_MISMATCH(HttpStatus.CONFLICT, "TOOL-011", "최신 Tool PLAN 버전과 일치하지 않습니다."),
     TOOL_DRAFT_REVIEW_PHASE_REQUIRED(HttpStatus.CONFLICT, "TOOL-012", "REVIEW 단계의 Draft Tool만 재생성할 수 있습니다."),
+    TOOL_ACCESS_LEVEL_INVALID(HttpStatus.BAD_REQUEST, "TOOL-013", "Tool access level은 1 이상 5 이하만 지정할 수 있습니다."),
 
     // ToolApproval
     TOOL_APPROVAL_NOT_FOUND(HttpStatus.NOT_FOUND, "TAPP-001", "Tool 승인 요청을 찾을 수 없습니다."),

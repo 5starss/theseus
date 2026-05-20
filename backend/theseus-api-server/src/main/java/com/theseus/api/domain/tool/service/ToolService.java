@@ -1,11 +1,15 @@
 package com.theseus.api.domain.tool.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.project.entity.Project;
 import com.theseus.api.domain.project.entity.ProjectMember;
 import com.theseus.api.domain.project.entity.ProjectMemberStatus;
+import com.theseus.api.domain.project.entity.ProjectRole;
 import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.dto.response.ToolDetailResponse;
@@ -38,6 +42,7 @@ public class ToolService {
 	private final ProjectMemberRepository projectMemberRepository;
 	private final UserRepository userRepository;
 	private final CoreStreamProperties coreStreamProperties;
+	private final ObjectMapper objectMapper;
 
 	private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
 		.connectTimeout(java.time.Duration.ofSeconds(5))
@@ -95,6 +100,30 @@ public class ToolService {
 		return ToolDetailResponse.createFrom(tool);
 	}
 
+	@Transactional
+	public ToolSummaryResponse updateToolAccessLevel(
+		AuthenticatedUser currentUser,
+		Long projectId,
+		Long toolId,
+		Integer accessLevel
+	) {
+		User user = getCurrentUserEntity(currentUser);
+		Project project = getProjectEntity(projectId);
+		ProjectMember projectMember = getActiveProjectMember(project, user);
+		validateProjectAdmin(projectMember);
+		validateToolAccessLevel(accessLevel);
+
+		Tool tool = toolRepository.findByIdAndProjectForUpdate(toolId, project)
+			.orElseThrow(() -> BusinessException.of(ErrorCode.TOOL_NOT_FOUND));
+		if (tool.isDeleted()) {
+			throw BusinessException.of(ErrorCode.TOOL_NOT_FOUND);
+		}
+
+		requestCoreToolPermissionLevelUpdate(project.getId(), tool.getFileName(), accessLevel);
+		tool.updateAccessLevel(accessLevel, updatePermissionLevelMetadata(tool.getMetadataJson(), accessLevel));
+		return ToolSummaryResponse.createFrom(tool);
+	}
+
 	/**
 	 * Tool을 논리 삭제 처리하고 코어서버의 실제 도구 파일을 휴지통으로 이동시킵니다.
 	 */
@@ -131,6 +160,27 @@ public class ToolService {
 			}
 		} catch (Exception exception) {
 			log.warn(">>>> Failed to send Tool deletion request to Core server. project={}, file={}", projectId, fileName, exception);
+		}
+	}
+
+	private void requestCoreToolPermissionLevelUpdate(Long projectId, String fileName, Integer accessLevel) {
+		try {
+			java.net.URI updateUri = coreStreamProperties.updateToolPermissionLevelUri(projectId, fileName);
+			String requestBody = "{\"permissionLevel\":%d}".formatted(accessLevel);
+			java.net.http.HttpRequest coreRequest = java.net.http.HttpRequest.newBuilder(updateUri)
+				.timeout(java.time.Duration.ofSeconds(10))
+				.header("Accept", "application/json")
+				.header("Content-Type", "application/json")
+				.header("X-Internal-Api-Key", internalApiKey == null ? "" : internalApiKey)
+				.method("PATCH", java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
+				.build();
+
+			java.net.http.HttpResponse<String> response = httpClient.send(coreRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+			if (response.statusCode() < 200 || response.statusCode() >= 300) {
+				log.warn(">>>> Core Tool permissionLevel update failed. status={}, body={}", response.statusCode(), response.body());
+			}
+		} catch (Exception exception) {
+			log.warn(">>>> Failed to send Tool permissionLevel update request to Core server. project={}, file={}", projectId, fileName, exception);
 		}
 	}
 
@@ -185,6 +235,38 @@ public class ToolService {
 	private void validateAccessibleTool(ProjectMember projectMember, Tool tool) {
 		if (!tool.isAccessibleWithAccessLevel(projectMember.getAccessLevel())) {
 			throw BusinessException.of(ErrorCode.TOOL_ACCESS_LEVEL_REQUIRED);
+		}
+	}
+
+	private void validateProjectAdmin(ProjectMember projectMember) {
+		if (!ProjectRole.ADMIN.equals(projectMember.getProjectRole())) {
+			throw BusinessException.of(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
+		}
+	}
+
+	private void validateToolAccessLevel(Integer accessLevel) {
+		if (accessLevel == null || accessLevel < 1 || accessLevel > 5) {
+			throw BusinessException.of(ErrorCode.TOOL_ACCESS_LEVEL_INVALID);
+		}
+	}
+
+	private String updatePermissionLevelMetadata(String metadataJson, Integer accessLevel) {
+		ObjectNode metadata = objectMapper.createObjectNode();
+		if (metadataJson != null && !metadataJson.isBlank()) {
+			try {
+				var parsed = objectMapper.readTree(metadataJson);
+				if (parsed != null && parsed.isObject()) {
+					metadata = (ObjectNode) parsed;
+				}
+			} catch (JsonProcessingException exception) {
+				log.warn(">>>> Tool metadataJson parse failed while updating access level.", exception);
+			}
+		}
+		metadata.put("permissionLevel", accessLevel);
+		try {
+			return objectMapper.writeValueAsString(metadata);
+		} catch (JsonProcessingException exception) {
+			throw BusinessException.of(ErrorCode.TOOL_ACCESS_LEVEL_INVALID, exception);
 		}
 	}
 

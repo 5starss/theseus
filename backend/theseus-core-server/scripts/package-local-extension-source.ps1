@@ -228,6 +228,53 @@ function Copy-OptionalFile {
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
+function ConvertTo-AsciiText {
+    param([string]$Value)
+
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($character in $Value.ToCharArray()) {
+        if ([int][char]$character -le 127) {
+            [void]$builder.Append($character)
+        }
+    }
+    return $builder.ToString()
+}
+
+function Copy-OptionalRequirementsFileAscii {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        return
+    }
+
+    $destinationDir = Split-Path -Parent $Destination
+    New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+
+    $asciiLines = @(
+        Get-Content -LiteralPath $Source -Encoding UTF8 |
+            ForEach-Object { ConvertTo-AsciiText -Value $_ }
+    )
+    Set-Content -LiteralPath $Destination -Value $asciiLines -Encoding ASCII
+}
+
+function Assert-AsciiFile {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $Path).Path)
+    foreach ($byte in $bytes) {
+        if ($byte -gt 127) {
+            throw "Packaged requirements file contains non-ASCII bytes: $Path"
+        }
+    }
+}
+
 function Write-PackageReadme {
     param([string]$Destination)
 
@@ -396,14 +443,21 @@ Copy-RequiredFile -Source $uninstallCmd -Destination (Join-Path $stagingPath "Un
 
 foreach ($fileName in @(
     ".env.example",
-    "requirements.txt",
-    "requirements-browser.txt",
-    "requirements-custom-tools.txt",
-    "requirements-doc-tools.txt",
     "theseus_cli.py",
     "usage.md"
 )) {
     Copy-OptionalFile -Source (Join-Path $CorePath $fileName) -Destination (Join-Path $coreDestination $fileName)
+}
+
+foreach ($fileName in @(
+    "requirements.txt",
+    "requirements-browser.txt",
+    "requirements-custom-tools.txt",
+    "requirements-doc-tools.txt"
+)) {
+    $destination = Join-Path $coreDestination $fileName
+    Copy-OptionalRequirementsFileAscii -Source (Join-Path $CorePath $fileName) -Destination $destination
+    Assert-AsciiFile -Path $destination
 }
 
 Copy-RequiredFile -Source (Join-Path $CorePath "scripts\install-vscode-extension.ps1") -Destination (Join-Path $coreDestination "scripts\install-vscode-extension.ps1")

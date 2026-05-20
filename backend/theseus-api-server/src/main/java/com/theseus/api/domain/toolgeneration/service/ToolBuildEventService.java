@@ -3,13 +3,13 @@ package com.theseus.api.domain.toolgeneration.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.theseus.api.common.exception.BusinessException;
 import com.theseus.api.common.exception.ErrorCode;
 import com.theseus.api.domain.chat.entity.ChatMessageContentType;
 import com.theseus.api.domain.chat.entity.ChatMessageSenderType;
 import com.theseus.api.domain.chat.entity.ChatMessageType;
 import com.theseus.api.domain.chat.service.ChatMessageService;
-import com.theseus.api.domain.project.entity.ProjectAccessLevelPolicy;
 import com.theseus.api.domain.tool.entity.Tool;
 import com.theseus.api.domain.tool.entity.ToolPlan;
 import com.theseus.api.domain.tool.entity.ToolPlanGroup;
@@ -167,6 +167,7 @@ public class ToolBuildEventService {
 			return;
 		}
 
+		int toolAccessLevel = resolveToolAccessLevel(artifact);
 		Tool createdTool = toolRepository.save(Tool.builder()
 			.project(toolPlan.getProject())
 			.chatSession(toolPlan.getChatSession())
@@ -176,11 +177,11 @@ public class ToolBuildEventService {
 			.displayName(resolveDisplayName(artifact, fileName))
 			.displayDescription(artifact.getDisplayDescription())
 			.status(ToolStatus.APPROVED)
-			.toolGrade(ProjectAccessLevelPolicy.ADMIN_ACCESS_LEVEL)
+			.toolGrade(toolAccessLevel)
 			.moduleName(artifact.getModuleName())
 			.artifactPath(artifact.getArtifactPath())
 			.codeSnapshot(artifact.getCodeSnapshot())
-			.metadataJson(writeJsonNodeAsString(artifact.getMetadataJson()))
+			.metadataJson(writeMetadataJsonWithPermissionLevel(artifact.getMetadataJson(), toolAccessLevel))
 			.build());
 
 		completeBuildWithTool(toolPlanRun, event, toolPlan, createdTool, parseCompletedAt(event));
@@ -438,13 +439,32 @@ public class ToolBuildEventService {
 		return value;
 	}
 
-	private String writeJsonNodeAsString(JsonNode jsonNode) {
-		if (jsonNode == null || jsonNode.isNull()) {
-			return null;
+	private int resolveToolAccessLevel(ToolBuildArtifactPayload artifact) {
+		Integer permissionLevel = artifact.getPermissionLevel();
+		if (permissionLevel != null && permissionLevel >= 1 && permissionLevel <= 5) {
+			return permissionLevel;
 		}
+		JsonNode metadataJson = artifact.getMetadataJson();
+		if (metadataJson != null && metadataJson.has("permissionLevel")) {
+			int metadataPermissionLevel = metadataJson.get("permissionLevel").asInt(5);
+			if (metadataPermissionLevel >= 1 && metadataPermissionLevel <= 5) {
+				return metadataPermissionLevel;
+			}
+		}
+		return 5;
+	}
+
+	private String writeMetadataJsonWithPermissionLevel(JsonNode jsonNode, int permissionLevel) {
+		ObjectNode metadata;
+		if (jsonNode != null && jsonNode.isObject()) {
+			metadata = ((ObjectNode) jsonNode).deepCopy();
+		} else {
+			metadata = objectMapper.createObjectNode();
+		}
+		metadata.put("permissionLevel", permissionLevel);
 
 		try {
-			return objectMapper.writeValueAsString(jsonNode);
+			return objectMapper.writeValueAsString(metadata);
 		} catch (JsonProcessingException exception) {
 			throw BusinessException.of(ErrorCode.TOOL_BUILD_EVENT_INVALID, exception);
 		}

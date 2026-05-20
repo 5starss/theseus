@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 
 from theseus_engine.models.modes import AgentMode, CoordinatorPhase, PlanPhase
@@ -38,8 +39,29 @@ class PromptRenderingTest(unittest.TestCase):
         self.assertIn("execution_spec.permissionLevel", prompt)
         self.assertIn("generated tool's required permission level", prompt)
         self.assertIn("not as disclosure of the user's own RBAC level", prompt)
+        self.assertIn("Do not omit `execution_spec.permissionLevel`", prompt)
+        self.assertIn("It must be a concrete", prompt)
+        self.assertIn("review, approval, and RBAC/tool creation", prompt)
 
-    def test_persona_guidance_is_shared_across_core_modes(self) -> None:
+    def test_generated_tool_execute_contract_is_rendered(self) -> None:
+        drafting_prompt = build_system_prompt(
+            mode=AgentMode.PLAN,
+            plan_phase=PlanPhase.DRAFTING,
+            available_tools=["read_file", "tool_search"],
+        )
+        executing_prompt = build_system_prompt(
+            mode=AgentMode.PLAN,
+            plan_phase=PlanPhase.EXECUTING,
+            available_tools=["create_tool"],
+        )
+
+        for prompt in (drafting_prompt, executing_prompt):
+            with self.subTest(prompt=prompt[:40]):
+                self.assertIn("async def execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult", prompt)
+                self.assertIn("directly on the BaseTool subclass", prompt)
+                self.assertIn("missing this", prompt)
+
+    def test_base_prompt_keeps_minimal_analytical_language_neutral_guidance(self) -> None:
         prompts = [
             build_system_prompt(mode=AgentMode.ASK, available_tools=[]),
             build_system_prompt(mode=AgentMode.AGENT, available_tools=[]),
@@ -52,15 +74,54 @@ class PromptRenderingTest(unittest.TestCase):
 
         for prompt in prompts:
             with self.subTest(prompt=prompt[:40]):
-                self.assertIn("# Identity / Product Persona", prompt)
-                self.assertIn("Theseus AI, the enterprise", prompt)
-                self.assertIn("create, modify, replace, and evolve tools", prompt)
-                self.assertIn("Do not invent mythological or philosophical rationale", prompt)
-                self.assertIn("authoritative context", prompt)
-                self.assertIn("professional honorific language", prompt)
-                self.assertIn("Do NOT use emoji", prompt)
-                self.assertIn("Avoid jokes, excessive exclamation", prompt)
-                self.assertIn("Do NOT evaluate or flatter", prompt)
+                self.assertIn("professional, analytical AI agent", prompt)
+                self.assertIn("controlled tool workflows", prompt)
+                self.assertIn("clear reasoning", prompt)
+                self.assertIn("professional, analytical, respectful register", prompt)
+                self.assertIn("Follow the user's latest language", prompt)
+                self.assertNotIn("# Identity / Product Persona", prompt)
+                self.assertNotIn("mythological or philosophical rationale", prompt)
+
+    def test_rendered_core_prompts_do_not_include_language_specific_examples(self) -> None:
+        prompts = [
+            build_system_prompt(mode=AgentMode.ASK, available_tools=[]),
+            build_system_prompt(mode=AgentMode.AGENT, available_tools=[]),
+            build_system_prompt(
+                mode=AgentMode.PLAN,
+                plan_phase=PlanPhase.DRAFTING,
+                available_tools=[],
+            ),
+            build_system_prompt(
+                mode=AgentMode.PLAN,
+                plan_phase=PlanPhase.WAIT_FOR_REVIEW,
+                available_tools=[],
+            ),
+            build_system_prompt(
+                mode=AgentMode.PLAN,
+                plan_phase=PlanPhase.EXECUTING,
+                available_tools=[],
+            ),
+            build_system_prompt(
+                mode=AgentMode.PLAN,
+                plan_phase=PlanPhase.VERIFYING,
+                available_tools=[],
+            ),
+            build_system_prompt(
+                mode=AgentMode.COORDINATOR,
+                coordinator_phase=CoordinatorPhase.DECOMPOSE,
+                available_tools=[],
+            ),
+            build_system_prompt(
+                mode=AgentMode.COORDINATOR,
+                coordinator_phase=CoordinatorPhase.DISPATCH,
+                available_tools=[],
+            ),
+        ]
+
+        hangul = re.compile(r"[\uac00-\ud7a3]")
+        for prompt in prompts:
+            with self.subTest(prompt=prompt[:40]):
+                self.assertIsNone(hangul.search(prompt))
 
     def test_tool_use_prompt_distinguishes_tools_from_shell_commands(self) -> None:
         self.assertIn("use the `glob` tool instead of shell `find` or `ls`", TOOL_USE_CAPABILITY_PROMPT)

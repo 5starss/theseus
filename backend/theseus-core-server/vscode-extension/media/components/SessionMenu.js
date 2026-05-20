@@ -10,6 +10,7 @@ export function renderSessionMenu({
   onDelete,
   onRename,
   onExport,
+  keepOpenAfterSwitch = false,
 }) {
   if (!menuEl) return;
   menuEl.innerHTML = '';
@@ -68,7 +69,6 @@ export function renderSessionMenu({
     event.preventDefault();
     event.stopPropagation();
     onNew(createSessionName());
-    onClose();
   });
   summary.append(summaryLabel, addBtn);
   details.appendChild(summary);
@@ -89,7 +89,7 @@ export function renderSessionMenu({
     meta.textContent = session.name;
     btn.append(title, meta);
     btn.addEventListener('click', () => {
-      onClose();
+      if (!keepOpenAfterSwitch) onClose();
       onSwitch(session.name);
     });
     row.appendChild(btn);
@@ -129,7 +129,6 @@ export function renderSessionMenu({
     event.preventDefault();
     const name = renameInput.value.trim();
     if (name && name !== currentSession) onRename(currentSession, name);
-    onClose();
   });
   actions.appendChild(renameForm);
 
@@ -142,11 +141,9 @@ export function renderSessionMenu({
   };
   addAction('Export MD', () => {
     onExport(currentSession, 'markdown');
-    onClose();
   });
   addAction('Export JSON', () => {
     onExport(currentSession, 'json');
-    onClose();
   });
 
   menuEl.append(header, details, actions);

@@ -9,10 +9,33 @@ interface ChatStreamEvent {
   message?: string;
   content?: string;
   tool_name?: string;
+  toolName?: string;
+  tool_use_id?: string;
+  toolUseId?: string;
+  tool_input?: Record<string, unknown>;
+  toolInput?: Record<string, unknown>;
   output?: string;
   status?: string;
+  is_error?: boolean;
+  isError?: boolean;
   total_tokens?: number;
   model_name?: string;
+}
+
+function getToolName(data: ChatStreamEvent): string | null {
+  return data.tool_name || data.toolName || null;
+}
+
+function getToolUseId(data: ChatStreamEvent): string | null {
+  return data.tool_use_id || data.toolUseId || null;
+}
+
+function getToolInput(data: ChatStreamEvent): Record<string, unknown> {
+  return data.tool_input || data.toolInput || {};
+}
+
+function isToolError(data: ChatStreamEvent): boolean {
+  return data.is_error === true || data.isError === true;
 }
 
 export function useChatStreamSSE() {
@@ -65,6 +88,10 @@ export function useChatStreamSSE() {
           const data = JSON.parse(ev.data) as ChatStreamEvent;
           const eventType = (ev.event || '').toLowerCase();
           const store = useChatSessionStore.getState();
+          const toolName = getToolName(data);
+          const toolUseId = getToolUseId(data);
+          const toolInput = getToolInput(data);
+          const toolError = isToolError(data);
 
           switch (eventType) {
             case 'connected':
@@ -82,16 +109,46 @@ export function useChatStreamSSE() {
               break;
 
             case 'status':
+            case 'tool_start':
+            case 'tool_execution_started':
+              if (toolName) {
+                store.upsertToolExecutionNotice({
+                  noticeType: 'TOOL_EXECUTION_STARTED',
+                  toolName,
+                  toolUseId,
+                  toolInput,
+                  status: data.status || 'started',
+                  metadata: {
+                    message: data.message || `Executing tool: ${toolName}`,
+                    step: `Tool Running: ${toolName}`,
+                  },
+                });
+              }
               store.setProgressInfo({
-                step: data.message || 'Agent working',
+                step: toolName ? `Tool Running: ${toolName}` : (data.message || 'Agent working'),
                 message: data.message || '',
                 percent: 0,
               });
               break;
 
             case 'tool_result':
+            case 'tool_complete':
+            case 'tool_execution_completed':
+              if (toolName) {
+                store.upsertToolExecutionNotice({
+                  noticeType: toolError ? 'TOOL_EXECUTION_FAILED' : 'TOOL_EXECUTION_COMPLETED',
+                  toolName,
+                  toolUseId,
+                  toolInput,
+                  output: data.output || '',
+                  isError: toolError,
+                  status: data.status || (toolError ? 'failed' : 'completed'),
+                });
+              }
               store.setProgressInfo({
-                step: data.tool_name ? `Tool: ${data.tool_name}` : 'Tool result',
+                step: toolName
+                  ? `${toolError ? 'Tool Failed' : 'Tool Completed'}: ${toolName}`
+                  : (toolError ? 'Tool failed' : 'Tool completed'),
                 message: data.output || '',
                 percent: 0,
               });

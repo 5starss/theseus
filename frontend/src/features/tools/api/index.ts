@@ -49,6 +49,23 @@ export const toolApi = {
     }
   },
 
+  updateToolAccessLevel: async (
+    projectId: string | number,
+    toolId: string | number,
+    accessLevel: number
+  ): Promise<ToolItem> => {
+    try {
+      const response = await apiClient.patch<ApiResponse<ToolItem>>(
+        `/api/v1/projects/${projectId}/tools/${toolId}/access-level`,
+        { accessLevel }
+      );
+      return response.data.result;
+    } catch (error) {
+      console.error(`Failed to update tool ${toolId} access level:`, error);
+      throw error;
+    }
+  },
+
   /**
    * Tool을 논리 삭제 처리합니다.
    */

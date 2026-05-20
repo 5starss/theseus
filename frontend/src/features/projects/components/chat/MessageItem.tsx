@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Copy, Check, CheckCircle, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
-import type { ChatMessage } from '../../types/chat';
+import type { ChatMessage, ToolExecutionNotice, ToolExecutionNoticeGroup } from '../../types/chat';
 
 interface MessageItemProps {
   msg: ChatMessage;
@@ -10,34 +10,43 @@ interface MessageItemProps {
   isLoadingDots: boolean;
 }
 
-interface ToolExecutionNotice {
-  noticeType: 'TOOL_EXECUTION_STARTED' | 'TOOL_EXECUTION_COMPLETED' | 'TOOL_EXECUTION_FAILED';
-  toolName: string;
-  toolUseId: string;
-  toolInput?: Record<string, unknown>;
-  output?: string;
-  error?: string;
-  status?: string;
+function getToolExecutionState(notice: ToolExecutionNotice): 'started' | 'completed' | 'failed' {
+  if (notice.noticeType === 'TOOL_EXECUTION_FAILED' || notice.isError === true) return 'failed';
+  if (notice.noticeType === 'TOOL_EXECUTION_COMPLETED') return 'completed';
+  return 'started';
 }
 
-function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
+function ToolExecutionStatusIcon({ state }: { state: 'started' | 'completed' | 'failed' }) {
+  return (
+    <div className={`p-1.5 rounded-md shrink-0 ${state === 'started' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+        state === 'completed' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+          'bg-red-500/10 text-red-400 border border-red-500/20'
+      }`}>
+      {state === 'started' && <Play className="w-3.5 h-3.5 animate-pulse" />}
+      {state === 'completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
+      {state === 'failed' && <AlertTriangle className="w-3.5 h-3.5" />}
+    </div>
+  );
+}
+
+function ToolExecutionNoticeView({ notice, compact = false }: { notice: ToolExecutionNotice; compact?: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
-  const isStarted = notice.noticeType === 'TOOL_EXECUTION_STARTED';
-  const isCompleted = notice.noticeType === 'TOOL_EXECUTION_COMPLETED';
-  const isFailed = notice.noticeType === 'TOOL_EXECUTION_FAILED';
+  const executionState = getToolExecutionState(notice);
+  const isStarted = executionState === 'started';
+  const isFailed = executionState === 'failed';
+  const isCompleted = executionState === 'completed';
+  const errorOutput = notice.error || notice.output;
+  const statusMessage = typeof notice.metadata?.message === 'string'
+    ? notice.metadata.message
+    : isStarted
+      ? `Executing tool: ${notice.toolName}`
+      : null;
 
   return (
     <div className="flex flex-col gap-2 w-full text-slate-300 font-sans">
-      <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)]">
+      <div className={`flex items-center justify-between gap-3 rounded-lg bg-slate-900/60 border border-slate-800/80 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)] ${compact ? 'p-2' : 'p-3'}`}>
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`p-1.5 rounded-md shrink-0 ${isStarted ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-              isCompleted ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
-                'bg-red-500/10 text-red-400 border border-red-500/20'
-            }`}>
-            {isStarted && <Play className="w-3.5 h-3.5 animate-pulse" />}
-            {isCompleted && <CheckCircle2 className="w-3.5 h-3.5" />}
-            {isFailed && <AlertTriangle className="w-3.5 h-3.5" />}
-          </div>
+          <ToolExecutionStatusIcon state={executionState} />
           <div className="flex flex-col min-w-0">
             <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold font-['Space_Grotesk']">
               {isStarted ? 'Tool Execution Started' : isCompleted ? 'Tool Execution Completed' : 'Tool Execution Failed'}
@@ -61,6 +70,15 @@ function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
 
       {isOpen && (
         <div className="flex flex-col gap-2.5 p-3 rounded-lg bg-[#0c1322] border border-slate-800/80 animate-fade-in font-mono text-[11px] leading-relaxed max-w-full overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]">
+          {statusMessage && (
+            <div className="flex flex-col gap-1 max-w-full">
+              <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Execution Status</span>
+              <pre className="p-2 rounded bg-slate-950/40 text-blue-300 border border-slate-900/60 overflow-x-auto whitespace-pre-wrap break-all">
+                {statusMessage}
+              </pre>
+            </div>
+          )}
+
           {notice.toolInput && (
             <div className="flex flex-col gap-1 max-w-full">
               <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Input Arguments</span>
@@ -79,14 +97,63 @@ function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
             </div>
           )}
 
-          {isFailed && notice.error && (
+          {isFailed && errorOutput && (
             <div className="flex flex-col gap-1 max-w-full">
               <span className="text-[9px] text-red-400/80 uppercase tracking-wider font-bold">Error Output</span>
               <pre className="p-2 rounded bg-red-950/10 text-red-300 border border-red-950/20 overflow-x-auto whitespace-pre-wrap break-all">
-                {notice.error}
+                {errorOutput}
               </pre>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolExecutionGroupView({ group }: { group: ToolExecutionNoticeGroup }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const failedCount = group.notices.filter((notice) => getToolExecutionState(notice) === 'failed').length;
+  const runningCount = group.notices.filter((notice) => getToolExecutionState(notice) === 'started').length;
+  const completedCount = group.notices.filter((notice) => getToolExecutionState(notice) === 'completed').length;
+  const groupState = failedCount > 0 ? 'failed' : runningCount > 0 ? 'started' : 'completed';
+  const summaryParts = [
+    runningCount > 0 ? `${runningCount} running` : null,
+    completedCount > 0 ? `${completedCount} completed` : null,
+    failedCount > 0 ? `${failedCount} failed` : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="flex flex-col gap-2 w-full text-slate-300 font-sans">
+      <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05)]">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <ToolExecutionStatusIcon state={groupState} />
+          <div className="flex flex-col min-w-0">
+            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold font-['Space_Grotesk']">
+              Tool Executions
+            </span>
+            <span className="text-xs font-bold text-slate-200 truncate">
+              도구 실행 {group.notices.length}개 · {summaryParts.join(' · ')}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 bg-slate-800/60 hover:bg-slate-700/60 border border-slate-700/50 rounded px-2 py-1 cursor-pointer transition-all active:scale-95 shrink-0"
+        >
+          <span>{isOpen ? 'Close' : 'Details'}</span>
+          {isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="flex flex-col gap-2 rounded-lg bg-[#0c1322] border border-slate-800/80 p-2">
+          {group.notices.map((notice, index) => (
+            <ToolExecutionNoticeView
+              key={`${notice.toolUseId || notice.toolName}-${index}`}
+              notice={notice}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -110,7 +177,10 @@ export function MessageItem({ msg, isLoadingDots }: MessageItemProps) {
     if (msg.content.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(msg.content);
-        return !!(parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_'));
+        return !!(
+          parsed.noticeType === 'TOOL_EXECUTION_GROUP'
+          || (parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_'))
+        );
       } catch {
         return false;
       }
@@ -137,6 +207,10 @@ export function MessageItem({ msg, isLoadingDots }: MessageItemProps) {
     if (msg.content.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(msg.content);
+
+        if (parsed.noticeType === 'TOOL_EXECUTION_GROUP' && Array.isArray(parsed.notices)) {
+          return <ToolExecutionGroupView group={parsed as ToolExecutionNoticeGroup} />;
+        }
 
         if (parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_')) {
           const notice = parsed as ToolExecutionNotice;

@@ -4,6 +4,203 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 190 — Tool 실행 notice 최종 상태 병합 및 접기 표시 (2026-05-20)
+
+#### Frontend
+- 실시간 store upsert와 세션 이력 표시 단계에서 `toolUseId`가 한쪽 이벤트에만 있거나 누락된 경우에도 같은 `toolName`의 최근 Started notice를 Completed/Failed notice가 대체하도록 보강
+- 같은 실행의 Started/Completed 또는 Started/Failed 카드가 동시에 남지 않고, 실행 중에는 Started만 보였다가 완료 후 최종 상태 카드만 남도록 정리
+- 여러 Tool 실행 notice가 연속으로 렌더링될 때 접힌 `Tool Executions` 묶음 카드에는 총 개수/완료/실패 수만 표시하고, Details를 펼치면 각 Tool의 input/output을 기존 카드 형태로 확인할 수 있도록 추가
+- ASK/AGENT Tool 실행 중 별도 `Tool Running` processing 패널은 숨기고, assistant 답변 대기 애니메이션은 Tool 아코디언 아래에 표시되도록 정리
+- live stream 중 assistant 답변 chunk가 먼저 들어온 뒤 Tool 결과가 도착해도 Tool notice가 답변 뒤에 붙지 않고 실행 중인 assistant 응답 앞에 유지되도록 store 삽입 위치를 보정
+- 프론트 chat stream handler가 `tool_name`/`toolName`, `tool_result`/`tool_complete`/`tool_execution_completed` 이벤트 형식을 모두 수용하도록 보강해 새로고침 전에도 Tool stack 아코디언이 표시되도록 정리
+- PLAN 생성 중에는 스트리밍 assistant 말풍선을 숨기고 기존 processing 패널만 표시해 동일 진행 문구가 두 번 노출되지 않도록 정리
+- `/dev/tool-execution` 미리보기 페이지를 `bash` 실패와 `glob` 완료 사례로 갱신해 ID 누락 fallback 및 접힌 그룹 UI를 확인할 수 있게 함
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+- `http://127.0.0.1:5173/dev/tool-execution` 응답 `200` 확인
+
+---
+
+### 🛠️ Session 189 — Tool 실행 카드 실제 미리보기 라우트 추가 (2026-05-20)
+
+#### Frontend
+- 로그인 없이 실제 `ChatDashboard` 렌더링 경로에서 Tool 실행 notice UI를 확인할 수 있는 개발 전용 `/dev/tool-execution` 라우트 추가
+- `ToolExecutionPreviewPage`에서 `TOOL_EXECUTION_STARTED` notice를 먼저 표시한 뒤 같은 `toolUseId`의 `TOOL_EXECUTION_COMPLETED` notice로 교체되는 동적 상태 전환을 시뮬레이션
+- 시연/검증 중 `/login` 보호 라우트에 막히지 않고 ASK/AGENT Tool 실행 카드 단일화 결과를 바로 확인할 수 있도록 보강
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 188 — Tool 실행 notice 카드 단일화 (2026-05-20)
+
+#### Frontend
+- ASK/AGENT chat stream에서 `TOOL_EXECUTION_STARTED` notice를 메시지 카드로 추가하고, 같은 `toolUseId`의 완료/실패 이벤트가 오면 기존 카드를 교체하도록 `upsertToolExecutionNotice` 추가
+- 세션 이력 로드 시 Started/Completed notice가 모두 있어도 `toolUseId` 기준으로 최종 Completed/Failed 카드만 렌더링되도록 `ChatArea` 표시 메시지를 dedupe
+- Tool notice 타입을 공통 chat type으로 분리하고, `isError=true` 완료 payload를 실패 카드로 유지
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 187 — ASK/AGENT 툴 실행 상태 UI 노출 (2026-05-20)
+
+#### Core / Frontend
+- Core chat stream의 툴 시작 `status` SSE에 `tool_name`, `tool_use_id`, `tool_input`, `status=started`를 포함
+- Core chat stream의 툴 완료 `tool_result` SSE에 `tool_use_id`, `tool_input`, `is_error`, 완료/실패 `status`를 포함
+- 프론트 chat stream handler가 ASK/AGENT에서도 `Tool Running`, `Tool Completed`, `Tool Failed` 진행 상태를 `progressInfo`로 표시하도록 보강
+- `ChatArea`의 processing 패널을 PLAN 전용에서 ASK/AGENT 진행 상태에도 표시되도록 확장
+- 저장된 `TOOL_EXECUTION_*` notice 카드를 완료 후에도 숨기지 않고, `isError=true` 완료 이력은 실패 카드로 렌더링
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\routes\stream.py`
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 186 — LLM 출력 토큰 한도 32768 통일 (2026-05-20)
+
+#### Core / ToolBuild
+- 일반 ASK/AGENT 응답, 단발 LLM generate wrapper, PLAN draft/formatter/feedback, ToolBuild artifact 생성, ToolBuild failure feedback, generated Tool repair 응답 한도를 `max_tokens=32768`로 통일
+- Tool audit hook LLM 호출의 응답 한도도 `max_tokens=32768`로 맞춰 Tool 관련 LLM 호출의 출력 제한을 통일
+- Tool artifact/repair JSON이 긴 Python source 또는 metadata를 포함할 때 출력 길이 부족으로 잘릴 가능성을 줄임
+- 짧은 내부 판정용 evaluator/hook 호출은 기존 소형 한도를 유지
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\agent_loop.py backend\theseus-core-server\src\tool_build\builder.py backend\theseus-core-server\theseus_engine\tools\tool_repair.py backend\theseus-core-server\theseus_engine\engine\query_engine.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\api_types.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\theseus_client.py backend\theseus-core-server\theseus_engine\wrappers\hooks\theseus_hook_executor.py`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 185 — generated tool execute 계약 프롬프트 보강 (2026-05-20)
+
+#### `theseus_engine`
+- PLAN Drafting/Executing 프롬프트에 generated custom Tool의 `BaseTool` 하위 클래스가 `async def execute(self, arguments, context) -> ToolResult`를 직접 정의해야 한다는 계약을 명시
+- 실행 로직을 `main()`, helper, service object, module-level function에만 두면 Core validator가 거부한다는 안내를 추가
+- prompt rendering 회귀 테스트에 generated Tool execute 계약 문구 검증 추가
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py`
+- `python -m unittest discover -s tests -p test_prompt_rendering.py`
+- `git diff --check`
+
+---
+
+### 📝 Session 184 — frontend guide locator Tool 시연 프롬프트 문서화 (2026-05-20)
+
+#### 문서
+- `docs/operations/frontend-guide-locator-tool-demo.md`를 추가해 AI 자동매매 가이드 페이지 수정 위치를 찾는 시연용 custom Tool 생성 요청 프롬프트를 정리
+- allowlist 파일, `permissionLevel=2`, `FrontendGuideLocatorTool.execute(...)` 필수 구현 계약, 반환 필드, 데모 실행 예시를 명시
+
+#### 검증
+- `git diff --check`
+
+---
+
+### 🛠️ Session 183 — generated tool permissionLevel 프롬프트 보강 (2026-05-20)
+
+#### `theseus_engine`
+- PLAN Drafting 프롬프트에서 generated tool 계획의 `execution_spec.permissionLevel`을 `1~5` 정수로 반드시 명시하도록 보강
+- `null`, 문자열, placeholder, 설명문 형태의 권한값을 금지하고, 불확실한 경우 가장 낮은 안전 권한을 선택한 뒤 `permission_rationale`에 근거를 쓰도록 명시
+- prompt rendering 회귀 테스트에 permissionLevel 누락 방지 문구 검증 추가
+- 일반 AGENT 응답, PLAN 1차 draft, PLAN structured formatter, 공통 `ApiMessageRequest` 기본 출력 한도를 `max_tokens=16384`로 통일
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\api_types.py backend\theseus-core-server\src\tool_plan\agent_loop.py backend\theseus-core-server\theseus_engine\engine\query_engine.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\theseus_client.py`
+- `python -m unittest discover -s tests -p test_prompt_rendering.py`
+- `git diff --check`
+
+---
+
+### 🐛 Session 182 — Local extension package requirements ASCII 정리 (2026-05-19)
+
+#### 설치/패키징
+- `scripts/package-local-extension-source.ps1`가 배포 ZIP에 `requirements*.txt`를 복사할 때 non-ASCII 문자를 제거하고 ASCII 인코딩으로 저장하도록 변경
+- 원본 개발용 requirements 파일은 그대로 유지하고, 원클릭 설치 ZIP 내부 파일만 시스템 언어별 Unicode decode 오류를 피하도록 정리
+- 패키징 중 requirements 파일에 non-ASCII byte가 남으면 즉시 실패하도록 검증 추가
+
+#### 문서
+- `README.md`, `usage.md`에 local extension source package의 `requirements*.txt`가 ASCII-only로 복사된다는 내용을 추가
+
+#### 검증
+- PowerShell parser로 `scripts\package-local-extension-source.ps1` 구문 검증 성공
+- local extension source package smoke로 ZIP 내부 `requirements*.txt` ASCII-only 검증 성공
+- `git diff --check` 성공
+
+---
+
+### 🛠️ Session 181 — 서버 PLAN 생성 진행 스트림 보강 (2026-05-19)
+
+#### Core / API 연동
+- `ToolPlanPlanner.plan()`에 `status_chunk_callback` 경계를 추가해 raw LLM PLAN delta는 계속 차단하면서도 안전한 PLAN 진행 로그를 `chunk` 이벤트로 스트리밍할 수 있게 함
+- `ToolPlanProcessor`와 legacy `ToolGenerationProcessor`가 PLAN 접수/초안/구조화/검증 진행 메시지를 SSE chunk로 전달하도록 연결
+- PLAN structured output formatter의 `max_tokens`를 4096에서 16384로 늘려 긴 PLAN JSON 정규화 중 truncation 위험을 줄임
+
+#### Frontend
+- ToolPlan SSE `progress` 코드(`PLAN_DRAFTING`, `PLAN_STRUCTURING` 등)를 사용자 표시용 문장으로 변환
+- PLAN 생성 중 assistant placeholder가 아직 비어 있어도 processing 로그 영역에 최신 progress 메시지가 표시되도록 보강
+- PLAN 패널에 `개요`, `보완 필요`, `검증 기준` 상위 섹션을 읽기 전용으로 작게 노출해 task field feedback UI의 과밀도를 피하면서 누락 정보를 보완
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\processor.py backend\theseus-core-server\src\tool_generation\processor.py`
+- `python -m unittest discover -s tests -p test_tool_plan_processor_chunks.py`
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 180 — VSCode Extension UI 회귀 정리 및 VSIX 최신성 표시 (2026-05-19)
+
+#### VSCode Extension
+- Markdown URL 렌더링 결과를 WebView 내부 링크로만 남기지 않고, `http:` / `https:` 링크 클릭 시 Extension Host의 `openExternal` 경로로 외부 브라우저/IDE 링크 열기가 동작하도록 연결
+- Activity accordion의 고정 높이 제한을 완화하고, tool output preview의 이중 `max-height` 제한을 정리해 긴 tool 호출 결과가 펼침 상태에서 잘리지 않도록 개선
+- tool 실행 중 자동 펼침, 완료 후 자동 접힘 정책은 유지하되, 사용자가 수동으로 펼친 activity는 자동 접힘이 덮어쓰지 않도록 `userOpenOverride` 우선순위를 보강
+- 응답 종료 시 빈 typing article, assistant draft 참조, markdown render RAF, loop status를 함께 정리해 응답 완료 후에도 “현재 응답이 진행 중입니다” 안내가 남는 문제를 줄임
+- custom tool validation/install, change review, settings 변경 같은 운영성 이벤트를 persistent chat article 대신 tool/status activity note 또는 transient warning으로 배치해 채팅 transcript 오염을 줄임
+- 세션 메뉴의 `+`, `x`, rename, export 동작 후 메뉴가 관리 패널로 유지되도록 close 정책을 정리하고, 실제 세션 전환만 화면 전환 동작으로 취급
+- HealthPanel에 extension version, bundle mtime, media mtime, source marker를 표시해 `theseus-vscode-0.0.1.vsix` 버전이 고정되어도 설치된 번들이 최신 빌드인지 확인할 수 있게 개선
+
+#### 패키징 / 문서
+- `verify:package-inputs` 스크립트를 추가해 VSIX 패키징 전 `out/`, `media/`, 핵심 WebView/Host 파일이 포함될 준비가 되어 있는지 확인
+- `package:vsix`가 compile 이후 packaging input 검증을 수행하도록 변경
+- `usage.md`의 Antigravity 설치 흐름을 `npm.cmd run package:vsix` 기준으로 보강하고, HealthPanel marker로 설치 최신성을 확인하는 절차를 추가
+
+#### 검증
+- `npm.cmd run compile`
+- `npm.cmd run verify:package-inputs`
+- `node --check backend/theseus-core-server/vscode-extension/media/main.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/dispatcher.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/ActivityLog.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/SessionMenu.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/HealthPanel.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/MessageList.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/RunnerStatus.js`
+- `node --check backend/theseus-core-server/vscode-extension/media/components/CustomTools.js`
+- `npm.cmd run package:vsix`
+- VSIX 내부 `extension/media/main.js`, `extension/media/components/ActivityLog.js`, `extension/out/providers/ChatViewProvider.js` 포함 및 `ui-regression-fixes-2026-05-19` marker 확인
+- `git diff --check`
+
+---
+
+### 🛠️ Session 179 — Theseus prompt 최소 톤 지침 재정리 (2026-05-19)
+
+#### `theseus_engine`
+- `S14P31A308-429`의 세부 persona/명명 의도/감정 톤 지침을 걷어내고, 공통 system prompt를 커밋 이전 구조에 가깝게 복원
+- 최소 지침으로 `professional, analytical AI agent` 정체성과 사용자 최신 언어를 따르는 언어 중립 응답 원칙만 추가
+
+#### 테스트
+- `tests/test_prompt_rendering.py`에 최소 분석형 agent 지침과 사용자 최신 언어 추종 원칙만 검증하도록 회귀 테스트를 조정
+- ASK/AGENT/PLAN/COORDINATOR 렌더링 prompt에 특정 언어 예시가 직접 포함되지 않도록 회귀 검증을 추가
+
+---
+
 ### 🛠️ Session 178 — 서버 민감 도구 자동 승인 정책 설정 추가 (2026-05-19)
 
 #### `src`

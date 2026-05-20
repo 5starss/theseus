@@ -20,6 +20,8 @@ def _claim_billing_outbox(batch_size: int) -> list[ClaimedBillingOutbox]:
         db.rollback()
         raise
     finally:
+        if db.in_transaction():
+            db.rollback()
         db.close()
 
 
@@ -31,6 +33,8 @@ def _mark_billing_outbox_sent(record_id: str) -> None:
         db.rollback()
         raise
     finally:
+        if db.in_transaction():
+            db.rollback()
         db.close()
 
 
@@ -51,6 +55,8 @@ def _mark_billing_outbox_failed(
         db.rollback()
         raise
     finally:
+        if db.in_transaction():
+            db.rollback()
         db.close()
 
 

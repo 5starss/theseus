@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
@@ -11,7 +11,7 @@ import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MessageItem } from './MessageItem';
 import { ToolPlanMode } from '../../types/chat';
-import type { ChatMessage, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+import type { ChatMessage, ToolExecutionNotice, ToolExecutionNoticeGroup, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 import type { RemoteWorkspaceResponse } from '../../types/project';
 
 const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
@@ -19,6 +19,171 @@ const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description:
   { value: ToolPlanMode.PLAN, label: 'PLAN', description: '도구 명세' },
   { value: ToolPlanMode.AGENT, label: 'AGENT', description: '실행 준비' },
 ];
+
+function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<ToolExecutionNotice>;
+    if (
+      typeof parsed.noticeType === 'string'
+      && parsed.noticeType.startsWith('TOOL_EXECUTION_')
+      && typeof parsed.toolName === 'string'
+    ) {
+      return parsed as ToolExecutionNotice;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function toolNoticeExactKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolUseId ? `id:${notice.toolUseId}` : null;
+}
+
+function toolNoticeNameKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolName ? `tool:${notice.toolName}` : null;
+}
+
+function isTerminalToolNotice(notice: ToolExecutionNotice): boolean {
+  return notice.noticeType !== 'TOOL_EXECUTION_STARTED' || notice.isError === true;
+}
+
+function dedupeToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
+  const visible: ChatMessage[] = [];
+  const noticeIndexByExactKey = new Map<string, number>();
+  const startedIndexesByToolName = new Map<string, number[]>();
+
+  const rememberStarted = (notice: ToolExecutionNotice, visibleIndex: number) => {
+    const nameKey = toolNoticeNameKey(notice);
+    if (!nameKey) return;
+    const indexes = startedIndexesByToolName.get(nameKey) || [];
+    indexes.push(visibleIndex);
+    startedIndexesByToolName.set(nameKey, indexes);
+  };
+
+  const takeLatestStartedIndex = (notice: ToolExecutionNotice): number | null => {
+    const nameKey = toolNoticeNameKey(notice);
+    if (!nameKey) return null;
+
+    const indexes = startedIndexesByToolName.get(nameKey);
+    if (!indexes) return null;
+
+    while (indexes.length > 0) {
+      const index = indexes.pop();
+      if (index === undefined) break;
+
+      const existingNotice = parseToolExecutionNotice(visible[index]?.content || '');
+      if (existingNotice && !isTerminalToolNotice(existingNotice)) {
+        return index;
+      }
+    }
+
+    return null;
+  };
+
+  for (const message of messages) {
+    const notice = parseToolExecutionNotice(message.content);
+    const exactKey = notice ? toolNoticeExactKey(notice) : null;
+
+    if (!notice) {
+      visible.push(message);
+      continue;
+    }
+
+    if (!isTerminalToolNotice(notice)) {
+      const existingIndex = exactKey ? noticeIndexByExactKey.get(exactKey) : undefined;
+      if (existingIndex !== undefined) {
+        const existingNotice = parseToolExecutionNotice(visible[existingIndex].content);
+        if (!existingNotice || !isTerminalToolNotice(existingNotice)) {
+          visible[existingIndex] = message;
+        }
+        continue;
+      }
+
+      const visibleIndex = visible.length;
+      visible.push(message);
+      if (exactKey) {
+        noticeIndexByExactKey.set(exactKey, visibleIndex);
+      }
+      rememberStarted(notice, visibleIndex);
+      continue;
+    }
+
+    const exactMatchIndex = exactKey ? noticeIndexByExactKey.get(exactKey) : undefined;
+    const fallbackStartedIndex = exactMatchIndex === undefined ? takeLatestStartedIndex(notice) : null;
+    const replaceIndex = exactMatchIndex ?? fallbackStartedIndex;
+
+    if (replaceIndex !== undefined && replaceIndex !== null) {
+      visible[replaceIndex] = message;
+      if (exactKey) {
+        noticeIndexByExactKey.set(exactKey, replaceIndex);
+      }
+      continue;
+    }
+
+    const visibleIndex = visible.length;
+    visible.push(message);
+    if (exactKey) {
+      noticeIndexByExactKey.set(exactKey, visibleIndex);
+    }
+  }
+
+  return visible;
+}
+
+function isToolExecutionMessage(message: ChatMessage): boolean {
+  return parseToolExecutionNotice(message.content) !== null;
+}
+
+function groupToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
+  const grouped: ChatMessage[] = [];
+  let buffer: ChatMessage[] = [];
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) return;
+
+    if (buffer.length === 1) {
+      grouped.push(buffer[0]);
+      buffer = [];
+      return;
+    }
+
+    const notices = buffer
+      .map((message) => parseToolExecutionNotice(message.content))
+      .filter((notice): notice is ToolExecutionNotice => notice !== null);
+    const groupPayload: ToolExecutionNoticeGroup = {
+      noticeType: 'TOOL_EXECUTION_GROUP',
+      notices,
+    };
+    grouped.push({
+      ...buffer[0],
+      messageId: `tool-execution-group-${buffer[0].messageId}-${buffer[buffer.length - 1].messageId}`,
+      senderType: 'SYSTEM_NOTICE',
+      messageType: 'SYSTEM_NOTICE',
+      contentType: 'JSON',
+      content: JSON.stringify(groupPayload),
+    });
+    buffer = [];
+  };
+
+  for (const message of messages) {
+    if (isToolExecutionMessage(message)) {
+      buffer.push(message);
+      continue;
+    }
+
+    flushBuffer();
+    grouped.push(message);
+  }
+
+  flushBuffer();
+
+  return grouped;
+}
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -53,6 +218,21 @@ export function ChatArea() {
   const { connectChatStream } = useChatStreamSSE();
   const selectedRemoteWorkspace = remoteWorkspaces.find(
     workspace => workspace.remoteWorkspaceId === selectedRemoteWorkspaceId
+  );
+  const processingLogText = (
+    messages[messages.length - 1]?.content
+    || progressInfo?.message
+    || 'Initializing stream...'
+  ).replace(/blockId:\s*[\w-]+\s*/gi, '');
+  const showProcessingPanel = (isGenerating || isBuilding) && (
+    isBuilding || mode === ToolPlanMode.PLAN
+  );
+  const processingPanelTitle = isBuilding
+    ? 'Tool Building'
+    : (progressInfo?.step || `${mode} Processing`);
+  const visibleMessages = useMemo(
+    () => groupToolExecutionMessages(dedupeToolExecutionMessages(messages)),
+    [messages]
   );
 
   const handleScroll = () => {
@@ -223,11 +403,16 @@ export function ChatArea() {
       >
         {messages.length > 0 ? (
           <div className="space-y-6">
-            {messages.map((msg, idx) => {
-              const isLast = idx === messages.length - 1;
+            {visibleMessages.map((msg, idx) => {
+              const isLast = idx === visibleMessages.length - 1;
+
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
-              if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
+              if (
+                isLastAssistant
+                && (isGenerating || isBuilding)
+                && mode === ToolPlanMode.PLAN
+              ) return null;
 
               const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
 
@@ -243,7 +428,7 @@ export function ChatArea() {
             })}
 
             {/* 별도의 생성 로그 UI (말풍선과 별개) */}
-            {(isGenerating || isBuilding) && mode === ToolPlanMode.PLAN && (
+            {showProcessingPanel && (
               <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="w-full max-w-[85%] bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
                   <div className="bg-blue-500/10 px-4 py-2 border-b border-blue-500/10 flex items-center justify-between">
@@ -254,7 +439,7 @@ export function ChatArea() {
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:0.4s]" />
                       </div>
                       <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em]">
-                        {isBuilding ? 'Tool Building' : (progressInfo?.step || 'Agent Processing')}
+                        {processingPanelTitle}
                       </span>
                     </div>
                   </div>
@@ -267,7 +452,7 @@ export function ChatArea() {
                     <div className="bg-[#050c18] rounded-lg p-3 border border-slate-800/50">
                       <div className="font-mono text-[11px] leading-relaxed text-slate-400 break-all max-h-[150px] overflow-y-auto scrollbar-none">
                         <span className="text-blue-500/50 mr-2">$</span>
-                        {(messages[messages.length - 1]?.content || 'Initializing stream...').replace(/blockId:\s*[\w-]+\s*/gi, '')}
+                        {processingLogText}
                         <span className="inline-block w-1.5 h-3.5 bg-blue-500/50 ml-1 animate-pulse" />
                       </div>
                     </div>
