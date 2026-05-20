@@ -24,6 +24,23 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export type ToolExecutionNoticeType =
+  | 'TOOL_EXECUTION_STARTED'
+  | 'TOOL_EXECUTION_COMPLETED'
+  | 'TOOL_EXECUTION_FAILED';
+
+export interface ToolExecutionNotice {
+  noticeType: ToolExecutionNoticeType;
+  toolName: string;
+  toolUseId?: string | null;
+  toolInput?: Record<string, unknown>;
+  output?: string;
+  error?: string;
+  isError?: boolean;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface PlanBlock {
   blockId: string;
   title: string;

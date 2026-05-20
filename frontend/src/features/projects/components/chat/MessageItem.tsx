@@ -1,24 +1,13 @@
 import { useState } from 'react';
 import { Copy, Check, CheckCircle, Play, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { MarkdownViewer } from '@/components/ui/MarkdownViewer';
-import type { ChatMessage } from '../../types/chat';
+import type { ChatMessage, ToolExecutionNotice } from '../../types/chat';
 
 interface MessageItemProps {
   msg: ChatMessage;
   isLast: boolean;
   isGenerating: boolean;
   isLoadingDots: boolean;
-}
-
-interface ToolExecutionNotice {
-  noticeType: 'TOOL_EXECUTION_STARTED' | 'TOOL_EXECUTION_COMPLETED' | 'TOOL_EXECUTION_FAILED';
-  toolName: string;
-  toolUseId: string;
-  toolInput?: Record<string, unknown>;
-  output?: string;
-  error?: string;
-  isError?: boolean;
-  status?: string;
 }
 
 function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {

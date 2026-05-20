@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 188 — Tool 실행 notice 카드 단일화 (2026-05-20)
+
+#### Frontend
+- ASK/AGENT chat stream에서 `TOOL_EXECUTION_STARTED` notice를 메시지 카드로 추가하고, 같은 `toolUseId`의 완료/실패 이벤트가 오면 기존 카드를 교체하도록 `upsertToolExecutionNotice` 추가
+- 세션 이력 로드 시 Started/Completed notice가 모두 있어도 `toolUseId` 기준으로 최종 Completed/Failed 카드만 렌더링되도록 `ChatArea` 표시 메시지를 dedupe
+- Tool notice 타입을 공통 chat type으로 분리하고, `isError=true` 완료 payload를 실패 카드로 유지
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 187 — ASK/AGENT 툴 실행 상태 UI 노출 (2026-05-20)
 
 #### Core / Frontend
