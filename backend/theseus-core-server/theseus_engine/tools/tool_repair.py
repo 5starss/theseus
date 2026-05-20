@@ -306,7 +306,7 @@ class ToolRepairLoop(Generic[T, S]):
                 "You repair Theseus generated custom tool artifacts. "
                 "Return strict JSON only. Do not include markdown fences."
             ),
-            max_tokens=8192,
+            max_tokens=32768,
             tools=[],
             debug_context=self.debug_context,
         )
