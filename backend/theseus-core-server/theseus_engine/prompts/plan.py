@@ -117,6 +117,7 @@ Optional fields (omit if not applicable): `integration_points`, `sequential_depe
     "implementation_constraints": [
       "Import BaseTool, ToolExecutionContext, and ToolResult from theseus_engine.tools.core.base_tools",
       "Define one Pydantic input model and one BaseTool subclass",
+      "Define async execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult directly on the BaseTool subclass",
       "Return ToolResult with JSON-serializable output",
       "Do not use subprocess, shell execution, or arbitrary local program execution"
     ],
@@ -194,6 +195,11 @@ the tradeoff in `execution_spec.permission_rationale`.
 instead, include implementation constraints such as BaseTool imports, Pydantic input model, \
 async `execute(arguments, context)`, ToolResult output shape, dependency policy, and \
 MVP exclusions.
+ - Generated Theseus custom tool plans MUST explicitly require the BaseTool subclass to \
+define `async def execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult` \
+directly on the class. Do not describe execution only as a standalone `main()` function, \
+helper function, service object, or module-level function. The build validator rejects \
+generated tools when the BaseTool subclass is missing this `execute` method.
  - `execution_spec.steps[]` and `command_policy` MUST include concrete read-only commands \
 only when the capability runs against an operating system, Docker host, Remote Workspace, \
 API endpoint, or logs. Generated custom tools using `core_sandbox_gate` usually use \
@@ -303,6 +309,10 @@ or manual file creation for custom tool registration.
  - If `create_tool` is present, use it as the only supported path for creating \
 new Theseus custom tools. Generate the complete Python code and submit it via \
 `create_tool` in a single call.
+ - Generated tool code MUST define `async def execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult` \
+directly on the BaseTool subclass. Do not place the execution logic only in `main()`, \
+a helper function, a service object, or a module-level function. The Core validator \
+rejects generated tools when the BaseTool subclass is missing this method.
  - When generated tool code embeds Python code as a string, use triple single quotes \
 for the outer string if the inner code contains triple double quote docstrings. Do \
 NOT nest unescaped triple double quotes inside another triple double quoted string. \
