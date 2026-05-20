@@ -117,7 +117,7 @@ class ToolPlanAgentLoop:
                     model=self.model_name,
                     messages=messages,
                     system_prompt=system_prompt,
-                    max_tokens=16384,
+                    max_tokens=32768,
                     tools=self.tool_registry.to_api_schema(),
                     debug_context=self._llm_debug_context(),
                 )

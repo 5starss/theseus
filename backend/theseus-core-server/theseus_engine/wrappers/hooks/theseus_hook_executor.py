@@ -346,7 +346,7 @@ class TheseusHookExecutor:
         if callable(generate):
             return await generate(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=64,
+                max_tokens=32768,
             )
 
         stream_message = getattr(self._llm_client, "stream_message", None)
@@ -369,7 +369,7 @@ class TheseusHookExecutor:
                     content=[TextBlock(text=prompt)],
                 )
             ],
-            max_tokens=64,
+            max_tokens=32768,
             tools=[],
         )
         chunks: list[str] = []

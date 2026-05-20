@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 186 — LLM 출력 토큰 한도 32768 통일 (2026-05-20)
+
+#### Core / ToolBuild
+- 일반 ASK/AGENT 응답, 단발 LLM generate wrapper, PLAN draft/formatter/feedback, ToolBuild artifact 생성, ToolBuild failure feedback, generated Tool repair 응답 한도를 `max_tokens=32768`로 통일
+- Tool audit hook LLM 호출의 응답 한도도 `max_tokens=32768`로 맞춰 Tool 관련 LLM 호출의 출력 제한을 통일
+- Tool artifact/repair JSON이 긴 Python source 또는 metadata를 포함할 때 출력 길이 부족으로 잘릴 가능성을 줄임
+- 짧은 내부 판정용 evaluator/hook 호출은 기존 소형 한도를 유지
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\tool_plan\planner.py backend\theseus-core-server\src\tool_plan\agent_loop.py backend\theseus-core-server\src\tool_build\builder.py backend\theseus-core-server\theseus_engine\tools\tool_repair.py backend\theseus-core-server\theseus_engine\engine\query_engine.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\api_types.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\theseus_client.py backend\theseus-core-server\theseus_engine\wrappers\hooks\theseus_hook_executor.py`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 185 — generated tool execute 계약 프롬프트 보강 (2026-05-20)
 
 #### `theseus_engine`
