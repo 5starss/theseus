@@ -12,6 +12,7 @@ import ProjectSettingsPage from '@/pages/user/projects/ProjectSettingsPage';
 import ToolListPage from '@/pages/user/projects/ToolListPage';
 import ProjectIndexPage from '@/pages/user/projects/ProjectIndexPage';
 import PlanFeedbackPreviewPage from '@/pages/dev/PlanFeedbackPreviewPage';
+import ToolExecutionPreviewPage from '@/pages/dev/ToolExecutionPreviewPage';
 import type { RouteObject } from 'react-router-dom';
 
 const routes: RouteObject[] = [
@@ -82,6 +83,9 @@ if (import.meta.env.DEV) {
   routes.push({
     path: '/dev/plan-feedback',
     element: <PlanFeedbackPreviewPage />,
+  }, {
+    path: '/dev/tool-execution',
+    element: <ToolExecutionPreviewPage />,
   });
 }
 
