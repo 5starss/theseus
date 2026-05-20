@@ -15,7 +15,6 @@ from src.builder.engine import (
     get_query_engine,
 )
 from src.db.postgres import get_db
-from src.db.repositories.billing import BillingOutboxRepository
 from src.history.service import (
     load_history_messages,
     persist_assistant_message,
@@ -247,16 +246,6 @@ async def stream_agent_response(
                 )
             except Exception as exc:
                 logger.error("Plan restoration failed: %s", exc, exc_info=True)
-        outbox_record = BillingOutboxRepository(db).enqueue(
-            user_id=session.user_id,
-            project_id=session.project_id,
-            usage=usage_data,
-        )
-        logger.info(
-            "Billing outbox enqueued for user %s with record %s",
-            session.user_id,
-            outbox_record.id,
-        )
 
 
 async def create_streaming_response(
