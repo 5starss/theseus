@@ -17,14 +17,16 @@ interface ToolExecutionNotice {
   toolInput?: Record<string, unknown>;
   output?: string;
   error?: string;
+  isError?: boolean;
   status?: string;
 }
 
 function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
   const [isOpen, setIsOpen] = useState(false);
   const isStarted = notice.noticeType === 'TOOL_EXECUTION_STARTED';
-  const isCompleted = notice.noticeType === 'TOOL_EXECUTION_COMPLETED';
-  const isFailed = notice.noticeType === 'TOOL_EXECUTION_FAILED';
+  const isFailed = notice.noticeType === 'TOOL_EXECUTION_FAILED' || notice.isError === true;
+  const isCompleted = notice.noticeType === 'TOOL_EXECUTION_COMPLETED' && !isFailed;
+  const errorOutput = notice.error || notice.output;
 
   return (
     <div className="flex flex-col gap-2 w-full text-slate-300 font-sans">
@@ -79,11 +81,11 @@ function ToolExecutionNoticeView({ notice }: { notice: ToolExecutionNotice }) {
             </div>
           )}
 
-          {isFailed && notice.error && (
+          {isFailed && errorOutput && (
             <div className="flex flex-col gap-1 max-w-full">
               <span className="text-[9px] text-red-400/80 uppercase tracking-wider font-bold">Error Output</span>
               <pre className="p-2 rounded bg-red-950/10 text-red-300 border border-red-950/20 overflow-x-auto whitespace-pre-wrap break-all">
-                {notice.error}
+                {errorOutput}
               </pre>
             </div>
           )}

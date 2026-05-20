@@ -135,7 +135,13 @@ async def stream_agent_response(
                 )
                 yield sse_event(
                     "status",
-                    {"message": f"Executing tool: {event.tool_name}"},
+                    {
+                        "message": f"Executing tool: {event.tool_name}",
+                        "tool_name": event.tool_name,
+                        "tool_use_id": getattr(event, "tool_use_id", None),
+                        "tool_input": event.tool_input,
+                        "status": "started",
+                    },
                 )
             elif isinstance(event, assembly.tool_execution_completed_type):
                 await persist_tool_result_message(
@@ -162,7 +168,11 @@ async def stream_agent_response(
                     "tool_result",
                     {
                         "tool_name": event.tool_name,
+                        "tool_use_id": getattr(event, "tool_use_id", None),
+                        "tool_input": getattr(event, "tool_input", None),
                         "output": _truncate_tool_output(event.output),
+                        "is_error": event.is_error,
+                        "status": "failed" if event.is_error else "completed",
                     },
                 )
             elif isinstance(event, assembly.error_event_type):

@@ -59,6 +59,12 @@ export function ChatArea() {
     || progressInfo?.message
     || 'Initializing stream...'
   ).replace(/blockId:\s*[\w-]+\s*/gi, '');
+  const showProcessingPanel = (isGenerating || isBuilding) && (
+    mode === ToolPlanMode.PLAN || Boolean(progressInfo?.step || progressInfo?.message)
+  );
+  const processingPanelTitle = isBuilding
+    ? 'Tool Building'
+    : (progressInfo?.step || `${mode} Processing`);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -230,22 +236,6 @@ export function ChatArea() {
           <div className="space-y-6">
             {messages.map((msg, idx) => {
               const isLast = idx === messages.length - 1;
-              
-              // 도구 실행 공지 여부 판별
-              const isToolExecutionNotice = (() => {
-                if (msg.content && msg.content.trim().startsWith('{')) {
-                  try {
-                    const parsed = JSON.parse(msg.content);
-                    return !!(parsed.noticeType && parsed.noticeType.startsWith('TOOL_EXECUTION_'));
-                  } catch {
-                    return false;
-                  }
-                }
-                return false;
-              })();
-
-              // 답변이 모두 생성된 완료 상태(!isGenerating)에서는 도구 실행 공지 카드들을 숨김
-              if (isToolExecutionNotice && !isGenerating) return null;
 
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
@@ -265,7 +255,7 @@ export function ChatArea() {
             })}
 
             {/* 별도의 생성 로그 UI (말풍선과 별개) */}
-            {(isGenerating || isBuilding) && mode === ToolPlanMode.PLAN && (
+            {showProcessingPanel && (
               <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="w-full max-w-[85%] bg-slate-900/40 border border-blue-500/20 rounded-xl overflow-hidden shadow-2xl backdrop-blur-sm">
                   <div className="bg-blue-500/10 px-4 py-2 border-b border-blue-500/10 flex items-center justify-between">
@@ -276,7 +266,7 @@ export function ChatArea() {
                         <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce [animation-delay:0.4s]" />
                       </div>
                       <span className="text-[10px] font-bold text-blue-400 uppercase tracking-[0.2em]">
-                        {isBuilding ? 'Tool Building' : (progressInfo?.step || 'Agent Processing')}
+                        {processingPanelTitle}
                       </span>
                     </div>
                   </div>

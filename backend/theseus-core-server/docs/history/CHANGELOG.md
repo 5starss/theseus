@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 187 — ASK/AGENT 툴 실행 상태 UI 노출 (2026-05-20)
+
+#### Core / Frontend
+- Core chat stream의 툴 시작 `status` SSE에 `tool_name`, `tool_use_id`, `tool_input`, `status=started`를 포함
+- Core chat stream의 툴 완료 `tool_result` SSE에 `tool_use_id`, `tool_input`, `is_error`, 완료/실패 `status`를 포함
+- 프론트 chat stream handler가 ASK/AGENT에서도 `Tool Running`, `Tool Completed`, `Tool Failed` 진행 상태를 `progressInfo`로 표시하도록 보강
+- `ChatArea`의 processing 패널을 PLAN 전용에서 ASK/AGENT 진행 상태에도 표시되도록 확장
+- 저장된 `TOOL_EXECUTION_*` notice 카드를 완료 후에도 숨기지 않고, `isError=true` 완료 이력은 실패 카드로 렌더링
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\src\routes\stream.py`
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 186 — LLM 출력 토큰 한도 32768 통일 (2026-05-20)
 
 #### Core / ToolBuild

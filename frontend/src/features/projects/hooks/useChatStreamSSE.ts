@@ -9,8 +9,11 @@ interface ChatStreamEvent {
   message?: string;
   content?: string;
   tool_name?: string;
+  tool_use_id?: string;
+  tool_input?: Record<string, unknown>;
   output?: string;
   status?: string;
+  is_error?: boolean;
   total_tokens?: number;
   model_name?: string;
 }
@@ -83,7 +86,7 @@ export function useChatStreamSSE() {
 
             case 'status':
               store.setProgressInfo({
-                step: data.message || 'Agent working',
+                step: data.tool_name ? `Tool Running: ${data.tool_name}` : (data.message || 'Agent working'),
                 message: data.message || '',
                 percent: 0,
               });
@@ -91,7 +94,9 @@ export function useChatStreamSSE() {
 
             case 'tool_result':
               store.setProgressInfo({
-                step: data.tool_name ? `Tool: ${data.tool_name}` : 'Tool result',
+                step: data.tool_name
+                  ? `${data.is_error ? 'Tool Failed' : 'Tool Completed'}: ${data.tool_name}`
+                  : (data.is_error ? 'Tool failed' : 'Tool completed'),
                 message: data.output || '',
                 percent: 0,
               });
