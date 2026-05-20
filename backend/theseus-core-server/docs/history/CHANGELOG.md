@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 📝 Session 184 — frontend guide locator Tool 시연 프롬프트 문서화 (2026-05-20)
+
+#### 문서
+- `docs/operations/frontend-guide-locator-tool-demo.md`를 추가해 AI 자동매매 가이드 페이지 수정 위치를 찾는 시연용 custom Tool 생성 요청 프롬프트를 정리
+- allowlist 파일, `permissionLevel=2`, `FrontendGuideLocatorTool.execute(...)` 필수 구현 계약, 반환 필드, 데모 실행 예시를 명시
+
+#### 검증
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 183 — generated tool permissionLevel 프롬프트 보강 (2026-05-20)
 
 #### `theseus_engine`
