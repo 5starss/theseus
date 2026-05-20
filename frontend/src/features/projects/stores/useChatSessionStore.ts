@@ -45,6 +45,10 @@ function isEmptyAssistantPlaceholder(message: ChatMessage | undefined): boolean 
   return message?.senderType === 'ASSISTANT' && !message.content.trim();
 }
 
+function isAssistantMessage(message: ChatMessage | undefined): boolean {
+  return message?.senderType === 'ASSISTANT';
+}
+
 function findToolNoticeUpsertIndex(messages: ChatMessage[], notice: ToolExecutionNotice): number {
   const exactKey = toolNoticeExactKey(notice);
   const nameKey = toolNoticeNameKey(notice);
@@ -239,6 +243,7 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
       createdAt: new Date().toISOString(),
     };
     const insertIndex = isEmptyAssistantPlaceholder(messages[messages.length - 1])
+      || (state.isGenerating && isAssistantMessage(messages[messages.length - 1]))
       ? messages.length - 1
       : messages.length;
     messages.splice(insertIndex, 0, message);
