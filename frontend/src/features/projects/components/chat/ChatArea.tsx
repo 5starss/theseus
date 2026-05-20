@@ -139,19 +139,6 @@ function isToolExecutionMessage(message: ChatMessage): boolean {
   return parseToolExecutionNotice(message.content) !== null;
 }
 
-function isToolExecutionRenderMessage(message: ChatMessage): boolean {
-  const trimmed = message.content.trim();
-  if (!trimmed.startsWith('{')) return false;
-
-  try {
-    const parsed = JSON.parse(trimmed) as { noticeType?: string };
-    return parsed.noticeType === 'TOOL_EXECUTION_GROUP'
-      || Boolean(parsed.noticeType?.startsWith('TOOL_EXECUTION_'));
-  } catch {
-    return false;
-  }
-}
-
 function groupToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
   const grouped: ChatMessage[] = [];
   let buffer: ChatMessage[] = [];
@@ -246,10 +233,6 @@ export function ChatArea() {
   const visibleMessages = useMemo(
     () => groupToolExecutionMessages(dedupeToolExecutionMessages(messages)),
     [messages]
-  );
-  const hasVisibleToolExecutionNotice = useMemo(
-    () => visibleMessages.some(isToolExecutionRenderMessage),
-    [visibleMessages]
   );
 
   const handleScroll = () => {
@@ -428,10 +411,7 @@ export function ChatArea() {
               if (
                 isLastAssistant
                 && (isGenerating || isBuilding)
-                && (
-                  mode === ToolPlanMode.PLAN
-                  || (hasVisibleToolExecutionNotice && !msg.content.trim())
-                )
+                && mode === ToolPlanMode.PLAN
               ) return null;
 
               const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
