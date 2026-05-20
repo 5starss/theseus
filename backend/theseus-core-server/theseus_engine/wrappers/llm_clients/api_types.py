@@ -45,7 +45,7 @@ class ApiMessageRequest:
     model: str
     messages: list[ConversationMessage]
     system_prompt: str | None = None
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     tools: list[dict[str, Any]] = field(default_factory=list)
     debug_context: dict[str, Any] = field(default_factory=dict)
     response_format: dict[str, Any] | None = None

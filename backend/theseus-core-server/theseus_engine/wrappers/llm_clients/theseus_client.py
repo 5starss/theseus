@@ -432,7 +432,7 @@ class TheseusLLMClient(SupportsStreamingMessages):
         self,
         messages: list[dict[str, str]] | list[ConversationMessage],
         system_prompt: str = "",
-        max_tokens: int = 4096,
+        max_tokens: int = 16384,
         tools: list[Any] | None = None,
         model: str | None = None,
     ) -> ConversationMessage:

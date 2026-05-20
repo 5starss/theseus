@@ -1350,7 +1350,7 @@ class QueryEngine:
         cwd: str | Path,
         model: str,
         system_prompt: str,
-        max_tokens: int = 4096,
+        max_tokens: int = 16384,
         context_window_tokens: int | None = None,
         auto_compact_threshold_tokens: int | None = None,
         max_turns: int | None = 30,
