@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 185 — generated tool execute 계약 프롬프트 보강 (2026-05-20)
+
+#### `theseus_engine`
+- PLAN Drafting/Executing 프롬프트에 generated custom Tool의 `BaseTool` 하위 클래스가 `async def execute(self, arguments, context) -> ToolResult`를 직접 정의해야 한다는 계약을 명시
+- 실행 로직을 `main()`, helper, service object, module-level function에만 두면 Core validator가 거부한다는 안내를 추가
+- prompt rendering 회귀 테스트에 generated Tool execute 계약 문구 검증 추가
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py`
+- `python -m unittest discover -s tests -p test_prompt_rendering.py`
+- `git diff --check`
+
+---
+
 ### 📝 Session 184 — frontend guide locator Tool 시연 프롬프트 문서화 (2026-05-20)
 
 #### 문서

@@ -43,6 +43,24 @@ class PromptRenderingTest(unittest.TestCase):
         self.assertIn("It must be a concrete", prompt)
         self.assertIn("review, approval, and RBAC/tool creation", prompt)
 
+    def test_generated_tool_execute_contract_is_rendered(self) -> None:
+        drafting_prompt = build_system_prompt(
+            mode=AgentMode.PLAN,
+            plan_phase=PlanPhase.DRAFTING,
+            available_tools=["read_file", "tool_search"],
+        )
+        executing_prompt = build_system_prompt(
+            mode=AgentMode.PLAN,
+            plan_phase=PlanPhase.EXECUTING,
+            available_tools=["create_tool"],
+        )
+
+        for prompt in (drafting_prompt, executing_prompt):
+            with self.subTest(prompt=prompt[:40]):
+                self.assertIn("async def execute(self, arguments: <InputModel>, context: ToolExecutionContext) -> ToolResult", prompt)
+                self.assertIn("directly on the BaseTool subclass", prompt)
+                self.assertIn("missing this", prompt)
+
     def test_base_prompt_keeps_minimal_analytical_language_neutral_guidance(self) -> None:
         prompts = [
             build_system_prompt(mode=AgentMode.ASK, available_tools=[]),
