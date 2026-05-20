@@ -143,6 +143,47 @@ class ToolServiceTest {
 	}
 
 	@Test
+	@DisplayName("프로젝트 ADMIN은 Tool access level과 metadataJson permissionLevel을 함께 수정할 수 있다")
+	void updateToolAccessLevelUpdatesToolGradeAndMetadataPermissionLevel() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A141036", 3, true, ProjectRole.ADMIN);
+		Tool tool = createTool(fixture.project(), fixture.projectMember(), "editable", ToolStatus.APPROVED, 3);
+
+		// When
+		ToolSummaryResponse response = toolService.updateToolAccessLevel(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			tool.getId(),
+			5
+		);
+
+		// Then
+		assertThat(response.getToolGrade()).isEqualTo(5);
+		assertThat(tool.getToolGrade()).isEqualTo(5);
+		assertThat(tool.getMetadataJson()).contains("\"suffix\":\"editable\"");
+		assertThat(tool.getMetadataJson()).contains("\"permissionLevel\":5");
+	}
+
+	@Test
+	@DisplayName("프로젝트 ADMIN이 아니면 Tool access level을 수정할 수 없다")
+	void updateToolAccessLevelFailsWhenCurrentUserIsNotProjectAdmin() {
+		// Given
+		ProjectFixture fixture = createProjectFixture("A141037", 3, true);
+		Tool tool = createTool(fixture.project(), fixture.projectMember(), "readonly", ToolStatus.APPROVED, 3);
+
+		// When & Then
+		assertThatThrownBy(() -> toolService.updateToolAccessLevel(
+			createAuthenticatedUser(fixture.user()),
+			fixture.project().getId(),
+			tool.getId(),
+			4
+		))
+			.isInstanceOf(BusinessException.class)
+			.extracting(exception -> ((BusinessException) exception).getErrorCode())
+			.isEqualTo(ErrorCode.PROJECT_ADMIN_PERMISSION_REQUIRED);
+	}
+
+	@Test
 	@DisplayName("지원하지 않는 조회 범위로 Tool 목록을 조회할 수 없다")
 	void getToolsFailsWhenScopeIsUnsupported() {
 		// Given
@@ -202,6 +243,15 @@ class ToolServiceTest {
 	}
 
 	private ProjectFixture createProjectFixture(String employeeNumber, Integer accessLevel, Boolean canUseTool) {
+		return createProjectFixture(employeeNumber, accessLevel, canUseTool, ProjectRole.MEMBER);
+	}
+
+	private ProjectFixture createProjectFixture(
+		String employeeNumber,
+		Integer accessLevel,
+		Boolean canUseTool,
+		ProjectRole projectRole
+	) {
 		User user = createUser(employeeNumber);
 		Project project = projectRepository.save(Project.builder()
 			.name("Tool Query Project " + employeeNumber)
@@ -211,7 +261,7 @@ class ToolServiceTest {
 		ProjectMember projectMember = projectMemberRepository.save(ProjectMember.builder()
 			.project(project)
 			.user(user)
-			.projectRole(ProjectRole.MEMBER)
+			.projectRole(projectRole)
 			.accessLevel(accessLevel)
 			.canUseTool(canUseTool)
 			.build());
