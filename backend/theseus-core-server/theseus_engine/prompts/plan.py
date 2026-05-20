@@ -184,6 +184,11 @@ required attributes, and execute signature before activation.
 as an integer from 1 to 5 and a short `execution_spec.permission_rationale`. Choose the \
 lowest level that satisfies the tool. The generated BaseTool class `permission_level` \
 and later `create_tool.permission_level` must match this planned value.
+ - Do not omit `execution_spec.permissionLevel` for generated tool plans. Do not set it \
+to `null`, a string, a placeholder, or an explanatory sentence. It must be a concrete \
+integer `1`, `2`, `3`, `4`, or `5` so review, approval, and RBAC/tool creation can make \
+the same permission decision. If uncertain, choose the lowest safe integer and explain \
+the tradeoff in `execution_spec.permission_rationale`.
  - Generated Theseus custom tools are not operating-system command plans. Their \
 `execution_spec.steps[]` may be empty when validation is delegated to `core_sandbox_gate`; \
 instead, include implementation constraints such as BaseTool imports, Pydantic input model, \

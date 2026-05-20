@@ -39,6 +39,9 @@ class PromptRenderingTest(unittest.TestCase):
         self.assertIn("execution_spec.permissionLevel", prompt)
         self.assertIn("generated tool's required permission level", prompt)
         self.assertIn("not as disclosure of the user's own RBAC level", prompt)
+        self.assertIn("Do not omit `execution_spec.permissionLevel`", prompt)
+        self.assertIn("It must be a concrete", prompt)
+        self.assertIn("review, approval, and RBAC/tool creation", prompt)
 
     def test_base_prompt_keeps_minimal_analytical_language_neutral_guidance(self) -> None:
         prompts = [
