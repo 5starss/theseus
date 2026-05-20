@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 183 — generated tool permissionLevel 프롬프트 보강 (2026-05-20)
+
+#### `theseus_engine`
+- PLAN Drafting 프롬프트에서 generated tool 계획의 `execution_spec.permissionLevel`을 `1~5` 정수로 반드시 명시하도록 보강
+- `null`, 문자열, placeholder, 설명문 형태의 권한값을 금지하고, 불확실한 경우 가장 낮은 안전 권한을 선택한 뒤 `permission_rationale`에 근거를 쓰도록 명시
+- prompt rendering 회귀 테스트에 permissionLevel 누락 방지 문구 검증 추가
+
+#### 검증
+- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py`
+- `python -m unittest discover -s tests -p test_prompt_rendering.py`
+- `git diff --check`
+
+---
+
 ### 🐛 Session 182 — Local extension package requirements ASCII 정리 (2026-05-19)
 
 #### 설치/패키징
