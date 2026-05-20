@@ -161,6 +161,11 @@ public class Tool {
 		}
 	}
 
+	public void updateAccessLevel(Integer toolGrade, String metadataJson) {
+		this.toolGrade = toolGrade;
+		this.metadataJson = metadataJson;
+	}
+
 	public void connectSourceToolPlan(ToolPlan sourceToolPlan) {
 		this.sourceToolPlan = Objects.requireNonNull(sourceToolPlan, "sourceToolPlan must not be null");
 	}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Code, FileText, CheckCircle, Clock, Trash2 } from 'lucide-react';
+import { X, Code, FileText, CheckCircle, Clock, Trash2, Shield } from 'lucide-react';
 import { toolApi } from '../api';
 import type { ToolDetailResponse, ToolItem } from '../types';
 
@@ -121,6 +121,13 @@ export function ToolDetailModal({ projectId, toolItem, onClose, onDeleteSuccess 
                   <p className="text-sm text-slate-300 truncate">
                     {new Date(detail.updatedAt).toLocaleDateString()}
                   </p>
+                </div>
+                <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">
+                  <div className="flex items-center gap-2 text-slate-500 mb-1">
+                    <Shield className="w-4 h-4" />
+                    <span className="text-xs uppercase tracking-wider">Access Level</span>
+                  </div>
+                  <p className="text-sm text-slate-300">Lv.{detail.toolGrade ?? 1}</p>
                 </div>
                 <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/50">
                   <div className="flex items-center gap-2 text-slate-500 mb-1">
