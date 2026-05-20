@@ -58,7 +58,7 @@ function findToolNoticeUpsertIndex(messages: ChatMessage[], notice: ToolExecutio
     }
   }
 
-  if (isTerminalToolNotice(notice) && nameKey) {
+  if (nameKey) {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const existingNotice = parseToolExecutionNotice(messages[i].content);
       if (

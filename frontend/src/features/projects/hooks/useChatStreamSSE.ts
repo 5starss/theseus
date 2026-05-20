@@ -92,6 +92,10 @@ export function useChatStreamSSE() {
                   toolUseId: data.tool_use_id || null,
                   toolInput: data.tool_input || {},
                   status: data.status || 'started',
+                  metadata: {
+                    message: data.message || `Executing tool: ${data.tool_name}`,
+                    step: `Tool Running: ${data.tool_name}`,
+                  },
                 });
               }
               store.setProgressInfo({
