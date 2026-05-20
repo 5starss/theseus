@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
@@ -11,7 +11,7 @@ import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MessageItem } from './MessageItem';
 import { ToolPlanMode } from '../../types/chat';
-import type { ChatMessage, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+import type { ChatMessage, ToolExecutionNotice, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 import type { RemoteWorkspaceResponse } from '../../types/project';
 
 const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
@@ -19,6 +19,66 @@ const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description:
   { value: ToolPlanMode.PLAN, label: 'PLAN', description: '도구 명세' },
   { value: ToolPlanMode.AGENT, label: 'AGENT', description: '실행 준비' },
 ];
+
+function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<ToolExecutionNotice>;
+    if (
+      typeof parsed.noticeType === 'string'
+      && parsed.noticeType.startsWith('TOOL_EXECUTION_')
+      && typeof parsed.toolName === 'string'
+    ) {
+      return parsed as ToolExecutionNotice;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function toolNoticeKey(notice: ToolExecutionNotice): string | null {
+  if (notice.toolUseId) return `id:${notice.toolUseId}`;
+  if (notice.toolName) return `tool:${notice.toolName}`;
+  return null;
+}
+
+function noticePriority(notice: ToolExecutionNotice): number {
+  if (notice.noticeType === 'TOOL_EXECUTION_STARTED') return 1;
+  return 2;
+}
+
+function dedupeToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
+  const visible: ChatMessage[] = [];
+  const noticeIndexByKey = new Map<string, number>();
+
+  for (const message of messages) {
+    const notice = parseToolExecutionNotice(message.content);
+    const key = notice ? toolNoticeKey(notice) : null;
+
+    if (!notice || !key) {
+      visible.push(message);
+      continue;
+    }
+
+    const existingIndex = noticeIndexByKey.get(key);
+    if (existingIndex === undefined) {
+      noticeIndexByKey.set(key, visible.length);
+      visible.push(message);
+      continue;
+    }
+
+    const existingNotice = parseToolExecutionNotice(visible[existingIndex].content);
+    if (!existingNotice || noticePriority(notice) >= noticePriority(existingNotice)) {
+      visible[existingIndex] = message;
+    }
+  }
+
+  return visible;
+}
 
 export function ChatArea() {
   const { projectId, sessionId } = useParams<{ projectId: string; sessionId: string }>();
@@ -65,6 +125,7 @@ export function ChatArea() {
   const processingPanelTitle = isBuilding
     ? 'Tool Building'
     : (progressInfo?.step || `${mode} Processing`);
+  const visibleMessages = useMemo(() => dedupeToolExecutionMessages(messages), [messages]);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -234,8 +295,8 @@ export function ChatArea() {
       >
         {messages.length > 0 ? (
           <div className="space-y-6">
-            {messages.map((msg, idx) => {
-              const isLast = idx === messages.length - 1;
+            {visibleMessages.map((msg, idx) => {
+              const isLast = idx === visibleMessages.length - 1;
 
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;

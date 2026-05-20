@@ -5,8 +5,39 @@ import type {
   DraftPhase,
   ProgressInfo,
   StructuredPlan,
+  ToolExecutionNotice,
   ToolPlanMode
 } from '../types/chat';
+
+function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as Partial<ToolExecutionNotice>;
+    if (
+      typeof parsed.noticeType === 'string'
+      && parsed.noticeType.startsWith('TOOL_EXECUTION_')
+      && typeof parsed.toolName === 'string'
+    ) {
+      return parsed as ToolExecutionNotice;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function toolNoticeKey(notice: ToolExecutionNotice): string | null {
+  if (notice.toolUseId) return `id:${notice.toolUseId}`;
+  if (notice.toolName) return `tool:${notice.toolName}`;
+  return null;
+}
+
+function isEmptyAssistantPlaceholder(message: ChatMessage | undefined): boolean {
+  return message?.senderType === 'ASSISTANT' && !message.content.trim();
+}
 
 interface ChatSessionState {
   messages: ChatMessage[];
@@ -53,6 +84,7 @@ interface ChatSessionState {
   setToolResult: (result: Record<string, unknown> | null) => void;
   setActiveTab: (tab: 'plan' | 'result') => void;
   setIsBuilding: (isBuilding: boolean) => void;
+  upsertToolExecutionNotice: (notice: ToolExecutionNotice) => void;
   addMessage: (msg: ChatMessage) => void;
   completeAssistantPlaceholder: (msg: ChatMessage) => void;
   updateLastMessageContent: (chunk: string) => void;
@@ -146,6 +178,43 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
+
+  upsertToolExecutionNotice: (notice) => set((state) => {
+    const content = JSON.stringify(notice);
+    const key = toolNoticeKey(notice);
+    const messages = [...state.messages];
+
+    if (key) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const existingNotice = parseToolExecutionNotice(messages[i].content);
+        if (existingNotice && toolNoticeKey(existingNotice) === key) {
+          messages[i] = {
+            ...messages[i],
+            senderType: 'SYSTEM_NOTICE',
+            messageType: 'SYSTEM_NOTICE',
+            contentType: 'JSON',
+            content,
+          };
+          return { messages };
+        }
+      }
+    }
+
+    const message: ChatMessage = {
+      messageId: crypto.randomUUID(),
+      senderType: 'SYSTEM_NOTICE',
+      messageType: 'SYSTEM_NOTICE',
+      contentType: 'JSON',
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    const insertIndex = isEmptyAssistantPlaceholder(messages[messages.length - 1])
+      ? messages.length - 1
+      : messages.length;
+    messages.splice(insertIndex, 0, message);
+
+    return { messages };
+  }),
 
   completeAssistantPlaceholder: (msg) => set((state) => {
     const messages = [...state.messages];

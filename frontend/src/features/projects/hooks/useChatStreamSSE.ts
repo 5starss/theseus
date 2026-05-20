@@ -85,6 +85,15 @@ export function useChatStreamSSE() {
               break;
 
             case 'status':
+              if (data.tool_name) {
+                store.upsertToolExecutionNotice({
+                  noticeType: 'TOOL_EXECUTION_STARTED',
+                  toolName: data.tool_name,
+                  toolUseId: data.tool_use_id || null,
+                  toolInput: data.tool_input || {},
+                  status: data.status || 'started',
+                });
+              }
               store.setProgressInfo({
                 step: data.tool_name ? `Tool Running: ${data.tool_name}` : (data.message || 'Agent working'),
                 message: data.message || '',
@@ -93,6 +102,17 @@ export function useChatStreamSSE() {
               break;
 
             case 'tool_result':
+              if (data.tool_name) {
+                store.upsertToolExecutionNotice({
+                  noticeType: data.is_error ? 'TOOL_EXECUTION_FAILED' : 'TOOL_EXECUTION_COMPLETED',
+                  toolName: data.tool_name,
+                  toolUseId: data.tool_use_id || null,
+                  toolInput: data.tool_input || {},
+                  output: data.output || '',
+                  isError: data.is_error || false,
+                  status: data.status || (data.is_error ? 'failed' : 'completed'),
+                });
+              }
               store.setProgressInfo({
                 step: data.tool_name
                   ? `${data.is_error ? 'Tool Failed' : 'Tool Completed'}: ${data.tool_name}`
