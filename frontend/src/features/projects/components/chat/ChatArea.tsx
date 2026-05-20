@@ -11,7 +11,7 @@ import { useChatStreamSSE } from '../../hooks/useChatStreamSSE';
 import { useProjectStore } from '../../stores/useProjectStore';
 import { MessageItem } from './MessageItem';
 import { ToolPlanMode } from '../../types/chat';
-import type { ChatMessage, ToolExecutionNotice, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
+import type { ChatMessage, ToolExecutionNotice, ToolExecutionNoticeGroup, ToolPlanMode as ToolPlanModeType } from '../../types/chat';
 import type { RemoteWorkspaceResponse } from '../../types/project';
 
 const MODE_OPTIONS: Array<{ value: ToolPlanModeType; label: string; description: string }> = [
@@ -40,44 +40,149 @@ function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
   return null;
 }
 
-function toolNoticeKey(notice: ToolExecutionNotice): string | null {
-  if (notice.toolUseId) return `id:${notice.toolUseId}`;
-  if (notice.toolName) return `tool:${notice.toolName}`;
-  return null;
+function toolNoticeExactKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolUseId ? `id:${notice.toolUseId}` : null;
 }
 
-function noticePriority(notice: ToolExecutionNotice): number {
-  if (notice.noticeType === 'TOOL_EXECUTION_STARTED') return 1;
-  return 2;
+function toolNoticeNameKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolName ? `tool:${notice.toolName}` : null;
+}
+
+function isTerminalToolNotice(notice: ToolExecutionNotice): boolean {
+  return notice.noticeType !== 'TOOL_EXECUTION_STARTED' || notice.isError === true;
 }
 
 function dedupeToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
   const visible: ChatMessage[] = [];
-  const noticeIndexByKey = new Map<string, number>();
+  const noticeIndexByExactKey = new Map<string, number>();
+  const startedIndexesByToolName = new Map<string, number[]>();
+
+  const rememberStarted = (notice: ToolExecutionNotice, visibleIndex: number) => {
+    const nameKey = toolNoticeNameKey(notice);
+    if (!nameKey) return;
+    const indexes = startedIndexesByToolName.get(nameKey) || [];
+    indexes.push(visibleIndex);
+    startedIndexesByToolName.set(nameKey, indexes);
+  };
+
+  const takeLatestStartedIndex = (notice: ToolExecutionNotice): number | null => {
+    const nameKey = toolNoticeNameKey(notice);
+    if (!nameKey) return null;
+
+    const indexes = startedIndexesByToolName.get(nameKey);
+    if (!indexes) return null;
+
+    while (indexes.length > 0) {
+      const index = indexes.pop();
+      if (index === undefined) break;
+
+      const existingNotice = parseToolExecutionNotice(visible[index]?.content || '');
+      if (existingNotice && !isTerminalToolNotice(existingNotice)) {
+        return index;
+      }
+    }
+
+    return null;
+  };
 
   for (const message of messages) {
     const notice = parseToolExecutionNotice(message.content);
-    const key = notice ? toolNoticeKey(notice) : null;
+    const exactKey = notice ? toolNoticeExactKey(notice) : null;
 
-    if (!notice || !key) {
+    if (!notice) {
       visible.push(message);
       continue;
     }
 
-    const existingIndex = noticeIndexByKey.get(key);
-    if (existingIndex === undefined) {
-      noticeIndexByKey.set(key, visible.length);
+    if (!isTerminalToolNotice(notice)) {
+      const existingIndex = exactKey ? noticeIndexByExactKey.get(exactKey) : undefined;
+      if (existingIndex !== undefined) {
+        const existingNotice = parseToolExecutionNotice(visible[existingIndex].content);
+        if (!existingNotice || !isTerminalToolNotice(existingNotice)) {
+          visible[existingIndex] = message;
+        }
+        continue;
+      }
+
+      const visibleIndex = visible.length;
       visible.push(message);
+      if (exactKey) {
+        noticeIndexByExactKey.set(exactKey, visibleIndex);
+      }
+      rememberStarted(notice, visibleIndex);
       continue;
     }
 
-    const existingNotice = parseToolExecutionNotice(visible[existingIndex].content);
-    if (!existingNotice || noticePriority(notice) >= noticePriority(existingNotice)) {
-      visible[existingIndex] = message;
+    const exactMatchIndex = exactKey ? noticeIndexByExactKey.get(exactKey) : undefined;
+    const fallbackStartedIndex = exactMatchIndex === undefined ? takeLatestStartedIndex(notice) : null;
+    const replaceIndex = exactMatchIndex ?? fallbackStartedIndex;
+
+    if (replaceIndex !== undefined && replaceIndex !== null) {
+      visible[replaceIndex] = message;
+      if (exactKey) {
+        noticeIndexByExactKey.set(exactKey, replaceIndex);
+      }
+      continue;
+    }
+
+    const visibleIndex = visible.length;
+    visible.push(message);
+    if (exactKey) {
+      noticeIndexByExactKey.set(exactKey, visibleIndex);
     }
   }
 
   return visible;
+}
+
+function isToolExecutionMessage(message: ChatMessage): boolean {
+  return parseToolExecutionNotice(message.content) !== null;
+}
+
+function groupToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
+  const grouped: ChatMessage[] = [];
+  let buffer: ChatMessage[] = [];
+
+  const flushBuffer = () => {
+    if (buffer.length === 0) return;
+
+    if (buffer.length === 1) {
+      grouped.push(buffer[0]);
+      buffer = [];
+      return;
+    }
+
+    const notices = buffer
+      .map((message) => parseToolExecutionNotice(message.content))
+      .filter((notice): notice is ToolExecutionNotice => notice !== null);
+    const groupPayload: ToolExecutionNoticeGroup = {
+      noticeType: 'TOOL_EXECUTION_GROUP',
+      notices,
+    };
+    grouped.push({
+      ...buffer[0],
+      messageId: `tool-execution-group-${buffer[0].messageId}-${buffer[buffer.length - 1].messageId}`,
+      senderType: 'SYSTEM_NOTICE',
+      messageType: 'SYSTEM_NOTICE',
+      contentType: 'JSON',
+      content: JSON.stringify(groupPayload),
+    });
+    buffer = [];
+  };
+
+  for (const message of messages) {
+    if (isToolExecutionMessage(message)) {
+      buffer.push(message);
+      continue;
+    }
+
+    flushBuffer();
+    grouped.push(message);
+  }
+
+  flushBuffer();
+
+  return grouped;
 }
 
 export function ChatArea() {
@@ -125,7 +230,10 @@ export function ChatArea() {
   const processingPanelTitle = isBuilding
     ? 'Tool Building'
     : (progressInfo?.step || `${mode} Processing`);
-  const visibleMessages = useMemo(() => dedupeToolExecutionMessages(messages), [messages]);
+  const visibleMessages = useMemo(
+    () => groupToolExecutionMessages(dedupeToolExecutionMessages(messages)),
+    [messages]
+  );
 
   const handleScroll = () => {
     if (!scrollRef.current) return;

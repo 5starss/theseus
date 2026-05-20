@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 190 — Tool 실행 notice 최종 상태 병합 및 접기 표시 (2026-05-20)
+
+#### Frontend
+- 실시간 store upsert와 세션 이력 표시 단계에서 `toolUseId`가 한쪽 이벤트에만 있거나 누락된 경우에도 같은 `toolName`의 최근 Started notice를 Completed/Failed notice가 대체하도록 보강
+- 같은 실행의 Started/Completed 또는 Started/Failed 카드가 동시에 남지 않고, 실행 중에는 Started만 보였다가 완료 후 최종 상태 카드만 남도록 정리
+- 여러 Tool 실행 notice가 연속으로 렌더링될 때 `Tool Executions` 묶음 카드로 접어 표시하고, Details를 펼치면 각 Tool의 input/output을 확인할 수 있도록 추가
+- `/dev/tool-execution` 미리보기 페이지를 `bash` 실패와 `glob` 완료 사례로 갱신해 ID 누락 fallback 및 접힌 그룹 UI를 확인할 수 있게 함
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+- `http://127.0.0.1:5173/dev/tool-execution` 응답 `200` 확인
+
+---
+
 ### 🛠️ Session 189 — Tool 실행 카드 실제 미리보기 라우트 추가 (2026-05-20)
 
 #### Frontend
