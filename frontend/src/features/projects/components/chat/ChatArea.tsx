@@ -139,6 +139,19 @@ function isToolExecutionMessage(message: ChatMessage): boolean {
   return parseToolExecutionNotice(message.content) !== null;
 }
 
+function isToolExecutionRenderMessage(message: ChatMessage): boolean {
+  const trimmed = message.content.trim();
+  if (!trimmed.startsWith('{')) return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { noticeType?: string };
+    return parsed.noticeType === 'TOOL_EXECUTION_GROUP'
+      || Boolean(parsed.noticeType?.startsWith('TOOL_EXECUTION_'));
+  } catch {
+    return false;
+  }
+}
+
 function groupToolExecutionMessages(messages: ChatMessage[]): ChatMessage[] {
   const grouped: ChatMessage[] = [];
   let buffer: ChatMessage[] = [];
@@ -225,7 +238,7 @@ export function ChatArea() {
     || 'Initializing stream...'
   ).replace(/blockId:\s*[\w-]+\s*/gi, '');
   const showProcessingPanel = (isGenerating || isBuilding) && (
-    mode === ToolPlanMode.PLAN || Boolean(progressInfo?.step || progressInfo?.message)
+    isBuilding || mode === ToolPlanMode.PLAN
   );
   const processingPanelTitle = isBuilding
     ? 'Tool Building'
@@ -233,6 +246,10 @@ export function ChatArea() {
   const visibleMessages = useMemo(
     () => groupToolExecutionMessages(dedupeToolExecutionMessages(messages)),
     [messages]
+  );
+  const hasVisibleToolExecutionNotice = useMemo(
+    () => visibleMessages.some(isToolExecutionRenderMessage),
+    [visibleMessages]
   );
 
   const handleScroll = () => {
@@ -408,7 +425,12 @@ export function ChatArea() {
 
               // 최신 생성 중인 어시스턴트 메시지는 말풍선 리스트에서 숨김 (별도 로그 UI로 표시)
               const isLastAssistant = msg.senderType === 'ASSISTANT' && isLast;
-              if (isLastAssistant && (isGenerating || isBuilding) && mode === ToolPlanMode.PLAN) return null;
+              if (
+                isLastAssistant
+                && (isGenerating || isBuilding)
+                && !msg.content.trim()
+                && (mode === ToolPlanMode.PLAN || hasVisibleToolExecutionNotice)
+              ) return null;
 
               const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
 

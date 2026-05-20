@@ -36,6 +36,11 @@ function ToolExecutionNoticeView({ notice, compact = false }: { notice: ToolExec
   const isFailed = executionState === 'failed';
   const isCompleted = executionState === 'completed';
   const errorOutput = notice.error || notice.output;
+  const statusMessage = typeof notice.metadata?.message === 'string'
+    ? notice.metadata.message
+    : isStarted
+      ? `Executing tool: ${notice.toolName}`
+      : null;
 
   return (
     <div className="flex flex-col gap-2 w-full text-slate-300 font-sans">
@@ -65,6 +70,15 @@ function ToolExecutionNoticeView({ notice, compact = false }: { notice: ToolExec
 
       {isOpen && (
         <div className="flex flex-col gap-2.5 p-3 rounded-lg bg-[#0c1322] border border-slate-800/80 animate-fade-in font-mono text-[11px] leading-relaxed max-w-full overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)]">
+          {statusMessage && (
+            <div className="flex flex-col gap-1 max-w-full">
+              <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Execution Status</span>
+              <pre className="p-2 rounded bg-slate-950/40 text-blue-300 border border-slate-900/60 overflow-x-auto whitespace-pre-wrap break-all">
+                {statusMessage}
+              </pre>
+            </div>
+          )}
+
           {notice.toolInput && (
             <div className="flex flex-col gap-1 max-w-full">
               <span className="text-[9px] text-slate-500 uppercase tracking-wider font-bold">Input Arguments</span>
@@ -132,34 +146,12 @@ function ToolExecutionGroupView({ group }: { group: ToolExecutionNoticeGroup }) 
         </button>
       </div>
 
-      {!isOpen && (
-        <div className="flex flex-wrap gap-1.5">
-          {group.notices.map((notice, index) => {
-            const state = getToolExecutionState(notice);
-            return (
-              <span
-                key={`${notice.toolUseId || notice.toolName}-${index}`}
-                className={`rounded border px-2 py-1 text-[10px] font-mono ${state === 'started'
-                    ? 'border-blue-500/20 bg-blue-500/10 text-blue-300'
-                    : state === 'completed'
-                      ? 'border-green-500/20 bg-green-500/10 text-green-300'
-                      : 'border-red-500/20 bg-red-500/10 text-red-300'
-                  }`}
-              >
-                {notice.toolName}: {state}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
       {isOpen && (
         <div className="flex flex-col gap-2 rounded-lg bg-[#0c1322] border border-slate-800/80 p-2">
           {group.notices.map((notice, index) => (
             <ToolExecutionNoticeView
               key={`${notice.toolUseId || notice.toolName}-${index}`}
               notice={notice}
-              compact
             />
           ))}
         </div>
