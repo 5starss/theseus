@@ -428,8 +428,10 @@ export function ChatArea() {
               if (
                 isLastAssistant
                 && (isGenerating || isBuilding)
-                && !msg.content.trim()
-                && (mode === ToolPlanMode.PLAN || hasVisibleToolExecutionNotice)
+                && (
+                  mode === ToolPlanMode.PLAN
+                  || (hasVisibleToolExecutionNotice && !msg.content.trim())
+                )
               ) return null;
 
               const isLoadingDots = msg.senderType === 'ASSISTANT' && isLast && isGenerating && !msg.content;
