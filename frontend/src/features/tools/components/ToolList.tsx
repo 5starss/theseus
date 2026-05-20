@@ -66,6 +66,7 @@ export function ToolList() {
       setSelectedTool((prevTool) =>
         prevTool?.toolId === updatedTool.toolId ? { ...prevTool, ...updatedTool } : prevTool
       );
+      alert('Tool access level 수정이 완료되었습니다.');
     } catch (error) {
       console.error('Failed to update tool access level:', error);
       alert('Tool access level 수정에 실패했습니다.');
