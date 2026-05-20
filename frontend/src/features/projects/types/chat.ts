@@ -41,6 +41,11 @@ export interface ToolExecutionNotice {
   metadata?: Record<string, unknown>;
 }
 
+export interface ToolExecutionNoticeGroup {
+  noticeType: 'TOOL_EXECUTION_GROUP';
+  notices: ToolExecutionNotice[];
+}
+
 export interface PlanBlock {
   blockId: string;
   title: string;

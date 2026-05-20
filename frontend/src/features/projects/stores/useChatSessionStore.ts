@@ -29,14 +29,49 @@ function parseToolExecutionNotice(content: string): ToolExecutionNotice | null {
   return null;
 }
 
-function toolNoticeKey(notice: ToolExecutionNotice): string | null {
-  if (notice.toolUseId) return `id:${notice.toolUseId}`;
-  if (notice.toolName) return `tool:${notice.toolName}`;
-  return null;
+function toolNoticeExactKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolUseId ? `id:${notice.toolUseId}` : null;
+}
+
+function toolNoticeNameKey(notice: ToolExecutionNotice): string | null {
+  return notice.toolName ? `tool:${notice.toolName}` : null;
+}
+
+function isTerminalToolNotice(notice: ToolExecutionNotice): boolean {
+  return notice.noticeType !== 'TOOL_EXECUTION_STARTED' || notice.isError === true;
 }
 
 function isEmptyAssistantPlaceholder(message: ChatMessage | undefined): boolean {
   return message?.senderType === 'ASSISTANT' && !message.content.trim();
+}
+
+function findToolNoticeUpsertIndex(messages: ChatMessage[], notice: ToolExecutionNotice): number {
+  const exactKey = toolNoticeExactKey(notice);
+  const nameKey = toolNoticeNameKey(notice);
+
+  if (exactKey) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const existingNotice = parseToolExecutionNotice(messages[i].content);
+      if (existingNotice && toolNoticeExactKey(existingNotice) === exactKey) {
+        return i;
+      }
+    }
+  }
+
+  if (isTerminalToolNotice(notice) && nameKey) {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const existingNotice = parseToolExecutionNotice(messages[i].content);
+      if (
+        existingNotice
+        && toolNoticeNameKey(existingNotice) === nameKey
+        && !isTerminalToolNotice(existingNotice)
+      ) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
 }
 
 interface ChatSessionState {
@@ -181,23 +216,18 @@ export const useChatSessionStore = create<ChatSessionState>((set, get) => ({
 
   upsertToolExecutionNotice: (notice) => set((state) => {
     const content = JSON.stringify(notice);
-    const key = toolNoticeKey(notice);
     const messages = [...state.messages];
+    const existingIndex = findToolNoticeUpsertIndex(messages, notice);
 
-    if (key) {
-      for (let i = messages.length - 1; i >= 0; i -= 1) {
-        const existingNotice = parseToolExecutionNotice(messages[i].content);
-        if (existingNotice && toolNoticeKey(existingNotice) === key) {
-          messages[i] = {
-            ...messages[i],
-            senderType: 'SYSTEM_NOTICE',
-            messageType: 'SYSTEM_NOTICE',
-            contentType: 'JSON',
-            content,
-          };
-          return { messages };
-        }
-      }
+    if (existingIndex >= 0) {
+      messages[existingIndex] = {
+        ...messages[existingIndex],
+        senderType: 'SYSTEM_NOTICE',
+        messageType: 'SYSTEM_NOTICE',
+        contentType: 'JSON',
+        content,
+      };
+      return { messages };
     }
 
     const message: ChatMessage = {

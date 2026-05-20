@@ -14,7 +14,6 @@ export default function ToolExecutionPreviewPage() {
 
   useEffect(() => {
     const now = new Date().toISOString();
-    const toolUseId = 'dev-preview-remote-grep';
 
     setProject({
       projectMemberId: 1,
@@ -43,7 +42,7 @@ export default function ToolExecutionPreviewPage() {
           senderType: 'USER',
           messageType: 'CHAT',
           contentType: 'TEXT',
-          content: 'remote_grep으로 Tool 실행 상태 카드가 어떻게 보이는지 확인해줘.',
+          content: 'bash와 glob Tool 실행 상태 카드가 어떻게 접히고 최종 상태로 정리되는지 확인해줘.',
           createdAt: now,
         },
       ],
@@ -72,25 +71,43 @@ export default function ToolExecutionPreviewPage() {
 
     upsertToolExecutionNotice({
       noticeType: 'TOOL_EXECUTION_STARTED',
-      toolName: 'remote_grep',
-      toolUseId,
+      toolName: 'bash',
+      toolUseId: 'dev-preview-bash',
       toolInput: {
-        query: 'TOOL_EXECUTION',
-        path: 'frontend/src/features/projects',
+        command: 'npm run build',
+      },
+      status: 'started',
+    });
+    upsertToolExecutionNotice({
+      noticeType: 'TOOL_EXECUTION_STARTED',
+      toolName: 'glob',
+      toolUseId: 'dev-preview-glob',
+      toolInput: {
+        pattern: 'frontend/src/**/*.tsx',
       },
       status: 'started',
     });
 
     const timer = window.setTimeout(() => {
       upsertToolExecutionNotice({
-        noticeType: 'TOOL_EXECUTION_COMPLETED',
-        toolName: 'remote_grep',
-        toolUseId,
+        noticeType: 'TOOL_EXECUTION_FAILED',
+        toolName: 'bash',
+        toolUseId: null,
         toolInput: {
-          query: 'TOOL_EXECUTION',
-          path: 'frontend/src/features/projects',
+          command: 'npm run build',
         },
-        output: '3 matches found in ChatArea.tsx, MessageItem.tsx, and useChatStreamSSE.ts.',
+        output: 'Build failed with a demonstration error.',
+        isError: true,
+        status: 'failed',
+      });
+      upsertToolExecutionNotice({
+        noticeType: 'TOOL_EXECUTION_COMPLETED',
+        toolName: 'glob',
+        toolUseId: null,
+        toolInput: {
+          pattern: 'frontend/src/**/*.tsx',
+        },
+        output: '12 files matched.',
         isError: false,
         status: 'completed',
       });
