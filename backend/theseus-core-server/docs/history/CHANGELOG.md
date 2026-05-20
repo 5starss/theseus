@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 189 — Tool 실행 카드 실제 미리보기 라우트 추가 (2026-05-20)
+
+#### Frontend
+- 로그인 없이 실제 `ChatDashboard` 렌더링 경로에서 Tool 실행 notice UI를 확인할 수 있는 개발 전용 `/dev/tool-execution` 라우트 추가
+- `ToolExecutionPreviewPage`에서 `TOOL_EXECUTION_STARTED` notice를 먼저 표시한 뒤 같은 `toolUseId`의 `TOOL_EXECUTION_COMPLETED` notice로 교체되는 동적 상태 전환을 시뮬레이션
+- 시연/검증 중 `/login` 보호 라우트에 막히지 않고 ASK/AGENT Tool 실행 카드 단일화 결과를 바로 확인할 수 있도록 보강
+
+#### 검증
+- `npx.cmd tsc -b --pretty false`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 188 — Tool 실행 notice 카드 단일화 (2026-05-20)
 
 #### Frontend
