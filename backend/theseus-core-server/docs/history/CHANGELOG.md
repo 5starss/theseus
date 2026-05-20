@@ -10,9 +10,10 @@
 - PLAN Drafting 프롬프트에서 generated tool 계획의 `execution_spec.permissionLevel`을 `1~5` 정수로 반드시 명시하도록 보강
 - `null`, 문자열, placeholder, 설명문 형태의 권한값을 금지하고, 불확실한 경우 가장 낮은 안전 권한을 선택한 뒤 `permission_rationale`에 근거를 쓰도록 명시
 - prompt rendering 회귀 테스트에 permissionLevel 누락 방지 문구 검증 추가
+- 일반 AGENT 응답, PLAN 1차 draft, PLAN structured formatter, 공통 `ApiMessageRequest` 기본 출력 한도를 `max_tokens=16384`로 통일
 
 #### 검증
-- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py`
+- `python -m py_compile backend\theseus-core-server\theseus_engine\prompts\plan.py backend\theseus-core-server\tests\test_prompt_rendering.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\api_types.py backend\theseus-core-server\src\tool_plan\agent_loop.py backend\theseus-core-server\theseus_engine\engine\query_engine.py backend\theseus-core-server\theseus_engine\wrappers\llm_clients\theseus_client.py`
 - `python -m unittest discover -s tests -p test_prompt_rendering.py`
 - `git diff --check`
 
