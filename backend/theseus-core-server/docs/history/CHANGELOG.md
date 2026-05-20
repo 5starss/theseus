@@ -11,6 +11,7 @@
 - 같은 실행의 Started/Completed 또는 Started/Failed 카드가 동시에 남지 않고, 실행 중에는 Started만 보였다가 완료 후 최종 상태 카드만 남도록 정리
 - 여러 Tool 실행 notice가 연속으로 렌더링될 때 접힌 `Tool Executions` 묶음 카드에는 총 개수/완료/실패 수만 표시하고, Details를 펼치면 각 Tool의 input/output을 기존 카드 형태로 확인할 수 있도록 추가
 - ASK/AGENT Tool 실행 중 별도 `Tool Running` processing 패널과 빈 assistant 로딩 점을 중복 표시하지 않고, 실행 상태 메시지를 Started 카드의 Details 안에서 확인하도록 정리
+- PLAN 생성 중에는 스트리밍 assistant 말풍선을 숨기고 기존 processing 패널만 표시해 동일 진행 문구가 두 번 노출되지 않도록 정리
 - `/dev/tool-execution` 미리보기 페이지를 `bash` 실패와 `glob` 완료 사례로 갱신해 ID 누락 fallback 및 접힌 그룹 UI를 확인할 수 있게 함
 
 #### 검증
