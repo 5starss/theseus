@@ -217,34 +217,85 @@ pipeline {
                     def webCompose    = env.WEB_COMPOSE
                     def deployed      = false
 
+                    sh """
+                        set -e
+                        echo '=== Docker Environment Debug ==='
+                        whoami
+                        pwd
+                        docker version
+                        docker context ls
+                        docker network ls
+                        ls -al
+                        ls -al ${composeDir}
+                    """
+
+                    sh """
+                        set -e
+                        echo '=== Ensure stock-network exists ==='
+                        docker network inspect stock-network >/dev/null 2>&1 || docker network create stock-network
+                        docker network ls | grep stock-network
+                    """
+
+                    sh """
+                        set -e
+                        echo '=== Compose Config Check: ${serverCompose} ==='
+                        docker compose -f ${composeDir}/${serverCompose} config | grep -A5 -B5 stock-network || true
+                        echo '=== Compose Config Check: ${webCompose} ==='
+                        docker compose -f ${composeDir}/${webCompose} config | grep -A5 -B5 stock-network || true
+                    """
+
                     if (env.CHANGED_API_GATEWAY == 'true') {
                         echo '  → Deploying api-gateway'
-                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway"
+                        sh """
+                            set -e
+                            echo '=== Deploy api-gateway ==='
+                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway
+                        """
                         deployed = true
                     }
                     if (env.CHANGED_CORE_API_SERVER == 'true') {
                         echo '  → Deploying core-api-server'
-                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server"
+                        sh """
+                            set -e
+                            echo '=== Deploy core-api-server ==='
+                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server
+                        """
                         deployed = true
                     }
                     if (env.CHANGED_MATCHER_SERVER == 'true') {
                         echo '  → Deploying matcher-server'
-                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server"
+                        sh """
+                            set -e
+                            echo '=== Deploy matcher-server ==='
+                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server
+                        """
                         deployed = true
                     }
                     if (env.CHANGED_MARKET_SERVER == 'true') {
                         echo '  → Deploying market-server'
-                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server"
+                        sh """
+                            set -e
+                            echo '=== Deploy market-server ==='
+                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server
+                        """
                         deployed = true
                     }
                     if (env.CHANGED_AI_SERVER == 'true') {
                         echo '  → Deploying ai-server'
-                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server"
+                        sh """
+                            set -e
+                            echo '=== Deploy ai-server ==='
+                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server
+                        """
                         deployed = true
                     }
                     if (env.CHANGED_NGINX == 'true') {
                         echo '  → Deploying nginx'
-                        sh "docker compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx"
+                        sh """
+                            set -e
+                            echo '=== Deploy nginx ==='
+                            docker compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx
+                        """
                         deployed = true
                     }
 
