@@ -11,6 +11,7 @@ import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentUpdateRequest
 import com.s14p21a503.coreapi.domain.community.dto.CommunityLikeToggleResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostCreateRequestDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostDetailResponseDto;
+import com.s14p21a503.coreapi.domain.community.dto.CommunityPostSortType;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostSummaryResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostUpdateRequestDto;
 import com.s14p21a503.coreapi.domain.community.service.CommunityLikeService;
@@ -46,11 +47,15 @@ public class CommunityController {
             @RequestParam(required = false) String stockId,
             @RequestParam(required = false) String stockCode,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "latest") String sort
     ) {
         validatePageRequest(page, size);
         Pageable pageable = PageRequest.of(page, size);
-        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getPosts(userId, stockId, stockCode, pageable));
+        return ApiResponse.onSuccess(
+                SuccessCode.OK,
+                communityService.getPosts(userId, stockId, stockCode, CommunityPostSortType.from(sort), pageable)
+        );
     }
 
     @GetMapping("/posts/{postId}")

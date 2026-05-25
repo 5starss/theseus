@@ -8,6 +8,7 @@ import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentUpdateRequestDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostCreateRequestDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostDetailResponseDto;
+import com.s14p21a503.coreapi.domain.community.dto.CommunityPostSortType;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostSummaryResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostUpdateRequestDto;
 import com.s14p21a503.coreapi.domain.community.entity.CommunityComment;
@@ -47,12 +48,13 @@ public class CommunityService {
             Long userId,
             String stockId,
             String stockCode,
+            CommunityPostSortType sortType,
             Pageable pageable
     ) {
         String ticker = resolveTicker(stockId, stockCode);
         Stock stock = getStock(ticker);
 
-        Page<CommunityPost> postPage = communityPostRepository.findByTickerOrderByCreatedAtDescIdDesc(ticker, pageable);
+        Page<CommunityPost> postPage = getSortedPostPage(ticker, sortType, pageable);
         Set<Long> userIds = extractPostUserIds(postPage.getContent());
         Set<Long> postIds = extractPostIds(postPage.getContent());
         Map<Long, String> nicknameMap = getNicknameMap(userIds);
@@ -77,6 +79,15 @@ public class CommunityService {
                 .build());
 
         return PageResponseDto.from(mappedPage);
+    }
+
+    private Page<CommunityPost> getSortedPostPage(String ticker, CommunityPostSortType sortType, Pageable pageable) {
+        return switch (sortType) {
+            case LIKES -> communityPostRepository.findByTickerOrderByLikeCountDesc(ticker, pageable);
+            case COMMENTS -> communityPostRepository.findByTickerOrderByCommentCountDescCreatedAtDescIdDesc(ticker, pageable);
+            case VIEWS -> communityPostRepository.findByTickerOrderByViewCountDescCreatedAtDescIdDesc(ticker, pageable);
+            case LATEST -> communityPostRepository.findByTickerOrderByCreatedAtDescIdDesc(ticker, pageable);
+        };
     }
 
     @Transactional(readOnly = true)
