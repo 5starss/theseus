@@ -239,9 +239,10 @@ pipeline {
                     sh """
                         set -e
                         echo '=== Compose Config Check: ${serverCompose} ==='
-                        docker compose -f ${composeDir}/${serverCompose} config | grep -A5 -B5 stock-network || true
+                        cd ${composeDir}
+                        docker compose -f ${serverCompose} config | grep -A5 -B5 stock-network || true
                         echo '=== Compose Config Check: ${webCompose} ==='
-                        docker compose -f ${composeDir}/${webCompose} config | grep -A5 -B5 stock-network || true
+                        docker compose -f ${webCompose} config | grep -A5 -B5 stock-network || true
                     """
 
                     if (env.CHANGED_API_GATEWAY == 'true') {
@@ -249,7 +250,8 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy api-gateway ==='
-                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway
+                            cd ${composeDir}
+                            docker compose -f ${serverCompose} up -d --no-deps --build api-gateway
                         """
                         deployed = true
                     }
@@ -258,7 +260,8 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy core-api-server ==='
-                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server
+                            cd ${composeDir}
+                            docker compose -f ${serverCompose} up -d --no-deps --build core-api-server
                         """
                         deployed = true
                     }
@@ -267,7 +270,8 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy matcher-server ==='
-                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server
+                            cd ${composeDir}
+                            docker compose -f ${serverCompose} up -d --no-deps --build matcher-server
                         """
                         deployed = true
                     }
@@ -276,7 +280,8 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy market-server ==='
-                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server
+                            cd ${composeDir}
+                            docker compose -f ${serverCompose} up -d --no-deps --build market-server
                         """
                         deployed = true
                     }
@@ -285,7 +290,8 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy ai-server ==='
-                            docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server
+                            cd ${composeDir}
+                            docker compose -f ${serverCompose} up -d --no-deps --build ai-server
                         """
                         deployed = true
                     }
@@ -294,15 +300,16 @@ pipeline {
                         sh """
                             set -e
                             echo '=== Deploy nginx ==='
-                            docker compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx
+                            cd ${composeDir}
+                            docker compose -f ${webCompose} up -d --no-deps --build nginx
                         """
                         deployed = true
                     }
 
                     if (deployed) {
                         echo '📦 Deployment Status:'
-                        sh "docker compose -f ${composeDir}/${serverCompose} ps || true"
-                        sh "docker compose -f ${composeDir}/${webCompose} ps || true"
+                        sh "cd ${composeDir} && docker compose -f ${serverCompose} ps || true"
+                        sh "cd ${composeDir} && docker compose -f ${webCompose} ps || true"
                     } else {
                         echo '⏭️ No services changed. Skipping deployment.'
                     }
