@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -30,4 +31,13 @@ public class Stock extends BaseEntity {
 
     @Column(name = "logo_url")
     private String logoUrl;
+
+    @Builder
+    public Stock(String ticker, String companyName, String marketType, String status, String logoUrl) {
+        this.ticker = ticker;
+        this.companyName = companyName;
+        this.marketType = marketType != null ? marketType : "UNKNOWN";
+        this.status = status != null ? status : "ACTIVE";
+        this.logoUrl = logoUrl;
+    }
 }
