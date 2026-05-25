@@ -21,6 +21,8 @@ public class CommunityPostDetailResponseDto {
     private LocalDateTime updatedAt;
     private long viewCount;
     private long commentCount;
+    private long likeCount;
+    private Boolean likedByMe;
     @JsonProperty("isShareholder")
     private Boolean isShareholder;
 }

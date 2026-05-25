@@ -8,10 +8,12 @@ import com.s14p21a503.coreapi.common.response.status.SuccessCode;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentCreateRequestDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityCommentUpdateRequestDto;
+import com.s14p21a503.coreapi.domain.community.dto.CommunityLikeToggleResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostCreateRequestDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostDetailResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostSummaryResponseDto;
 import com.s14p21a503.coreapi.domain.community.dto.CommunityPostUpdateRequestDto;
+import com.s14p21a503.coreapi.domain.community.service.CommunityLikeService;
 import com.s14p21a503.coreapi.domain.community.service.CommunityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -36,9 +38,11 @@ import java.util.List;
 public class CommunityController {
 
     private final CommunityService communityService;
+    private final CommunityLikeService communityLikeService;
 
     @GetMapping("/posts")
     public ResponseEntity<ApiResponse<PageResponseDto<CommunityPostSummaryResponseDto>>> getPosts(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
             @RequestParam(required = false) String stockId,
             @RequestParam(required = false) String stockCode,
             @RequestParam(defaultValue = "0") int page,
@@ -46,12 +50,15 @@ public class CommunityController {
     ) {
         validatePageRequest(page, size);
         Pageable pageable = PageRequest.of(page, size);
-        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getPosts(stockId, stockCode, pageable));
+        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getPosts(userId, stockId, stockCode, pageable));
     }
 
     @GetMapping("/posts/{postId}")
-    public ResponseEntity<ApiResponse<CommunityPostDetailResponseDto>> getPostDetail(@PathVariable Long postId) {
-        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getPostDetail(postId));
+    public ResponseEntity<ApiResponse<CommunityPostDetailResponseDto>> getPostDetail(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable Long postId
+    ) {
+        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getPostDetail(userId, postId));
     }
 
     @PostMapping("/posts")
@@ -87,8 +94,11 @@ public class CommunityController {
     }
 
     @GetMapping("/posts/{postId}/comments")
-    public ResponseEntity<ApiResponse<List<CommunityCommentResponseDto>>> getComments(@PathVariable Long postId) {
-        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getComments(postId));
+    public ResponseEntity<ApiResponse<List<CommunityCommentResponseDto>>> getComments(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @PathVariable Long postId
+    ) {
+        return ApiResponse.onSuccess(SuccessCode.OK, communityService.getComments(userId, postId));
     }
 
     @PostMapping("/posts/{postId}/comments")
@@ -116,6 +126,22 @@ public class CommunityController {
     ) {
         communityService.deleteComment(userId, commentId);
         return ApiResponse.onSuccess(SuccessCode.OK);
+    }
+
+    @PostMapping("/posts/{postId}/likes")
+    public ResponseEntity<ApiResponse<CommunityLikeToggleResponseDto>> togglePostLike(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long postId
+    ) {
+        return ApiResponse.onSuccess(SuccessCode.OK, communityLikeService.togglePostLike(userId, postId));
+    }
+
+    @PostMapping("/comments/{commentId}/likes")
+    public ResponseEntity<ApiResponse<CommunityLikeToggleResponseDto>> toggleCommentLike(
+            @RequestHeader("X-User-Id") Long userId,
+            @PathVariable Long commentId
+    ) {
+        return ApiResponse.onSuccess(SuccessCode.OK, communityLikeService.toggleCommentLike(userId, commentId));
     }
 
     private void validatePageRequest(int page, int size) {

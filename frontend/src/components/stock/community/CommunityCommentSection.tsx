@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { format } from "date-fns";
-import { MessageSquare, Pencil, Trash2 } from "lucide-react";
+import { MessageSquare, Pencil, Trash2, Heart } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApiError } from "../../../api/client";
 import { communityApi } from "../../../api/community";
@@ -21,12 +22,14 @@ export function CommunityCommentSection({
   comments,
   onCommentsChange,
 }: CommunityCommentSectionProps) {
+  const navigate = useNavigate();
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const [newComment, setNewComment] = useState("");
   const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
   const [editingContent, setEditingContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [likeSubmittingId, setLikeSubmittingId] = useState<number | null>(null);
 
   const getApiMessage = (error: unknown, fallback: string) => {
     if (error instanceof ApiError) {
@@ -98,6 +101,34 @@ export function CommunityCommentSection({
       toast.error(getApiMessage(error, "댓글 삭제에 실패했습니다."));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleToggleLike = async (commentId: number) => {
+    if (!isLoggedIn) {
+      toast.error("좋아요는 로그인 후 이용할 수 있습니다.");
+      navigate("/login");
+      return;
+    }
+
+    try {
+      setLikeSubmittingId(commentId);
+      const response = await communityApi.toggleCommentLike(commentId);
+      onCommentsChange(
+        comments.map((comment) =>
+          comment.commentId === commentId
+            ? {
+                ...comment,
+                likeCount: response.likeCount,
+                likedByMe: response.liked,
+              }
+            : comment
+        )
+      );
+    } catch (error) {
+      toast.error(getApiMessage(error, "좋아요 처리에 실패했습니다."));
+    } finally {
+      setLikeSubmittingId(null);
     }
   };
 
@@ -193,9 +224,30 @@ export function CommunityCommentSection({
                         </div>
                       </div>
                     ) : (
-                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
-                        {comment.content}
-                      </p>
+                      <>
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {comment.content}
+                        </p>
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            disabled={likeSubmittingId === comment.commentId}
+                            onClick={() => handleToggleLike(comment.commentId)}
+                            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                              comment.likedByMe
+                                ? "border-rose-200 bg-rose-50 text-rose-600"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            <Heart
+                              className={`size-3.5 ${
+                                comment.likedByMe ? "fill-current" : ""
+                              }`}
+                            />
+                            {comment.likeCount}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { format } from "date-fns";
-import { Eye, MessageSquare, Pencil, Trash2, ChevronLeft } from "lucide-react";
+import { Eye, MessageSquare, Pencil, Trash2, ChevronLeft, Heart } from "lucide-react";
 import { toast } from "sonner";
 import { communityApi } from "../api/community";
 import { stockApi } from "../api/stock";
@@ -17,11 +17,13 @@ export default function CommunityPostDetailPage() {
   const navigate = useNavigate();
   const { code, postId } = useParams<{ code: string; postId: string }>();
   const currentUserId = useAuthStore((state) => state.user?.id);
+  const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
   const [post, setPost] = useState<CommunityPostDetail | null>(null);
   const [comments, setComments] = useState<CommunityComment[]>([]);
   const [stockName, setStockName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [likeSubmitting, setLikeSubmitting] = useState(false);
 
   const numericPostId = Number(postId);
 
@@ -80,6 +82,36 @@ export default function CommunityPostDetailPage() {
       navigate(`/stock/${code}`);
     } catch (error) {
       toast.error(getApiMessage(error, "게시글 삭제에 실패했습니다."));
+    }
+  };
+
+  const handleToggleLike = async () => {
+    if (!post) {
+      return;
+    }
+
+    if (!isLoggedIn) {
+      toast.error("좋아요는 로그인 후 이용할 수 있습니다.");
+      navigate("/login");
+      return;
+    }
+
+    try {
+      setLikeSubmitting(true);
+      const response = await communityApi.togglePostLike(post.postId);
+      setPost((current) =>
+        current
+          ? {
+              ...current,
+              likeCount: response.likeCount,
+              likedByMe: response.liked,
+            }
+          : current
+      );
+    } catch (error) {
+      toast.error(getApiMessage(error, "좋아요 처리에 실패했습니다."));
+    } finally {
+      setLikeSubmitting(false);
     }
   };
 
@@ -163,6 +195,19 @@ export default function CommunityPostDetailPage() {
               <MessageSquare className="size-4" />
               {comments.length}
             </span>
+            <button
+              type="button"
+              onClick={handleToggleLike}
+              disabled={likeSubmitting}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+                post.likedByMe
+                  ? "border-rose-200 bg-rose-50 text-rose-600"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+              }`}
+            >
+              <Heart className={`size-4 ${post.likedByMe ? "fill-current" : ""}`} />
+              {post.likeCount}
+            </button>
           </div>
 
           <div className="mt-6 rounded-2xl bg-slate-50 p-4">
