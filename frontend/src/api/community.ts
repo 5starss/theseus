@@ -10,7 +10,7 @@ import type {
   CommunityPostUpdateRequest,
 } from "../types/community";
 
-const BASE_URL = "/api/v1/community";
+const BASE_URL = "/api/v1/core/community";
 
 export const communityApi = {
   getPosts: async (
