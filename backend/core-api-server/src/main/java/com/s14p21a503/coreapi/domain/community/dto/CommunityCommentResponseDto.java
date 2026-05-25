@@ -1,5 +1,6 @@
 package com.s14p21a503.coreapi.domain.community.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -16,5 +17,6 @@ public class CommunityCommentResponseDto {
     private String content;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private boolean isShareholder;
+    @JsonProperty("isShareholder")
+    private Boolean isShareholder;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { MessageSquarePlus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,7 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPosts = async () => {
+  const loadPosts = useCallback(async () => {
     if (!stockCode) {
       return;
     }
@@ -44,11 +44,11 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [stockCode]);
 
   useEffect(() => {
     loadPosts();
-  }, [stockCode]);
+  }, [loadPosts]);
 
   const handleRefresh = async () => {
     await loadPosts();
