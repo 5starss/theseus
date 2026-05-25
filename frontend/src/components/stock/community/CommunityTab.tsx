@@ -8,6 +8,7 @@ import { getErrorMessage } from "../../../utils/errorMessages";
 import type {
   CommunityPageResponse,
   CommunityPostListItem,
+  CommunityPostSort,
 } from "../../../types/community";
 import { Button } from "../../ui/button";
 import { CommunityPostCard } from "./CommunityPostCard";
@@ -20,6 +21,7 @@ interface CommunityTabProps {
 
 export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
+  const [sort, setSort] = useState<CommunityPostSort>("latest");
   const [postsPage, setPostsPage] =
     useState<CommunityPageResponse<CommunityPostListItem> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +35,7 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
     try {
       setLoading(true);
       setError(null);
-      const response = await communityApi.getPosts(stockCode, 0, 20);
+      const response = await communityApi.getPosts(stockCode, 0, 20, sort);
       setPostsPage(response);
     } catch (error) {
       const message =
@@ -44,7 +46,7 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [stockCode]);
+  }, [stockCode, sort]);
 
   useEffect(() => {
     loadPosts();
@@ -56,6 +58,12 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
   };
 
   const posts = postsPage?.content ?? [];
+  const sortOptions: Array<{ value: CommunityPostSort; label: string }> = [
+    { value: "latest", label: "최신순" },
+    { value: "likes", label: "좋아요순" },
+    { value: "comments", label: "댓글순" },
+    { value: "views", label: "조회수순" },
+  ];
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6">
@@ -85,6 +93,23 @@ export function CommunityTab({ stockCode, stockName }: CommunityTabProps) {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {sortOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setSort(option.value)}
+            className={`rounded-full border px-3 py-1.5 text-sm font-semibold transition ${
+              sort === option.value
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
       </div>
 
       <div className="mt-5">

@@ -7,6 +7,8 @@ export interface CommunityPageResponse<T> {
   last: boolean;
 }
 
+export type CommunityPostSort = "latest" | "likes" | "comments" | "views";
+
 export interface CommunityPostListItem {
   postId: number;
   stockCode: string;

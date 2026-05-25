@@ -4,6 +4,7 @@ import type {
   CommunityCommentCreateRequest,
   CommunityLikeToggleResponse,
   CommunityCommentUpdateRequest,
+  CommunityPostSort,
   CommunityPageResponse,
   CommunityPostCreateRequest,
   CommunityPostDetail,
@@ -17,12 +18,13 @@ export const communityApi = {
   getPosts: async (
     stockCode: string,
     page = 0,
-    size = 20
+    size = 20,
+    sort: CommunityPostSort = "latest"
   ): Promise<CommunityPageResponse<CommunityPostListItem>> => {
     const response = await api.get<ApiResponse<CommunityPageResponse<CommunityPostListItem>>>(
       `${BASE_URL}/posts`,
       {
-        params: { stockCode, page, size },
+        params: { stockCode, page, size, sort },
       }
     );
 
