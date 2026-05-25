@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public interface PositionRepository extends JpaRepository<Position, Long> {
@@ -23,4 +24,18 @@ public interface PositionRepository extends JpaRepository<Position, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Position p WHERE p.accountId = :accountId AND p.ticker = :ticker")
     Optional<Position> findByAccountIdAndTickerForUpdate(@Param("accountId") Long accountId, @Param("ticker") String ticker);
+
+    boolean existsByUserIdAndTickerAndQuantityGreaterThan(Long userId, String ticker, Integer quantity);
+
+    @Query("""
+            SELECT DISTINCT p.userId
+            FROM Position p
+            WHERE p.ticker = :ticker
+              AND p.quantity > 0
+              AND p.userId IN :userIds
+            """)
+    Set<Long> findShareholderUserIdsByTickerAndUserIds(
+            @Param("ticker") String ticker,
+            @Param("userIds") Set<Long> userIds
+    );
 }
