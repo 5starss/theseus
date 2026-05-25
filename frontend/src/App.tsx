@@ -10,6 +10,8 @@ import Home from "./pages/Home";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import StockDashboard from "./pages/StockDashboard";
+import CommunityPostDetailPage from "./pages/CommunityPostDetailPage";
+import CommunityPostEditorPage from "./pages/CommunityPostEditorPage";
 import Account from "./pages/Account";
 import MyPage from "./pages/MyPage";
 import Ranking from "./pages/Ranking";
@@ -19,11 +21,11 @@ import { OrderHistoryTab } from "./components/account/OrderHistoryTab";
 import { Toaster } from "sonner";
 
 function App() {
-  const connect = useSocketStore(state => state.connect);
-  const connectSSE = useNotificationStore(state => state.connectSSE);
-  const disconnectSSE = useNotificationStore(state => state.disconnectSSE);
-  const isLoggedIn = useAuthStore(state => state.isLoggedIn);
-  const fetchTradePolicy = useConfigStore(state => state.fetchTradePolicy);
+  const connect = useSocketStore((state) => state.connect);
+  const connectSSE = useNotificationStore((state) => state.connectSSE);
+  const disconnectSSE = useNotificationStore((state) => state.disconnectSSE);
+  const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
+  const fetchTradePolicy = useConfigStore((state) => state.fetchTradePolicy);
 
   useEffect(() => {
     connect();
@@ -50,10 +52,21 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="stock/:code" element={<StockDashboard />} />
+          <Route
+            path="stock/:code/community/posts/:postId"
+            element={<CommunityPostDetailPage />}
+          />
           <Route path="ranking" element={<Ranking />} />
 
-          {/* 로그인 권한이 필요한 라우트 */}
           <Route element={<ProtectedRoute />}>
+            <Route
+              path="stock/:code/community/posts/new"
+              element={<CommunityPostEditorPage />}
+            />
+            <Route
+              path="stock/:code/community/posts/:postId/edit"
+              element={<CommunityPostEditorPage />}
+            />
             <Route path="mypage" element={<MyPage />} />
             <Route path="account" element={<Account />}>
               <Route index element={<Navigate to="asset" replace />} />
@@ -65,7 +78,7 @@ function App() {
         </Route>
       </Routes>
     </BrowserRouter>
-  )
+  );
 }
 
-export default App
+export default App;
