@@ -219,39 +219,39 @@ pipeline {
 
                     if (env.CHANGED_API_GATEWAY == 'true') {
                         echo '  → Deploying api-gateway'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway"
+                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build api-gateway"
                         deployed = true
                     }
                     if (env.CHANGED_CORE_API_SERVER == 'true') {
                         echo '  → Deploying core-api-server'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server"
+                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build core-api-server"
                         deployed = true
                     }
                     if (env.CHANGED_MATCHER_SERVER == 'true') {
                         echo '  → Deploying matcher-server'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server"
+                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build matcher-server"
                         deployed = true
                     }
                     if (env.CHANGED_MARKET_SERVER == 'true') {
                         echo '  → Deploying market-server'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server"
+                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build market-server"
                         deployed = true
                     }
                     if (env.CHANGED_AI_SERVER == 'true') {
                         echo '  → Deploying ai-server'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server"
+                        sh "docker compose -f ${composeDir}/${serverCompose} up -d --no-deps --build ai-server"
                         deployed = true
                     }
                     if (env.CHANGED_NGINX == 'true') {
                         echo '  → Deploying nginx'
-                        sh "docker-compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx"
+                        sh "docker compose -f ${composeDir}/${webCompose} up -d --no-deps --build nginx"
                         deployed = true
                     }
 
                     if (deployed) {
                         echo '📦 Deployment Status:'
-                        sh "docker-compose -f ${composeDir}/${serverCompose} ps || true"
-                        sh "docker-compose -f ${composeDir}/${webCompose} ps || true"
+                        sh "docker compose -f ${composeDir}/${serverCompose} ps || true"
+                        sh "docker compose -f ${composeDir}/${webCompose} ps || true"
                     } else {
                         echo '⏭️ No services changed. Skipping deployment.'
                     }
