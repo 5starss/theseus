@@ -41,6 +41,9 @@ class CommunityServiceTest {
     @Mock
     private ShareholderBadgeService shareholderBadgeService;
 
+    @Mock
+    private CommunityLikeService communityLikeService;
+
     @InjectMocks
     private CommunityService communityService;
 

@@ -2,6 +2,7 @@ import api, { ApiError, type ApiResponse } from "./client";
 import type {
   CommunityComment,
   CommunityCommentCreateRequest,
+  CommunityLikeToggleResponse,
   CommunityCommentUpdateRequest,
   CommunityPageResponse,
   CommunityPostCreateRequest,
@@ -129,5 +130,33 @@ export const communityApi = {
 
   deleteComment: async (commentId: number): Promise<void> => {
     await api.delete<ApiResponse<void>>(`${BASE_URL}/comments/${commentId}`);
+  },
+
+  togglePostLike: async (
+    postId: number
+  ): Promise<CommunityLikeToggleResponse> => {
+    const response = await api.post<ApiResponse<CommunityLikeToggleResponse>>(
+      `${BASE_URL}/posts/${postId}/likes`
+    );
+
+    if (!response.data.isSuccess || !response.data.result) {
+      throw new ApiError(response.data.code, response.data.message);
+    }
+
+    return response.data.result;
+  },
+
+  toggleCommentLike: async (
+    commentId: number
+  ): Promise<CommunityLikeToggleResponse> => {
+    const response = await api.post<ApiResponse<CommunityLikeToggleResponse>>(
+      `${BASE_URL}/comments/${commentId}/likes`
+    );
+
+    if (!response.data.isSuccess || !response.data.result) {
+      throw new ApiError(response.data.code, response.data.message);
+    }
+
+    return response.data.result;
   },
 };

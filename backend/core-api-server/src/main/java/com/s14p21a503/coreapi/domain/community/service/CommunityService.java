@@ -40,9 +40,11 @@ public class CommunityService {
     private final StockRepository stockRepository;
     private final UserRepository userRepository;
     private final ShareholderBadgeService shareholderBadgeService;
+    private final CommunityLikeService communityLikeService;
 
     @Transactional(readOnly = true)
     public PageResponseDto<CommunityPostSummaryResponseDto> getPosts(
+            Long userId,
             String stockId,
             String stockCode,
             Pageable pageable
@@ -52,8 +54,11 @@ public class CommunityService {
 
         Page<CommunityPost> postPage = communityPostRepository.findByTickerOrderByCreatedAtDescIdDesc(ticker, pageable);
         Set<Long> userIds = extractPostUserIds(postPage.getContent());
+        Set<Long> postIds = extractPostIds(postPage.getContent());
         Map<Long, String> nicknameMap = getNicknameMap(userIds);
         Map<Long, Boolean> shareholderMap = shareholderBadgeService.getShareholderMap(ticker, userIds);
+        Map<Long, Long> likeCountMap = communityLikeService.getPostLikeCountMap(postIds);
+        Set<Long> likedPostIds = communityLikeService.getLikedPostIds(userId, postIds);
 
         Page<CommunityPostSummaryResponseDto> mappedPage = postPage.map(post -> CommunityPostSummaryResponseDto.builder()
                 .postId(post.getId())
@@ -66,6 +71,8 @@ public class CommunityService {
                 .updatedAt(post.getUpdatedAt())
                 .viewCount(post.getViewCount())
                 .commentCount(post.getCommentCount())
+                .likeCount(likeCountMap.getOrDefault(post.getId(), 0L))
+                .likedByMe(likedPostIds.contains(post.getId()))
                 .isShareholder(shareholderMap.getOrDefault(post.getUserId(), false))
                 .build());
 
@@ -73,7 +80,7 @@ public class CommunityService {
     }
 
     @Transactional(readOnly = true)
-    public CommunityPostDetailResponseDto getPostDetail(Long postId) {
+    public CommunityPostDetailResponseDto getPostDetail(Long userId, Long postId) {
         CommunityPost post = getPost(postId);
         Stock stock = getStock(post.getTicker());
         User user = getUser(post.getUserId());
@@ -90,6 +97,8 @@ public class CommunityService {
                 .updatedAt(post.getUpdatedAt())
                 .viewCount(post.getViewCount())
                 .commentCount(post.getCommentCount())
+                .likeCount(communityLikeService.getPostLikeCount(postId))
+                .likedByMe(communityLikeService.isPostLikedByUser(userId, postId))
                 .isShareholder(shareholderBadgeService.isShareholder(post.getTicker(), post.getUserId()))
                 .build();
     }
@@ -109,7 +118,7 @@ public class CommunityService {
                         .build()
         );
 
-        return toPostDetailResponse(post, user.getNickname(), stock.getCompanyName());
+        return toPostDetailResponse(post, userId, user.getNickname(), stock.getCompanyName());
     }
 
     @Transactional
@@ -124,7 +133,7 @@ public class CommunityService {
 
         User user = getUser(post.getUserId());
         Stock stock = getStock(post.getTicker());
-        return toPostDetailResponse(post, user.getNickname(), stock.getCompanyName());
+        return toPostDetailResponse(post, userId, user.getNickname(), stock.getCompanyName());
     }
 
     @Transactional
@@ -143,12 +152,15 @@ public class CommunityService {
     }
 
     @Transactional(readOnly = true)
-    public List<CommunityCommentResponseDto> getComments(Long postId) {
+    public List<CommunityCommentResponseDto> getComments(Long userId, Long postId) {
         CommunityPost post = getPost(postId);
         List<CommunityComment> comments = communityCommentRepository.findByPostIdOrderByCreatedAtAscIdAsc(postId);
         Set<Long> userIds = extractCommentUserIds(comments);
+        Set<Long> commentIds = extractCommentIds(comments);
         Map<Long, String> nicknameMap = getNicknameMap(userIds);
         Map<Long, Boolean> shareholderMap = shareholderBadgeService.getShareholderMap(post.getTicker(), userIds);
+        Map<Long, Long> likeCountMap = communityLikeService.getCommentLikeCountMap(commentIds);
+        Set<Long> likedCommentIds = communityLikeService.getLikedCommentIds(userId, commentIds);
 
         return comments.stream()
                 .map(comment -> CommunityCommentResponseDto.builder()
@@ -159,6 +171,8 @@ public class CommunityService {
                         .content(comment.getContent())
                         .createdAt(comment.getCreatedAt())
                         .updatedAt(comment.getUpdatedAt())
+                        .likeCount(likeCountMap.getOrDefault(comment.getId(), 0L))
+                        .likedByMe(likedCommentIds.contains(comment.getId()))
                         .isShareholder(shareholderMap.getOrDefault(comment.getUserId(), false))
                         .build())
                 .toList();
@@ -178,7 +192,7 @@ public class CommunityService {
         );
         post.increaseCommentCount();
 
-        return toCommentResponse(comment, user.getNickname(), post.getTicker());
+        return toCommentResponse(comment, userId, user.getNickname(), post.getTicker());
     }
 
     @Transactional
@@ -190,7 +204,7 @@ public class CommunityService {
 
         User user = getUser(comment.getUserId());
         CommunityPost post = getPost(comment.getPostId());
-        return toCommentResponse(comment, user.getNickname(), post.getTicker());
+        return toCommentResponse(comment, userId, user.getNickname(), post.getTicker());
     }
 
     @Transactional
@@ -203,7 +217,7 @@ public class CommunityService {
         communityCommentRepository.delete(comment);
     }
 
-    private CommunityPostDetailResponseDto toPostDetailResponse(CommunityPost post, String nickname, String stockName) {
+    private CommunityPostDetailResponseDto toPostDetailResponse(CommunityPost post, Long viewerUserId, String nickname, String stockName) {
         return CommunityPostDetailResponseDto.builder()
                 .postId(post.getId())
                 .stockCode(post.getTicker())
@@ -216,11 +230,13 @@ public class CommunityService {
                 .updatedAt(post.getUpdatedAt())
                 .viewCount(post.getViewCount())
                 .commentCount(post.getCommentCount())
+                .likeCount(communityLikeService.getPostLikeCount(post.getId()))
+                .likedByMe(communityLikeService.isPostLikedByUser(viewerUserId, post.getId()))
                 .isShareholder(shareholderBadgeService.isShareholder(post.getTicker(), post.getUserId()))
                 .build();
     }
 
-    private CommunityCommentResponseDto toCommentResponse(CommunityComment comment, String nickname, String ticker) {
+    private CommunityCommentResponseDto toCommentResponse(CommunityComment comment, Long viewerUserId, String nickname, String ticker) {
         return CommunityCommentResponseDto.builder()
                 .commentId(comment.getId())
                 .postId(comment.getPostId())
@@ -229,6 +245,8 @@ public class CommunityService {
                 .content(comment.getContent())
                 .createdAt(comment.getCreatedAt())
                 .updatedAt(comment.getUpdatedAt())
+                .likeCount(communityLikeService.getCommentLikeCount(comment.getId()))
+                .likedByMe(communityLikeService.isCommentLikedByUser(viewerUserId, comment.getId()))
                 .isShareholder(shareholderBadgeService.isShareholder(ticker, comment.getUserId()))
                 .build();
     }
@@ -305,9 +323,21 @@ public class CommunityService {
                 .collect(Collectors.toSet());
     }
 
+    private Set<Long> extractPostIds(List<CommunityPost> posts) {
+        return posts.stream()
+                .map(CommunityPost::getId)
+                .collect(Collectors.toSet());
+    }
+
     private Set<Long> extractCommentUserIds(List<CommunityComment> comments) {
         return comments.stream()
                 .map(CommunityComment::getUserId)
+                .collect(Collectors.toSet());
+    }
+
+    private Set<Long> extractCommentIds(List<CommunityComment> comments) {
+        return comments.stream()
+                .map(CommunityComment::getId)
                 .collect(Collectors.toSet());
     }
 }

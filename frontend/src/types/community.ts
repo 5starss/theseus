@@ -18,6 +18,8 @@ export interface CommunityPostListItem {
   updatedAt: string;
   viewCount: number;
   commentCount: number;
+  likeCount: number;
+  likedByMe: boolean;
   isShareholder: boolean;
 }
 
@@ -33,6 +35,8 @@ export interface CommunityPostDetail {
   updatedAt: string;
   viewCount: number;
   commentCount: number;
+  likeCount: number;
+  likedByMe: boolean;
   isShareholder: boolean;
 }
 
@@ -44,7 +48,14 @@ export interface CommunityComment {
   content: string;
   createdAt: string;
   updatedAt: string;
+  likeCount: number;
+  likedByMe: boolean;
   isShareholder: boolean;
+}
+
+export interface CommunityLikeToggleResponse {
+  liked: boolean;
+  likeCount: number;
 }
 
 export interface CommunityPostCreateRequest {

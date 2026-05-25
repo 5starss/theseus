@@ -1,4 +1,4 @@
-import { MessageSquare, Eye } from "lucide-react";
+import { MessageSquare, Eye, Heart } from "lucide-react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import type { CommunityPostListItem } from "../../../types/community";
@@ -37,6 +37,14 @@ export function CommunityPostCard({ post }: CommunityPostCardProps) {
           <span className="inline-flex items-center gap-1">
             <MessageSquare className="size-3.5" />
             {post.commentCount}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 ${
+              post.likedByMe ? "text-rose-500" : ""
+            }`}
+          >
+            <Heart className={`size-3.5 ${post.likedByMe ? "fill-current" : ""}`} />
+            {post.likeCount}
           </span>
         </div>
       </div>
