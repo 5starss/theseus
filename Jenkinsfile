@@ -205,7 +205,7 @@ pipeline {
         stage('Deploy') {
             when {
                 allOf {
-                    branch 'dev'
+                    branch 'stock_dev'
                     expression { !env.gitlabMergeRequestIid && !env.CHANGE_ID }
                 }
             }
