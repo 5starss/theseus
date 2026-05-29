@@ -11,14 +11,16 @@ import com.theseus.api.domain.project.repository.ProjectMemberRepository;
 import com.theseus.api.domain.project.repository.ProjectRepository;
 import com.theseus.api.domain.tool.dto.response.ToolUsageListResponse;
 import com.theseus.api.domain.tool.dto.response.ToolUsageResponse;
-import com.theseus.api.domain.tool.entity.ToolUsageStatus;
+import com.theseus.api.domain.tool.entity.ToolUsageLog;
 import com.theseus.api.domain.tool.repository.ToolUsageLogRepository;
 import com.theseus.api.domain.user.entity.User;
 import com.theseus.api.domain.user.repository.UserRepository;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,36 +38,37 @@ public class ToolUsageService {
 		AuthenticatedUser currentUser,
 		Long projectId,
 		int page,
-		int size,
-		ToolUsageStatus status
+		int size
 	) {
 		User user = getCurrentUserEntity(currentUser);
 		Project project = getProjectEntity(projectId);
 		ProjectMember projectMember = getActiveProjectMember(project, user);
 		validateProjectAdmin(projectMember);
 
-		Pageable pageable = PageRequest.of(
-			Math.max(page, 0),
-			Math.max(size, 1),
-			Sort.by(Sort.Direction.DESC, "usedAt")
-		);
 		// TODO(S14P31A308-483): Tool execution completed/failed 이벤트 수신 지점에서 ToolUsageLog 저장을 연결합니다.
-		return ToolUsageListResponse.createFrom(
-			findToolUsageLogs(project, status, pageable)
-				.map(ToolUsageResponse::createFrom)
-		);
-	}
+		List<ProjectMember> projectMembers = projectMemberRepository.findByProject(project)
+			.stream()
+			.sorted(Comparator.comparing(member -> member.getUser().getName()))
+			.toList();
+		Map<Long, List<ToolUsageLog>> usageLogsByProjectMemberId = toolUsageLogRepository
+			.findByProjectOrderByUsedAtDesc(project)
+			.stream()
+			.collect(Collectors.groupingBy(usageLog -> usageLog.getUsedByProjectMember().getId()));
 
-	private org.springframework.data.domain.Page<com.theseus.api.domain.tool.entity.ToolUsageLog> findToolUsageLogs(
-		Project project,
-		ToolUsageStatus status,
-		Pageable pageable
-	) {
-		if (status == null) {
-			return toolUsageLogRepository.findByProjectOrderByUsedAtDesc(project, pageable);
-		}
+		int normalizedPage = Math.max(page, 0);
+		int normalizedSize = Math.max(size, 1);
+		int fromIndex = Math.min(normalizedPage * normalizedSize, projectMembers.size());
+		int toIndex = Math.min(fromIndex + normalizedSize, projectMembers.size());
 
-		return toolUsageLogRepository.findByProjectAndStatusOrderByUsedAtDesc(project, status, pageable);
+		List<ToolUsageResponse> items = projectMembers.subList(fromIndex, toIndex)
+			.stream()
+			.map(member -> ToolUsageResponse.createFrom(
+				member,
+				usageLogsByProjectMemberId.getOrDefault(member.getId(), Collections.emptyList())
+			))
+			.toList();
+
+		return ToolUsageListResponse.createFrom(items, normalizedPage, normalizedSize, projectMembers.size());
 	}
 
 	private User getCurrentUserEntity(AuthenticatedUser currentUser) {

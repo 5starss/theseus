@@ -4,7 +4,6 @@ import com.theseus.api.common.response.ApiResponse;
 import com.theseus.api.common.response.status.SuccessCode;
 import com.theseus.api.domain.auth.token.AuthenticatedUser;
 import com.theseus.api.domain.tool.dto.response.ToolUsageListResponse;
-import com.theseus.api.domain.tool.entity.ToolUsageStatus;
 import com.theseus.api.domain.tool.service.ToolUsageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,15 +30,13 @@ public class ToolUsageController {
 		@AuthenticationPrincipal AuthenticatedUser currentUser,
 		@PathVariable Long projectId,
 		@RequestParam(defaultValue = "0") int page,
-		@RequestParam(defaultValue = "20") int size,
-		@RequestParam(required = false) ToolUsageStatus status
+		@RequestParam(defaultValue = "20") int size
 	) {
 		ToolUsageListResponse response = toolUsageService.getToolUsages(
 			currentUser,
 			projectId,
 			page,
-			size,
-			status
+			size
 		);
 		return ApiResponse.onSuccess(SuccessCode.OK, response);
 	}
