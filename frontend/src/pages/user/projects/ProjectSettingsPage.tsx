@@ -5,6 +5,7 @@ import { ProjectGeneralSettings } from '@/features/projects/components/settings/
 import { ProjectMemberManagement } from '@/features/projects/components/settings/ProjectMemberManagement';
 import { RemoteWorkspaceManagement } from '@/features/projects/components/settings/RemoteWorkspaceManagement';
 import { ToolApprovalManagement } from '@/features/projects/components/settings/ToolApprovalManagement';
+import { ToolUsageHistoryTab } from '@/features/projects/components/settings/ToolUsageHistoryTab';
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -38,6 +39,7 @@ export default function ProjectSettingsPage() {
           <TabsList className="bg-slate-900/50 backdrop-blur border border-slate-800 p-1 mb-8">
             <TabsTrigger value="general" className="data-[state=active]:bg-blue-400 data-[state=active]:text-[#003a6b]">일반 설정</TabsTrigger>
             <TabsTrigger value="members" className="data-[state=active]:bg-blue-400 data-[state=active]:text-[#003a6b]">멤버 관리</TabsTrigger>
+            <TabsTrigger value="tool-usages" className="data-[state=active]:bg-blue-400 data-[state=active]:text-[#003a6b]">도구 사용 목록</TabsTrigger>
             <TabsTrigger value="approvals" className="data-[state=active]:bg-blue-400 data-[state=active]:text-[#003a6b]">ToolPlan 승인</TabsTrigger>
             <TabsTrigger value="remote-workspaces" className="data-[state=active]:bg-blue-400 data-[state=active]:text-[#003a6b]">Remote Workspace</TabsTrigger>
           </TabsList>
@@ -48,6 +50,10 @@ export default function ProjectSettingsPage() {
 
           <TabsContent value="members" className="mt-0 focus-visible:outline-none">
             <ProjectMemberManagement projectId={projectId} />
+          </TabsContent>
+
+          <TabsContent value="tool-usages" className="mt-0 focus-visible:outline-none">
+            <ToolUsageHistoryTab projectId={projectId} />
           </TabsContent>
 
           <TabsContent value="approvals" className="mt-0 focus-visible:outline-none">
