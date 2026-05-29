@@ -149,7 +149,7 @@ chat_replays:
       afterToolsDelayMs: 550
     answer:
       beforeTools: "관리자 권한으로 싸피 증권 랜딩 페이지 변경을 진행하겠습니다.\n\n"
-      afterTools: "프론트 변경이 완료되었습니다. 변경된 싸피 증권 랜딩 페이지를 확인하시면 됩니다."
+      afterTools: "잘됐음"
     toolStack:
       - toolName: frontend_landing_editor
         toolUseId: demo-frontend-success-001
