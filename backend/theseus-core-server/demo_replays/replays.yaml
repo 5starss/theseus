@@ -1,0 +1,136 @@
+version: 1
+
+# THESEUS_DEMO_REPLAY_ENABLED=true 일 때만 사용됩니다.
+# 시연 키워드, 답변, Tool 카드 내용만 여기서 바꾸면 됩니다.
+# remote: none     -> Remote Workspace 미선택일 때만 매칭
+# remote: required -> Remote Workspace 선택 시에만 매칭
+
+plan_replays:
+  - id: "1-kim-plan-before-vacation"
+    modes: [PLAN]
+    match:
+      remote: none
+      contains_any:
+        - "휴가 전 플랜 생성"
+        - "인수인계 모니터링 툴 계획"
+    progress:
+      - message: REQUEST_RECEIVED
+        progressRate: 5
+      - message: PLAN_DRAFTING
+        progressRate: 40
+      - message: PLAN_COMPLETED
+        progressRate: 100
+    result:
+      rawMarkdown: |
+        ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
+
+        김대리 부재 중 신입사원이 원격 운영 환경에서 API 상태와 시스템 리소스를 확인할 수 있도록
+        읽기 전용 모니터링 Tool을 생성합니다.
+      structuredPlanJson:
+        version: 1
+        goal: "김대리 휴가 전 인수인계 모니터링 Tool 생성"
+        tasks:
+          - id: task-1
+            title: "원격 운영 진단 Tool 명세 작성"
+            problem: "신입사원이 API 상태와 리소스를 같은 기준으로 확인해야 합니다."
+            solution: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
+            expected_effect: "휴가 기간 중 운영 진단 업무를 표준화합니다."
+          - id: task-2
+            title: "권한 및 승인 기준 정리"
+            problem: "원격 환경 접근 Tool은 관리자 승인과 권한 등급 확인이 필요합니다."
+            solution: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
+            expected_effect: "관리자가 생성 승인 여부를 빠르게 판단할 수 있습니다."
+        verification:
+          success_criteria:
+            - "PLAN 패널에 task가 표시됩니다."
+            - "생성 승인 요청 버튼을 누를 수 있습니다."
+      planSnapshot:
+        schemaVersion: "1.0"
+        planVersion: 1
+        blocks:
+          - blockId: task-1
+            title: "원격 운영 진단 Tool 명세 작성"
+            content: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
+            order: 1
+          - blockId: task-2
+            title: "권한 및 승인 기준 정리"
+            content: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
+            order: 2
+
+chat_replays:
+  - id: "3-new-hire-monitoring-success"
+    modes: [AGENT]
+    match:
+      remote: required
+      contains_any:
+        - "인수인계 업무 1"
+        - "모니터링 툴 사용"
+    answer:
+      beforeTools: "김대리 인수인계 기준에 따라 원격 모니터링 Tool을 실행하겠습니다.\n\n"
+      afterTools: "모니터링 결과 API와 시스템 리소스는 현재 정상 범위입니다. 인수인계 업무 1을 완료했습니다."
+    toolStack:
+      - toolName: integrated_ops_diagnostics
+        toolUseId: demo-monitoring-001
+        toolInput:
+          services:
+            - "http://localhost:8080/health"
+            - "http://localhost:8081/health"
+        started:
+          message: "원격 운영 환경의 API 상태와 시스템 리소스를 조회합니다."
+        completed:
+          output: |
+            {
+              "overall_status": "PASS",
+              "api_status": "PASS",
+              "cpu_percent": 37.5,
+              "mem_percent": 42.1,
+              "recommendation": "정상 범위입니다."
+            }
+
+  - id: "5-new-hire-frontend-change-failed"
+    modes: [AGENT]
+    match:
+      remote: required
+      contains_any:
+        - "인수인계 업무 2"
+        - "프론트 변경 툴 실패"
+    answer:
+      beforeTools: "싸피 증권 랜딩 페이지 변경 Tool을 실행해 보겠습니다.\n\n"
+      afterTools: "프론트 변경은 권한 등급 부족으로 실패했습니다. 관리자 권한 조정 후 다시 실행해야 합니다."
+    toolStack:
+      - toolName: frontend_landing_editor
+        toolUseId: demo-frontend-failed-001
+        toolInput:
+          page: "ssafy-securities-landing"
+          change: "hero copy update"
+        started:
+          message: "원격 프론트 프로젝트에서 랜딩 페이지 변경을 시도합니다."
+        failed:
+          error: "Permission denied: current user level is insufficient for remote frontend write."
+          output: "권한 등급 부족으로 원격 프론트 변경 작업이 차단되었습니다."
+
+  - id: "7-admin-frontend-change-success"
+    modes: [AGENT]
+    match:
+      remote: required
+      contains_any:
+        - "관리자 프론트 변경 성공"
+        - "프론트 변경 성공"
+    answer:
+      beforeTools: "관리자 권한으로 싸피 증권 랜딩 페이지 변경을 진행하겠습니다.\n\n"
+      afterTools: "프론트 변경이 완료되었습니다. 변경된 싸피 증권 랜딩 페이지를 확인하시면 됩니다."
+    toolStack:
+      - toolName: frontend_landing_editor
+        toolUseId: demo-frontend-success-001
+        toolInput:
+          page: "ssafy-securities-landing"
+          change: "hero copy update"
+        started:
+          message: "관리자 권한으로 원격 프론트 프로젝트의 랜딩 페이지를 수정합니다."
+        completed:
+          output: |
+            {
+              "changed_files": ["frontend/src/pages/SsafySecuritiesLanding.tsx"],
+              "status": "updated",
+              "summary": "싸피 증권 랜딩 페이지 hero 문구와 CTA 영역을 수정했습니다."
+            }

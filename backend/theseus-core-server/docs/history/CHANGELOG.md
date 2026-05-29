@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 191 — YAML 기반 데모 replay 분기 추가 (2026-05-29)
+
+#### Core
+- `THESEUS_DEMO_REPLAY_ENABLED=true`일 때 `demo_replays/replays.yaml`의 키워드 매칭으로 ASK/AGENT 채팅 스트림을 LLM 호출 없이 재생하는 demo replay 경로 추가
+- `answer.beforeTools`, `toolStack[].started`, `toolStack[].completed/failed`, `answer.afterTools`로 답변/툴 호출 스택/성공·실패 카드를 YAML에서 분리 수정할 수 있도록 보강
+- `toolStack` 배열에 여러 Tool을 순서대로 정의하면 같은 시나리오 안에서 복수 Tool 호출 스택을 재생할 수 있도록 구성
+- ToolPlan worker가 PLAN 요청 키워드를 YAML과 매칭하면 `rawMarkdown`, `structuredPlanJson`, `planSnapshot`을 고정 응답으로 발행하도록 demo replay 분기 추가
+- `THESEUS_DEMO_REPLAY_PATH`로 시나리오 YAML 위치를 바꿀 수 있게 설정 추가
+- `match.remote: none|required` 조건으로 PLAN은 Remote Workspace 미선택 시, AGENT 시나리오는 Remote Workspace 선택 시에만 매칭되도록 분기
+
+#### 문서
+- `.env.example`, `README.md`에 demo replay 설정을 추가
+- `demo_replays/replays.yaml`에 시연용 4개 시나리오만 남기도록 정리
+  - 김대리 휴가 전 PLAN 생성 (`PLAN`, `remote: none`)
+  - 신입사원 인수인계 업무 1: 모니터링 Tool 성공 (`AGENT`, `remote: required`)
+  - 신입사원 인수인계 업무 2: 프론트 변경 Tool 실패 (`AGENT`, `remote: required`)
+  - 관리자 프론트 변경 성공 (`AGENT`, `remote: required`)
+
+#### 검증
+- `python -m py_compile src\demo_replay.py src\routes\stream.py src\tool_plan\processor.py tests\test_demo_replay.py`
+- `python -m unittest tests.test_demo_replay tests.test_tool_plan_processor_chunks`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 190 — Tool 실행 notice 최종 상태 병합 및 접기 표시 (2026-05-20)
 
 #### Frontend

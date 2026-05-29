@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -15,6 +16,12 @@ from src.builder.engine import (
     get_query_engine,
 )
 from src.db.postgres import get_db
+from src.demo_replay import (
+    chat_replay_model_name,
+    chat_replay_stream_events,
+    chat_replay_total_tokens,
+    find_chat_replay,
+)
 from src.history.service import (
     load_history_messages,
     persist_assistant_message,
@@ -76,6 +83,86 @@ def _resolve_stream_mode(raw_mode: str, *, plan_id: str | None) -> AgentMode:
             detail="mode must be one of ASK, AGENT, or PLAN",
         )
     return mode_map[normalized]
+
+
+async def stream_demo_replay_response(
+    session: SessionContext,
+    chat_session_id: int,
+    replay: dict,
+):
+    """Emit a YAML-defined demo replay using the normal chat SSE contract."""
+
+    assistant_chunks: list[str] = []
+    completed_payload: dict | None = None
+
+    yield sse_event(
+        "connected",
+        {
+            "message": "Theseus Core Demo Replay Connected",
+            "user_id": session.user_id,
+            "project_id": session.project_id,
+            "chat_session_id": chat_session_id,
+        },
+    )
+
+    for item in chat_replay_stream_events(replay):
+        delay_ms = item.get("delay_ms")
+        if delay_ms:
+            try:
+                await asyncio.sleep(max(0, int(delay_ms)) / 1000)
+            except (TypeError, ValueError):
+                pass
+
+        event_type = str(item.get("event") or "")
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+
+        if event_type == "chunk":
+            assistant_chunks.append(str(data.get("content") or ""))
+        elif event_type == "status" and data.get("tool_name"):
+            await persist_tool_call_message(
+                session=session,
+                chat_session_id=chat_session_id,
+                tool_name=str(data.get("tool_name")),
+                tool_input=data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {},
+                tool_use_id=data.get("tool_use_id"),
+            )
+        elif event_type == "tool_result" and data.get("tool_name"):
+            output = _truncate_tool_output(data.get("output", ""))
+            data = {**data, "output": output}
+            await persist_tool_result_message(
+                session=session,
+                chat_session_id=chat_session_id,
+                tool_name=str(data.get("tool_name")),
+                output=output,
+                is_error=bool(data.get("is_error")),
+                tool_use_id=data.get("tool_use_id"),
+                tool_input=data.get("tool_input") if isinstance(data.get("tool_input"), dict) else {},
+                metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else None,
+            )
+        elif event_type == "error":
+            yield sse_event("error", data)
+            return
+        elif event_type == "completed":
+            completed_payload = data
+            break
+
+        yield sse_event(event_type, data)
+
+    await persist_assistant_message(
+        session=session,
+        chat_session_id=chat_session_id,
+        content="".join(assistant_chunks),
+    )
+
+    yield sse_event(
+        "completed",
+        {
+            "status": "done",
+            "total_tokens": chat_replay_total_tokens(replay),
+            "model_name": chat_replay_model_name(replay),
+            **(completed_payload or {}),
+        },
+    )
 
 
 async def stream_agent_response(
@@ -263,6 +350,26 @@ async def create_streaming_response(
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
+    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    replay = find_chat_replay(
+        prompt=prompt,
+        mode=stream_mode,
+        user_id=session.user_id,
+        project_id=session.project_id,
+        remote_workspace_id=remote_workspace_id,
+    )
+    if replay is not None:
+        await persist_user_message(session, chat_session_id, prompt)
+        return StreamingResponse(
+            stream_demo_replay_response(session, chat_session_id, replay),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     project_tool_permissions = await get_project_tool_permissions(
         project_id=session.project_id,
         user_id=session.user_id,
@@ -270,7 +377,6 @@ async def create_streaming_response(
 
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
-    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
     remote_workspace = await _resolve_remote_workspace_for_stream(
         project_id=session.project_id,
         remote_workspace_id=remote_workspace_id,
@@ -339,6 +445,31 @@ async def stream_endpoint(
     if not prompt.strip():
         raise HTTPException(status_code=422, detail="Prompt must not be blank")
 
+    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
+    resolved_remote_workspace_id = (
+        remote_workspace_id
+        if remote_workspace_id is not None
+        else remote_workspace_id_camel
+    )
+    replay = find_chat_replay(
+        prompt=prompt,
+        mode=stream_mode,
+        user_id=session.user_id,
+        project_id=session.project_id,
+        remote_workspace_id=resolved_remote_workspace_id,
+    )
+    if replay is not None:
+        await persist_user_message(session, chat_session_id, prompt)
+        return StreamingResponse(
+            stream_demo_replay_response(session, chat_session_id, replay),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     project_tool_permissions = await get_project_tool_permissions(
         project_id=session.project_id,
         user_id=session.user_id,
@@ -346,12 +477,6 @@ async def stream_endpoint(
 
     history_messages = await load_history_messages(session, chat_session_id)
     bound_plan = None
-    stream_mode = _resolve_stream_mode(mode, plan_id=plan_id)
-    resolved_remote_workspace_id = (
-        remote_workspace_id
-        if remote_workspace_id is not None
-        else remote_workspace_id_camel
-    )
     remote_workspace = await _resolve_remote_workspace_for_stream(
         project_id=session.project_id,
         remote_workspace_id=resolved_remote_workspace_id,
