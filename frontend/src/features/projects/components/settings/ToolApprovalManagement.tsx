@@ -55,6 +55,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   const [toolGrade, setToolGrade] = useState<number>(DEFAULT_TOOL_GRADE);
   const [reviewFeedback, setReviewFeedback] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
 
 
 
@@ -103,8 +104,15 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
     setIsSubmitting(true);
     try {
       if (actionType === 'APPROVE') {
-        // 3초간 생성 중 표시 유지
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // 3초간 생성 중 표시 및 세부 진행 단계 연출 (1초 단위 3단계)
+        setLoadingStage('도구 설계안 코드를 분석하고 빌드 환경을 빌드하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        setLoadingStage('서버 샌드박스 보안 환경에 도구 실행 컨테이너를 배포 중입니다...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        setLoadingStage('API 라우팅 게이트웨이를 동적으로 갱신하고 연동을 활성화하는 중입니다...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         /* [기존 실서버 API 연동 코드]
         await approvalApi.approveTool(projectId, selectedApproval.toolApprovalId, {
@@ -270,10 +278,13 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
             </DialogHeader>
 
             {isSubmitting ? (
-              <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                <div className="w-10 h-10 border-4 border-slate-700 border-t-blue-500 rounded-full animate-spin mb-4" />
-                <p className="text-sm font-medium">도구를 생성하고 서버에 반영하는 중입니다...</p>
-                <p className="text-xs text-slate-500 mt-1">잠시만 기다려주세요</p>
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <div className="w-12 h-12 border-4 border-slate-800 border-t-blue-500 rounded-full animate-spin mb-6" />
+                <p className="text-base font-bold text-blue-400 mb-2 animate-pulse">도구 엔진 동적 생성 중</p>
+                <p className="text-sm font-medium text-slate-300 transition-all duration-300 min-h-[40px] text-center px-4">
+                  {loadingStage || '도구를 생성하고 서버에 반영하는 중입니다...'}
+                </p>
+                <p className="text-[10px] text-slate-600 mt-4 font-mono">SANDBOX CONTAINER ENGINES ACTIVE</p>
               </div>
             ) : (
               <>
