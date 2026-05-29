@@ -11,8 +11,8 @@ import type { ProjectMemberResponse } from '@/features/projects/api';
 import type { ProjectMemberUpdateRequest } from '@/features/projects/types/member';
 
 const DEFAULT_MEMBER_ACCESS_LEVEL = 1;
-const MAX_MEMBER_ACCESS_LEVEL = 99;
-const ADMIN_ACCESS_LEVEL = 100;
+const MAX_MEMBER_ACCESS_LEVEL = 5;
+const ADMIN_ACCESS_LEVEL = 5;
 
 const clampMemberAccessLevel = (value: number) =>
   Math.min(MAX_MEMBER_ACCESS_LEVEL, Math.max(DEFAULT_MEMBER_ACCESS_LEVEL, value));
@@ -126,7 +126,7 @@ export function EditMemberModal({ projectId, isOpen, onOpenChange, onSuccess, se
                 onChange={(e) => setEditAccessLevel(clampMemberAccessLevel(Number(e.target.value)))}
                 className="bg-slate-950 border-slate-800 text-white h-10 rounded-md px-3 text-sm w-full focus:ring-1 focus:ring-blue-400 outline-none"
               />
-              <p className="text-[11px] text-slate-500">Member/Manager: 1-99, Admin: 100</p>
+              <p className="text-[11px] text-slate-500">Member/Manager/Admin: 1-5</p>
             </div>
           </div>
 
