@@ -10,7 +10,9 @@
 - `THESEUS_DEMO_REPLAY_ENABLED=true`일 때 `demo_replays/replays.yaml`의 키워드 매칭으로 ASK/AGENT 채팅 스트림을 LLM 호출 없이 재생하는 demo replay 경로 추가
 - `answer.beforeTools`, `toolStack[].started`, `toolStack[].completed/failed`, `answer.afterTools`로 답변/툴 호출 스택/성공·실패 카드를 YAML에서 분리 수정할 수 있도록 보강
 - `toolStack` 배열에 여러 Tool을 순서대로 정의하면 같은 시나리오 안에서 복수 Tool 호출 스택을 재생할 수 있도록 구성
+- `timing.textChunkChars`, `textChunkDelayMs`, `toolStartDelayMs`, `toolCompletedDelayMs`, `toolFailedDelayMs`로 답변 chunk 스트리밍과 구간별 지연 시간을 YAML에서 조정할 수 있도록 추가
 - ToolPlan worker가 PLAN 요청 키워드를 YAML과 매칭하면 `rawMarkdown`, `structuredPlanJson`, `planSnapshot`을 고정 응답으로 발행하도록 demo replay 분기 추가
+- ToolPlan demo replay의 `progress[].delayMs`를 적용해 PLAN 진행 이벤트가 즉시 끝나지 않고 단계별로 노출되도록 보강
 - `THESEUS_DEMO_REPLAY_PATH`로 시나리오 YAML 위치를 바꿀 수 있게 설정 추가
 - `match.remote: none|required` 조건으로 PLAN은 Remote Workspace 미선택 시, AGENT 시나리오는 Remote Workspace 선택 시에만 매칭되도록 분기
 

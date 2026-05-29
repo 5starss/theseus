@@ -4,6 +4,8 @@ version: 1
 # 시연 키워드, 답변, Tool 카드 내용만 여기서 바꾸면 됩니다.
 # remote: none     -> Remote Workspace 미선택일 때만 매칭
 # remote: required -> Remote Workspace 선택 시에만 매칭
+# timing.textChunkChars    -> 답변을 몇 글자씩 스트리밍할지 설정
+# timing.*DelayMs          -> 각 구간별 대기 시간(ms) 설정
 
 plan_replays:
   - id: "1-kim-plan-before-vacation"
@@ -16,10 +18,13 @@ plan_replays:
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
+        delayMs: 350
       - message: PLAN_DRAFTING
         progressRate: 40
+        delayMs: 900
       - message: PLAN_COMPLETED
         progressRate: 100
+        delayMs: 700
     result:
       rawMarkdown: |
         ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
@@ -65,6 +70,13 @@ chat_replays:
       contains_any:
         - "인수인계 업무 1"
         - "모니터링 툴 사용"
+    timing:
+      textChunkChars: 8
+      textChunkDelayMs: 45
+      beforeToolsDelayMs: 450
+      toolStartDelayMs: 800
+      toolCompletedDelayMs: 1300
+      afterToolsDelayMs: 550
     answer:
       beforeTools: "김대리 인수인계 기준에 따라 원격 모니터링 Tool을 실행하겠습니다.\n\n"
       afterTools: "모니터링 결과 API와 시스템 리소스는 현재 정상 범위입니다. 인수인계 업무 1을 완료했습니다."
@@ -94,6 +106,13 @@ chat_replays:
       contains_any:
         - "인수인계 업무 2"
         - "프론트 변경 툴 실패"
+    timing:
+      textChunkChars: 8
+      textChunkDelayMs: 45
+      beforeToolsDelayMs: 450
+      toolStartDelayMs: 800
+      toolFailedDelayMs: 1200
+      afterToolsDelayMs: 550
     answer:
       beforeTools: "싸피 증권 랜딩 페이지 변경 Tool을 실행해 보겠습니다.\n\n"
       afterTools: "프론트 변경은 권한 등급 부족으로 실패했습니다. 관리자 권한 조정 후 다시 실행해야 합니다."
@@ -116,6 +135,13 @@ chat_replays:
       contains_any:
         - "관리자 프론트 변경 성공"
         - "프론트 변경 성공"
+    timing:
+      textChunkChars: 8
+      textChunkDelayMs: 45
+      beforeToolsDelayMs: 450
+      toolStartDelayMs: 800
+      toolCompletedDelayMs: 1400
+      afterToolsDelayMs: 550
     answer:
       beforeTools: "관리자 권한으로 싸피 증권 랜딩 페이지 변경을 진행하겠습니다.\n\n"
       afterTools: "프론트 변경이 완료되었습니다. 변경된 싸피 증권 랜딩 페이지를 확인하시면 됩니다."

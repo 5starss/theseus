@@ -13,6 +13,7 @@ from src.demo_replay import (
     find_tool_plan_replay,
     plan_replay_chunks,
     plan_replay_progress,
+    replay_delay_ms,
 )
 from src.tool_plan.planner import ToolPlanPlanner, ToolPlanPlannerError
 from src.tool_plan.publisher import ToolPlanEventPublisher
@@ -123,6 +124,9 @@ class ToolPlanProcessor:
         )
         result = build_tool_plan_result_from_replay(replay)
         for item in plan_replay_progress(replay):
+            delay_ms = replay_delay_ms(item)
+            if delay_ms:
+                await asyncio.sleep(max(0, delay_ms) / 1000)
             await self.publish_progress(
                 event,
                 str(item.get("message") or "PLAN_DRAFTING"),
