@@ -22,7 +22,7 @@ const mockToolUsageRows: ToolUsageRow[] = [
     successCount: 8,
     failedCount: 1,
     status: 'SUCCESS',
-    usedAt: '2026-05-29T11:30:00',
+    usedAt: '2026-05-29',
   },
   {
     id: 2,
@@ -33,7 +33,7 @@ const mockToolUsageRows: ToolUsageRow[] = [
     successCount: 2,
     failedCount: 3,
     status: 'FAILED',
-    usedAt: '2026-05-29T09:10:00',
+    usedAt: '2026-05-29',
   },
 ];
 
@@ -51,8 +51,6 @@ const formatDateTime = (value?: string | null) => {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
   });
 };
 
