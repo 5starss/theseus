@@ -4,7 +4,7 @@ public final class ProjectAccessLevelPolicy {
 
 	public static final int DEFAULT_MEMBER_ACCESS_LEVEL = 1;
 	public static final int MAX_MEMBER_ACCESS_LEVEL = 5;
-	public static final int ADMIN_ACCESS_LEVEL = 100;
+	public static final int ADMIN_ACCESS_LEVEL = 5;
 
 	private ProjectAccessLevelPolicy() {
 	}

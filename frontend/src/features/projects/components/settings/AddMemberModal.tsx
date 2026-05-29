@@ -9,8 +9,8 @@ import { memberApi } from '@/features/projects/api/member';
 import type { ProjectMemberCreateRequest } from '@/features/projects/types/member';
 
 const DEFAULT_MEMBER_ACCESS_LEVEL = 1;
-const MAX_MEMBER_ACCESS_LEVEL = 99;
-const ADMIN_ACCESS_LEVEL = 100;
+const MAX_MEMBER_ACCESS_LEVEL = 5;
+const ADMIN_ACCESS_LEVEL = 5;
 
 const clampMemberAccessLevel = (value: number) =>
   Math.min(MAX_MEMBER_ACCESS_LEVEL, Math.max(DEFAULT_MEMBER_ACCESS_LEVEL, value));
@@ -99,7 +99,7 @@ export function AddMemberModal({ projectId, isOpen, onOpenChange, onSuccess }: A
               onChange={(e) => setNewAccessLevel(clampMemberAccessLevel(Number(e.target.value)))}
               className="bg-slate-950 border-slate-800 text-white"
             />
-            <p className="text-[11px] text-slate-500">Member/Manager: 1-99, Admin: 100</p>
+            <p className="text-[11px] text-slate-500">Member/Manager/Admin: 1-5</p>
           </div>
         </div>
         <DialogFooter>
