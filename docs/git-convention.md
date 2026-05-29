@@ -26,7 +26,7 @@ stock/<type>/<JIRA 번호>/<branch-name>
 예시:
 
 ```text
-stock/feat/S14P21A503-123/initial-user-info
+stock/feat/S14P21A308-123/initial-user-info
 stock/fix/S14P31A308-358/jenkins-gitlab-connection
 ```
 

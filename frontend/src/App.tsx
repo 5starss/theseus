@@ -7,6 +7,8 @@ import { useConfigStore } from "./store/useConfigStore";
 import Layout from "./components/layout/Layout";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import Home from "./pages/Home";
+import HomeMockup from "./pages/HomeMockup";
+import HomeMockup2 from "./pages/HomeMockup2";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import StockDashboard from "./pages/StockDashboard";
@@ -49,6 +51,8 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/mockup1" element={<HomeMockup />} />
+        <Route path="/mockup2" element={<HomeMockup2 />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
           <Route path="stock/:code" element={<StockDashboard />} />
