@@ -168,11 +168,11 @@ def _entry_matches(
     if not _match_id_constraint(matcher, key="remoteWorkspaceId", actual=remote_workspace_id):
         return False
 
-    remote_policy = (
-        matcher.get("remote")
-        or matcher.get("remote_workspace")
-        or matcher.get("remoteWorkspace")
-    )
+    remote_policy = None
+    for key in ("remote", "remote_workspace", "remoteWorkspace"):
+        if key in matcher:
+            remote_policy = matcher[key]
+            break
     if remote_policy is not None:
         normalized_policy = str(remote_policy).strip().lower()
         has_remote = remote_workspace_id is not None
@@ -340,6 +340,82 @@ def _first_text(mapping: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _first_present(mapping: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping[key]
+    return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def replay_delay_ms(mapping: dict[str, Any]) -> int | None:
+    return _int_or_none(_first_present(mapping, "delay_ms", "delayMs"))
+
+
+def _timing_config(replay: dict[str, Any]) -> dict[str, Any]:
+    timing = replay.get("timing") or replay.get("delays") or {}
+    return timing if isinstance(timing, dict) else {}
+
+
+def _timing_int(replay: dict[str, Any], *keys: str, default: int | None = None) -> int | None:
+    timing = _timing_config(replay)
+    for key in keys:
+        if key in timing:
+            value = _int_or_none(timing[key])
+            return default if value is None else value
+    return default
+
+
+def _text_stream_events(
+    replay: dict[str, Any],
+    content: str,
+    *,
+    initial_delay_ms: int | None,
+) -> list[dict[str, Any]]:
+    text = _stringify(content)
+    if not text:
+        return []
+
+    chunk_chars = _timing_int(
+        replay,
+        "textChunkChars",
+        "text_chunk_chars",
+        "chunkChars",
+        "chunk_size",
+        "chunkSize",
+        default=0,
+    )
+    chunk_delay_ms = _timing_int(
+        replay,
+        "textChunkDelayMs",
+        "text_chunk_delay_ms",
+        "chunkDelayMs",
+        default=None,
+    )
+
+    if chunk_chars is None or chunk_chars <= 0:
+        chunks = [text]
+    else:
+        chunks = [text[index : index + chunk_chars] for index in range(0, len(text), chunk_chars)]
+
+    events: list[dict[str, Any]] = []
+    for index, chunk in enumerate(chunks):
+        events.append(
+            {
+                "event": "chunk",
+                "data": {"content": chunk},
+                "delay_ms": initial_delay_ms if index == 0 else chunk_delay_ms,
+            }
+        )
+    return events
+
+
 def _answer_chunks(replay: dict[str, Any], *, before_tools: bool) -> list[str]:
     answer = replay.get("answer")
     if isinstance(answer, str):
@@ -376,10 +452,13 @@ def _tool_stack_entries(replay: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in raw_stack if isinstance(item, dict)]
 
 
-def _tool_start_event(tool: dict[str, Any]) -> dict[str, Any]:
+def _tool_start_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
     started = tool.get("started") if isinstance(tool.get("started"), dict) else {}
     tool_name = tool.get("tool_name") or tool.get("toolName") or tool.get("name")
     tool_use_id = tool.get("tool_use_id") or tool.get("toolUseId") or tool.get("id")
+    delay_ms = replay_delay_ms(started)
+    if delay_ms is None:
+        delay_ms = _timing_int(replay, "toolStartDelayMs", "tool_start_delay_ms", default=None)
     tool_input = (
         tool.get("tool_input")
         or tool.get("toolInput")
@@ -397,11 +476,11 @@ def _tool_start_event(tool: dict[str, Any]) -> dict[str, Any]:
             "status": started.get("status") or "started",
             "metadata": started.get("metadata") if isinstance(started.get("metadata"), dict) else None,
         },
-        "delay_ms": started.get("delay_ms", started.get("delayMs")),
+        "delay_ms": delay_ms,
     }
 
 
-def _tool_result_event(tool: dict[str, Any]) -> dict[str, Any]:
+def _tool_result_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
     result = (
         tool.get("completed")
         if isinstance(tool.get("completed"), dict)
@@ -426,6 +505,14 @@ def _tool_result_event(tool: dict[str, Any]) -> dict[str, Any]:
             result.get("isError", tool.get("is_error", tool.get("isError", "failed" in tool))),
         )
     )
+    fallback_delay_keys = (
+        ("toolFailedDelayMs", "tool_failed_delay_ms", "toolResultDelayMs", "tool_result_delay_ms")
+        if is_error
+        else ("toolCompletedDelayMs", "tool_completed_delay_ms", "toolResultDelayMs", "tool_result_delay_ms")
+    )
+    delay_ms = replay_delay_ms(result)
+    if delay_ms is None:
+        delay_ms = _timing_int(replay, *fallback_delay_keys, default=None)
     return {
         "event": "tool_result",
         "data": {
@@ -438,23 +525,37 @@ def _tool_result_event(tool: dict[str, Any]) -> dict[str, Any]:
             "status": result.get("status") or ("failed" if is_error else "completed"),
             "metadata": result.get("metadata") if isinstance(result.get("metadata"), dict) else None,
         },
-        "delay_ms": result.get("delay_ms", result.get("delayMs")),
+        "delay_ms": delay_ms,
     }
 
 
 def _structured_chat_events(replay: dict[str, Any]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     tool_stack = _tool_stack_entries(replay)
+    before_delay_ms = _timing_int(
+        replay,
+        "beforeToolsDelayMs",
+        "before_tools_delay_ms",
+        "beforeAnswerDelayMs",
+        default=None,
+    )
+    after_delay_ms = _timing_int(
+        replay,
+        "afterToolsDelayMs",
+        "after_tools_delay_ms",
+        "afterAnswerDelayMs",
+        default=None,
+    )
 
     for content in _answer_chunks(replay, before_tools=True):
-        normalized.append({"event": "chunk", "data": {"content": content}, "delay_ms": None})
+        normalized.extend(_text_stream_events(replay, content, initial_delay_ms=before_delay_ms))
 
     for tool in tool_stack:
-        normalized.append(_tool_start_event(tool))
-        normalized.append(_tool_result_event(tool))
+        normalized.append(_tool_start_event(replay, tool))
+        normalized.append(_tool_result_event(replay, tool))
 
     for content in _answer_chunks(replay, before_tools=False):
-        normalized.append({"event": "chunk", "data": {"content": content}, "delay_ms": None})
+        normalized.extend(_text_stream_events(replay, content, initial_delay_ms=after_delay_ms))
 
     return normalized
 

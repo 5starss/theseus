@@ -103,6 +103,52 @@ chat_replays:
         self.assertEqual(["chunk", "tool_result"], [item["event"] for item in events])
         self.assertTrue(events[1]["data"]["is_error"])
 
+    def test_chat_replay_streams_answer_chunks_with_timing(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: chat-streaming-demo
+    modes: [AGENT]
+    match:
+      contains_any: ["스트리밍"]
+    timing:
+      textChunkChars: 2
+      textChunkDelayMs: 50
+      beforeToolsDelayMs: 300
+      toolStartDelayMs: 700
+      toolCompletedDelayMs: 900
+      afterToolsDelayMs: 400
+    answer:
+      beforeTools: "abcd"
+      afterTools: "efg"
+    toolStack:
+      - toolName: demo_tool
+        toolUseId: tool-stream-1
+        completed:
+          output: "ok"
+"""
+        )
+
+        replay = find_chat_replay(
+            prompt="스트리밍 테스트",
+            mode="AGENT",
+            user_id=1,
+            project_id=10,
+        )
+        events = chat_replay_stream_events(replay or {})
+
+        self.assertEqual(
+            ["chunk", "chunk", "status", "tool_result", "chunk", "chunk"],
+            [item["event"] for item in events],
+        )
+        self.assertEqual(["ab", "cd", "ef", "g"], [events[index]["data"]["content"] for index in [0, 1, 4, 5]])
+        self.assertEqual(300, events[0]["delay_ms"])
+        self.assertEqual(50, events[1]["delay_ms"])
+        self.assertEqual(700, events[2]["delay_ms"])
+        self.assertEqual(900, events[3]["delay_ms"])
+        self.assertEqual(400, events[4]["delay_ms"])
+        self.assertEqual(50, events[5]["delay_ms"])
+
     def test_replay_remote_policy_limits_matches(self) -> None:
         self._enable_replay(
             """
