@@ -218,6 +218,30 @@ plan_replays:
         self.assertIsNotNone(find_tool_plan_replay(local_plan_event))
         self.assertIsNone(find_tool_plan_replay(remote_plan_event))
 
+    def test_replay_remote_any_matches_with_or_without_remote_workspace(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: frontend-failure-demo
+    modes: [AGENT]
+    match:
+      remote: any
+      contains_any: ["프론트 변경 툴 실패"]
+    answer:
+      afterTools: "matched"
+"""
+        )
+
+        for remote_workspace_id in (None, 20):
+            replay = find_chat_replay(
+                prompt="변경후 프론트 변경 툴 실패",
+                mode="AGENT",
+                user_id=1,
+                project_id=10,
+                remote_workspace_id=remote_workspace_id,
+            )
+            self.assertIsNotNone(replay)
+
     def test_plan_replay_builds_tool_plan_result(self) -> None:
         self._enable_replay(
             """
