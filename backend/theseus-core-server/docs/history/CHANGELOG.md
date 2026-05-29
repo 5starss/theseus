@@ -14,15 +14,15 @@
 - ToolPlan worker가 PLAN 요청 키워드를 YAML과 매칭하면 `rawMarkdown`, `structuredPlanJson`, `planSnapshot`을 고정 응답으로 발행하도록 demo replay 분기 추가
 - ToolPlan demo replay의 `progress[].delayMs`를 적용해 PLAN 진행 이벤트가 즉시 끝나지 않고 단계별로 노출되도록 보강
 - `THESEUS_DEMO_REPLAY_PATH`로 시나리오 YAML 위치를 바꿀 수 있게 설정 추가
-- `match.remote: none|required` 조건으로 PLAN은 Remote Workspace 미선택 시, AGENT 시나리오는 Remote Workspace 선택 시에만 매칭되도록 분기
+- `match.remote: none|required|any` 조건을 지원하며, 기본 AGENT 시연 3개는 프론트 요청의 `remoteWorkspaceId` 누락에도 키워드 replay가 동작하도록 `any`로 조정
 
 #### 문서
 - `.env.example`, `README.md`에 demo replay 설정을 추가
 - `demo_replays/replays.yaml`에 시연용 4개 시나리오만 남기도록 정리
   - 김대리 휴가 전 PLAN 생성 (`PLAN`, `remote: none`)
-  - 신입사원 인수인계 업무 1: 모니터링 Tool 성공 (`AGENT`, `remote: required`)
-  - 신입사원 인수인계 업무 2: 프론트 변경 Tool 실패 (`AGENT`, `remote: required`)
-  - 관리자 프론트 변경 성공 (`AGENT`, `remote: required`)
+  - 신입사원 인수인계 업무 1: 모니터링 Tool 성공 (`AGENT`, `remote: any`)
+  - 신입사원 인수인계 업무 2: 프론트 변경 Tool 실패 (`AGENT`, `remote: any`)
+  - 관리자 프론트 변경 성공 (`AGENT`, `remote: any`)
 
 #### 검증
 - `python -m py_compile src\demo_replay.py src\routes\stream.py src\tool_plan\processor.py tests\test_demo_replay.py`

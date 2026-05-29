@@ -4,6 +4,7 @@ version: 1
 # 시연 키워드, 답변, Tool 카드 내용만 여기서 바꾸면 됩니다.
 # remote: none     -> Remote Workspace 미선택일 때만 매칭
 # remote: required -> Remote Workspace 선택 시에만 매칭
+# remote: any      -> Remote Workspace 전달 여부와 관계없이 매칭
 # timing.textChunkChars    -> 답변을 몇 글자씩 스트리밍할지 설정
 # timing.*DelayMs          -> 각 구간별 대기 시간(ms) 설정
 
@@ -66,7 +67,7 @@ chat_replays:
   - id: "3-new-hire-monitoring-success"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "인수인계 업무 1"
         - "모니터링 툴 사용"
@@ -102,10 +103,13 @@ chat_replays:
   - id: "5-new-hire-frontend-change-failed"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "인수인계 업무 2"
         - "프론트 변경 툴 실패"
+        - "프론트엔드 변경 툴 실패"
+        - "프론트 변경 실패"
+        - "프론트엔드 변경 실패"
     timing:
       textChunkChars: 8
       textChunkDelayMs: 45
@@ -131,10 +135,11 @@ chat_replays:
   - id: "7-admin-frontend-change-success"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "관리자 프론트 변경 성공"
         - "프론트 변경 성공"
+        - "프론트엔드 변경 성공"
     timing:
       textChunkChars: 8
       textChunkDelayMs: 45

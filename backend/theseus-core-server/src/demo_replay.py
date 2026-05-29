@@ -176,9 +176,11 @@ def _entry_matches(
     if remote_policy is not None:
         normalized_policy = str(remote_policy).strip().lower()
         has_remote = remote_workspace_id is not None
-        if normalized_policy in {"required", "present", "true", "remote"} and not has_remote:
+        if normalized_policy in {"any", "optional", "*"}:
+            pass
+        elif normalized_policy in {"required", "present", "true", "remote"} and not has_remote:
             return False
-        if normalized_policy in {"none", "absent", "false", "local"} and has_remote:
+        elif normalized_policy in {"none", "absent", "false", "local"} and has_remote:
             return False
 
     return _match_text(prompt, matcher)
