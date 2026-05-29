@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     THESEUS_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_PROJECT_CUSTOM_TOOLS_DIR: Optional[str] = None
     THESEUS_CUSTOM_TOOLS_HOST_DIR: Optional[str] = None
+    THESEUS_DEMO_REPLAY_ENABLED: bool = False
+    THESEUS_DEMO_REPLAY_PATH: str = "demo_replays/replays.yaml"
 
     # Sandbox shared workdir settings.
     # When Core runs inside a Docker container and controls the host Docker daemon,
