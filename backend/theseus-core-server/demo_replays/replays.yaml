@@ -63,6 +63,179 @@ plan_replays:
             content: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
             order: 2
 
+  - id: "2-server-health-monitor-tool-plan"
+    modes: [PLAN]
+    match:
+      remote: none
+      contains_any:
+        - "서버 상태 모니터링 툴"
+        - "서버 상태 통합 진단 툴"
+        - "서버 헬스 모니터"
+        - "CPU 메모리 네트워크 리포트"
+        - "server_health_monitor"
+    progress:
+      - message: REQUEST_RECEIVED
+        progressRate: 5
+        delayMs: 300
+      - message: PLAN_DRAFTING
+        progressRate: 35
+        delayMs: 900
+      - message: PLAN_STRUCTURING
+        progressRate: 75
+        delayMs: 650
+      - message: PLAN_VALIDATING
+        progressRate: 90
+        delayMs: 500
+      - message: PLAN_COMPLETED
+        progressRate: 100
+        delayMs: 450
+    result:
+      rawMarkdown: |
+        ## 서버 상태 통합 진단 Tool 생성 PLAN
+
+        현재 서버의 CPU, 메모리, 네트워크 연결 상태를 한 번에 수집하고
+        이상 징후를 `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO` 상태로 리포트하는
+        읽기 전용 진단 Tool을 생성합니다.
+
+        보안 정책상 shell 실행, 외부 ping, traceroute, 패킷 캡처는 제외하고,
+        `psutil` 기반의 안전한 시스템 메트릭 수집과 임계치 분석에 집중합니다.
+
+        ### 실행 스펙
+        - 도구 이름: `server_health_monitor`
+        - 권한 레벨: 1, 시스템 상태만 읽는 안전한 진단 도구
+        - 검증 전략: `core_sandbox_gate`
+        - 입력값: CPU 경고/위험 임계치, 메모리 경고/위험 임계치, 네트워크 연결 수 임계치
+        - 결과 형식: JSON과 Markdown 요약 리포트
+
+      structuredPlanJson:
+        version: 1
+        goal: "서버 CPU, 메모리, 네트워크 상태를 통합 진단하고 이상 징후를 리포트하는 읽기 전용 Tool 생성"
+        summary:
+          problem: "서버 상태를 한 번에 확인하는 통합 진단 Tool이 없어 CPU, 메모리, 네트워크 상태를 개별적으로 확인해야 합니다."
+          approach: "psutil 기반 메트릭 수집, 임계치 비교, 상태 판정, JSON/Markdown 리포트 생성을 하나의 BaseTool로 구현합니다."
+          security_scope: "shell 실행, subprocess, socket 기반 외부 연결 테스트, 네트워크 설정 변경, 서비스 재시작은 MVP에서 제외합니다."
+        execution_spec:
+          toolName: "server_health_monitor"
+          displayName: "서버 상태 통합 진단"
+          targetFiles:
+            - "/custom-tools/5/server_health_monitor_tool.py"
+            - "/custom-tools/5/server_health_monitor_tool.meta.json"
+          permissionLevel: 1
+          validationStrategy: "core_sandbox_gate"
+          inputFields:
+            - name: threshold_cpu_warning
+              label: "CPU 주의 임계치"
+              description: "전체 CPU 사용률이 이 값 이상이면 WARNING으로 판정합니다."
+              default: 80
+            - name: threshold_cpu_fail
+              label: "CPU 위험 임계치"
+              description: "전체 CPU 사용률이 이 값 이상이면 FAIL로 판정합니다."
+              default: 95
+            - name: threshold_mem_warning
+              label: "메모리 주의 임계치"
+              description: "메모리 사용률이 이 값 이상이면 WARNING으로 판정합니다."
+              default: 85
+            - name: threshold_mem_fail
+              label: "메모리 위험 임계치"
+              description: "메모리 사용률이 이 값 이상이면 FAIL로 판정합니다."
+              default: 95
+          outputFields:
+            - name: check_id
+              label: "진단 항목 ID"
+            - name: category
+              label: "분류"
+            - name: target
+              label: "진단 대상"
+            - name: status
+              label: "상태"
+              allowedValues:
+                - "PASS: 정상"
+                - "WARNING: 주의"
+                - "FAIL: 위험"
+                - "SKIPPED: 수집 생략"
+                - "INFO: 참고 정보"
+            - name: evidence
+              label: "판정 근거"
+            - name: sanitized_output
+              label: "민감 정보 제거 결과"
+            - name: recommendation
+              label: "권장 조치"
+        tasks:
+          - id: task-1
+            title: "서버 상태 모니터링 Tool 구현"
+            problem: "CPU, 메모리, 네트워크 연결 상태를 안전하게 수집하고 분석하는 로직이 필요합니다."
+            solution: "BaseTool을 상속한 ServerHealthMonitorTool을 만들고 psutil로 읽기 전용 메트릭을 수집합니다."
+            expected_effect: "서버의 전반적인 건강 상태와 리소스 병목 가능성을 한눈에 파악할 수 있습니다."
+            description: "psutil.cpu_percent(), psutil.virtual_memory(), psutil.net_connections()를 사용하고 CPU 80% 이상, 메모리 90% 이상 같은 임계치 기준으로 상태를 판정합니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-1-1
+            parent_id: task-1
+            title: "메트릭 수집 로직 구현"
+            problem: "시스템 자원과 네트워크 연결 수를 신뢰할 수 있는 방식으로 수집해야 합니다."
+            solution: "전체 CPU 사용률, 코어별 CPU 사용률, 메모리 사용률, 가용 메모리, ESTABLISHED 네트워크 연결 수를 내부 메서드로 수집합니다."
+            expected_effect: "리포트 생성에 필요한 기초 데이터를 안정적으로 확보합니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-1-2
+            parent_id: task-1
+            title: "상태 분석 및 리포트 생성"
+            problem: "수집된 숫자를 사용자가 바로 이해할 수 있는 진단 결과로 바꾸는 기준이 필요합니다."
+            solution: "PASS, WARNING, FAIL, SKIPPED, INFO 상태를 부여하고 원인과 권장 조치를 JSON/Markdown 리포트로 제공합니다."
+            expected_effect: "사용자가 CPU 과부하, 메모리 부족, 네트워크 연결 급증 같은 징후를 즉시 파악할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-2
+            title: "Tool 메타데이터 설정"
+            problem: "Theseus 엔진이 Tool을 인식하고 입력/출력 계약을 표시하려면 메타데이터가 필요합니다."
+            solution: "toolName, displayName, permissionLevel, inputs, outputs를 담은 meta.json을 작성합니다."
+            expected_effect: "Tool 인터페이스가 명확해지고 재사용 가능한 시연/운영 기준이 생깁니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.meta.json"
+        caveats:
+          - "psutil 의존성이 필요하며 /proc 접근 권한에 따라 일부 수집값은 SKIPPED가 될 수 있습니다."
+          - "외부 IP ping, traceroute, 부하 생성, 네트워크 설정 변경, 서비스 재시작은 MVP 범위에서 제외합니다."
+          - "정밀 외부 연결성 검사가 꼭 필요하면 Remote Workspace 전용 read-only adapter 또는 기존 remote_check_* Tool 조합을 Plan B로 사용합니다."
+        verification:
+          success_criteria:
+            - "CPU, 메모리, 네트워크 연결 상태가 포함된 JSON/Markdown 리포트가 에러 없이 생성됩니다."
+            - "threshold_cpu와 threshold_mem 값을 조정했을 때 WARNING/FAIL 판정이 정상적으로 바뀝니다."
+            - "subprocess, socket 등 금지된 모듈을 import하지 않습니다."
+          test_commands:
+            - "python3 -B -m py_compile /custom-tools/5/server_health_monitor_tool.py"
+          manual_checks:
+            - "Tool 실행 결과의 CPU, 메모리 수치가 현재 시스템 상태와 크게 어긋나지 않는지 확인합니다."
+            - "리소스 사용량이 높은 환경에서 WARNING 또는 FAIL 리포트가 출력되는지 확인합니다."
+            - "코드 검토로 shell 실행과 네트워크 설정 변경 로직이 없는지 확인합니다."
+      planSnapshot:
+        schemaVersion: "1.0"
+        planVersion: 1
+        blocks:
+          - blockId: overview
+            title: "개요"
+            content: "서버의 CPU, 메모리, 네트워크 연결 상태를 한 번에 확인하고 이상 징후를 리포트하는 읽기 전용 시스템 진단 Tool을 생성합니다."
+            order: 1
+          - blockId: task-1
+            title: "서버 상태 모니터링 Tool 구현"
+            content: "ServerHealthMonitorTool을 구현하고 psutil 기반으로 CPU, 메모리, 네트워크 연결 상태를 안전하게 수집합니다."
+            order: 2
+          - blockId: task-1-1
+            title: "메트릭 수집 로직 구현"
+            content: "전체/코어별 CPU 사용률, 메모리 사용률과 가용 메모리, ESTABLISHED 네트워크 연결 수를 수집합니다."
+            order: 3
+          - blockId: task-1-2
+            title: "상태 분석 및 리포트 생성"
+            content: "수집값을 임계치와 비교해 PASS, WARNING, FAIL, SKIPPED, INFO 상태로 판정하고 권장 조치를 포함한 리포트를 생성합니다."
+            order: 4
+          - blockId: task-2
+            title: "Tool 메타데이터 설정"
+            content: "server_health_monitor Tool의 입력값, 출력 필드, 권한 레벨, 검증 전략을 meta.json에 정의합니다."
+            order: 5
+          - blockId: verification
+            title: "검증 기준"
+            content: "py_compile, 금지 모듈 검토, 리소스 수치 확인, 임계치 조정에 따른 WARNING/FAIL 판정 확인을 수행합니다."
+            order: 6
+
 chat_replays:
   - id: "3-new-hire-monitoring-success"
     modes: [AGENT]
