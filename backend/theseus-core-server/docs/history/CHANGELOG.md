@@ -8,7 +8,8 @@
 
 #### Demo Replay
 - `server_health_monitor` Tool 생성 PLAN replay 시나리오를 추가
-- 발표자가 이해하기 쉽도록 문제, 해결 방향, 실행 스펙, 입력/출력 필드, 주의사항을 한국어 중심으로 정리
+- 발표자가 이해하기 쉽도록 원문 구조에 맞춰 문제 분석, 주요 작업, 주의사항, Plan B, 실행 스펙, 검증 기준을 한국어 중심으로 정리
+- `structuredPlanJson`과 `planSnapshot`에 통합 진단 Tool 부재 배경, MVP 제외 범위, Remote Workspace 어댑터 대안을 보강
 - `server_health_monitor`, `PASS/WARNING/FAIL`, `check_id` 같은 계약명은 한글 설명과 함께 유지
 
 ---
