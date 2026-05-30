@@ -96,6 +96,56 @@ class ToolPlanProcessorChunkTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("PLAN 초안을 작성하고 있습니다.", "".join(chunks))
         self.assertIn("최종 표시용 Markdown", "".join(chunks))
 
+    async def test_demo_plan_replay_streams_progress_status_chunks(self) -> None:
+        publisher = _CollectingPublisher()
+        processor = ToolPlanProcessor(publisher=publisher, planner=_FakePlanner())
+        event = ToolPlanRequestedEvent(
+            eventType="TOOL_PLAN_REQUESTED",
+            runId="run-demo",
+            projectId=1,
+            chatSessionId=10,
+            requestedByUserId=100,
+            requestedByProjectMemberId=200,
+            prompt="휴가 전 서버 모니터링 툴 생성",
+            requestedAt=datetime.now(timezone.utc),
+        )
+        replay = {
+            "id": "demo-plan",
+            "progress": [
+                {
+                    "message": "REQUEST_RECEIVED",
+                    "progressRate": 5,
+                    "chunk": "PLAN 요청을 접수했습니다.\n",
+                },
+                {
+                    "message": "PLAN_DRAFTING",
+                    "progressRate": 40,
+                    "chunk": "서버 모니터링 요구사항을 분석하고 있습니다.\n",
+                },
+                {
+                    "message": "PLAN_COMPLETED",
+                    "progressRate": 100,
+                },
+            ],
+            "result": {
+                "rawMarkdown": "## Demo PLAN\n\n완성된 PLAN입니다.",
+                "structuredPlanJson": {"goal": "demo"},
+                "planSnapshot": {"blocks": []},
+            },
+        }
+
+        await processor.publish_demo_plan(event, replay)
+
+        chunks = [
+            item["content"]
+            for item in publisher.events
+            if item.get("eventType") == "chunk"
+        ]
+        self.assertIn("PLAN 요청을 접수했습니다.", "".join(chunks))
+        self.assertIn("서버 모니터링 요구사항을 분석하고 있습니다.", "".join(chunks))
+        self.assertIn("PLAN 초안이 준비되었습니다.", "".join(chunks))
+        self.assertIn("완성된 PLAN입니다.", "".join(chunks))
+
 
 if __name__ == "__main__":
     unittest.main()
