@@ -16,6 +16,9 @@ plan_replays:
       contains_any:
         - "휴가 전 플랜 생성"
         - "인수인계 모니터링 툴 계획"
+        - "김대리 휴가 전 서버 모니터링 툴 생성"
+        - "싸피증권 서버 모니터링 툴 계획"
+        - "server_health_monitor 인수인계"
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
@@ -30,38 +33,87 @@ plan_replays:
       rawMarkdown: |
         ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
 
-        김대리 부재 중 신입사원이 원격 운영 환경에서 API 상태와 시스템 리소스를 확인할 수 있도록
-        읽기 전용 모니터링 Tool을 생성합니다.
+        김대리 휴가 기간 동안 신입사원이 싸피증권 서버 운영 상태를 같은 기준으로 점검할 수 있도록
+        `server_health_monitor` Tool을 생성합니다.
+
+        이 Tool은 원격 운영 환경의 API health, 주식 시세 요약 API, 주문 처리 health,
+        CPU, 메모리, 부하 평균, 네트워크 연결 상태를 읽기 전용으로 수집하고
+        이상 징후를 `PASS`, `WARNING`, `FAIL`, `SKIPPED` 상태로 요약합니다.
+        운영 환경을 변경하지 않는 조회 전용 Tool이므로 신입사원에게도 안전하게 위임할 수 있습니다.
+
+        ### 주요 작업
+        1. **운영 상태 수집 기준 정의**
+           - `/health`, `/api/v1/stocks/summary`, `/api/v1/orders/health` 응답을 확인합니다.
+           - CPU, 메모리, 부하 평균, ESTABLISHED 네트워크 연결 수를 수집합니다.
+           - 각 항목을 `PASS`, `WARNING`, `FAIL`, `SKIPPED`로 판정합니다.
+
+        2. **인수인계용 리포트 생성**
+           - 신입사원이 바로 읽을 수 있도록 JSON 원본과 Markdown 요약을 함께 제공합니다.
+           - 문제가 있을 경우 원인 후보와 권장 조치를 표시합니다.
+
+        3. **권한 및 승인 기준 정리**
+           - 권한 레벨은 1로 제한합니다.
+           - 파일 수정, 배포, 서비스 재시작, shell 실행은 제외합니다.
+           - 관리자 승인 후 프로젝트 공용 Tool로 등록합니다.
       structuredPlanJson:
         version: 1
-        goal: "김대리 휴가 전 인수인계 모니터링 Tool 생성"
+        goal: "김대리 휴가 전 싸피증권 서버 상태 모니터링 Tool 생성"
+        summary:
+          requestedBy: "김대리"
+          handoverTarget: "신입사원"
+          toolName: "server_health_monitor"
+          permissionLevel: 1
+          scope: "싸피증권 운영 환경의 API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 상태를 읽기 전용으로 점검"
+          inputPromptExamples:
+            - "김대리 인수인계 업무 1 - 김대리가 만든 서버 모니터링 툴 사용"
+            - "server_health_monitor로 싸피증권 서버 상태 점검해줘"
+            - "싸피증권 API와 서버 리소스 상태를 모니터링하고 리포트해줘"
+          excluded:
+            - "파일 수정"
+            - "배포"
+            - "서비스 재시작"
+            - "shell 실행"
         tasks:
           - id: task-1
-            title: "원격 운영 진단 Tool 명세 작성"
-            problem: "신입사원이 API 상태와 리소스를 같은 기준으로 확인해야 합니다."
-            solution: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
-            expected_effect: "휴가 기간 중 운영 진단 업무를 표준화합니다."
+            title: "운영 상태 수집 기준 정의"
+            problem: "김대리의 점검 기준이 개인 노하우로 남아 있어 신입사원이 같은 수준의 운영 판단을 하기 어렵습니다."
+            solution: "API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하 평균, 네트워크 연결 수를 읽기 전용으로 수집하고 상태값을 표준화합니다."
+            expected_effect: "담당자가 부재해도 동일한 기준으로 싸피증권 운영 상태를 점검할 수 있습니다."
           - id: task-2
+            title: "인수인계용 리포트 생성"
+            problem: "단순 수치만 제공하면 신입사원이 조치 필요 여부를 판단하기 어렵습니다."
+            solution: "PASS/WARNING/FAIL/SKIPPED 판정, 근거 수치, 권장 조치를 Markdown 요약과 JSON 원본으로 제공합니다."
+            expected_effect: "운영 점검 결과를 빠르게 이해하고 필요한 경우 관리자에게 보고할 수 있습니다."
+          - id: task-3
             title: "권한 및 승인 기준 정리"
-            problem: "원격 환경 접근 Tool은 관리자 승인과 권한 등급 확인이 필요합니다."
-            solution: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
-            expected_effect: "관리자가 생성 승인 여부를 빠르게 판단할 수 있습니다."
+            problem: "원격 환경 접근 Tool은 안전 범위와 사용자 권한을 명확히 제한해야 합니다."
+            solution: "permissionLevel 1, 조회 전용, shell/subprocess 금지, 서비스 변경 금지를 PLAN에 명시합니다."
+            expected_effect: "관리자가 승인 여부와 신입사원 사용 가능 범위를 빠르게 판단할 수 있습니다."
         verification:
           success_criteria:
             - "PLAN 패널에 task가 표시됩니다."
             - "생성 승인 요청 버튼을 누를 수 있습니다."
+            - "승인 대기열에 싸피증권 운영 모니터링 Tool 요청이 표시됩니다."
       planSnapshot:
         schemaVersion: "1.0"
         planVersion: 1
         blocks:
-          - blockId: task-1
-            title: "원격 운영 진단 Tool 명세 작성"
-            content: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
+          - blockId: overview
+            title: "개요"
+            content: "김대리 휴가 중 신입사원이 싸피증권 서버 운영 상태를 같은 기준으로 점검할 수 있도록 server_health_monitor Tool을 생성합니다."
             order: 1
-          - blockId: task-2
-            title: "권한 및 승인 기준 정리"
-            content: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
+          - blockId: task-1
+            title: "운영 상태 수집 기준 정의"
+            content: "API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하 평균, 네트워크 연결 수를 읽기 전용으로 수집하고 PASS/WARNING/FAIL/SKIPPED 상태로 표준화합니다."
             order: 2
+          - blockId: task-2
+            title: "인수인계용 리포트 생성"
+            content: "신입사원이 바로 이해할 수 있도록 Markdown 요약, JSON 원본, 권장 조치를 함께 제공합니다."
+            order: 3
+          - blockId: task-3
+            title: "권한 및 승인 기준 정리"
+            content: "permissionLevel 1, 조회 전용, shell 실행 금지, 서비스 변경 금지 조건을 명시해 관리자 승인 대상으로 등록합니다."
+            order: 4
 
   - id: "2-server-health-monitor-tool-plan"
     modes: [PLAN]
@@ -329,33 +381,145 @@ chat_replays:
       contains_any:
         - "인수인계 업무 1"
         - "모니터링 툴 사용"
+        - "김대리가 만든 모니터링 툴 사용"
+        - "서버 상태 모니터링 툴 사용"
+        - "김대리가 만든 서버 모니터링 툴 사용"
+        - "싸피증권 서버 상태 점검"
+        - "주식 시세 요약 주문 처리 서버 모니터링"
+        - "server_health_monitor"
     timing:
       textChunkChars: 8
       textChunkDelayMs: 45
       beforeToolsDelayMs: 450
+      toolStackTotalDelayMs: 4800
       toolStartDelayMs: 800
       toolCompletedDelayMs: 1300
       afterToolsDelayMs: 550
     answer:
-      beforeTools: "김대리 인수인계 기준에 따라 원격 모니터링 Tool을 실행하겠습니다.\n\n"
-      afterTools: "모니터링 결과 API와 시스템 리소스는 현재 정상 범위입니다. 인수인계 업무 1을 완료했습니다."
+      beforeTools: |
+        김대리가 인수인계한 `server_health_monitor` Tool을 실행하겠습니다.
+        싸피증권 API health, 주식 시세 요약 API, 주문 처리 health와
+        현재 서버의 CPU, 메모리, 부하, 네트워크 연결 상태를 읽기 전용으로 점검합니다.
+
+      afterTools: |
+        `server_health_monitor` 실행 결과, 싸피증권 서버 상태는 전반적으로 정상 범위입니다.
+
+        진단 요약
+        - 전체 상태: `PASS`
+        - API health: `PASS` (HTTP 200, 42ms)
+        - 주식 시세 요약 API: `PASS` (HTTP 200, 88ms)
+        - 주문 처리 health: `PASS` (HTTP 200, 63ms)
+        - CPU 사용률: 37.5% (`PASS`)
+        - 메모리 사용률: 42.1% (`PASS`)
+        - 1분 평균 부하: 0.48 (`PASS`)
+        - ESTABLISHED 네트워크 연결: 18개 (`PASS`)
+        - 외부 ping/traceroute: 보안 정책상 `SKIPPED`
+
+        권장 조치
+        - 즉시 조치가 필요한 이상 징후는 없습니다.
+        - 네트워크 연결 수가 120개 이상으로 증가하거나 메모리 사용률이 85%를 넘으면 관리자에게 보고하면 됩니다.
+        - 장 시작 전과 장 마감 전에 동일 Tool로 한 번씩 재점검하면 됩니다.
+
+        인수인계 업무 1을 완료했습니다.
     toolStack:
-      - toolName: integrated_ops_diagnostics
-        toolUseId: demo-monitoring-001
+      - toolName: server_health_monitor
+        toolUseId: demo-server-health-monitor-001
         toolInput:
-          services:
-            - "http://localhost:8080/health"
-            - "http://localhost:8081/health"
+          threshold_cpu: 80
+          threshold_mem: 85
+          check_level: "handover"
+          api_targets:
+            - name: "API health"
+              url: "http://localhost:8080/health"
+            - name: "주식 시세 요약 API"
+              url: "http://localhost:8080/api/v1/stocks/summary"
+            - name: "주문 처리 health"
+              url: "http://localhost:8080/api/v1/orders/health"
+          include_network_connections: true
+          include_load_average: true
+          report_format: "json_markdown"
         started:
-          message: "원격 운영 환경의 API 상태와 시스템 리소스를 조회합니다."
+          message: "server_health_monitor로 싸피증권 API와 서버 리소스 상태를 수집합니다."
         completed:
           output: |
             {
               "overall_status": "PASS",
-              "api_status": "PASS",
-              "cpu_percent": 37.5,
-              "mem_percent": 42.1,
-              "recommendation": "정상 범위입니다."
+              "summary": "API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 연결 상태가 모두 임계치 이내입니다.",
+              "checks": [
+                {
+                  "check_id": "api-health",
+                  "category": "API",
+                  "target": "/health",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 42ms",
+                  "sanitized_output": "status=UP, service=ssafy-securities-api",
+                  "recommendation": "정상 응답입니다."
+                },
+                {
+                  "check_id": "stock-summary",
+                  "category": "API",
+                  "target": "/api/v1/stocks/summary",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 88ms, summaryCount=24",
+                  "sanitized_output": "market=MOCK, topMovers=masked",
+                  "recommendation": "시세 요약 API가 정상 응답 중입니다."
+                },
+                {
+                  "check_id": "order-health",
+                  "category": "API",
+                  "target": "/api/v1/orders/health",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 63ms, queueDepth=3",
+                  "sanitized_output": "orderQueue=3, worker=active",
+                  "recommendation": "주문 처리 큐가 안정 범위입니다."
+                },
+                {
+                  "check_id": "cpu-overall",
+                  "category": "CPU",
+                  "target": "overall",
+                  "status": "PASS",
+                  "evidence": "37.5% < threshold_cpu 80%",
+                  "sanitized_output": "cpu_percent=37.5, per_core=[31.2, 44.8, 36.1, 38.0]",
+                  "recommendation": "정상 범위입니다. 추가 조치가 필요하지 않습니다."
+                },
+                {
+                  "check_id": "memory-usage",
+                  "category": "MEMORY",
+                  "target": "virtual_memory",
+                  "status": "PASS",
+                  "evidence": "42.1% < threshold_mem 85%",
+                  "sanitized_output": "used=6.7GB, available=9.2GB, total=16.0GB",
+                  "recommendation": "가용 메모리가 충분합니다."
+                },
+                {
+                  "check_id": "load-average",
+                  "category": "LOAD",
+                  "target": "1m/5m/15m",
+                  "status": "PASS",
+                  "evidence": "1m load average 0.48",
+                  "sanitized_output": "load_avg=[0.48, 0.52, 0.49]",
+                  "recommendation": "부하가 낮은 상태입니다."
+                },
+                {
+                  "check_id": "network-established",
+                  "category": "NETWORK",
+                  "target": "ESTABLISHED connections",
+                  "status": "PASS",
+                  "evidence": "18 active connections < warning threshold 120",
+                  "sanitized_output": "established=18, listen=6, time_wait=11",
+                  "recommendation": "연결 수가 정상 범위입니다."
+                },
+                {
+                  "check_id": "external-connectivity",
+                  "category": "NETWORK",
+                  "target": "ICMP ping / traceroute",
+                  "status": "SKIPPED",
+                  "evidence": "socket/subprocess 사용 제한으로 외부 연결성 검사는 수행하지 않음",
+                  "sanitized_output": "not executed by security policy",
+                  "recommendation": "외부 연결성 검사가 필요하면 관리자 승인 후 remote_check_* Tool을 사용합니다."
+                }
+              ],
+              "markdown_report": "## 싸피증권 서버 상태 진단 리포트\n- 전체 상태: PASS\n- API health: 정상\n- 주식 시세 요약 API: 정상\n- 주문 처리 health: 정상\n- CPU: 37.5%, 정상\n- 메모리: 42.1%, 정상\n- 부하 평균: 0.48, 정상\n- ESTABLISHED 연결: 18개, 정상\n- 외부 ping/traceroute: 보안 정책상 생략\n\n권장 조치: 즉시 조치 필요 없음. 장 시작 전/마감 전 재점검 권장."
             }
 
   - id: "5-new-hire-frontend-change-failed"
@@ -368,27 +532,62 @@ chat_replays:
         - "프론트엔드 변경 툴 실패"
         - "프론트 변경 실패"
         - "프론트엔드 변경 실패"
+        - "프론트 변경 과정 실패"
     timing:
       textChunkChars: 8
       textChunkDelayMs: 45
       beforeToolsDelayMs: 450
+      toolStackTotalDelayMs: 6500
       toolStartDelayMs: 800
       toolFailedDelayMs: 1200
       afterToolsDelayMs: 550
     answer:
-      beforeTools: "싸피 증권 랜딩 페이지 변경 Tool을 실행해 보겠습니다.\n\n"
-      afterTools: "프론트 변경은 권한 등급 부족으로 실패했습니다. 관리자 권한 조정 후 다시 실행해야 합니다."
+      beforeTools: |
+        싸피증권 랜딩 페이지의 메인 문구를 변경해 보겠습니다.
+        먼저 대상 파일과 현재 권한을 확인한 뒤 수정 가능 여부를 판단합니다.
+
+      afterTools: |
+        프론트 변경 과정은 권한 등급 부족으로 중단되었습니다.
+
+        실패 사유
+        - 현재 사용자: 신입사원
+        - 현재 권한: LV.1, Tool Use 가능
+        - 필요한 권한: LV.3 이상, Tool Update 가능
+        - 차단된 작업: 원격 프론트 파일 쓰기
+
+        조회와 분석은 가능하지만 랜딩 페이지 파일 수정은 관리자 승인 또는 권한 등급 조정이 필요합니다.
+        관리자에게 권한 확인을 요청해 주세요.
     toolStack:
-      - toolName: frontend_landing_editor
+      - toolName: remote_glob
+        toolUseId: demo-landing-failed-glob-001
+        toolInput:
+          pattern: "**/LandingPage.tsx"
+        started:
+          message: "원격 프론트 프로젝트에서 싸피증권 랜딩 페이지 파일을 검색합니다."
+        completed:
+          output: |
+            Found 1 matches:
+            frontend/src/pages/LandingPage.tsx
+
+      - toolName: frontend_landing_change_guard
         toolUseId: demo-frontend-failed-001
         toolInput:
           page: "ssafy-securities-landing"
-          change: "hero copy update"
+          file: "frontend/src/pages/LandingPage.tsx"
+          change: "hero headline and CTA copy update"
+          requiredAccessLevel: 3
+          currentAccessLevel: 1
         started:
-          message: "원격 프론트 프로젝트에서 랜딩 페이지 변경을 시도합니다."
+          message: "랜딩 페이지 수정 권한과 Tool Update 권한을 확인합니다."
         failed:
-          error: "Permission denied: current user level is insufficient for remote frontend write."
-          output: "권한 등급 부족으로 원격 프론트 변경 작업이 차단되었습니다."
+          error: "Permission denied: current access level 1 is lower than required level 3 for remote frontend write."
+          output: |
+            권한 검증 결과 프론트 변경 작업이 차단되었습니다.
+            - userRole: MEMBER
+            - accessLevel: 1
+            - canUseTool: true
+            - canUpdateTool: false
+            - blockedAction: remote_edit_file(frontend/src/pages/LandingPage.tsx)
 
   - id: "7-admin-frontend-change-success"
     modes: [AGENT]
@@ -398,155 +597,154 @@ chat_replays:
         - "관리자 프론트 변경 성공"
         - "프론트 변경 성공"
         - "프론트엔드 변경 성공"
-        - "AI 가이드 모달"
-        - "AIGuideModal"
-        - "에메랄드/청록"
+        - "싸피 증권 랜딩 페이지 변경"
+        - "싸피증권 랜딩 변경"
+        - "변경된 랜딩 페이지"
     timing:
       textChunkChars: 10
       textChunkDelayMs: 35
       beforeToolsDelayMs: 420
+      toolStackTotalDelayMs: 12000
       toolStartDelayMs: 520
       toolCompletedDelayMs: 760
       afterToolsDelayMs: 480
     answer:
       beforeTools: |
-        관리자 권한으로 리모트 워크스페이스의 프론트 프로젝트를 확인하고,
-        AI 가이드 모달의 스타일만 에메랄드/청록 계열로 변경하겠습니다.
+        관리자 권한으로 싸피증권 프론트 프로젝트를 확인하고,
+        랜딩 페이지의 메인 문구와 CTA 영역을 발표 시연용 문구로 변경하겠습니다.
 
       afterTools: |
-        AIGuideModal.tsx 파일의 스타일을 요청하신 에메랄드/청록 계열로 변경 완료했습니다.
+        싸피증권 랜딩 페이지 변경이 완료되었습니다.
 
         변경 사항 요약
-        - 상단 헤더: 기존 보라색에서 에메랄드/청록 그라데이션으로 변경했습니다.
-        - STEP 번호 배지: 같은 계열의 진한 에메랄드 색상으로 정리했습니다.
-        - Tip 박스: 연한 청록 배경과 진한 테두리로 변경했습니다.
-        - 확인 버튼: 동일한 강조색으로 맞추고 hover/shadow 색상도 정리했습니다.
+        - Hero 문구: “복잡한 투자를 더 쉽게, SSAFY Securities”로 변경했습니다.
+        - 보조 문구: 실시간 시세, 모의 투자, 리스크 학습 흐름이 드러나도록 정리했습니다.
+        - CTA 버튼: “모의투자 시작하기”와 “포트폴리오 보기”로 변경했습니다.
+        - 운영 배너: 김대리 인수인계 모니터링 Tool 점검 결과가 정상이라는 문구를 추가했습니다.
 
         검토 결과
-        - Tailwind class 적용과 TSX 구조에 이상이 없음을 확인했습니다.
-        - isOpen, onClose 등 동작 로직은 변경하지 않았습니다.
-        - 시연에서 더 눈에 띄는 청록색 톤의 가이드 모달을 확인하실 수 있습니다.
+        - 랜딩 페이지 컴포넌트의 문구와 스타일 class 적용을 확인했습니다.
+        - 라우팅, API 호출, 버튼 동작 로직은 변경하지 않았습니다.
+        - 새로고침 후 변경된 싸피증권 랜딩 페이지를 확인하실 수 있습니다.
     toolStack:
       - toolName: remote_glob
-        toolUseId: demo-ai-guide-glob-001
+        toolUseId: demo-landing-success-glob-001
         toolInput:
-          pattern: "**/AIGuideModal.tsx"
+          pattern: "**/LandingPage.tsx"
         started:
-          message: "리모트 워크스페이스에서 AI 가이드 모달 파일 위치를 검색합니다."
+          message: "리모트 워크스페이스에서 싸피증권 랜딩 페이지 파일 위치를 검색합니다."
         completed:
           output: |
             Found 1 matches:
-            frontend/src/components/layout/sidebar/AIGuideModal.tsx
+            frontend/src/pages/LandingPage.tsx
 
       - toolName: remote_read_file
-        toolUseId: demo-ai-guide-read-001
+        toolUseId: demo-landing-success-read-001
         toolInput:
-          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+          path: "frontend/src/pages/LandingPage.tsx"
         started:
-          message: "현재 AIGuideModal.tsx 스타일과 컴포넌트 구조를 확인합니다."
+          message: "현재 싸피증권 랜딩 페이지의 Hero 문구와 CTA 구조를 확인합니다."
         completed:
           output: |
-            --- Reading remote:frontend/src/components/layout/sidebar/AIGuideModal.tsx (Lines 1-500) ---
-            18  <DialogContent className="max-w-2xl p-0 overflow-hidden border-none rounded-3xl shadow-2xl">
-            19      <div className="bg-indigo-600 px-8 py-6 text-white relative overflow-hidden">
-            25          <DialogDescription className="text-indigo-100 font-medium text-base">
-            43              <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-black text-sm shrink-0">1</div>
-            52              <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex gap-3">
-            102         <section className="bg-indigo-50 p-6 rounded-3xl border border-indigo-100 relative overflow-hidden">
-            134         className="px-5 py-3 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-200"
+            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 1-220) ---
+            21  <h1>SSAFY Securities</h1>
+            25  <p>모의 투자로 배우는 금융 서비스</p>
+            32  <Button>시작하기</Button>
+            33  <Button variant="outline">서비스 둘러보기</Button>
+            48  <section id="market-summary">
+            76  <section id="portfolio-preview">
 
-      - toolName: frontend_guide_locator
-        toolUseId: demo-ai-guide-locator-001
+      - toolName: frontend_landing_copy_planner
+        toolUseId: demo-landing-success-plan-001
         toolInput:
           project_root: "frontend"
-          user_request: "상단 헤더는 보라색 대신 에메랄드/청록 계열 gradient로 바꾸고, STEP 번호 배지는 같은 계열의 진한 색으로, Tip 박스는 연한 청록 배경과 진한 테두리로, 확인 버튼도 같은 강조색으로 바꿔줘."
+          user_request: "싸피증권 랜딩 페이지를 발표 시연용으로 더 명확하게 바꿔줘. 메인 문구, 보조 문구, CTA, 운영 점검 정상 배너를 추가해줘."
         started:
-          message: "요청된 스타일 변경 지점을 프론트 가이드 locator로 추출합니다."
+          message: "랜딩 페이지에서 변경할 문구와 UI 블록을 추출합니다."
         completed:
           output: |
             {
               "status": "success",
-              "change_intent": "style_change",
+              "change_intent": "landing_copy_update",
               "target_files": [
-                "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+                "frontend/src/pages/LandingPage.tsx"
               ],
-              "style_targets": [
+              "copy_targets": [
                 {
-                  "element": "modal_header",
-                  "current_class": "bg-indigo-600",
-                  "suggested_class": "bg-gradient-to-br from-emerald-500 to-teal-600"
+                  "element": "hero_headline",
+                  "current": "SSAFY Securities",
+                  "suggested": "복잡한 투자를 더 쉽게, SSAFY Securities"
                 },
                 {
-                  "element": "step_badge",
-                  "current_class": "bg-indigo-100 text-indigo-600",
-                  "suggested_class": "bg-emerald-100 text-emerald-700"
+                  "element": "hero_description",
+                  "current": "모의 투자로 배우는 금융 서비스",
+                  "suggested": "실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼"
                 },
                 {
-                  "element": "tip_box",
-                  "current_class": "bg-blue-50 border-blue-100 text-blue-700",
-                  "suggested_class": "bg-emerald-50 border-emerald-200 text-emerald-700"
+                  "element": "primary_cta",
+                  "current": "시작하기",
+                  "suggested": "모의투자 시작하기"
                 },
                 {
-                  "element": "confirm_button",
-                  "current_class": "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200",
-                  "suggested_class": "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
+                  "element": "ops_banner",
+                  "current": null,
+                  "suggested": "운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS"
                 }
               ]
             }
 
       - toolName: remote_edit_file
-        toolUseId: demo-ai-guide-edit-001
+        toolUseId: demo-landing-success-edit-001
         toolInput:
-          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
-          instruction: "동작 로직은 유지하고 Tailwind style class만 에메랄드/청록 계열로 변경"
+          path: "frontend/src/pages/LandingPage.tsx"
+          instruction: "라우팅과 API 로직은 유지하고 랜딩 페이지 문구, CTA, 운영 점검 배너만 변경"
         started:
-          message: "AIGuideModal.tsx의 Tailwind 스타일 클래스만 수정합니다."
+          message: "싸피증권 랜딩 페이지의 문구와 CTA 영역을 수정합니다."
         completed:
           output: |
-            Updated frontend/src/components/layout/sidebar/AIGuideModal.tsx
-            - Header: bg-gradient-to-br from-emerald-500 to-teal-600
-            - Description: text-emerald-50
-            - Step badges: bg-emerald-100 text-emerald-700
-            - Tip box: bg-emerald-50 border-emerald-200 text-emerald-700
-            - Completion section: bg-emerald-50 border-emerald-100 text-emerald-900/text-emerald-800
-            - Confirm button: bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200
+            Updated frontend/src/pages/LandingPage.tsx
+            - Hero headline: 복잡한 투자를 더 쉽게, SSAFY Securities
+            - Hero description: 실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼
+            - Primary CTA: 모의투자 시작하기
+            - Secondary CTA: 포트폴리오 보기
+            - Ops banner: 운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS
 
       - toolName: remote_read_file
-        toolUseId: demo-ai-guide-read-verify-001
+        toolUseId: demo-landing-success-read-verify-001
         toolInput:
-          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
-          offset: 50
-          limit: 1000
+          path: "frontend/src/pages/LandingPage.tsx"
+          offset: 18
+          limit: 90
         started:
-          message: "변경된 하단 스타일과 버튼 스타일을 다시 검사합니다."
+          message: "변경된 Hero 문구와 CTA 텍스트를 다시 확인합니다."
         completed:
           output: |
-            --- Reading remote:frontend/src/components/layout/sidebar/AIGuideModal.tsx (Lines 51-142) ---
-            52  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex gap-3">
-            53      <p className="text-emerald-700 text-xs leading-relaxed">
-            63  <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-black text-sm shrink-0">2</div>
-            80  <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-black text-sm shrink-0">3</div>
-            102 <section className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 relative overflow-hidden">
-            103     <h4 className="font-bold text-emerald-900 text-lg mb-2 flex items-center gap-2">
-            106     <p className="text-emerald-800 text-sm leading-relaxed">
-            134 className="px-5 py-3 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 transition-all active:scale-95 shadow-lg shadow-emerald-200"
+            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 18-108) ---
+            21  <h1>복잡한 투자를 더 쉽게, SSAFY Securities</h1>
+            25  <p>실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼</p>
+            32  <Button>모의투자 시작하기</Button>
+            33  <Button variant="outline">포트폴리오 보기</Button>
+            41  <div className="rounded-xl border border-emerald-200 bg-emerald-50">
+            42      운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS
 
-      - toolName: remote_read_file
-        toolUseId: demo-ai-guide-final-check-001
+      - toolName: landing_visual_smoke_check
+        toolUseId: demo-landing-success-final-check-001
         toolInput:
-          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+          route: "/"
+          viewport: "desktop"
         started:
-          message: "최종 파일 전체를 다시 읽어 TSX 구조와 로직 변경 여부를 확인합니다."
+          message: "랜딩 페이지 렌더링과 주요 문구 노출 여부를 최종 확인합니다."
         completed:
           output: |
             --- Final inspection summary ---
-            File: frontend/src/components/layout/sidebar/AIGuideModal.tsx
+            Route: /
+            File: frontend/src/pages/LandingPage.tsx
             Logic check:
-            - Dialog open={isOpen} onOpenChange={onClose} 유지
-            - 확인 버튼 onClick={onClose} 유지
-            - import, props, JSX return 구조 변경 없음
+            - 라우팅 변경 없음
+            - 버튼 onClick/API 호출 로직 변경 없음
+            - 데이터 조회 hook 변경 없음
 
-            Style check:
-            - 보라색 계열 indigo header/button class 제거
-            - emerald/teal header gradient 적용
-            - step badge, tip box, completion section, confirm button 색상 일관성 확인
+            Render check:
+            - Hero headline 노출 확인
+            - CTA 2개 노출 확인
+            - 운영 점검 정상 배너 노출 확인

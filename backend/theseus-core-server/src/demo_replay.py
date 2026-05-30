@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -374,6 +375,147 @@ def _timing_int(replay: dict[str, Any], *keys: str, default: int | None = None) 
     return default
 
 
+_TOOL_DELAY_WEIGHTS = {
+    "glob": 0.65,
+    "read": 1.0,
+    "search": 1.35,
+    "analysis": 1.55,
+    "diagnostic": 1.65,
+    "edit": 2.45,
+    "validation": 2.8,
+    "default": 1.2,
+}
+
+_TOOL_DELAY_START_RATIOS = {
+    "glob": 0.32,
+    "read": 0.26,
+    "search": 0.24,
+    "analysis": 0.22,
+    "diagnostic": 0.25,
+    "edit": 0.18,
+    "validation": 0.16,
+    "default": 0.24,
+}
+
+
+def _stable_jitter(seed: str, *, spread: float) -> float:
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    fraction = int(digest[:8], 16) / 0xFFFFFFFF
+    return 1.0 - spread + (fraction * spread * 2)
+
+
+def _tool_delay_identity(tool: dict[str, Any], index: int) -> str:
+    return "|".join(
+        str(part or "")
+        for part in (
+            index,
+            tool.get("tool_name"),
+            tool.get("toolName"),
+            tool.get("name"),
+            tool.get("tool_use_id"),
+            tool.get("toolUseId"),
+            tool.get("id"),
+        )
+    )
+
+
+def _tool_delay_kind(tool: dict[str, Any]) -> str:
+    text_parts = [
+        tool.get("tool_name"),
+        tool.get("toolName"),
+        tool.get("name"),
+        tool.get("label"),
+        tool.get("tool_use_id"),
+        tool.get("toolUseId"),
+    ]
+    for key in ("started", "completed", "failed", "result"):
+        value = tool.get(key)
+        if isinstance(value, dict):
+            text_parts.extend([value.get("message"), value.get("status")])
+    text = " ".join(_stringify(part) for part in text_parts).casefold()
+
+    if any(token in text for token in ("test", "validate", "verify", "compile", "check", "검증")):
+        return "validation"
+    if any(token in text for token in ("edit", "write", "update", "patch", "replace", "수정", "변경")):
+        return "edit"
+    if any(token in text for token in ("diagnostic", "diagnostics", "monitor", "health", "진단", "모니터링")):
+        return "diagnostic"
+    if any(token in text for token in ("locator", "analyze", "analysis", "inspect", "분석", "추출")):
+        return "analysis"
+    if any(token in text for token in ("search", "grep", "find", "검색")):
+        return "search"
+    if any(token in text for token in ("read", "cat", "읽")):
+        return "read"
+    if any(token in text for token in ("glob", "list", "ls", "목록")):
+        return "glob"
+    return "default"
+
+
+def _distribute_total_delay(total_delay_ms: int, weighted_items: list[tuple[str, float]]) -> list[int]:
+    if total_delay_ms <= 0 or not weighted_items:
+        return []
+
+    total_weight = sum(weight for _, weight in weighted_items)
+    if total_weight <= 0:
+        return [0 for _ in weighted_items]
+
+    raw_durations = [(total_delay_ms * weight) / total_weight for _, weight in weighted_items]
+    durations = [int(value) for value in raw_durations]
+    remaining = total_delay_ms - sum(durations)
+    if remaining > 0:
+        order = sorted(
+            range(len(raw_durations)),
+            key=lambda index: raw_durations[index] - durations[index],
+            reverse=True,
+        )
+        for index in order[:remaining]:
+            durations[index] += 1
+    return durations
+
+
+def _tool_stack_delay_pairs(replay: dict[str, Any], tool_stack: list[dict[str, Any]]) -> list[dict[str, int]]:
+    total_delay_ms = _timing_int(
+        replay,
+        "toolStackTotalDelayMs",
+        "tool_stack_total_delay_ms",
+        "toolTotalDelayMs",
+        "tool_total_delay_ms",
+        default=None,
+    )
+    if total_delay_ms is None or total_delay_ms <= 0 or not tool_stack:
+        return []
+
+    weighted_items: list[tuple[str, float]] = []
+    identities: list[str] = []
+    replay_id = _stringify(replay.get("id"))
+    for index, tool in enumerate(tool_stack):
+        kind = _tool_delay_kind(tool)
+        identity = _tool_delay_identity(tool, index)
+        identities.append(identity)
+        jitter = _stable_jitter(f"{replay_id}|{identity}|duration", spread=0.13)
+        weighted_items.append((kind, _TOOL_DELAY_WEIGHTS.get(kind, _TOOL_DELAY_WEIGHTS["default"]) * jitter))
+
+    durations = _distribute_total_delay(total_delay_ms, weighted_items)
+    delay_pairs: list[dict[str, int]] = []
+    for index, duration in enumerate(durations):
+        kind = weighted_items[index][0]
+        ratio_jitter = _stable_jitter(f"{replay_id}|{identities[index]}|start", spread=0.04)
+        start_ratio = _TOOL_DELAY_START_RATIOS.get(kind, _TOOL_DELAY_START_RATIOS["default"]) * ratio_jitter
+        start_ratio = max(0.12, min(0.36, start_ratio))
+        start_delay_ms = int(duration * start_ratio)
+        if duration >= 400:
+            start_delay_ms = max(120, start_delay_ms)
+        if start_delay_ms >= duration:
+            start_delay_ms = duration // 2
+        delay_pairs.append(
+            {
+                "start": start_delay_ms,
+                "result": duration - start_delay_ms,
+            }
+        )
+    return delay_pairs
+
+
 def _text_stream_events(
     replay: dict[str, Any],
     content: str,
@@ -454,11 +596,18 @@ def _tool_stack_entries(replay: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in raw_stack if isinstance(item, dict)]
 
 
-def _tool_start_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
+def _tool_start_event(
+    replay: dict[str, Any],
+    tool: dict[str, Any],
+    *,
+    delay_ms_override: int | None = None,
+) -> dict[str, Any]:
     started = tool.get("started") if isinstance(tool.get("started"), dict) else {}
     tool_name = tool.get("tool_name") or tool.get("toolName") or tool.get("name")
     tool_use_id = tool.get("tool_use_id") or tool.get("toolUseId") or tool.get("id")
     delay_ms = replay_delay_ms(started)
+    if delay_ms is None:
+        delay_ms = delay_ms_override
     if delay_ms is None:
         delay_ms = _timing_int(replay, "toolStartDelayMs", "tool_start_delay_ms", default=None)
     tool_input = (
@@ -482,7 +631,12 @@ def _tool_start_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str,
     }
 
 
-def _tool_result_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
+def _tool_result_event(
+    replay: dict[str, Any],
+    tool: dict[str, Any],
+    *,
+    delay_ms_override: int | None = None,
+) -> dict[str, Any]:
     result = (
         tool.get("completed")
         if isinstance(tool.get("completed"), dict)
@@ -513,6 +667,8 @@ def _tool_result_event(replay: dict[str, Any], tool: dict[str, Any]) -> dict[str
         else ("toolCompletedDelayMs", "tool_completed_delay_ms", "toolResultDelayMs", "tool_result_delay_ms")
     )
     delay_ms = replay_delay_ms(result)
+    if delay_ms is None:
+        delay_ms = delay_ms_override
     if delay_ms is None:
         delay_ms = _timing_int(replay, *fallback_delay_keys, default=None)
     return {
@@ -552,9 +708,11 @@ def _structured_chat_events(replay: dict[str, Any]) -> list[dict[str, Any]]:
     for content in _answer_chunks(replay, before_tools=True):
         normalized.extend(_text_stream_events(replay, content, initial_delay_ms=before_delay_ms))
 
-    for tool in tool_stack:
-        normalized.append(_tool_start_event(replay, tool))
-        normalized.append(_tool_result_event(replay, tool))
+    tool_delay_pairs = _tool_stack_delay_pairs(replay, tool_stack)
+    for index, tool in enumerate(tool_stack):
+        delay_pair = tool_delay_pairs[index] if index < len(tool_delay_pairs) else {}
+        normalized.append(_tool_start_event(replay, tool, delay_ms_override=delay_pair.get("start")))
+        normalized.append(_tool_result_event(replay, tool, delay_ms_override=delay_pair.get("result")))
 
     for content in _answer_chunks(replay, before_tools=False):
         normalized.extend(_text_stream_events(replay, content, initial_delay_ms=after_delay_ms))
