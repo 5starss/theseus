@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { toolApi } from '../api';
 import type { ToolItem } from '../types';
 import { ToolCard } from './ToolCard';
@@ -66,10 +67,10 @@ export function ToolList() {
       setSelectedTool((prevTool) =>
         prevTool?.toolId === updatedTool.toolId ? { ...prevTool, ...updatedTool } : prevTool
       );
-      alert('Tool access level 수정이 완료되었습니다.');
+      toast.success('도구 접근 권한이 변경되었습니다.');
     } catch (error) {
       console.error('Failed to update tool access level:', error);
-      alert('Tool access level 수정에 실패했습니다.');
+      toast.error('도구 접근 권한 변경에 실패했습니다.');
     } finally {
       setUpdatingToolId(null);
     }
@@ -161,7 +162,7 @@ export function ToolList() {
           )}
         </div>
       </div>
-      
+
       {selectedTool && projectId && (
         <ToolDetailModal
           projectId={projectId}
