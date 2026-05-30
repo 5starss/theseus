@@ -12,6 +12,7 @@
 #### Demo Replay
 - 김대리 휴가 전 `server_health_monitor` PLAN 생성과 서버 상태 통합 진단 PLAN 생성의 progress 지연을 약 8.9초대로 늘려 발표 중 너무 빠르게 완료되지 않도록 조정
 - PLAN 접수, 요구사항 분석, Tool 명세 정리, PLAN 카드 구조화, 보안 검증, 완료 문구가 단계별로 보이도록 `chunk` 문구를 추가
+- 김대리 휴가 전 PLAN 결과를 서버 상태 통합 진단 템플릿 양식에 맞춰 문제 분석, 주요 작업, 주의 사항, Plan B, 실행 스펙, 검증 기준까지 보강하고 주식 시세 요약/주문 처리 health 내용을 추가
 
 #### 검증
 - `python -m py_compile src\tool_plan\processor.py tests\test_tool_plan_processor_chunks.py`
