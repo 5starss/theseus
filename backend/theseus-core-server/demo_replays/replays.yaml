@@ -140,28 +140,155 @@ chat_replays:
         - "관리자 프론트 변경 성공"
         - "프론트 변경 성공"
         - "프론트엔드 변경 성공"
+        - "AI 가이드 모달"
+        - "AIGuideModal"
+        - "에메랄드/청록"
     timing:
-      textChunkChars: 8
-      textChunkDelayMs: 45
-      beforeToolsDelayMs: 450
-      toolStartDelayMs: 800
-      toolCompletedDelayMs: 1400
-      afterToolsDelayMs: 550
+      textChunkChars: 10
+      textChunkDelayMs: 35
+      beforeToolsDelayMs: 420
+      toolStartDelayMs: 520
+      toolCompletedDelayMs: 760
+      afterToolsDelayMs: 480
     answer:
-      beforeTools: "관리자 권한으로 싸피 증권 랜딩 페이지 변경을 진행하겠습니다.\n\n"
-      afterTools: "잘됐음"
+      beforeTools: |
+        관리자 권한으로 리모트 워크스페이스의 프론트 프로젝트를 확인하고,
+        AI 가이드 모달의 스타일만 에메랄드/청록 계열로 변경하겠습니다.
+
+      afterTools: |
+        AIGuideModal.tsx 파일의 스타일을 요청하신 에메랄드/청록 계열로 변경 완료했습니다.
+
+        변경 사항 요약
+        - 상단 헤더: 기존 보라색에서 에메랄드/청록 그라데이션으로 변경했습니다.
+        - STEP 번호 배지: 같은 계열의 진한 에메랄드 색상으로 정리했습니다.
+        - Tip 박스: 연한 청록 배경과 진한 테두리로 변경했습니다.
+        - 확인 버튼: 동일한 강조색으로 맞추고 hover/shadow 색상도 정리했습니다.
+
+        검토 결과
+        - Tailwind class 적용과 TSX 구조에 이상이 없음을 확인했습니다.
+        - isOpen, onClose 등 동작 로직은 변경하지 않았습니다.
+        - 시연에서 더 눈에 띄는 청록색 톤의 가이드 모달을 확인하실 수 있습니다.
     toolStack:
-      - toolName: frontend_landing_editor
-        toolUseId: demo-frontend-success-001
+      - toolName: remote_glob
+        toolUseId: demo-ai-guide-glob-001
         toolInput:
-          page: "ssafy-securities-landing"
-          change: "hero copy update"
+          pattern: "**/AIGuideModal.tsx"
         started:
-          message: "관리자 권한으로 원격 프론트 프로젝트의 랜딩 페이지를 수정합니다."
+          message: "리모트 워크스페이스에서 AI 가이드 모달 파일 위치를 검색합니다."
+        completed:
+          output: |
+            Found 1 matches:
+            frontend/src/components/layout/sidebar/AIGuideModal.tsx
+
+      - toolName: remote_read_file
+        toolUseId: demo-ai-guide-read-001
+        toolInput:
+          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+        started:
+          message: "현재 AIGuideModal.tsx 스타일과 컴포넌트 구조를 확인합니다."
+        completed:
+          output: |
+            --- Reading remote:frontend/src/components/layout/sidebar/AIGuideModal.tsx (Lines 1-500) ---
+            18  <DialogContent className="max-w-2xl p-0 overflow-hidden border-none rounded-3xl shadow-2xl">
+            19      <div className="bg-indigo-600 px-8 py-6 text-white relative overflow-hidden">
+            25          <DialogDescription className="text-indigo-100 font-medium text-base">
+            43              <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center font-black text-sm shrink-0">1</div>
+            52              <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex gap-3">
+            102         <section className="bg-indigo-50 p-6 rounded-3xl border border-indigo-100 relative overflow-hidden">
+            134         className="px-5 py-3 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-200"
+
+      - toolName: frontend_guide_locator
+        toolUseId: demo-ai-guide-locator-001
+        toolInput:
+          project_root: "frontend"
+          user_request: "상단 헤더는 보라색 대신 에메랄드/청록 계열 gradient로 바꾸고, STEP 번호 배지는 같은 계열의 진한 색으로, Tip 박스는 연한 청록 배경과 진한 테두리로, 확인 버튼도 같은 강조색으로 바꿔줘."
+        started:
+          message: "요청된 스타일 변경 지점을 프론트 가이드 locator로 추출합니다."
         completed:
           output: |
             {
-              "changed_files": ["frontend/src/pages/SsafySecuritiesLanding.tsx"],
-              "status": "updated",
-              "summary": "싸피 증권 랜딩 페이지 hero 문구와 CTA 영역을 수정했습니다."
+              "status": "success",
+              "change_intent": "style_change",
+              "target_files": [
+                "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+              ],
+              "style_targets": [
+                {
+                  "element": "modal_header",
+                  "current_class": "bg-indigo-600",
+                  "suggested_class": "bg-gradient-to-br from-emerald-500 to-teal-600"
+                },
+                {
+                  "element": "step_badge",
+                  "current_class": "bg-indigo-100 text-indigo-600",
+                  "suggested_class": "bg-emerald-100 text-emerald-700"
+                },
+                {
+                  "element": "tip_box",
+                  "current_class": "bg-blue-50 border-blue-100 text-blue-700",
+                  "suggested_class": "bg-emerald-50 border-emerald-200 text-emerald-700"
+                },
+                {
+                  "element": "confirm_button",
+                  "current_class": "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200",
+                  "suggested_class": "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
+                }
+              ]
             }
+
+      - toolName: remote_edit_file
+        toolUseId: demo-ai-guide-edit-001
+        toolInput:
+          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+          instruction: "동작 로직은 유지하고 Tailwind style class만 에메랄드/청록 계열로 변경"
+        started:
+          message: "AIGuideModal.tsx의 Tailwind 스타일 클래스만 수정합니다."
+        completed:
+          output: |
+            Updated frontend/src/components/layout/sidebar/AIGuideModal.tsx
+            - Header: bg-gradient-to-br from-emerald-500 to-teal-600
+            - Description: text-emerald-50
+            - Step badges: bg-emerald-100 text-emerald-700
+            - Tip box: bg-emerald-50 border-emerald-200 text-emerald-700
+            - Completion section: bg-emerald-50 border-emerald-100 text-emerald-900/text-emerald-800
+            - Confirm button: bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200
+
+      - toolName: remote_read_file
+        toolUseId: demo-ai-guide-read-verify-001
+        toolInput:
+          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+          offset: 50
+          limit: 1000
+        started:
+          message: "변경된 하단 스타일과 버튼 스타일을 다시 검사합니다."
+        completed:
+          output: |
+            --- Reading remote:frontend/src/components/layout/sidebar/AIGuideModal.tsx (Lines 51-142) ---
+            52  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex gap-3">
+            53      <p className="text-emerald-700 text-xs leading-relaxed">
+            63  <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-black text-sm shrink-0">2</div>
+            80  <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-black text-sm shrink-0">3</div>
+            102 <section className="bg-emerald-50 p-6 rounded-3xl border border-emerald-100 relative overflow-hidden">
+            103     <h4 className="font-bold text-emerald-900 text-lg mb-2 flex items-center gap-2">
+            106     <p className="text-emerald-800 text-sm leading-relaxed">
+            134 className="px-5 py-3 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-700 transition-all active:scale-95 shadow-lg shadow-emerald-200"
+
+      - toolName: remote_read_file
+        toolUseId: demo-ai-guide-final-check-001
+        toolInput:
+          path: "frontend/src/components/layout/sidebar/AIGuideModal.tsx"
+        started:
+          message: "최종 파일 전체를 다시 읽어 TSX 구조와 로직 변경 여부를 확인합니다."
+        completed:
+          output: |
+            --- Final inspection summary ---
+            File: frontend/src/components/layout/sidebar/AIGuideModal.tsx
+            Logic check:
+            - Dialog open={isOpen} onOpenChange={onClose} 유지
+            - 확인 버튼 onClick={onClose} 유지
+            - import, props, JSX return 구조 변경 없음
+
+            Style check:
+            - 보라색 계열 indigo header/button class 제거
+            - emerald/teal header gradient 적용
+            - step badge, tip box, completion section, confirm button 색상 일관성 확인
