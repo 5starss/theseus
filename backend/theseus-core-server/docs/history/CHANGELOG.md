@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 194 — 발표 시나리오 기준 채팅 replay 정렬 (2026-05-30)
+
+#### Demo Replay
+- 최종 발표 스크립트의 핵심 시연 흐름에 맞춰 PLAN/AGENT 채팅 입력 매칭 문구와 고정 응답 내용을 정리
+- 김대리 휴가 전 ToolPlan, 신입사원 모니터링 Tool 성공, 신입사원 프론트 변경 권한 실패, 관리자 프론트 변경 성공 시나리오를 싸피증권 랜딩 페이지 맥락으로 통일
+- 인수인계 업무 1의 Tool 이름과 PLAN/실행 응답을 `server_health_monitor`로 통일하고 API health, 주식 시세 요약, 주문 처리 health, CPU/메모리/부하/네트워크 리포트가 함께 보이도록 보강
+- 관리자 페이지, 도구 목록, 멤버 관리 화면은 다른 시연 작업 범위로 두고 `demo_replays/replays.yaml`의 채팅 응답과 Tool 카드 출력만 수정
+
+---
+
+### 🛠️ Session 193 — Demo replay Tool stack 지연 시간 분배 (2026-05-30)
+
+#### Core
+- `timing.toolStackTotalDelayMs`를 추가해 시연용 Tool stack의 전체 소요 시간을 YAML에서 지정할 수 있도록 보강
+- Tool 이름과 실행 id 기반의 안정적인 오차를 적용해 같은 시나리오를 반복해도 Tool별 시간이 모두 동일하게 보이지 않도록 조정
+- `glob/list`, `read`, `search`, `locator/analysis`, `edit/write`, `test/validation` 유형별 가중치를 적용해 읽기 작업은 빠르게, 수정/검증 작업은 상대적으로 느리게 재생
+
+#### Demo Replay
+- 모니터링 Tool 성공 시나리오는 약 4.8초, 프론트 변경 실패 시나리오는 약 6.5초, AI 가이드 모달 수정 시나리오는 약 12초 안에서 Tool stack 시간이 분배되도록 설정
+
+#### 검증
+- `python -m py_compile src\demo_replay.py tests\test_demo_replay.py`
+- `python -m unittest tests.test_demo_replay`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 192 — 서버 상태 통합 진단 PLAN replay 추가 (2026-05-30)
 
 #### Demo Replay

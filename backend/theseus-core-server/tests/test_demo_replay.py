@@ -149,6 +149,52 @@ chat_replays:
         self.assertEqual(400, events[4]["delay_ms"])
         self.assertEqual(50, events[5]["delay_ms"])
 
+    def test_chat_replay_distributes_tool_stack_total_delay_by_tool_kind(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: chat-tool-stack-total-delay-demo
+    modes: [AGENT]
+    match:
+      contains_any: ["총 시간 분배"]
+    timing:
+      toolStackTotalDelayMs: 10000
+      toolStartDelayMs: 100
+      toolCompletedDelayMs: 100
+    toolStack:
+      - toolName: remote_glob
+        toolUseId: tool-glob
+        completed:
+          output: "found"
+      - toolName: remote_read_file
+        toolUseId: tool-read
+        completed:
+          output: "read"
+      - toolName: remote_edit_file
+        toolUseId: tool-edit
+        completed:
+          output: "edited"
+"""
+        )
+
+        replay = find_chat_replay(
+            prompt="총 시간 분배 테스트",
+            mode="AGENT",
+            user_id=1,
+            project_id=10,
+        )
+        events = chat_replay_stream_events(replay or {})
+        tool_durations = [
+            (events[index]["delay_ms"] or 0) + (events[index + 1]["delay_ms"] or 0)
+            for index in range(0, len(events), 2)
+        ]
+        result_delays = [events[index]["delay_ms"] for index in range(1, len(events), 2)]
+
+        self.assertEqual(10000, sum(tool_durations))
+        self.assertGreater(tool_durations[2], tool_durations[1])
+        self.assertGreater(tool_durations[1], tool_durations[0])
+        self.assertGreater(len(set(result_delays)), 1)
+
     def test_replay_remote_policy_limits_matches(self) -> None:
         self._enable_replay(
             """
