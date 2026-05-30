@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 192 — 서버 상태 통합 진단 PLAN replay 추가 (2026-05-30)
+
+#### Demo Replay
+- `server_health_monitor` Tool 생성 PLAN replay 시나리오를 추가
+- 발표자가 이해하기 쉽도록 문제, 해결 방향, 실행 스펙, 입력/출력 필드, 주의사항을 한국어 중심으로 정리
+- `server_health_monitor`, `PASS/WARNING/FAIL`, `check_id` 같은 계약명은 한글 설명과 함께 유지
+
+---
+
 ### 🛠️ Session 191 — YAML 기반 데모 replay 분기 추가 (2026-05-29)
 
 #### Core
