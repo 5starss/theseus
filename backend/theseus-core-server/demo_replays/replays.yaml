@@ -22,13 +22,28 @@ plan_replays:
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
-        delayMs: 350
+        delayMs: 700
+        chunk: "PLAN 요청을 접수했습니다.\n"
       - message: PLAN_DRAFTING
-        progressRate: 40
-        delayMs: 900
+        progressRate: 20
+        delayMs: 1600
+        chunk: "김대리의 휴가 전 인수인계 요청과 신입사원 권한 범위를 분석하고 있습니다.\n"
+      - message: PLAN_DRAFTING
+        progressRate: 45
+        delayMs: 2400
+        chunk: "싸피증권 API health, 주식 시세 요약, 주문 처리 health와 서버 리소스 점검 항목을 Tool 명세로 정리하고 있습니다.\n"
+      - message: PLAN_STRUCTURING
+        progressRate: 72
+        delayMs: 1700
+        chunk: "수집 항목, 출력 리포트 필드, 권한 레벨을 PLAN 카드 구조로 변환하고 있습니다.\n"
+      - message: PLAN_VALIDATING
+        progressRate: 90
+        delayMs: 1300
+        chunk: "shell 실행과 서비스 변경 없이 읽기 전용으로 동작하는지 검증 기준을 확인하고 있습니다.\n"
       - message: PLAN_COMPLETED
         progressRate: 100
-        delayMs: 700
+        delayMs: 900
+        chunk: "PLAN 초안이 준비되었습니다.\n"
     result:
       rawMarkdown: |
         ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
@@ -128,19 +143,28 @@ plan_replays:
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
-        delayMs: 300
+        delayMs: 700
+        chunk: "PLAN 요청을 접수했습니다.\n"
       - message: PLAN_DRAFTING
-        progressRate: 35
-        delayMs: 900
+        progressRate: 20
+        delayMs: 1700
+        chunk: "서버 상태 통합 진단 요구사항과 보안 제약 조건을 분석하고 있습니다.\n"
+      - message: PLAN_DRAFTING
+        progressRate: 45
+        delayMs: 2300
+        chunk: "CPU, 메모리, 부하, 네트워크 연결 수집 항목과 임계치 판정 기준을 Tool 명세로 정리하고 있습니다.\n"
       - message: PLAN_STRUCTURING
         progressRate: 75
-        delayMs: 650
+        delayMs: 1800
+        chunk: "JSON/Markdown 리포트 구조와 PLAN 표시 블록을 정규화하고 있습니다.\n"
       - message: PLAN_VALIDATING
         progressRate: 90
-        delayMs: 500
+        delayMs: 1300
+        chunk: "금지 모듈과 MVP 제외 범위를 검증 기준에 반영하고 있습니다.\n"
       - message: PLAN_COMPLETED
         progressRate: 100
-        delayMs: 450
+        delayMs: 900
+        chunk: "PLAN 초안이 준비되었습니다.\n"
     result:
       rawMarkdown: |
         ## 서버 상태 통합 진단 Tool 생성 PLAN

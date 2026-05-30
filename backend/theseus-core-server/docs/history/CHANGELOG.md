@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 195 — PLAN replay 진행 스트리밍 보강 (2026-05-30)
+
+#### Core
+- demo PLAN replay에서 progress 단계마다 상태 chunk를 함께 발행해 실제 PLAN 생성처럼 내부 분석/구조화/검증 문구가 스트리밍되도록 보강
+
+#### Demo Replay
+- 김대리 휴가 전 `server_health_monitor` PLAN 생성과 서버 상태 통합 진단 PLAN 생성의 progress 지연을 약 8.9초대로 늘려 발표 중 너무 빠르게 완료되지 않도록 조정
+- PLAN 접수, 요구사항 분석, Tool 명세 정리, PLAN 카드 구조화, 보안 검증, 완료 문구가 단계별로 보이도록 `chunk` 문구를 추가
+
+#### 검증
+- `python -m py_compile src\tool_plan\processor.py tests\test_tool_plan_processor_chunks.py`
+- `python -m unittest tests.test_tool_plan_processor_chunks tests.test_demo_replay`
+- `git diff --check`
+
+---
+
 ### 🛠️ Session 194 — 발표 시나리오 기준 채팅 replay 정렬 (2026-05-30)
 
 #### Demo Replay
