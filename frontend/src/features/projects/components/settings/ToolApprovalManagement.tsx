@@ -104,15 +104,15 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
     setIsSubmitting(true);
     try {
       if (actionType === 'APPROVE') {
-        // 3초간 생성 중 표시 및 세부 진행 단계 연출 (1초 단위 3단계)
-        setLoadingStage('도구 설계안 코드를 분석하고 빌드 환경을 빌드하고 있습니다...');
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // 3초간 생성 중 표시 및 세부 진행 단계 연출 (3단계)
+        setLoadingStage('플랜을 분석하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        setLoadingStage('서버 샌드박스 보안 환경에 도구 실행 컨테이너를 배포 중입니다...');
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        setLoadingStage('코드를 생성하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 8000));
 
-        setLoadingStage('API 라우팅 게이트웨이를 동적으로 갱신하고 연동을 활성화하는 중입니다...');
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        setLoadingStage('샌드박스 환경에서 코드를 검증하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
 
         /* [기존 실서버 API 연동 코드]
         await approvalApi.approveTool(projectId, selectedApproval.toolApprovalId, {
