@@ -34,6 +34,9 @@ export default function HomeMockup() {
   // 쇼케이스 탭 상태 ("main" | "detail")
   const [showcaseTab, setShowcaseTab] = useState<"main" | "detail">("main");
 
+  // 자동재생 및 모션 재생/일시정지 상태 관리
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+
   // 소셜 프루프 카운팅 수치 상태
   const [userCount, setUserCount] = useState<number>(23000);
   const [analysisCount, setAnalysisCount] = useState<number>(142000);
@@ -387,56 +390,54 @@ export default function HomeMockup() {
         </div>
       </section>
 
-      {/* 9. 슬림하고 품격 있는 반투명 글래스모피즘 플로팅 Sticky 2단 통합 푸터 */}
-      <footer className="fixed bottom-0 left-0 w-full z-45 bg-white backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-12px_35px_rgba(15,23,42,0.04)] transition-all">
+      {/* 9. 슬림하고 품격 있는 반투명 글래스모피즘 플로팅 Sticky 2단 통합 푸터 (B안 고도화 - 틈새 0% 칼핏) */}
+      <footer className="fixed bottom-0 left-0 w-full z-45 bg-white/80 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-12px_35px_rgba(15,23,42,0.04)] transition-all">
 
         {/* [1단] 제휴 및 연계 기관 로고 슬라이더 영역 */}
         <div className="w-full border-b border-slate-200/50 py-3 px-4 md:px-8 select-none">
           <div className="max-w-[1400px] mx-auto flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+            {/* 컨트롤 패널 (좌측 상단에 배치된 스퀘어 모양 버튼 그룹) */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => alert("이전 기관 로고 조회")}
+                className="w-7 h-7 bg-white hover:bg-slate-50 text-slate-400 hover:text-slate-600 border border-slate-200/80 rounded flex items-center justify-center cursor-pointer active:scale-95 transition-all text-[11px] font-bold"
+              >
+                ◀
+              </button>
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
+                className="w-7 h-7 bg-white hover:bg-slate-50 text-slate-400 hover:text-slate-600 border border-slate-200/80 rounded flex items-center justify-center cursor-pointer active:scale-95 transition-all text-[10px] font-bold"
+              >
+                {isPlaying ? "■" : "▶"}
+              </button>
+              <button
+                onClick={() => alert("다음 기관 로고 조회")}
+                className="w-7 h-7 bg-white hover:bg-slate-50 text-slate-400 hover:text-slate-600 border border-slate-200/80 rounded flex items-center justify-center cursor-pointer active:scale-95 transition-all text-[11px] font-bold"
+              >
+                ▶
+              </button>
+            </div>
+
             {/* 로고 나열 스트립 */}
             <div className="w-full overflow-hidden flex items-center justify-start px-5 py-1">
-              <div className="flex flex-wrap items-center gap-8 md:gap-13 transition-all duration-1000 opacity-100">
-                {/* 삼성 로고 이미지 */}
+              <div className={`flex flex-wrap items-center gap-8 md:gap-12 transition-all duration-1000 ${isPlaying ? "opacity-100" : "opacity-80"}`}>
+                {/* 한국전문대학교육협의회, 한국교육개발원, KERIS 등 로고 스트립 이미지 */}
+                <img
+                  src="/tab_logo.png"
+                  alt="제휴 교육 기관 로고 그룹"
+                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 추가로 제공해주신 아동/미래 관련 기관 로고 이미지 */}
+                <img
+                  src="/child_future.png"
+                  alt="아동/미래 연계 기관 로고"
+                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 추가로 제공해주신 삼성 로고 이미지 */}
                 <img
                   src="/samsung.png"
                   alt="삼성 로고"
                   className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* 멀티캠퍼스 로고 */}
-                <img
-                  src="/multicampus.png"
-                  alt="멀티캠퍼스 로고"
-                  className="h-8 md:h-7 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* JA코리아 로고 */}
-                <img
-                  src="/ja_korea.svg"
-                  alt="JA코리아 로고"
-                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* KB국민은행 로고 */}
-                <img
-                  src="/kb.jpg"
-                  alt="KB국민은행 로고"
-                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* 하나은행 로고 */}
-                <img
-                  src="/hana.png"
-                  alt="하나은행 로고"
-                  className="h-8 md:h-8 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* 서울대 로고 */}
-                <img
-                  src="/snu.png"
-                  alt="서울대 로고"
-                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
-                />
-                {/* 대한상공회의소 로고 */}
-                <img
-                  src="/kcci.jpg"
-                  alt="대한상공회의소 로고"
-                  className="h-8 md:h-8 object-contain"
                 />
               </div>
             </div>
