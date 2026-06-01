@@ -13,12 +13,17 @@ plan_replays:
     modes: [PLAN]
     match:
       remote: none
-      contains_any:
-        - "휴가 전 플랜 생성"
-        - "인수인계 모니터링 툴 계획"
-        - "김대리 휴가 전 서버 모니터링 툴 생성"
-        - "싸피증권 서버 모니터링 툴 계획"
-        - "server_health_monitor 인수인계"
+      exact:
+        - "ssafy 증권의 cpu, 네트워크, 메모리, 부하 평균 그리고 주식의 추세를 모니터링 하는 툴을 만들어줘"
+      contains_all:
+        - "ssafy 증권"
+        - "cpu"
+        - "네트워크"
+        - "메모리"
+        - "부하 평균"
+        - "주식"
+        - "추세"
+        - "모니터링"
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
@@ -27,125 +32,124 @@ plan_replays:
       - message: PLAN_DRAFTING
         progressRate: 20
         delayMs: 1600
-        chunk: "김대리의 휴가 전 인수인계 요청과 신입사원 권한 범위를 분석하고 있습니다.\n"
+        chunk: "SSAFY 증권 운영 지표와 주식 추세 모니터링 요구사항을 분석하고 있습니다.\n"
       - message: PLAN_DRAFTING
         progressRate: 45
         delayMs: 2400
-        chunk: "싸피증권 API health, 주식 시세 요약, 주문 처리 health와 서버 리소스 점검 항목을 Tool 명세로 정리하고 있습니다.\n"
+        chunk: "CPU, 메모리, 부하 평균, 네트워크 I/O, 주가 추세 계산 항목을 Tool 명세로 정리하고 있습니다.\n"
       - message: PLAN_STRUCTURING
         progressRate: 72
         delayMs: 1700
-        chunk: "수집 항목, 출력 리포트 필드, 권한 레벨을 PLAN 카드 구조로 변환하고 있습니다.\n"
+        chunk: "수집 로직, 임계치 판정, 추세 분석 결과, 출력 리포트 필드를 PLAN 카드 구조로 변환하고 있습니다.\n"
       - message: PLAN_VALIDATING
         progressRate: 90
         delayMs: 1300
-        chunk: "shell 실행과 서비스 변경 없이 읽기 전용으로 동작하는지 검증 기준을 확인하고 있습니다.\n"
+        chunk: "운영 환경을 변경하지 않는 읽기 전용 Tool인지 검증 기준을 확인하고 있습니다.\n"
       - message: PLAN_COMPLETED
         progressRate: 100
         delayMs: 900
         chunk: "PLAN 초안이 준비되었습니다.\n"
     result:
       rawMarkdown: |
-        ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
+        ## SSAFY 증권 통합 모니터링 Tool 생성 PLAN
 
-        김대리 휴가 기간 동안 신입사원이 싸피증권 서버 운영 상태를 같은 기준으로 점검할 수 있도록
-        `server_health_monitor` Tool을 생성합니다.
+        SSAFY 증권 서비스의 CPU, 네트워크, 메모리, 부하 평균과 주요 주식 종목의 가격 추세를
+        한 번에 점검하는 읽기 전용 `ssafy_securities_monitor` Tool을 생성합니다.
 
-        이 Tool은 싸피증권 운영 환경의 API health, 주식 시세 요약 API, 주문 처리 health,
-        CPU, 메모리, 부하 평균, 네트워크 연결 상태를 읽기 전용으로 수집하고
-        이상 징후를 `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO` 상태로 요약합니다.
-
-        김대리가 휴가 전에 수동으로 확인하던 주식 시세 요약 응답 지연, 주문 처리 큐 적체,
-        주문 worker 상태, 서버 리소스 사용률을 하나의 리포트로 묶어 신입사원이 같은 기준으로
-        점검할 수 있게 만드는 것이 목표입니다. 운영 환경을 변경하지 않는 조회 전용 Tool이므로
-        신입사원에게도 안전하게 위임할 수 있습니다.
+        이 Tool은 운영 서버의 시스템 지표와 주식 시계열 데이터를 함께 수집해
+        서비스 부하와 시장 데이터 흐름을 같은 리포트에서 비교할 수 있도록 설계합니다.
+        시스템 지표는 `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO` 상태로 요약하고,
+        주식 추세는 상승, 하락, 횡보, 변동성 확대 같은 분석 라벨과 근거 지표를 함께 제공합니다.
 
         ### 문제 분석
-        - 김대리의 점검 기준이 개인 노하우로 남아 있어 담당자 부재 시 같은 수준의 운영 판단을 하기 어렵습니다.
-        - 싸피증권은 단순 서버 자원뿐 아니라 주식 시세 요약 API와 주문 처리 health가 함께 정상이어야 서비스 상태를 정상으로 볼 수 있습니다.
-        - 현재는 API health, 시세 요약, 주문 처리 큐, CPU/메모리/네트워크 상태를 한 번에 확인하는 인수인계용 통합 진단 Tool이 없습니다.
-        - 보안 정책상 shell 실행, 서비스 재시작, 네트워크 설정 변경, 외부 ping/traceroute는 수행하지 않습니다.
+        - CPU, 메모리, 부하 평균, 네트워크 I/O가 개별 지표로 흩어져 있으면 서비스 병목을 한눈에 판단하기 어렵습니다.
+        - 증권 서비스는 시스템 상태가 정상이어도 주식 데이터 갱신 지연, 거래량 급증, 가격 급변이 함께 발생할 수 있습니다.
+        - 현재는 운영 부하와 주식 추세를 같은 기준으로 묶어 보여주는 통합 모니터링 Tool이 없습니다.
+        - 보안 정책상 shell 실행, 서비스 재시작, 네트워크 설정 변경, 주문 생성/수정/취소는 수행하지 않습니다.
 
         ### 주요 작업
-        1. **싸피증권 운영 상태 모니터링 Tool 구현**
-           - 문제: 김대리 휴가 중 신입사원이 API, 주식 시세 요약, 주문 처리, 서버 리소스 상태를 같은 기준으로 확인해야 합니다.
-           - 해결 방향: API health와 업무 핵심 엔드포인트 응답, `psutil` 기반 시스템 메트릭을 수집하고 정의된 임계치와 비교하여 상태를 판정하는 `BaseTool`을 구현합니다.
-           - 구현 내용: `ServerHealthMonitorTool` 클래스를 구현하고 `/health`, `/api/v1/stocks/summary`, `/api/v1/orders/health`, CPU, 메모리, 부하 평균, 네트워크 연결 수를 읽기 전용으로 수집합니다.
-           - 기대 효과: 담당자 부재 중에도 싸피증권 서비스의 주요 장애 징후를 한눈에 파악할 수 있습니다.
-           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+        1. **통합 모니터링 Tool 스키마 정의**
+           - 문제: 시스템 지표와 주식 추세 분석 결과를 일관된 입력/출력 구조로 제공해야 합니다.
+           - 해결 방향: `SsafySecuritiesMonitorTool`을 `BaseTool`로 구현하고 모니터링 대상 종목, 조회 기간, 임계치, 출력 형식을 입력값으로 정의합니다.
+           - 구현 내용: Tool 입력 모델, 출력 모델, 상태값, 민감 정보 제거 규칙, 리포트 포맷을 정리합니다.
+           - 기대 효과: 프론트와 관리자 화면에서 같은 구조로 결과를 렌더링할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
 
-        2. **주식 시세 요약 및 주문 처리 health 수집**
-           - 문제: 서버 CPU와 메모리가 정상이어도 시세 요약 API 지연이나 주문 큐 적체가 있으면 사용자 체감 장애가 발생할 수 있습니다.
-           - 해결 방향: 시세 요약 응답 시간, 요약 데이터 개수, 마지막 갱신 시각, 주문 처리 큐 depth, 주문 worker 상태를 진단 항목으로 포함합니다.
-           - 구현 내용: 주식 시세 요약 API는 HTTP 200, latency, summaryCount, lastUpdated를 확인하고 주문 처리 health는 queueDepth, worker 상태, 최근 실패 건수를 확인합니다.
-           - 기대 효과: 신입사원이 단순 서버 수치뿐 아니라 싸피증권의 핵심 업무 흐름까지 함께 보고할 수 있습니다.
-           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+        2. **시스템 메트릭 수집 로직 구현**
+           - 문제: CPU, 메모리, 부하 평균을 신뢰할 수 있는 방식으로 수집해야 합니다.
+           - 해결 방향: `psutil` 기반 CPU 사용률, 메모리 사용률, 가용 메모리, 시스템 load average를 읽기 전용으로 수집합니다.
+           - 구현 내용: 전체 CPU, 코어별 CPU, memory percent, available memory, 1/5/15분 부하 평균을 수집합니다.
+           - 기대 효과: 운영 서버의 현재 부하 상태와 병목 가능성을 빠르게 파악할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
 
-        3. **메트릭 수집 로직 구현**
-           - 문제: 시스템 자원 및 네트워크 연결 수를 정밀하게 수집해야 합니다.
-           - 해결 방향: 전체/코어별 CPU 사용률, 가용 메모리, 현재 활성화된 네트워크 연결 수(`ESTABLISHED` 상태 등)를 수집하는 내부 메서드를 구현합니다.
-           - 기대 효과: 신뢰할 수 있는 시스템 메트릭 데이터를 확보합니다.
-           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+        3. **네트워크 상태 수집 로직 구현**
+           - 문제: 네트워크 병목은 CPU/메모리만으로 판단하기 어렵습니다.
+           - 해결 방향: 네트워크 송수신 바이트, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 이전 샘플 대비 변화량을 계산합니다.
+           - 구현 내용: `psutil.net_io_counters`, `psutil.net_connections`를 사용하되 권한 제한 시 `SKIPPED`로 안전하게 처리합니다.
+           - 기대 효과: 트래픽 급증이나 연결 오류 증가를 운영 부하와 함께 확인할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
 
-        4. **상태 분석 및 리포트 생성 로직 구현**
-           - 문제: 수집된 데이터를 기반으로 한 직관적인 판단 기준과 인수인계용 리포트 형식이 필요합니다.
-           - 해결 방향: 수집된 메트릭을 기반으로 정상, 주의, 위험 단계를 구분하고, 문제가 있는 경우 원인 후보와 권장 조치를 함께 제공합니다.
-           - 기대 효과: 신입사원이 이상 징후를 즉시 이해하고 관리자에게 보고할 수 있습니다.
-           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+        4. **주식 추세 분석 로직 구현**
+           - 문제: 단순 현재가만으로는 주식 흐름을 판단하기 어렵습니다.
+           - 해결 방향: 최근 가격 시계열을 기준으로 등락률, 이동평균, 거래량 변화, 변동성을 계산하고 추세 라벨을 산출합니다.
+           - 구현 내용: `lookback_minutes`, `symbols`, `trend_window` 입력을 기준으로 상승/하락/횡보/변동성 확대 상태를 판정합니다.
+           - 기대 효과: 운영 리포트에서 서버 부하와 주식 데이터 흐름을 함께 해석할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
 
-        5. **Tool 메타데이터 설정**
-           - 문제: Theseus 엔진이 Tool을 인식하고 실행할 수 있도록 메타데이터 정의가 필요합니다.
-           - 해결 방향: `toolName`, `displayName`, `inputs`, `outputs`, 권한 레벨이 정의된 meta.json 파일을 생성합니다.
-           - 기대 효과: Tool의 입력 파라미터와 출력 형식이 명확해져 일관된 인터페이스를 제공합니다.
-           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.meta.json`
+        5. **통합 리포트와 권한 메타데이터 구성**
+           - 문제: 분석 결과를 사용자 화면에서 바로 확인할 수 있는 리포트 형식과 Tool 메타데이터가 필요합니다.
+           - 해결 방향: JSON과 Markdown 결과를 모두 제공하고, 권한 레벨과 입력/출력 필드를 meta.json에 정의합니다.
+           - 구현 내용: 시스템 상태 요약, 주식 추세 요약, 위험 항목, 권장 조치, 수집 생략 사유를 포함합니다.
+           - 기대 효과: 운영자와 관리자가 같은 리포트를 기준으로 대응 여부를 판단할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.meta.json`
 
         ### 주의 사항
         - `psutil` 라이브러리 의존성이 필요합니다.
         - `/proc` 파일 시스템 접근 권한에 따라 일부 정보 수집이 제한될 수 있습니다.
-        - 시연 환경에서는 외부 네트워크 ping, traceroute, 정밀 패킷 캡처를 수행하지 않습니다.
+        - 주식 시계열 데이터는 read-only API 또는 제공된 샘플 데이터만 조회합니다.
+        - 외부 네트워크 ping, traceroute, 정밀 패킷 캡처, 부하 생성은 수행하지 않습니다.
         - 주문 생성, 주문 취소, 시세 데이터 변경, 서비스 재시작 같은 쓰기 작업은 수행하지 않습니다.
 
         ### 대안 / Plan B
-        - **Remote Workspace 전용 어댑터 활용**
-        - 커스텀 Tool의 보안 제약으로 인해 실제 외부 연결성 테스트나 정밀 네트워크 검사가 필요한 경우 기존 `remote_check_*` Tool을 `context.call_tool`로 호출합니다.
-        - 주식 시세 요약 또는 주문 처리 health가 별도 내부 서비스에 있을 경우, 해당 서비스의 read-only health endpoint만 호출하도록 어댑터를 분리합니다.
-        - 트레이드오프: 커스텀 Tool 내부에서 모든 것을 처리하는 대신 검증된 원격 체크 Tool을 조합하여 보안성과 정확성을 확보합니다.
+        - **read-only 데이터 어댑터 분리**
+        - 실제 주식 시계열 API가 환경별로 다르면 Tool 내부에 데이터 어댑터 인터페이스를 두고, 운영/시연/테스트 데이터 소스를 분리합니다.
+        - 정밀 네트워크 검사가 필요하면 커스텀 Tool 내부에서 직접 수행하지 않고 승인된 Remote Workspace read-only Tool을 조합합니다.
+        - 트레이드오프: 초기 구현은 조금 복잡해지지만 운영 환경 변경 없이 안전하게 확장할 수 있습니다.
 
         ### 실행 스펙
-        - 도구 이름: `server_health_monitor`
-        - 표시 이름: `싸피증권 인수인계 서버 진단`
-        - 권한 레벨: 1, 시스템과 서비스 상태만 읽는 안전한 진단 도구
+        - 도구 이름: `ssafy_securities_monitor`
+        - 표시 이름: `SSAFY 증권 통합 모니터링`
+        - 권한 레벨: 1, 시스템 지표와 주식 데이터를 읽기만 하는 안전한 진단 도구
         - 검증 전략: `core_sandbox_gate`
         - 상태값: `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO`
-        - 입력값: `threshold_cpu`, `threshold_mem`, `check_level`, `include_api_checks`
+        - 입력값: `symbols`, `lookback_minutes`, `threshold_cpu`, `threshold_mem`, `threshold_load`, `include_network`, `include_stock_trend`
         - MVP 제외: 인위적인 부하 생성, 외부 IP 대상 ICMP Ping/Traceroute, 주문 생성/수정/취소, 네트워크 설정 변경, 서비스 재시작
-        - 결과 필드: `check_id`, `category`, `target`, `status`, `evidence`, `sanitized_output`, `recommendation`
+        - 결과 필드: `summary`, `system_metrics`, `network_metrics`, `stock_trends`, `alerts`, `sanitized_output`, `recommendation`
 
         ### 검증 기준
-        - API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 상태가 포함된 JSON/Markdown 리포트가 에러 없이 생성되어야 합니다.
-        - Tool 실행 시 CPU, 메모리 수치가 현재 시스템 상태와 일치하는지 확인합니다.
-        - 주식 시세 요약 API 지연 또는 주문 처리 큐 적체 상황에서 `WARNING` 또는 `FAIL` 상태가 정상적으로 출력되는지 확인합니다.
-        - `subprocess`, shell 실행, 주문 쓰기 요청 등 금지된 동작이 없는지 코드 검토로 확인합니다.
+        - CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세가 포함된 JSON/Markdown 리포트가 에러 없이 생성되어야 합니다.
+        - Tool 실행 시 CPU, 메모리, load average 수치가 현재 시스템 상태와 크게 어긋나지 않아야 합니다.
+        - 주식 가격 급등락 또는 거래량 급증 데이터에서 추세 라벨과 경고 메시지가 정상적으로 출력되어야 합니다.
+        - `subprocess`, shell 실행, 주문 쓰기 요청, 시세 데이터 변경 등 금지된 동작이 없는지 코드 검토로 확인합니다.
       structuredPlanJson:
         version: 1
-        goal: "김대리 휴가 전 싸피증권 서버와 주식 처리 흐름을 통합 진단하는 읽기 전용 Tool 생성"
+        goal: "SSAFY 증권의 시스템 부하와 주식 추세를 통합 모니터링하는 읽기 전용 Tool 생성"
         summary:
-          requestedBy: "김대리"
-          handoverTarget: "신입사원"
-          toolName: "server_health_monitor"
-          displayName: "싸피증권 인수인계 서버 진단"
+          requestedBy: "operator"
+          toolName: "ssafy_securities_monitor"
+          displayName: "SSAFY 증권 통합 모니터링"
           permissionLevel: 1
-          goal: "김대리 휴가 기간 동안 신입사원이 싸피증권 API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 상태를 같은 기준으로 점검합니다."
-          problem: "담당자의 수동 점검 기준이 개인 노하우로 남아 있어 휴가 중 운영 공백과 보고 기준 불일치가 발생할 수 있습니다."
-          current_state: "API health, 시세 요약, 주문 처리 큐, 서버 리소스를 한 번에 확인하는 인수인계용 통합 진단 Tool이 없습니다."
-          approach: "read-only API health 확인과 psutil 기반 메트릭 수집, 임계치 비교, 상태 판정, JSON/Markdown 리포트 생성을 하나의 BaseTool로 구성합니다."
-          security_scope: "shell 실행, subprocess, socket 기반 외부 연결 테스트, 주문 생성/수정/취소, 네트워크 설정 변경, 서비스 재시작은 제외합니다."
-          scope: "싸피증권 운영 환경의 API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 상태를 읽기 전용으로 점검"
+          goal: "SSAFY 증권의 CPU, 네트워크, 메모리, 부하 평균과 주식 추세를 같은 리포트에서 점검합니다."
+          problem: "운영 부하 지표와 주식 추세 지표가 분리되어 있으면 장애 징후와 시장 데이터 변동을 함께 해석하기 어렵습니다."
+          current_state: "CPU, 메모리, 네트워크, load average, 주식 추세를 통합 분석하는 전용 Tool이 없습니다."
+          approach: "psutil 기반 시스템 메트릭 수집, read-only 주식 시계열 조회, 추세 계산, 임계치 판정, JSON/Markdown 리포트 생성을 하나의 BaseTool로 구성합니다."
+          security_scope: "shell 실행, subprocess, 주문 생성/수정/취소, 시세 데이터 변경, 네트워크 설정 변경, 서비스 재시작은 제외합니다."
+          scope: "SSAFY 증권 운영 환경의 시스템 지표와 주식 추세를 읽기 전용으로 점검"
           inputPromptExamples:
-            - "김대리 인수인계 업무 1 - 김대리가 만든 서버 모니터링 툴 사용"
-            - "server_health_monitor로 싸피증권 서버 상태 점검해줘"
-            - "싸피증권 API와 서버 리소스 상태를 모니터링하고 리포트해줘"
-            - "싸피증권 주식 시세 요약과 주문 처리 health까지 함께 점검해줘"
+            - "ssafy 증권의 cpu, 네트워크, 메모리, 부하 평균 그리고 주식의 추세를 모니터링 하는 툴을 만들어줘"
+            - "SSAFY 증권 서버 부하와 주식 추세를 같이 보는 모니터링 툴을 만들어줘"
+            - "CPU 메모리 네트워크와 주가 추세를 한 번에 리포트하는 도구를 설계해줘"
+            - "ssafy_securities_monitor로 시스템 상태와 종목 추세를 같이 분석하게 해줘"
           excluded:
             - "파일 수정"
             - "배포"
@@ -154,15 +158,15 @@ plan_replays:
             - "주문 생성/수정/취소"
             - "시세 데이터 변경"
         problem_analysis:
-          need: "김대리의 점검 기준을 신입사원이 그대로 재사용할 수 있도록 API, 주식 처리, 서버 리소스 상태를 하나의 리포트로 묶는 로직이 필요합니다."
-          constraint: "보안 정책상 shell 실행, 특정 네트워크 모듈 사용, 서비스 변경, 주문 쓰기 요청은 제한됩니다."
-          missing_capability: "개별 health check는 가능하지만 싸피증권 핵심 흐름인 시세 요약과 주문 처리 상태까지 포함한 인수인계용 통합 진단 Tool은 없습니다."
+          need: "운영 부하와 주식 추세를 같은 화면에서 해석할 수 있도록 시스템 메트릭과 주식 시계열 분석을 하나의 리포트로 묶는 로직이 필요합니다."
+          constraint: "보안 정책상 shell 실행, 서비스 변경, 주문 쓰기 요청, 시세 데이터 변경은 제한됩니다."
+          missing_capability: "개별 시스템 metric 확인은 가능하지만 CPU, 네트워크, 메모리, load average와 주식 추세를 통합 분석하는 Tool은 없습니다."
         execution_spec:
-          toolName: "server_health_monitor"
-          displayName: "싸피증권 인수인계 서버 진단"
+          toolName: "ssafy_securities_monitor"
+          displayName: "SSAFY 증권 통합 모니터링"
           targetFiles:
-            - "/custom-tools/5/server_health_monitor_tool.py"
-            - "/custom-tools/5/server_health_monitor_tool.meta.json"
+            - "/custom-tools/5/ssafy_securities_monitor_tool.py"
+            - "/custom-tools/5/ssafy_securities_monitor_tool.meta.json"
           permissionLevel: 1
           validationStrategy: "core_sandbox_gate"
           statusValues:
@@ -172,6 +176,17 @@ plan_replays:
             - "SKIPPED"
             - "INFO"
           inputFields:
+            - name: symbols
+              label: "모니터링 종목"
+              description: "추세를 분석할 SSAFY 증권 관심 종목 코드 목록입니다."
+              default:
+                - "005930"
+                - "000660"
+                - "035420"
+            - name: lookback_minutes
+              label: "추세 분석 기간"
+              description: "주식 가격과 거래량 추세를 계산할 최근 조회 기간입니다."
+              default: 60
             - name: threshold_cpu
               label: "CPU 임계치"
               description: "전체 CPU 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
@@ -180,31 +195,29 @@ plan_replays:
               label: "메모리 임계치"
               description: "메모리 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
               default: 85
-            - name: check_level
-              label: "점검 수준"
-              description: "handover 값이면 김대리 인수인계 기준의 API, 주식 처리, 서버 리소스 점검을 모두 수행합니다."
-              default: "handover"
-            - name: include_api_checks
-              label: "서비스 API 점검 포함"
-              description: "API health, 주식 시세 요약, 주문 처리 health를 리포트에 포함할지 결정합니다."
+            - name: threshold_load
+              label: "부하 평균 임계치"
+              description: "CPU 코어 수 대비 load average가 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 1.5
+            - name: include_network
+              label: "네트워크 지표 포함"
+              description: "네트워크 송수신량, 오류/드롭 수, 활성 연결 수를 리포트에 포함합니다."
+              default: true
+            - name: include_stock_trend
+              label: "주식 추세 포함"
+              description: "주식 가격 추세, 이동평균, 거래량 변화, 변동성 분석을 리포트에 포함합니다."
               default: true
           outputFields:
-            - name: check_id
-              label: "진단 항목 ID"
-            - name: category
-              label: "분류"
-            - name: target
-              label: "진단 대상"
-            - name: status
-              label: "상태"
-              allowedValues:
-                - "PASS: 정상"
-                - "WARNING: 주의"
-                - "FAIL: 위험"
-                - "SKIPPED: 수집 생략"
-                - "INFO: 참고 정보"
-            - name: evidence
-              label: "판정 근거"
+            - name: summary
+              label: "통합 요약"
+            - name: system_metrics
+              label: "CPU, 메모리, 부하 평균"
+            - name: network_metrics
+              label: "네트워크 상태"
+            - name: stock_trends
+              label: "주식 추세 분석"
+            - name: alerts
+              label: "경고 항목"
             - name: sanitized_output
               label: "민감 정보 제거 결과"
             - name: recommendation
@@ -221,120 +234,120 @@ plan_replays:
             - "JSON"
             - "Markdown"
           categories:
-            - "API"
-            - "StockSummary"
-            - "OrderProcessing"
             - "CPU"
             - "Memory"
             - "Network"
             - "Load"
+            - "StockTrend"
+            - "Alert"
           fields:
-            - "check_id"
-            - "category"
-            - "target"
-            - "status"
-            - "evidence"
+            - "summary"
+            - "system_metrics"
+            - "network_metrics"
+            - "stock_trends"
+            - "alerts"
             - "sanitized_output"
             - "recommendation"
         tasks:
           - id: task-1
-            title: "싸피증권 운영 상태 모니터링 Tool 구현"
-            problem: "김대리 휴가 중 신입사원이 API, 주식 시세 요약, 주문 처리, 서버 리소스 상태를 같은 기준으로 확인해야 합니다."
-            solution: "API health와 업무 핵심 엔드포인트 응답, psutil 기반 시스템 메트릭을 수집하고 정의된 임계치와 비교하여 PASS/WARNING/FAIL 상태를 판별하는 BaseTool을 구현합니다."
-            expected_effect: "담당자 부재 중에도 싸피증권 서비스의 주요 장애 징후를 한눈에 파악할 수 있습니다."
-            description: "/health, /api/v1/stocks/summary, /api/v1/orders/health, CPU, 메모리, 부하 평균, 네트워크 연결 수를 읽기 전용으로 수집합니다."
+            title: "통합 모니터링 Tool 스키마 정의"
+            problem: "시스템 지표와 주식 추세 분석 결과를 일관된 구조로 제공해야 합니다."
+            solution: "입력 모델, 출력 모델, 상태값, 리포트 포맷을 정의한 SsafySecuritiesMonitorTool을 구현합니다."
+            expected_effect: "프론트와 관리자 화면에서 같은 구조로 모니터링 결과를 렌더링할 수 있습니다."
+            description: "symbols, lookback_minutes, 임계치, 네트워크/주식 추세 포함 여부를 입력값으로 정의합니다."
             target_files:
-              - "/custom-tools/5/server_health_monitor_tool.py"
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
           - id: task-2
-            title: "주식 시세 요약 및 주문 처리 health 수집"
-            problem: "서버 자원이 정상이어도 시세 요약 API 지연이나 주문 큐 적체가 있으면 사용자 체감 장애가 발생할 수 있습니다."
-            solution: "시세 요약 응답 시간, 요약 데이터 개수, 마지막 갱신 시각, 주문 처리 큐 depth, 주문 worker 상태를 진단 항목으로 포함합니다."
-            expected_effect: "신입사원이 싸피증권의 핵심 업무 흐름까지 함께 점검하고 보고할 수 있습니다."
+            title: "시스템 메트릭 수집"
+            problem: "CPU, 메모리, 부하 평균을 신뢰할 수 있는 방식으로 수집해야 합니다."
+            solution: "psutil 기반으로 CPU 사용률, 메모리 사용률, 가용 메모리, 1/5/15분 부하 평균을 수집합니다."
+            expected_effect: "운영 서버의 현재 부하 상태와 병목 가능성을 빠르게 파악할 수 있습니다."
             target_files:
-              - "/custom-tools/5/server_health_monitor_tool.py"
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
           - id: task-3
-            title: "메트릭 수집 로직 구현"
-            problem: "시스템 자원과 네트워크 연결 수를 신뢰할 수 있는 방식으로 수집해야 합니다."
-            solution: "전체 CPU 사용률, 코어별 CPU 사용률, 메모리 사용률, 가용 메모리, ESTABLISHED 네트워크 연결 수를 내부 메서드로 수집합니다."
-            expected_effect: "리포트 생성에 필요한 기초 데이터를 안정적으로 확보합니다."
+            title: "네트워크 상태 수집"
+            problem: "네트워크 병목은 CPU/메모리 지표만으로 판단하기 어렵습니다."
+            solution: "송수신 바이트, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 권한 제한 시 SKIPPED로 처리합니다."
+            expected_effect: "트래픽 급증이나 연결 오류 증가를 운영 부하와 함께 확인할 수 있습니다."
             target_files:
-              - "/custom-tools/5/server_health_monitor_tool.py"
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
           - id: task-4
-            title: "상태 분석 및 리포트 생성"
-            problem: "수집된 숫자를 신입사원이 바로 이해할 수 있는 진단 결과로 바꾸는 기준이 필요합니다."
-            solution: "PASS, WARNING, FAIL, SKIPPED, INFO 상태를 부여하고 원인 후보와 권장 조치를 JSON/Markdown 리포트로 제공합니다."
-            expected_effect: "운영 점검 결과를 빠르게 이해하고 필요한 경우 관리자에게 보고할 수 있습니다."
+            title: "주식 추세 분석"
+            problem: "현재가만으로는 주식 흐름과 변동성 확대 여부를 판단하기 어렵습니다."
+            solution: "최근 가격 시계열에서 등락률, 이동평균, 거래량 변화, 변동성을 계산하고 추세 라벨을 산출합니다."
+            expected_effect: "서버 부하와 주식 데이터 흐름을 같은 리포트에서 함께 해석할 수 있습니다."
             target_files:
-              - "/custom-tools/5/server_health_monitor_tool.py"
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
           - id: task-5
-            title: "권한 및 승인 기준 정리"
-            problem: "원격 환경 접근 Tool은 안전 범위와 사용자 권한을 명확히 제한해야 합니다."
-            solution: "permissionLevel 1, 조회 전용, shell/subprocess 금지, 주문 쓰기 요청 금지, 서비스 변경 금지를 PLAN에 명시합니다."
-            expected_effect: "관리자가 승인 여부와 신입사원 사용 가능 범위를 빠르게 판단할 수 있습니다."
+            title: "통합 리포트 및 Tool 메타데이터 구성"
+            problem: "분석 결과를 화면에서 바로 확인할 수 있는 리포트 형식과 Tool 메타데이터가 필요합니다."
+            solution: "JSON/Markdown 리포트, 입력/출력 필드, permissionLevel 1, read-only 제약을 meta.json에 정의합니다."
+            expected_effect: "운영자와 관리자가 같은 리포트를 기준으로 대응 여부를 판단할 수 있습니다."
             target_files:
-              - "/custom-tools/5/server_health_monitor_tool.meta.json"
+              - "/custom-tools/5/ssafy_securities_monitor_tool.meta.json"
         plan_b:
-          title: "Remote Workspace 전용 어댑터 활용"
-          reason: "커스텀 Tool의 보안 제약으로 실제 외부 네트워크 ping 테스트나 정밀 패킷 캡처를 수행할 수 없습니다."
-          tradeoff: "커스텀 Tool 내부에서 모든 것을 처리하는 대신 기존 remote_check_* Tool을 context.call_tool로 호출해 보안성과 정확성을 확보합니다."
-          condition: "단순 메트릭 수집을 넘어 실제 외부 연결성 테스트나 별도 내부 서비스 health 확인이 반드시 필요한 경우 적용합니다."
+          title: "read-only 데이터 어댑터 분리"
+          reason: "주식 시계열 API와 네트워크 진단 방식은 운영/시연/테스트 환경마다 달라질 수 있습니다."
+          tradeoff: "데이터 어댑터 계층이 추가되지만 운영 환경 변경 없이 안전하게 확장할 수 있습니다."
+          condition: "실제 주식 데이터 API 또는 승인된 Remote Workspace read-only Tool을 조합해야 하는 경우 적용합니다."
         caveats:
           - "psutil 의존성이 필요하며 /proc 접근 권한에 따라 일부 수집값은 SKIPPED가 될 수 있습니다."
+          - "주식 시계열 데이터는 read-only API 또는 제공된 샘플 데이터만 조회합니다."
           - "외부 IP ping, traceroute, 부하 생성, 네트워크 설정 변경, 서비스 재시작은 MVP 범위에서 제외합니다."
           - "주문 생성/수정/취소와 시세 데이터 변경은 수행하지 않습니다."
-          - "정밀 외부 연결성 검사가 꼭 필요하면 Remote Workspace 전용 read-only adapter 또는 기존 remote_check_* Tool 조합을 Plan B로 사용합니다."
+          - "정밀 외부 연결성 검사가 꼭 필요하면 승인된 Remote Workspace read-only Tool 조합을 Plan B로 사용합니다."
         verification:
           success_criteria:
-            - "API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 네트워크 연결 상태가 포함된 JSON/Markdown 리포트가 에러 없이 생성됩니다."
-            - "threshold_cpu와 threshold_mem 값을 조정했을 때 WARNING/FAIL 판정이 정상적으로 바뀝니다."
-            - "주식 시세 요약 API 지연 또는 주문 큐 적체 시 WARNING/FAIL 판정이 출력됩니다."
-            - "subprocess, socket, 주문 쓰기 요청 등 금지된 동작을 사용하지 않습니다."
+            - "CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세가 포함된 JSON/Markdown 리포트가 에러 없이 생성됩니다."
+            - "threshold_cpu, threshold_mem, threshold_load 값을 조정했을 때 WARNING/FAIL 판정이 정상적으로 바뀝니다."
+            - "주식 가격 급등락 또는 거래량 급증 데이터에서 추세 라벨과 경고 메시지가 정상적으로 출력됩니다."
+            - "subprocess, shell 실행, 주문 쓰기 요청, 시세 데이터 변경 등 금지된 동작을 사용하지 않습니다."
           test_commands:
-            - "python3 -B -m py_compile /custom-tools/5/server_health_monitor_tool.py"
+            - "python3 -B -m py_compile /custom-tools/5/ssafy_securities_monitor_tool.py"
           manual_checks:
-            - "Tool 실행 결과의 CPU, 메모리 수치가 현재 시스템 상태와 크게 어긋나지 않는지 확인합니다."
-            - "주식 시세 요약 API와 주문 처리 health 결과가 리포트에 포함되는지 확인합니다."
-            - "리소스 사용량 또는 주문 큐 depth가 높은 환경에서 WARNING 또는 FAIL 리포트가 출력되는지 확인합니다."
-            - "코드 검토로 shell 실행, 서비스 변경, 주문 쓰기 로직이 없는지 확인합니다."
+            - "Tool 실행 결과의 CPU, 메모리, load average 수치가 현재 시스템 상태와 크게 어긋나지 않는지 확인합니다."
+            - "네트워크 송수신량과 연결 수가 리포트에 포함되는지 확인합니다."
+            - "주식 추세 결과에 등락률, 이동평균, 거래량 변화, 추세 라벨이 포함되는지 확인합니다."
+            - "코드 검토로 shell 실행, 서비스 변경, 주문 쓰기, 시세 데이터 변경 로직이 없는지 확인합니다."
       planSnapshot:
         schemaVersion: "1.0"
         planVersion: 1
         blocks:
           - blockId: overview
             title: "개요"
-            content: "김대리 휴가 중 신입사원이 싸피증권 API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 상태를 같은 기준으로 점검할 수 있도록 server_health_monitor Tool을 생성합니다."
+            content: "SSAFY 증권의 CPU, 네트워크, 메모리, 부하 평균과 주식 추세를 같은 기준으로 점검할 수 있도록 ssafy_securities_monitor Tool을 생성합니다."
             order: 1
           - blockId: problem-analysis
             title: "문제 분석"
-            content: "김대리의 수동 점검 노하우가 개인에게 남아 있어 담당자 부재 시 API, 시세 요약, 주문 처리 큐, 서버 리소스 상태를 일관된 기준으로 판단하기 어렵습니다."
+            content: "시스템 부하와 주식 추세가 분리되어 있으면 운영 장애 징후와 시장 데이터 변동을 함께 해석하기 어렵습니다."
             order: 2
           - blockId: task-1
-            title: "싸피증권 운영 상태 모니터링 Tool 구현"
-            content: "/health, /api/v1/stocks/summary, /api/v1/orders/health와 서버 리소스 메트릭을 읽기 전용으로 수집하고 PASS/WARNING/FAIL/SKIPPED/INFO 상태로 표준화합니다."
+            title: "통합 모니터링 Tool 스키마 정의"
+            content: "입력 모델, 출력 모델, 상태값, 민감 정보 제거 규칙, JSON/Markdown 리포트 포맷을 정의합니다."
             order: 3
           - blockId: task-2
-            title: "주식 시세 요약 및 주문 처리 health 수집"
-            content: "시세 요약 응답 시간, 요약 데이터 개수, 마지막 갱신 시각, 주문 처리 큐 depth, 주문 worker 상태를 진단 항목으로 포함합니다."
+            title: "시스템 메트릭 수집"
+            content: "CPU 사용률, 메모리 사용률, 가용 메모리, 1/5/15분 부하 평균을 psutil 기반으로 수집합니다."
             order: 4
           - blockId: task-3
-            title: "메트릭 수집 로직 구현"
-            content: "전체/코어별 CPU 사용률, 메모리 사용률과 가용 메모리, ESTABLISHED 네트워크 연결 수, 부하 평균을 수집합니다."
+            title: "네트워크 상태 수집"
+            content: "네트워크 송수신량, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 권한 제한 시 SKIPPED로 처리합니다."
             order: 5
           - blockId: task-4
-            title: "상태 분석 및 리포트 생성"
-            content: "수집값을 임계치와 비교해 상태를 판정하고 원인 후보, 판정 근거, 권장 조치를 포함한 JSON/Markdown 인수인계 리포트를 생성합니다."
+            title: "주식 추세 분석"
+            content: "최근 가격 시계열에서 등락률, 이동평균, 거래량 변화, 변동성을 계산해 상승/하락/횡보/변동성 확대 라벨을 산출합니다."
             order: 6
           - blockId: task-5
-            title: "권한 및 승인 기준 정리"
-            content: "permissionLevel 1, 조회 전용, shell 실행 금지, 주문 쓰기 요청 금지, 서비스 변경 금지 조건을 명시해 관리자 승인 대상으로 등록합니다."
+            title: "통합 리포트 및 Tool 메타데이터 구성"
+            content: "시스템 상태 요약, 주식 추세 요약, 경고 항목, 권장 조치, permissionLevel 1, read-only 제약을 Tool 메타데이터에 정의합니다."
             order: 7
           - blockId: plan-b
             title: "대안 / Plan B"
-            content: "외부 연결성 테스트 또는 별도 내부 서비스 health 확인이 필요하면 커스텀 Tool 내부에서 직접 처리하지 않고 기존 remote_check_* Tool을 context.call_tool로 호출하는 전용 어댑터를 사용합니다."
+            content: "주식 시계열 API 또는 네트워크 진단 방식이 환경별로 다르면 read-only 데이터 어댑터를 분리해 운영/시연/테스트 소스를 교체할 수 있게 합니다."
             order: 8
           - blockId: verification
             title: "검증 기준"
-            content: "API health, 주식 시세 요약, 주문 처리 health, CPU/메모리 수치, WARNING/FAIL 판정, 금지 모듈과 주문 쓰기 요청 미사용 여부를 확인합니다."
+            content: "CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세 리포트 생성과 금지 동작 미사용 여부를 확인합니다."
             order: 9
 
   - id: "2-server-health-monitor-tool-plan"
@@ -617,6 +630,7 @@ chat_replays:
         - "김대리가 만든 서버 모니터링 툴 사용"
         - "싸피증권 서버 상태 점검"
         - "주식 시세 요약 주문 처리 서버 모니터링"
+        - "주식 시세 요약 주문 처리 서버 모니터링 리포트를 작성해줘"
         - "server_health_monitor"
     timing:
       textChunkChars: 8
@@ -764,6 +778,7 @@ chat_replays:
         - "프론트 변경 실패"
         - "프론트엔드 변경 실패"
         - "프론트 변경 과정 실패"
+        - "싸피증권 랜딩페이지를 변경하고 싶어, 풋터를 추가하고 이미지를 깔끔하게 해줘"
     timing:
       textChunkChars: 8
       textChunkDelayMs: 45
@@ -831,6 +846,7 @@ chat_replays:
         - "싸피 증권 랜딩 페이지 변경"
         - "싸피증권 랜딩 변경"
         - "변경된 랜딩 페이지"
+        - "싸피증권 랜딩페이지를 변경해야해, 풋터를 추가하고 이미지를 깔끔하게 만들어줘"
     timing:
       textChunkChars: 10
       textChunkDelayMs: 35
