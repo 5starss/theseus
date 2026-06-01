@@ -642,12 +642,12 @@ chat_replays:
       afterToolsDelayMs: 550
     answer:
       beforeTools: |
-        김대리가 인수인계한 `server_health_monitor` Tool을 실행하겠습니다.
+        사용자가 요청한 작업에 대해 `ssafy_securities_monitor` Tool을 실행하여 파악하겠습니다.
         싸피증권 API health, 주식 시세 요약 API, 주문 처리 health와
         현재 서버의 CPU, 메모리, 부하, 네트워크 연결 상태를 읽기 전용으로 점검합니다.
 
       afterTools: |
-        `server_health_monitor` 실행 결과, 싸피증권 서버 상태는 전반적으로 정상 범위입니다.
+        `ssafy_securities_monitor` 실행 결과, 싸피증권 서버 상태는 전반적으로 정상 범위입니다.
 
         진단 요약
         - 전체 상태: `PASS`
@@ -664,10 +664,8 @@ chat_replays:
         - 즉시 조치가 필요한 이상 징후는 없습니다.
         - 네트워크 연결 수가 120개 이상으로 증가하거나 메모리 사용률이 85%를 넘으면 관리자에게 보고하면 됩니다.
         - 장 시작 전과 장 마감 전에 동일 Tool로 한 번씩 재점검하면 됩니다.
-
-        인수인계 업무 1을 완료했습니다.
     toolStack:
-      - toolName: server_health_monitor
+      - toolName: ssafy_securities_monitor
         toolUseId: demo-server-health-monitor-001
         toolInput:
           threshold_cpu: 80
@@ -684,7 +682,7 @@ chat_replays:
           include_load_average: true
           report_format: "json_markdown"
         started:
-          message: "server_health_monitor로 싸피증권 API와 서버 리소스 상태를 수집합니다."
+          message: "ssafy_securities_monitor로 싸피증권 API와 서버 리소스 상태를 수집합니다."
         completed:
           output: |
             {
