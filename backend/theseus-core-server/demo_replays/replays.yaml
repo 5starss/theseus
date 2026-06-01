@@ -12,7 +12,7 @@ plan_replays:
   - id: "1-kim-plan-before-vacation"
     modes: [PLAN]
     match:
-      remote: none
+      remote: any
       exact:
         - "ssafy 증권의 cpu, 네트워크, 메모리, 부하 평균 그리고 주식의 추세를 모니터링 하는 툴을 만들어줘"
       contains_all:
