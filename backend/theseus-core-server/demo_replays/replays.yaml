@@ -847,6 +847,10 @@ chat_replays:
         - "싸피증권 랜딩 변경"
         - "변경된 랜딩 페이지"
         - "싸피증권 랜딩페이지를 변경해야해, 풋터를 추가하고 이미지를 깔끔하게 만들어줘"
+        - "풋터를 변경하는데 해당 기업들을 넣어줘"
+        - "풋터에 후원사를 추가해줘"
+        - "삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 하이테크훈련센터"
+        - "후원사 목록을 풋터에 넣어줘"
     timing:
       textChunkChars: 10
       textChunkDelayMs: 35
@@ -858,21 +862,21 @@ chat_replays:
     answer:
       beforeTools: |
         관리자 권한으로 싸피증권 프론트 프로젝트를 확인하고,
-        랜딩 페이지의 메인 문구와 CTA 영역을 발표 시연용 문구로 변경하겠습니다.
+        랜딩 페이지 풋터에 후원사 목록을 추가하겠습니다.
 
       afterTools: |
-        싸피증권 랜딩 페이지 변경이 완료되었습니다.
+        싸피증권 랜딩 페이지 풋터 변경이 완료되었습니다.
 
         변경 사항 요약
-        - Hero 문구: “복잡한 투자를 더 쉽게, SSAFY Securities”로 변경했습니다.
-        - 보조 문구: 실시간 시세, 모의 투자, 리스크 학습 흐름이 드러나도록 정리했습니다.
-        - CTA 버튼: “모의투자 시작하기”와 “포트폴리오 보기”로 변경했습니다.
-        - 운영 배너: 김대리 인수인계 모니터링 Tool 점검 결과가 정상이라는 문구를 추가했습니다.
+        - Footer에 후원사/협력기관 영역을 추가했습니다.
+        - 후원사 목록: 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 하이테크훈련센터
+        - 기존 라우팅, API 호출, CTA 동작은 변경하지 않았습니다.
+        - 모바일에서도 후원사명이 줄바꿈되도록 반응형 grid 스타일을 적용했습니다.
 
         검토 결과
-        - 랜딩 페이지 컴포넌트의 문구와 스타일 class 적용을 확인했습니다.
-        - 라우팅, API 호출, 버튼 동작 로직은 변경하지 않았습니다.
-        - 새로고침 후 변경된 싸피증권 랜딩 페이지를 확인하실 수 있습니다.
+        - 랜딩 페이지 컴포넌트의 Footer 영역과 sponsor list 렌더링을 확인했습니다.
+        - 후원사명은 정적 데이터 배열로 관리해 이후 추가/삭제가 쉽도록 정리했습니다.
+        - 새로고침 후 변경된 싸피증권 랜딩 페이지 하단에서 확인하실 수 있습니다.
     toolStack:
       - toolName: remote_glob
         toolUseId: demo-landing-success-glob-001
@@ -890,7 +894,7 @@ chat_replays:
         toolInput:
           path: "frontend/src/pages/LandingPage.tsx"
         started:
-          message: "현재 싸피증권 랜딩 페이지의 Hero 문구와 CTA 구조를 확인합니다."
+          message: "현재 싸피증권 랜딩 페이지의 Footer 구조를 확인합니다."
         completed:
           output: |
             --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 1-220) ---
@@ -900,43 +904,38 @@ chat_replays:
             33  <Button variant="outline">서비스 둘러보기</Button>
             48  <section id="market-summary">
             76  <section id="portfolio-preview">
+            164 <footer className="border-t border-slate-200">
+            171     <span>SSAFY Securities</span>
+            176     <span>© 2026 SSAFY Securities</span>
 
       - toolName: frontend_landing_copy_planner
         toolUseId: demo-landing-success-plan-001
         toolInput:
           project_root: "frontend"
-          user_request: "싸피증권 랜딩 페이지를 발표 시연용으로 더 명확하게 바꿔줘. 메인 문구, 보조 문구, CTA, 운영 점검 정상 배너를 추가해줘."
+          user_request: "싸피증권 랜딩 페이지 풋터에 후원사 목록을 추가해줘. 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 하이테크훈련센터가 들어가야 해."
         started:
-          message: "랜딩 페이지에서 변경할 문구와 UI 블록을 추출합니다."
+          message: "랜딩 페이지 풋터에서 후원사 목록을 추가할 UI 블록을 추출합니다."
         completed:
           output: |
             {
               "status": "success",
-              "change_intent": "landing_copy_update",
+              "change_intent": "footer_sponsor_update",
               "target_files": [
                 "frontend/src/pages/LandingPage.tsx"
               ],
-              "copy_targets": [
-                {
-                  "element": "hero_headline",
-                  "current": "SSAFY Securities",
-                  "suggested": "복잡한 투자를 더 쉽게, SSAFY Securities"
-                },
-                {
-                  "element": "hero_description",
-                  "current": "모의 투자로 배우는 금융 서비스",
-                  "suggested": "실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼"
-                },
-                {
-                  "element": "primary_cta",
-                  "current": "시작하기",
-                  "suggested": "모의투자 시작하기"
-                },
-                {
-                  "element": "ops_banner",
-                  "current": null,
-                  "suggested": "운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS"
-                }
+              "footer_targets": [
+                "sponsor_section_title",
+                "sponsor_name_grid",
+                "responsive_footer_layout"
+              ],
+              "sponsors": [
+                "삼성전자",
+                "멀티캠퍼스",
+                "KB국민은행",
+                "하나은행",
+                "JA코리아",
+                "서울대",
+                "하이테크훈련센터"
               ]
             }
 
@@ -944,17 +943,16 @@ chat_replays:
         toolUseId: demo-landing-success-edit-001
         toolInput:
           path: "frontend/src/pages/LandingPage.tsx"
-          instruction: "라우팅과 API 로직은 유지하고 랜딩 페이지 문구, CTA, 운영 점검 배너만 변경"
+          instruction: "라우팅과 API 로직은 유지하고 랜딩 페이지 Footer에 후원사 목록만 추가"
         started:
-          message: "싸피증권 랜딩 페이지의 문구와 CTA 영역을 수정합니다."
+          message: "싸피증권 랜딩 페이지 Footer에 후원사 영역을 추가합니다."
         completed:
           output: |
             Updated frontend/src/pages/LandingPage.tsx
-            - Hero headline: 복잡한 투자를 더 쉽게, SSAFY Securities
-            - Hero description: 실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼
-            - Primary CTA: 모의투자 시작하기
-            - Secondary CTA: 포트폴리오 보기
-            - Ops banner: 운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS
+            - Added sponsors array: 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 하이테크훈련센터
+            - Added Footer sponsor section title: 함께하는 후원사
+            - Added responsive sponsor grid in footer
+            - Preserved existing routing, API calls, and button handlers
 
       - toolName: remote_read_file
         toolUseId: demo-landing-success-read-verify-001
@@ -963,16 +961,23 @@ chat_replays:
           offset: 18
           limit: 90
         started:
-          message: "변경된 Hero 문구와 CTA 텍스트를 다시 확인합니다."
+          message: "변경된 Footer 후원사 목록을 다시 확인합니다."
         completed:
           output: |
-            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 18-108) ---
-            21  <h1>복잡한 투자를 더 쉽게, SSAFY Securities</h1>
-            25  <p>실시간 시세와 모의 투자로 투자 흐름을 안전하게 학습하는 팀 프로젝트 플랫폼</p>
-            32  <Button>모의투자 시작하기</Button>
-            33  <Button variant="outline">포트폴리오 보기</Button>
-            41  <div className="rounded-xl border border-emerald-200 bg-emerald-50">
-            42      운영 점검 정상: 김대리 인수인계 모니터링 Tool 기준 PASS
+            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 150-205) ---
+            151 const sponsors = [
+            152   "삼성전자",
+            153   "멀티캠퍼스",
+            154   "KB국민은행",
+            155   "하나은행",
+            156   "JA코리아",
+            157   "서울대",
+            158   "하이테크훈련센터",
+            159 ];
+            176 <footer className="border-t border-slate-200 bg-white">
+            183   <p className="text-xs font-semibold text-slate-500">함께하는 후원사</p>
+            185   {sponsors.map((sponsor) => (
+            186     <span key={sponsor}>{sponsor}</span>
 
       - toolName: landing_visual_smoke_check
         toolUseId: demo-landing-success-final-check-001
@@ -992,6 +997,7 @@ chat_replays:
             - 데이터 조회 hook 변경 없음
 
             Render check:
-            - Hero headline 노출 확인
-            - CTA 2개 노출 확인
-            - 운영 점검 정상 배너 노출 확인
+            - Footer sponsor section 노출 확인
+            - 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행 노출 확인
+            - JA코리아, 서울대, 하이테크훈련센터 노출 확인
+            - 모바일 폭에서 후원사 grid 줄바꿈 확인
