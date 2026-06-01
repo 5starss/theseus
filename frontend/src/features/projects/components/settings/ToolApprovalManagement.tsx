@@ -40,7 +40,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
 
   const [approvals, setApprovals] = useState<ToolApprovalResponse[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [fetchTrigger, setFetchTrigger] = useState(0);
+
 
   // States for Detail Modal
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -54,8 +54,10 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   // Form states
   const [toolGrade, setToolGrade] = useState<number>(DEFAULT_TOOL_GRADE);
   const [reviewFeedback, setReviewFeedback] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadingStage, setLoadingStage] = useState('');
 
-  const refetch = () => setFetchTrigger(n => n + 1);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +76,7 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
     };
     fetchApprovals();
     return () => { cancelled = true; };
-  }, [projectId, fetchTrigger, filterStatus]);
+  }, [projectId, filterStatus]);
 
   const openDetailModal = (approval: ToolApprovalResponse) => {
     setSelectedDetailApproval(approval);
@@ -99,28 +101,57 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
   const handleActionSubmit = async () => {
     if (!selectedApproval) return;
 
+    setIsSubmitting(true);
     try {
       if (actionType === 'APPROVE') {
+        // 3초간 생성 중 표시 및 세부 진행 단계 연출 (3단계)
+        setLoadingStage('플랜을 분석하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        setLoadingStage('코드를 생성하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 8000));
+
+        setLoadingStage('샌드박스 환경에서 코드를 검증하고 있습니다...');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+
+        /* [기존 실서버 API 연동 코드]
         await approvalApi.approveTool(projectId, selectedApproval.toolApprovalId, {
           toolGrade,
           reviewFeedback
         });
-        toast.success('도구가 승인되었습니다.');
+        */
+
+        // 백엔드 API를 호출하지 않고 프론트엔드 상태에서 해당 항목을 제외하여 승인 연출
+        setApprovals((prev) =>
+          prev.filter((item) => item.toolApprovalId !== selectedApproval.toolApprovalId)
+        );
+        toast.success('도구가 성공적으로 승인 및 생성되었습니다.');
       } else {
         if (!reviewFeedback.trim()) {
           toast.warning('반려 사유를 입력해주세요.');
+          setIsSubmitting(false);
           return;
         }
+
+        /* [기존 실서버 API 연동 코드]
         await approvalApi.rejectTool(projectId, selectedApproval.toolApprovalId, {
           reviewFeedback
         });
+        */
+
+        // 반려 시에도 API 호출 대신 프론트엔드 목록에서 제외 처리
+        setApprovals((prev) =>
+          prev.filter((item) => item.toolApprovalId !== selectedApproval.toolApprovalId)
+        );
         toast.success('도구가 반려되었습니다.');
       }
       setIsActionOpen(false);
-      refetch();
+      // refetch(); // [기존 목록 새로고침 연동 코드]
     } catch (err) {
       console.error('Action failed', err);
       toast.error('처리에 실패했습니다.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -233,7 +264,9 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
           )}
         </CardContent>
 
-        <Dialog open={isActionOpen} onOpenChange={setIsActionOpen}>
+        <Dialog open={isActionOpen} onOpenChange={(open) => {
+          if (!isSubmitting) setIsActionOpen(open);
+        }}>
           <DialogContent className="max-w-lg bg-[#0b1424] border-slate-800 text-slate-100">
             <DialogHeader>
               <DialogTitle className="text-white flex items-center gap-2">
@@ -244,71 +277,84 @@ export function ToolApprovalManagement({ projectId }: ToolApprovalManagementProp
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-6 py-6">
-              <div className="space-y-4">
-                <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">승인 결정</Label>
-                <div className="flex gap-4">
+            {isSubmitting ? (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <div className="w-12 h-12 border-4 border-slate-800 border-t-blue-500 rounded-full animate-spin mb-6" />
+                <p className="text-base font-bold text-blue-400 mb-2 animate-pulse">도구 엔진 동적 생성 중</p>
+                <p className="text-sm font-medium text-slate-300 transition-all duration-300 min-h-[40px] text-center px-4">
+                  {loadingStage || '도구를 생성하고 서버에 반영하는 중입니다...'}
+                </p>
+                <p className="text-[10px] text-slate-600 mt-4 font-mono">SANDBOX CONTAINER ENGINES ACTIVE</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-6 py-6">
+                  <div className="space-y-4">
+                    <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">승인 결정</Label>
+                    <div className="flex gap-4">
+                      <Button
+                        variant={actionType === 'APPROVE' ? 'default' : 'outline'}
+                        onClick={() => setActionType('APPROVE')}
+                        className={cn(
+                          "flex-1 font-bold",
+                          actionType === 'APPROVE' ? "bg-green-600 hover:bg-green-700 text-white" : "border-slate-800 text-slate-500 hover:bg-slate-900"
+                        )}
+                      >
+                        승인 (Approve)
+                      </Button>
+                      <Button
+                        variant={actionType === 'REJECT' ? 'default' : 'outline'}
+                        onClick={() => setActionType('REJECT')}
+                        className={cn(
+                          "flex-1 font-bold",
+                          actionType === 'REJECT' ? "bg-red-600 hover:bg-red-700 text-white" : "border-slate-800 text-slate-500 hover:bg-slate-900"
+                        )}
+                      >
+                        반려 (Reject)
+                      </Button>
+                    </div>
+                  </div>
+
+                  {actionType === 'APPROVE' && !selectedApproval?.toolPlanId && (
+                    <div className="space-y-2">
+                      <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">도구 등급 (Tool Grade)</Label>
+                      <Input
+                        type="number"
+                        min={DEFAULT_TOOL_GRADE}
+                        max={MAX_PUBLIC_TOOL_GRADE}
+                        value={toolGrade}
+                        onChange={(e) => setToolGrade(clampPublicToolGrade(Number(e.target.value)))}
+                        className="bg-slate-950 border-slate-800 text-white"
+                      />
+                      <p className="text-[11px] text-slate-500">Public range: 1-99</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">검토 의견</Label>
+                    <Textarea
+                      placeholder={actionType === 'APPROVE' ? "승인 사유를 입력하세요..." : "반려 사유를 입력하세요..."}
+                      value={reviewFeedback}
+                      onChange={(e) => setReviewFeedback(e.target.value)}
+                      className="bg-slate-950 border-slate-800 text-white min-h-[100px]"
+                    />
+                  </div>
+                </div>
+
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={() => setIsActionOpen(false)} className="border-slate-700 text-slate-300 hover:bg-slate-800">취소</Button>
                   <Button
-                    variant={actionType === 'APPROVE' ? 'default' : 'outline'}
-                    onClick={() => setActionType('APPROVE')}
+                    onClick={handleActionSubmit}
                     className={cn(
-                      "flex-1 font-bold",
-                      actionType === 'APPROVE' ? "bg-green-600 hover:bg-green-700 text-white" : "border-slate-800 text-slate-500 hover:bg-slate-900"
+                      "font-bold px-8",
+                      actionType === 'APPROVE' ? "bg-green-600 hover:bg-green-700 text-white" : "bg-red-600 hover:bg-red-700 text-white"
                     )}
                   >
-                    승인 (Approve)
+                    {actionType === 'APPROVE' ? '승인하기' : '반려하기'}
                   </Button>
-                  <Button
-                    variant={actionType === 'REJECT' ? 'default' : 'outline'}
-                    onClick={() => setActionType('REJECT')}
-                    className={cn(
-                      "flex-1 font-bold",
-                      actionType === 'REJECT' ? "bg-red-600 hover:bg-red-700 text-white" : "border-slate-800 text-slate-500 hover:bg-slate-900"
-                    )}
-                  >
-                    반려 (Reject)
-                  </Button>
-                </div>
-              </div>
-
-              {actionType === 'APPROVE' && !selectedApproval?.toolPlanId && (
-                <div className="space-y-2">
-                  <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">도구 등급 (Tool Grade)</Label>
-                  <Input
-                    type="number"
-                    min={DEFAULT_TOOL_GRADE}
-                    max={MAX_PUBLIC_TOOL_GRADE}
-                    value={toolGrade}
-                    onChange={(e) => setToolGrade(clampPublicToolGrade(Number(e.target.value)))}
-                    className="bg-slate-950 border-slate-800 text-white"
-                  />
-                  <p className="text-[11px] text-slate-500">Public range: 1-99</p>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <Label className="text-slate-300 uppercase text-[10px] font-bold tracking-widest">검토 의견</Label>
-                <Textarea
-                  placeholder={actionType === 'APPROVE' ? "승인 사유를 입력하세요..." : "반려 사유를 입력하세요..."}
-                  value={reviewFeedback}
-                  onChange={(e) => setReviewFeedback(e.target.value)}
-                  className="bg-slate-950 border-slate-800 text-white min-h-[100px]"
-                />
-              </div>
-            </div>
-
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={() => setIsActionOpen(false)} className="border-slate-700 text-slate-300 hover:bg-slate-800">취소</Button>
-              <Button
-                onClick={handleActionSubmit}
-                className={cn(
-                  "font-bold px-8",
-                  actionType === 'APPROVE' ? "bg-green-600 hover:bg-green-700 text-white" : "bg-red-600 hover:bg-red-700 text-white"
-                )}
-              >
-                {actionType === 'APPROVE' ? '승인하기' : '반려하기'}
-              </Button>
-            </DialogFooter>
+                </DialogFooter>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </Card>

@@ -4,133 +4,1000 @@ version: 1
 # 시연 키워드, 답변, Tool 카드 내용만 여기서 바꾸면 됩니다.
 # remote: none     -> Remote Workspace 미선택일 때만 매칭
 # remote: required -> Remote Workspace 선택 시에만 매칭
+# remote: any      -> Remote Workspace 전달 여부와 관계없이 매칭
+# timing.textChunkChars    -> 답변을 몇 글자씩 스트리밍할지 설정
+# timing.*DelayMs          -> 각 구간별 대기 시간(ms) 설정
 
 plan_replays:
   - id: "1-kim-plan-before-vacation"
     modes: [PLAN]
     match:
       remote: none
-      contains_any:
-        - "휴가 전 플랜 생성"
-        - "인수인계 모니터링 툴 계획"
+      exact:
+        - "ssafy 증권의 cpu, 네트워크, 메모리, 부하 평균 그리고 주식의 추세를 모니터링 하는 툴을 만들어줘"
+      contains_all:
+        - "ssafy 증권"
+        - "cpu"
+        - "네트워크"
+        - "메모리"
+        - "부하 평균"
+        - "주식"
+        - "추세"
+        - "모니터링"
     progress:
       - message: REQUEST_RECEIVED
         progressRate: 5
+        delayMs: 700
+        chunk: "PLAN 요청을 접수했습니다.\n"
       - message: PLAN_DRAFTING
-        progressRate: 40
+        progressRate: 20
+        delayMs: 1600
+        chunk: "SSAFY 증권 운영 지표와 주식 추세 모니터링 요구사항을 분석하고 있습니다.\n"
+      - message: PLAN_DRAFTING
+        progressRate: 45
+        delayMs: 2400
+        chunk: "CPU, 메모리, 부하 평균, 네트워크 I/O, 주가 추세 계산 항목을 Tool 명세로 정리하고 있습니다.\n"
+      - message: PLAN_STRUCTURING
+        progressRate: 72
+        delayMs: 1700
+        chunk: "수집 로직, 임계치 판정, 추세 분석 결과, 출력 리포트 필드를 PLAN 카드 구조로 변환하고 있습니다.\n"
+      - message: PLAN_VALIDATING
+        progressRate: 90
+        delayMs: 1300
+        chunk: "운영 환경을 변경하지 않는 읽기 전용 Tool인지 검증 기준을 확인하고 있습니다.\n"
       - message: PLAN_COMPLETED
         progressRate: 100
+        delayMs: 900
+        chunk: "PLAN 초안이 준비되었습니다.\n"
     result:
       rawMarkdown: |
-        ## 김대리 휴가 전 인수인계 모니터링 Tool 생성 PLAN
+        ## SSAFY 증권 통합 모니터링 Tool 생성 PLAN
 
-        김대리 부재 중 신입사원이 원격 운영 환경에서 API 상태와 시스템 리소스를 확인할 수 있도록
-        읽기 전용 모니터링 Tool을 생성합니다.
+        SSAFY 증권 서비스의 CPU, 네트워크, 메모리, 부하 평균과 주요 주식 종목의 가격 추세를
+        한 번에 점검하는 읽기 전용 `ssafy_securities_monitor` Tool을 생성합니다.
+
+        이 Tool은 운영 서버의 시스템 지표와 주식 시계열 데이터를 함께 수집해
+        서비스 부하와 시장 데이터 흐름을 같은 리포트에서 비교할 수 있도록 설계합니다.
+        시스템 지표는 `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO` 상태로 요약하고,
+        주식 추세는 상승, 하락, 횡보, 변동성 확대 같은 분석 라벨과 근거 지표를 함께 제공합니다.
+
+        ### 문제 분석
+        - CPU, 메모리, 부하 평균, 네트워크 I/O가 개별 지표로 흩어져 있으면 서비스 병목을 한눈에 판단하기 어렵습니다.
+        - 증권 서비스는 시스템 상태가 정상이어도 주식 데이터 갱신 지연, 거래량 급증, 가격 급변이 함께 발생할 수 있습니다.
+        - 현재는 운영 부하와 주식 추세를 같은 기준으로 묶어 보여주는 통합 모니터링 Tool이 없습니다.
+        - 보안 정책상 shell 실행, 서비스 재시작, 네트워크 설정 변경, 주문 생성/수정/취소는 수행하지 않습니다.
+
+        ### 주요 작업
+        1. **통합 모니터링 Tool 스키마 정의**
+           - 문제: 시스템 지표와 주식 추세 분석 결과를 일관된 입력/출력 구조로 제공해야 합니다.
+           - 해결 방향: `SsafySecuritiesMonitorTool`을 `BaseTool`로 구현하고 모니터링 대상 종목, 조회 기간, 임계치, 출력 형식을 입력값으로 정의합니다.
+           - 구현 내용: Tool 입력 모델, 출력 모델, 상태값, 민감 정보 제거 규칙, 리포트 포맷을 정리합니다.
+           - 기대 효과: 프론트와 관리자 화면에서 같은 구조로 결과를 렌더링할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
+
+        2. **시스템 메트릭 수집 로직 구현**
+           - 문제: CPU, 메모리, 부하 평균을 신뢰할 수 있는 방식으로 수집해야 합니다.
+           - 해결 방향: `psutil` 기반 CPU 사용률, 메모리 사용률, 가용 메모리, 시스템 load average를 읽기 전용으로 수집합니다.
+           - 구현 내용: 전체 CPU, 코어별 CPU, memory percent, available memory, 1/5/15분 부하 평균을 수집합니다.
+           - 기대 효과: 운영 서버의 현재 부하 상태와 병목 가능성을 빠르게 파악할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
+
+        3. **네트워크 상태 수집 로직 구현**
+           - 문제: 네트워크 병목은 CPU/메모리만으로 판단하기 어렵습니다.
+           - 해결 방향: 네트워크 송수신 바이트, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 이전 샘플 대비 변화량을 계산합니다.
+           - 구현 내용: `psutil.net_io_counters`, `psutil.net_connections`를 사용하되 권한 제한 시 `SKIPPED`로 안전하게 처리합니다.
+           - 기대 효과: 트래픽 급증이나 연결 오류 증가를 운영 부하와 함께 확인할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
+
+        4. **주식 추세 분석 로직 구현**
+           - 문제: 단순 현재가만으로는 주식 흐름을 판단하기 어렵습니다.
+           - 해결 방향: 최근 가격 시계열을 기준으로 등락률, 이동평균, 거래량 변화, 변동성을 계산하고 추세 라벨을 산출합니다.
+           - 구현 내용: `lookback_minutes`, `symbols`, `trend_window` 입력을 기준으로 상승/하락/횡보/변동성 확대 상태를 판정합니다.
+           - 기대 효과: 운영 리포트에서 서버 부하와 주식 데이터 흐름을 함께 해석할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.py`
+
+        5. **통합 리포트와 권한 메타데이터 구성**
+           - 문제: 분석 결과를 사용자 화면에서 바로 확인할 수 있는 리포트 형식과 Tool 메타데이터가 필요합니다.
+           - 해결 방향: JSON과 Markdown 결과를 모두 제공하고, 권한 레벨과 입력/출력 필드를 meta.json에 정의합니다.
+           - 구현 내용: 시스템 상태 요약, 주식 추세 요약, 위험 항목, 권장 조치, 수집 생략 사유를 포함합니다.
+           - 기대 효과: 운영자와 관리자가 같은 리포트를 기준으로 대응 여부를 판단할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/ssafy_securities_monitor_tool.meta.json`
+
+        ### 주의 사항
+        - `psutil` 라이브러리 의존성이 필요합니다.
+        - `/proc` 파일 시스템 접근 권한에 따라 일부 정보 수집이 제한될 수 있습니다.
+        - 주식 시계열 데이터는 read-only API 또는 제공된 샘플 데이터만 조회합니다.
+        - 외부 네트워크 ping, traceroute, 정밀 패킷 캡처, 부하 생성은 수행하지 않습니다.
+        - 주문 생성, 주문 취소, 시세 데이터 변경, 서비스 재시작 같은 쓰기 작업은 수행하지 않습니다.
+
+        ### 대안 / Plan B
+        - **read-only 데이터 어댑터 분리**
+        - 실제 주식 시계열 API가 환경별로 다르면 Tool 내부에 데이터 어댑터 인터페이스를 두고, 운영/시연/테스트 데이터 소스를 분리합니다.
+        - 정밀 네트워크 검사가 필요하면 커스텀 Tool 내부에서 직접 수행하지 않고 승인된 Remote Workspace read-only Tool을 조합합니다.
+        - 트레이드오프: 초기 구현은 조금 복잡해지지만 운영 환경 변경 없이 안전하게 확장할 수 있습니다.
+
+        ### 실행 스펙
+        - 도구 이름: `ssafy_securities_monitor`
+        - 표시 이름: `SSAFY 증권 통합 모니터링`
+        - 권한 레벨: 1, 시스템 지표와 주식 데이터를 읽기만 하는 안전한 진단 도구
+        - 검증 전략: `core_sandbox_gate`
+        - 상태값: `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO`
+        - 입력값: `symbols`, `lookback_minutes`, `threshold_cpu`, `threshold_mem`, `threshold_load`, `include_network`, `include_stock_trend`
+        - MVP 제외: 인위적인 부하 생성, 외부 IP 대상 ICMP Ping/Traceroute, 주문 생성/수정/취소, 네트워크 설정 변경, 서비스 재시작
+        - 결과 필드: `summary`, `system_metrics`, `network_metrics`, `stock_trends`, `alerts`, `sanitized_output`, `recommendation`
+
+        ### 검증 기준
+        - CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세가 포함된 JSON/Markdown 리포트가 에러 없이 생성되어야 합니다.
+        - Tool 실행 시 CPU, 메모리, load average 수치가 현재 시스템 상태와 크게 어긋나지 않아야 합니다.
+        - 주식 가격 급등락 또는 거래량 급증 데이터에서 추세 라벨과 경고 메시지가 정상적으로 출력되어야 합니다.
+        - `subprocess`, shell 실행, 주문 쓰기 요청, 시세 데이터 변경 등 금지된 동작이 없는지 코드 검토로 확인합니다.
       structuredPlanJson:
         version: 1
-        goal: "김대리 휴가 전 인수인계 모니터링 Tool 생성"
+        goal: "SSAFY 증권의 시스템 부하와 주식 추세를 통합 모니터링하는 읽기 전용 Tool 생성"
+        summary:
+          requestedBy: "operator"
+          toolName: "ssafy_securities_monitor"
+          displayName: "SSAFY 증권 통합 모니터링"
+          permissionLevel: 1
+          goal: "SSAFY 증권의 CPU, 네트워크, 메모리, 부하 평균과 주식 추세를 같은 리포트에서 점검합니다."
+          problem: "운영 부하 지표와 주식 추세 지표가 분리되어 있으면 장애 징후와 시장 데이터 변동을 함께 해석하기 어렵습니다."
+          current_state: "CPU, 메모리, 네트워크, load average, 주식 추세를 통합 분석하는 전용 Tool이 없습니다."
+          approach: "psutil 기반 시스템 메트릭 수집, read-only 주식 시계열 조회, 추세 계산, 임계치 판정, JSON/Markdown 리포트 생성을 하나의 BaseTool로 구성합니다."
+          security_scope: "shell 실행, subprocess, 주문 생성/수정/취소, 시세 데이터 변경, 네트워크 설정 변경, 서비스 재시작은 제외합니다."
+          scope: "SSAFY 증권 운영 환경의 시스템 지표와 주식 추세를 읽기 전용으로 점검"
+          inputPromptExamples:
+            - "ssafy 증권의 cpu, 네트워크, 메모리, 부하 평균 그리고 주식의 추세를 모니터링 하는 툴을 만들어줘"
+            - "SSAFY 증권 서버 부하와 주식 추세를 같이 보는 모니터링 툴을 만들어줘"
+            - "CPU 메모리 네트워크와 주가 추세를 한 번에 리포트하는 도구를 설계해줘"
+            - "ssafy_securities_monitor로 시스템 상태와 종목 추세를 같이 분석하게 해줘"
+          excluded:
+            - "파일 수정"
+            - "배포"
+            - "서비스 재시작"
+            - "shell 실행"
+            - "주문 생성/수정/취소"
+            - "시세 데이터 변경"
+        problem_analysis:
+          need: "운영 부하와 주식 추세를 같은 화면에서 해석할 수 있도록 시스템 메트릭과 주식 시계열 분석을 하나의 리포트로 묶는 로직이 필요합니다."
+          constraint: "보안 정책상 shell 실행, 서비스 변경, 주문 쓰기 요청, 시세 데이터 변경은 제한됩니다."
+          missing_capability: "개별 시스템 metric 확인은 가능하지만 CPU, 네트워크, 메모리, load average와 주식 추세를 통합 분석하는 Tool은 없습니다."
+        execution_spec:
+          toolName: "ssafy_securities_monitor"
+          displayName: "SSAFY 증권 통합 모니터링"
+          targetFiles:
+            - "/custom-tools/5/ssafy_securities_monitor_tool.py"
+            - "/custom-tools/5/ssafy_securities_monitor_tool.meta.json"
+          permissionLevel: 1
+          validationStrategy: "core_sandbox_gate"
+          statusValues:
+            - "PASS"
+            - "WARNING"
+            - "FAIL"
+            - "SKIPPED"
+            - "INFO"
+          inputFields:
+            - name: symbols
+              label: "모니터링 종목"
+              description: "추세를 분석할 SSAFY 증권 관심 종목 코드 목록입니다."
+              default:
+                - "005930"
+                - "000660"
+                - "035420"
+            - name: lookback_minutes
+              label: "추세 분석 기간"
+              description: "주식 가격과 거래량 추세를 계산할 최근 조회 기간입니다."
+              default: 60
+            - name: threshold_cpu
+              label: "CPU 임계치"
+              description: "전체 CPU 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 80
+            - name: threshold_mem
+              label: "메모리 임계치"
+              description: "메모리 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 85
+            - name: threshold_load
+              label: "부하 평균 임계치"
+              description: "CPU 코어 수 대비 load average가 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 1.5
+            - name: include_network
+              label: "네트워크 지표 포함"
+              description: "네트워크 송수신량, 오류/드롭 수, 활성 연결 수를 리포트에 포함합니다."
+              default: true
+            - name: include_stock_trend
+              label: "주식 추세 포함"
+              description: "주식 가격 추세, 이동평균, 거래량 변화, 변동성 분석을 리포트에 포함합니다."
+              default: true
+          outputFields:
+            - name: summary
+              label: "통합 요약"
+            - name: system_metrics
+              label: "CPU, 메모리, 부하 평균"
+            - name: network_metrics
+              label: "네트워크 상태"
+            - name: stock_trends
+              label: "주식 추세 분석"
+            - name: alerts
+              label: "경고 항목"
+            - name: sanitized_output
+              label: "민감 정보 제거 결과"
+            - name: recommendation
+              label: "권장 조치"
+          mvpExclusions:
+            - "인위적인 부하 생성 또는 Stress Testing"
+            - "외부 IP 대상 ICMP Ping/Traceroute"
+            - "주문 생성/수정/취소"
+            - "시세 데이터 변경"
+            - "네트워크 설정 변경"
+            - "서비스 재시작"
+        report_design:
+          formats:
+            - "JSON"
+            - "Markdown"
+          categories:
+            - "CPU"
+            - "Memory"
+            - "Network"
+            - "Load"
+            - "StockTrend"
+            - "Alert"
+          fields:
+            - "summary"
+            - "system_metrics"
+            - "network_metrics"
+            - "stock_trends"
+            - "alerts"
+            - "sanitized_output"
+            - "recommendation"
         tasks:
           - id: task-1
-            title: "원격 운영 진단 Tool 명세 작성"
-            problem: "신입사원이 API 상태와 리소스를 같은 기준으로 확인해야 합니다."
-            solution: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
-            expected_effect: "휴가 기간 중 운영 진단 업무를 표준화합니다."
+            title: "통합 모니터링 Tool 스키마 정의"
+            problem: "시스템 지표와 주식 추세 분석 결과를 일관된 구조로 제공해야 합니다."
+            solution: "입력 모델, 출력 모델, 상태값, 리포트 포맷을 정의한 SsafySecuritiesMonitorTool을 구현합니다."
+            expected_effect: "프론트와 관리자 화면에서 같은 구조로 모니터링 결과를 렌더링할 수 있습니다."
+            description: "symbols, lookback_minutes, 임계치, 네트워크/주식 추세 포함 여부를 입력값으로 정의합니다."
+            target_files:
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
           - id: task-2
-            title: "권한 및 승인 기준 정리"
-            problem: "원격 환경 접근 Tool은 관리자 승인과 권한 등급 확인이 필요합니다."
-            solution: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
-            expected_effect: "관리자가 생성 승인 여부를 빠르게 판단할 수 있습니다."
+            title: "시스템 메트릭 수집"
+            problem: "CPU, 메모리, 부하 평균을 신뢰할 수 있는 방식으로 수집해야 합니다."
+            solution: "psutil 기반으로 CPU 사용률, 메모리 사용률, 가용 메모리, 1/5/15분 부하 평균을 수집합니다."
+            expected_effect: "운영 서버의 현재 부하 상태와 병목 가능성을 빠르게 파악할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
+          - id: task-3
+            title: "네트워크 상태 수집"
+            problem: "네트워크 병목은 CPU/메모리 지표만으로 판단하기 어렵습니다."
+            solution: "송수신 바이트, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 권한 제한 시 SKIPPED로 처리합니다."
+            expected_effect: "트래픽 급증이나 연결 오류 증가를 운영 부하와 함께 확인할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
+          - id: task-4
+            title: "주식 추세 분석"
+            problem: "현재가만으로는 주식 흐름과 변동성 확대 여부를 판단하기 어렵습니다."
+            solution: "최근 가격 시계열에서 등락률, 이동평균, 거래량 변화, 변동성을 계산하고 추세 라벨을 산출합니다."
+            expected_effect: "서버 부하와 주식 데이터 흐름을 같은 리포트에서 함께 해석할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/ssafy_securities_monitor_tool.py"
+          - id: task-5
+            title: "통합 리포트 및 Tool 메타데이터 구성"
+            problem: "분석 결과를 화면에서 바로 확인할 수 있는 리포트 형식과 Tool 메타데이터가 필요합니다."
+            solution: "JSON/Markdown 리포트, 입력/출력 필드, permissionLevel 1, read-only 제약을 meta.json에 정의합니다."
+            expected_effect: "운영자와 관리자가 같은 리포트를 기준으로 대응 여부를 판단할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/ssafy_securities_monitor_tool.meta.json"
+        plan_b:
+          title: "read-only 데이터 어댑터 분리"
+          reason: "주식 시계열 API와 네트워크 진단 방식은 운영/시연/테스트 환경마다 달라질 수 있습니다."
+          tradeoff: "데이터 어댑터 계층이 추가되지만 운영 환경 변경 없이 안전하게 확장할 수 있습니다."
+          condition: "실제 주식 데이터 API 또는 승인된 Remote Workspace read-only Tool을 조합해야 하는 경우 적용합니다."
+        caveats:
+          - "psutil 의존성이 필요하며 /proc 접근 권한에 따라 일부 수집값은 SKIPPED가 될 수 있습니다."
+          - "주식 시계열 데이터는 read-only API 또는 제공된 샘플 데이터만 조회합니다."
+          - "외부 IP ping, traceroute, 부하 생성, 네트워크 설정 변경, 서비스 재시작은 MVP 범위에서 제외합니다."
+          - "주문 생성/수정/취소와 시세 데이터 변경은 수행하지 않습니다."
+          - "정밀 외부 연결성 검사가 꼭 필요하면 승인된 Remote Workspace read-only Tool 조합을 Plan B로 사용합니다."
         verification:
           success_criteria:
-            - "PLAN 패널에 task가 표시됩니다."
-            - "생성 승인 요청 버튼을 누를 수 있습니다."
+            - "CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세가 포함된 JSON/Markdown 리포트가 에러 없이 생성됩니다."
+            - "threshold_cpu, threshold_mem, threshold_load 값을 조정했을 때 WARNING/FAIL 판정이 정상적으로 바뀝니다."
+            - "주식 가격 급등락 또는 거래량 급증 데이터에서 추세 라벨과 경고 메시지가 정상적으로 출력됩니다."
+            - "subprocess, shell 실행, 주문 쓰기 요청, 시세 데이터 변경 등 금지된 동작을 사용하지 않습니다."
+          test_commands:
+            - "python3 -B -m py_compile /custom-tools/5/ssafy_securities_monitor_tool.py"
+          manual_checks:
+            - "Tool 실행 결과의 CPU, 메모리, load average 수치가 현재 시스템 상태와 크게 어긋나지 않는지 확인합니다."
+            - "네트워크 송수신량과 연결 수가 리포트에 포함되는지 확인합니다."
+            - "주식 추세 결과에 등락률, 이동평균, 거래량 변화, 추세 라벨이 포함되는지 확인합니다."
+            - "코드 검토로 shell 실행, 서비스 변경, 주문 쓰기, 시세 데이터 변경 로직이 없는지 확인합니다."
       planSnapshot:
         schemaVersion: "1.0"
         planVersion: 1
         blocks:
-          - blockId: task-1
-            title: "원격 운영 진단 Tool 명세 작성"
-            content: "health check, CPU, memory, disk 상태를 읽기 전용으로 조회하는 Tool을 설계합니다."
+          - blockId: overview
+            title: "개요"
+            content: "SSAFY 증권의 CPU, 네트워크, 메모리, 부하 평균과 주식 추세를 같은 기준으로 점검할 수 있도록 ssafy_securities_monitor Tool을 생성합니다."
             order: 1
-          - blockId: task-2
-            title: "권한 및 승인 기준 정리"
-            content: "permissionLevel과 사용 목적을 PLAN에 명시해 승인 요청 가능 상태로 만듭니다."
+          - blockId: problem-analysis
+            title: "문제 분석"
+            content: "시스템 부하와 주식 추세가 분리되어 있으면 운영 장애 징후와 시장 데이터 변동을 함께 해석하기 어렵습니다."
             order: 2
+          - blockId: task-1
+            title: "통합 모니터링 Tool 스키마 정의"
+            content: "입력 모델, 출력 모델, 상태값, 민감 정보 제거 규칙, JSON/Markdown 리포트 포맷을 정의합니다."
+            order: 3
+          - blockId: task-2
+            title: "시스템 메트릭 수집"
+            content: "CPU 사용률, 메모리 사용률, 가용 메모리, 1/5/15분 부하 평균을 psutil 기반으로 수집합니다."
+            order: 4
+          - blockId: task-3
+            title: "네트워크 상태 수집"
+            content: "네트워크 송수신량, 패킷 수, 오류/드롭 수, 활성 연결 수를 수집하고 권한 제한 시 SKIPPED로 처리합니다."
+            order: 5
+          - blockId: task-4
+            title: "주식 추세 분석"
+            content: "최근 가격 시계열에서 등락률, 이동평균, 거래량 변화, 변동성을 계산해 상승/하락/횡보/변동성 확대 라벨을 산출합니다."
+            order: 6
+          - blockId: task-5
+            title: "통합 리포트 및 Tool 메타데이터 구성"
+            content: "시스템 상태 요약, 주식 추세 요약, 경고 항목, 권장 조치, permissionLevel 1, read-only 제약을 Tool 메타데이터에 정의합니다."
+            order: 7
+          - blockId: plan-b
+            title: "대안 / Plan B"
+            content: "주식 시계열 API 또는 네트워크 진단 방식이 환경별로 다르면 read-only 데이터 어댑터를 분리해 운영/시연/테스트 소스를 교체할 수 있게 합니다."
+            order: 8
+          - blockId: verification
+            title: "검증 기준"
+            content: "CPU, 메모리, 부하 평균, 네트워크 상태, 주식 추세 리포트 생성과 금지 동작 미사용 여부를 확인합니다."
+            order: 9
+
+  - id: "2-server-health-monitor-tool-plan"
+    modes: [PLAN]
+    match:
+      remote: none
+      contains_any:
+        - "서버 상태 모니터링 툴"
+        - "서버 상태 통합 진단 툴"
+        - "서버 헬스 모니터"
+        - "CPU 메모리 네트워크 리포트"
+        - "server_health_monitor"
+    progress:
+      - message: REQUEST_RECEIVED
+        progressRate: 5
+        delayMs: 700
+        chunk: "PLAN 요청을 접수했습니다.\n"
+      - message: PLAN_DRAFTING
+        progressRate: 20
+        delayMs: 1700
+        chunk: "서버 상태 통합 진단 요구사항과 보안 제약 조건을 분석하고 있습니다.\n"
+      - message: PLAN_DRAFTING
+        progressRate: 45
+        delayMs: 2300
+        chunk: "CPU, 메모리, 부하, 네트워크 연결 수집 항목과 임계치 판정 기준을 Tool 명세로 정리하고 있습니다.\n"
+      - message: PLAN_STRUCTURING
+        progressRate: 75
+        delayMs: 1800
+        chunk: "JSON/Markdown 리포트 구조와 PLAN 표시 블록을 정규화하고 있습니다.\n"
+      - message: PLAN_VALIDATING
+        progressRate: 90
+        delayMs: 1300
+        chunk: "금지 모듈과 MVP 제외 범위를 검증 기준에 반영하고 있습니다.\n"
+      - message: PLAN_COMPLETED
+        progressRate: 100
+        delayMs: 900
+        chunk: "PLAN 초안이 준비되었습니다.\n"
+    result:
+      rawMarkdown: |
+        ## 서버 상태 통합 진단 Tool 생성 PLAN
+
+        서버의 CPU, 메모리, 네트워크 상태를 모니터링하고 이상 징후를 리포트하는
+        시스템 진단 Tool을 생성합니다.
+
+        네트워크, 메모리, 부하 상태를 한 번에 확인하고 분석하여 리포트 형태로 제공하는
+        자동화된 도구가 필요합니다. 단, 보안 정책상 shell 실행 및 특정 네트워크 모듈 사용이
+        제한되므로 `psutil` 기반의 읽기 전용 메트릭 수집과 임계치 분석에 집중합니다.
+
+        현재 서버 모니터링을 위한 통합 진단 Tool은 부재하고, 개별적인 원격 체크 Tool만
+        존재하는 상태입니다. 따라서 서버 상태를 한눈에 파악할 수 있는 통합 리포트 흐름이 필요합니다.
+
+        ### 주요 작업
+        1. **서버 상태 모니터링 Tool 구현**
+           - 문제: CPU, 메모리, 네트워크 연결 상태를 안전하게 수집하고 분석하는 로직이 필요합니다.
+           - 해결 방향: `psutil`로 시스템 메트릭을 수집하고, 정의된 임계치와 비교하여 `PASS`, `WARNING`, `FAIL` 상태를 판별하는 `BaseTool`을 구현합니다.
+           - 구현 내용: `ServerHealthMonitorTool` 클래스를 구현하고 `psutil.cpu_percent()`, `psutil.virtual_memory()`, `psutil.net_connections()`를 사용해 데이터를 수집합니다. CPU 80% 이상, 메모리 90% 이상 같은 임계치를 적용하여 리포트를 생성합니다.
+           - 기대 효과: 서버의 전반적인 건강 상태를 한눈에 파악하고 잠재적인 리소스 병목 지점을 빠르게 식별할 수 있습니다.
+           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+
+        2. **메트릭 수집 로직 구현**
+           - 문제: 시스템 자원 및 네트워크 연결 수를 정밀하게 수집해야 합니다.
+           - 해결 방향: 전체/코어별 CPU 사용률, 가용 메모리, 현재 활성화된 네트워크 연결 수(`ESTABLISHED` 상태 등)를 수집하는 내부 메서드를 구현합니다.
+           - 기대 효과: 신뢰할 수 있는 시스템 메트릭 데이터를 확보합니다.
+           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+
+        3. **상태 분석 및 리포트 생성 로직 구현**
+           - 문제: 수집된 데이터를 기반으로 한 직관적인 판단 기준과 리포트 형식이 필요합니다.
+           - 해결 방향: 수집된 메트릭을 기반으로 정상, 주의, 위험 단계를 구분하고, 문제가 있는 경우 원인 후보와 권장 조치를 함께 제공합니다.
+           - 기대 효과: 사용자가 즉각적으로 조치 가능한 진단 결과를 받을 수 있습니다.
+           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.py`
+
+        4. **Tool 메타데이터 설정**
+           - 문제: Theseus 엔진이 Tool을 인식하고 실행할 수 있도록 메타데이터 정의가 필요합니다.
+           - 해결 방향: `toolName`, `displayName`, `inputs`, `outputs`, 권한 레벨이 정의된 meta.json 파일을 생성합니다.
+           - 기대 효과: Tool의 입력 파라미터와 출력 형식이 명확해져 일관된 인터페이스를 제공합니다.
+           - 영향 파일: `/custom-tools/5/server_health_monitor_tool.meta.json`
+
+        ### 주의 사항
+        - `psutil` 라이브러리 의존성이 필요합니다.
+        - `/proc` 파일 시스템 접근 권한에 따라 일부 정보 수집이 제한될 수 있습니다.
+
+        ### 대안 / Plan B
+        - **Remote Workspace 전용 어댑터 활용**
+        - 커스텀 Tool의 보안 제약으로 인해 실제 외부 네트워크 ping, traceroute, 정밀 패킷 캡처는 수행하지 않습니다.
+        - 단순 메트릭 수집을 넘어 외부 연결성 검사가 반드시 필요한 경우 기존 `remote_check_*` Tool을 `context.call_tool`로 호출하여 보안성과 정확성을 함께 확보합니다.
+
+        ### 실행 스펙
+        - 도구 이름: `server_health_monitor`
+        - 권한 레벨: 1, 시스템 상태만 읽는 안전한 진단 도구
+        - 검증 전략: `core_sandbox_gate`
+        - 상태값: `PASS`, `WARNING`, `FAIL`, `SKIPPED`, `INFO`
+        - 입력값: `threshold_cpu`, `threshold_mem`
+        - MVP 제외: 인위적인 부하 생성, 외부 IP 대상 ICMP Ping/Traceroute, 네트워크 설정 변경, 서비스 재시작
+        - 결과 필드: `check_id`, `category`, `target`, `status`, `evidence`, `sanitized_output`, `recommendation`
+
+        ### 검증 기준
+        - 네트워크, 메모리, 부하 상태가 포함된 JSON/Markdown 리포트가 에러 없이 생성되어야 합니다.
+        - Tool 실행 시 CPU, 메모리 수치가 현재 시스템 상태와 일치하는지 확인합니다.
+        - 리소스 사용량이 높은 환경에서 `WARNING` 또는 `FAIL` 상태가 정상적으로 출력되는지 확인합니다.
+        - `subprocess` 등 금지된 모듈이 import되지 않았는지 코드 검토로 확인합니다.
+
+      structuredPlanJson:
+        version: 1
+        goal: "서버 CPU, 메모리, 네트워크 상태를 통합 진단하고 이상 징후를 리포트하는 읽기 전용 Tool 생성"
+        summary:
+          goal: "서버의 CPU, 메모리, 네트워크 상태를 모니터링하고 이상 징후를 리포트하는 시스템 진단 Tool을 생성합니다."
+          problem: "네트워크, 메모리, 부하 상태를 한 번에 확인하고 분석하여 리포트 형태로 제공하는 자동화된 도구가 필요합니다."
+          current_state: "현재 서버 모니터링을 위한 통합 진단 Tool은 부재하며, 개별적인 원격 체크 Tool만 존재합니다."
+          approach: "psutil 기반 메트릭 수집, 임계치 비교, 상태 판정, JSON/Markdown 리포트 생성을 하나의 BaseTool로 구현합니다."
+          security_scope: "보안 정책상 shell 실행, subprocess, socket 기반 외부 연결 테스트, 네트워크 설정 변경, 서비스 재시작은 MVP에서 제외합니다."
+        problem_analysis:
+          need: "CPU, 메모리, 네트워크 연결 상태를 안전하게 수집하고 분석하는 로직이 필요합니다."
+          constraint: "보안 정책상 shell 실행 및 특정 네트워크 모듈 사용이 제한됩니다."
+          missing_capability: "개별 원격 체크 Tool은 존재하지만 서버 상태를 하나의 리포트로 묶는 통합 진단 Tool이 없습니다."
+        execution_spec:
+          toolName: "server_health_monitor"
+          displayName: "서버 상태 통합 진단"
+          targetFiles:
+            - "/custom-tools/5/server_health_monitor_tool.py"
+            - "/custom-tools/5/server_health_monitor_tool.meta.json"
+          permissionLevel: 1
+          validationStrategy: "core_sandbox_gate"
+          statusValues:
+            - "PASS"
+            - "WARNING"
+            - "FAIL"
+            - "SKIPPED"
+            - "INFO"
+          inputFields:
+            - name: threshold_cpu
+              label: "CPU 임계치"
+              description: "전체 CPU 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 80
+            - name: threshold_mem
+              label: "메모리 임계치"
+              description: "메모리 사용률이 이 값 이상이면 WARNING 이상 상태로 판정합니다."
+              default: 90
+          outputFields:
+            - name: check_id
+              label: "진단 항목 ID"
+            - name: category
+              label: "분류"
+            - name: target
+              label: "진단 대상"
+            - name: status
+              label: "상태"
+              allowedValues:
+                - "PASS: 정상"
+                - "WARNING: 주의"
+                - "FAIL: 위험"
+                - "SKIPPED: 수집 생략"
+                - "INFO: 참고 정보"
+            - name: evidence
+              label: "판정 근거"
+            - name: sanitized_output
+              label: "민감 정보 제거 결과"
+            - name: recommendation
+              label: "권장 조치"
+          mvpExclusions:
+            - "인위적인 부하 생성 또는 Stress Testing"
+            - "외부 IP 대상 ICMP Ping/Traceroute"
+            - "네트워크 설정 변경"
+            - "서비스 재시작"
+        report_design:
+          formats:
+            - "JSON"
+            - "Markdown"
+          categories:
+            - "CPU"
+            - "Memory"
+            - "Network"
+            - "Load"
+          fields:
+            - "check_id"
+            - "category"
+            - "target"
+            - "status"
+            - "evidence"
+            - "sanitized_output"
+            - "recommendation"
+        tasks:
+          - id: task-1
+            title: "서버 상태 모니터링 Tool 구현"
+            problem: "CPU, 메모리, 네트워크 연결 상태를 안전하게 수집하고 분석하는 로직이 필요합니다."
+            solution: "psutil을 사용하여 시스템 메트릭을 수집하고, 수집된 데이터를 정의된 임계치와 비교하여 PASS/WARNING/FAIL 상태를 판별하는 BaseTool을 구현합니다."
+            expected_effect: "서버의 전반적인 건강 상태를 한눈에 파악하고 잠재적인 리소스 병목 지점을 빠르게 식별할 수 있습니다."
+            description: "psutil.cpu_percent(), psutil.virtual_memory(), psutil.net_connections()를 사용하고 CPU 80% 이상, 메모리 90% 이상 같은 임계치 기준으로 상태를 판정합니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-1-1
+            parent_id: task-1
+            title: "메트릭 수집 로직 구현"
+            problem: "시스템 자원과 네트워크 연결 수를 신뢰할 수 있는 방식으로 수집해야 합니다."
+            solution: "전체 CPU 사용률, 코어별 CPU 사용률, 메모리 사용률, 가용 메모리, ESTABLISHED 네트워크 연결 수를 내부 메서드로 수집합니다."
+            expected_effect: "리포트 생성에 필요한 기초 데이터를 안정적으로 확보합니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-1-2
+            parent_id: task-1
+            title: "상태 분석 및 리포트 생성"
+            problem: "수집된 숫자를 사용자가 바로 이해할 수 있는 진단 결과로 바꾸는 기준이 필요합니다."
+            solution: "PASS, WARNING, FAIL, SKIPPED, INFO 상태를 부여하고 특정 프로세스의 메모리 점유율 증가 같은 원인 후보와 권장 조치를 JSON/Markdown 리포트로 제공합니다."
+            expected_effect: "사용자가 CPU 과부하, 메모리 부족, 네트워크 연결 급증 같은 징후를 즉시 파악할 수 있습니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.py"
+          - id: task-2
+            title: "Tool 메타데이터 설정"
+            problem: "Theseus 엔진이 Tool을 인식하고 입력/출력 계약을 표시하려면 메타데이터가 필요합니다."
+            solution: "toolName, displayName, permissionLevel, inputs, outputs를 담은 meta.json을 작성합니다."
+            expected_effect: "Tool 인터페이스가 명확해지고 재사용 가능한 시연/운영 기준이 생깁니다."
+            target_files:
+              - "/custom-tools/5/server_health_monitor_tool.meta.json"
+        plan_b:
+          title: "Remote Workspace 전용 어댑터 활용"
+          reason: "커스텀 Tool의 보안 제약으로 실제 외부 네트워크 ping 테스트나 정밀 패킷 캡처를 수행할 수 없습니다."
+          tradeoff: "커스텀 Tool 내부에서 모든 것을 처리하는 대신 기존 remote_check_* Tool을 context.call_tool로 호출해 보안성과 정확성을 확보합니다."
+          condition: "단순 메트릭 수집을 넘어 실제 외부 연결성 테스트가 반드시 필요한 경우 적용합니다."
+        caveats:
+          - "psutil 의존성이 필요하며 /proc 접근 권한에 따라 일부 수집값은 SKIPPED가 될 수 있습니다."
+          - "외부 IP ping, traceroute, 부하 생성, 네트워크 설정 변경, 서비스 재시작은 MVP 범위에서 제외합니다."
+          - "정밀 외부 연결성 검사가 꼭 필요하면 Remote Workspace 전용 read-only adapter 또는 기존 remote_check_* Tool 조합을 Plan B로 사용합니다."
+        verification:
+          success_criteria:
+            - "CPU, 메모리, 네트워크 연결 상태가 포함된 JSON/Markdown 리포트가 에러 없이 생성됩니다."
+            - "threshold_cpu와 threshold_mem 값을 조정했을 때 WARNING/FAIL 판정이 정상적으로 바뀝니다."
+            - "subprocess, socket 등 금지된 모듈을 import하지 않습니다."
+          test_commands:
+            - "python3 -B -m py_compile /custom-tools/5/server_health_monitor_tool.py"
+          manual_checks:
+            - "Tool 실행 결과의 CPU, 메모리 수치가 현재 시스템 상태와 크게 어긋나지 않는지 확인합니다."
+            - "리소스 사용량이 높은 환경에서 WARNING 또는 FAIL 리포트가 출력되는지 확인합니다."
+            - "코드 검토로 shell 실행과 네트워크 설정 변경 로직이 없는지 확인합니다."
+      planSnapshot:
+        schemaVersion: "1.0"
+        planVersion: 1
+        blocks:
+          - blockId: overview
+            title: "개요"
+            content: "서버의 CPU, 메모리, 네트워크 상태를 한 번에 확인하고 이상 징후를 PASS/WARNING/FAIL/SKIPPED/INFO 상태로 리포트하는 읽기 전용 시스템 진단 Tool을 생성합니다."
+            order: 1
+          - blockId: problem-analysis
+            title: "문제 분석"
+            content: "현재 통합 진단 Tool이 없어 네트워크, 메모리, 부하 상태를 개별 원격 체크 Tool로 나누어 확인해야 하며, 발표 시에는 하나의 리포트 흐름으로 보여줄 필요가 있습니다."
+            order: 2
+          - blockId: task-1
+            title: "서버 상태 모니터링 Tool 구현"
+            content: "ServerHealthMonitorTool을 구현하고 psutil.cpu_percent(), psutil.virtual_memory(), psutil.net_connections()로 CPU, 메모리, 네트워크 연결 상태를 안전하게 수집합니다."
+            order: 3
+          - blockId: task-1-1
+            title: "메트릭 수집 로직 구현"
+            content: "전체/코어별 CPU 사용률, 메모리 사용률과 가용 메모리, ESTABLISHED 네트워크 연결 수를 수집합니다."
+            order: 4
+          - blockId: task-1-2
+            title: "상태 분석 및 리포트 생성"
+            content: "수집값을 threshold_cpu, threshold_mem 기준과 비교해 상태를 판정하고 원인 후보, 판정 근거, 권장 조치를 포함한 JSON/Markdown 리포트를 생성합니다."
+            order: 5
+          - blockId: task-2
+            title: "Tool 메타데이터 설정"
+            content: "server_health_monitor Tool의 입력값, 출력 필드, 권한 레벨 1, core_sandbox_gate 검증 전략을 meta.json에 정의합니다."
+            order: 6
+          - blockId: plan-b
+            title: "대안 / Plan B"
+            content: "외부 연결성 테스트가 반드시 필요하면 보안 제약이 있는 커스텀 Tool 내부에서 처리하지 않고 기존 remote_check_* Tool을 context.call_tool로 호출하는 전용 어댑터 방식을 사용합니다."
+            order: 7
+          - blockId: verification
+            title: "검증 기준"
+            content: "JSON/Markdown 리포트 생성, CPU/메모리 수치 확인, WARNING/FAIL 판정 확인, subprocess 등 금지 모듈 미사용 여부를 확인합니다."
+            order: 8
 
 chat_replays:
   - id: "3-new-hire-monitoring-success"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "인수인계 업무 1"
         - "모니터링 툴 사용"
+        - "김대리가 만든 모니터링 툴 사용"
+        - "서버 상태 모니터링 툴 사용"
+        - "김대리가 만든 서버 모니터링 툴 사용"
+        - "싸피증권 서버 상태 점검"
+        - "주식 시세 요약 주문 처리 서버 모니터링"
+        - "주식 시세 요약 주문 처리 서버 모니터링 리포트를 작성해줘"
+        - "server_health_monitor"
+    timing:
+      textChunkChars: 8
+      textChunkDelayMs: 45
+      beforeToolsDelayMs: 450
+      toolStackTotalDelayMs: 4800
+      toolStartDelayMs: 800
+      toolCompletedDelayMs: 1300
+      afterToolsDelayMs: 550
     answer:
-      beforeTools: "김대리 인수인계 기준에 따라 원격 모니터링 Tool을 실행하겠습니다.\n\n"
-      afterTools: "모니터링 결과 API와 시스템 리소스는 현재 정상 범위입니다. 인수인계 업무 1을 완료했습니다."
+      beforeTools: |
+        김대리가 인수인계한 `server_health_monitor` Tool을 실행하겠습니다.
+        싸피증권 API health, 주식 시세 요약 API, 주문 처리 health와
+        현재 서버의 CPU, 메모리, 부하, 네트워크 연결 상태를 읽기 전용으로 점검합니다.
+
+      afterTools: |
+        `server_health_monitor` 실행 결과, 싸피증권 서버 상태는 전반적으로 정상 범위입니다.
+
+        진단 요약
+        - 전체 상태: `PASS`
+        - API health: `PASS` (HTTP 200, 42ms)
+        - 주식 시세 요약 API: `PASS` (HTTP 200, 88ms)
+        - 주문 처리 health: `PASS` (HTTP 200, 63ms)
+        - CPU 사용률: 37.5% (`PASS`)
+        - 메모리 사용률: 42.1% (`PASS`)
+        - 1분 평균 부하: 0.48 (`PASS`)
+        - ESTABLISHED 네트워크 연결: 18개 (`PASS`)
+        - 외부 ping/traceroute: 보안 정책상 `SKIPPED`
+
+        권장 조치
+        - 즉시 조치가 필요한 이상 징후는 없습니다.
+        - 네트워크 연결 수가 120개 이상으로 증가하거나 메모리 사용률이 85%를 넘으면 관리자에게 보고하면 됩니다.
+        - 장 시작 전과 장 마감 전에 동일 Tool로 한 번씩 재점검하면 됩니다.
+
+        인수인계 업무 1을 완료했습니다.
     toolStack:
-      - toolName: integrated_ops_diagnostics
-        toolUseId: demo-monitoring-001
+      - toolName: server_health_monitor
+        toolUseId: demo-server-health-monitor-001
         toolInput:
-          services:
-            - "http://localhost:8080/health"
-            - "http://localhost:8081/health"
+          threshold_cpu: 80
+          threshold_mem: 85
+          check_level: "handover"
+          api_targets:
+            - name: "API health"
+              url: "http://localhost:8080/health"
+            - name: "주식 시세 요약 API"
+              url: "http://localhost:8080/api/v1/stocks/summary"
+            - name: "주문 처리 health"
+              url: "http://localhost:8080/api/v1/orders/health"
+          include_network_connections: true
+          include_load_average: true
+          report_format: "json_markdown"
         started:
-          message: "원격 운영 환경의 API 상태와 시스템 리소스를 조회합니다."
+          message: "server_health_monitor로 싸피증권 API와 서버 리소스 상태를 수집합니다."
         completed:
           output: |
             {
               "overall_status": "PASS",
-              "api_status": "PASS",
-              "cpu_percent": 37.5,
-              "mem_percent": 42.1,
-              "recommendation": "정상 범위입니다."
+              "summary": "API health, 주식 시세 요약, 주문 처리 health, CPU, 메모리, 부하, 네트워크 연결 상태가 모두 임계치 이내입니다.",
+              "checks": [
+                {
+                  "check_id": "api-health",
+                  "category": "API",
+                  "target": "/health",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 42ms",
+                  "sanitized_output": "status=UP, service=ssafy-securities-api",
+                  "recommendation": "정상 응답입니다."
+                },
+                {
+                  "check_id": "stock-summary",
+                  "category": "API",
+                  "target": "/api/v1/stocks/summary",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 88ms, summaryCount=24",
+                  "sanitized_output": "market=MOCK, topMovers=masked",
+                  "recommendation": "시세 요약 API가 정상 응답 중입니다."
+                },
+                {
+                  "check_id": "order-health",
+                  "category": "API",
+                  "target": "/api/v1/orders/health",
+                  "status": "PASS",
+                  "evidence": "HTTP 200, latency 63ms, queueDepth=3",
+                  "sanitized_output": "orderQueue=3, worker=active",
+                  "recommendation": "주문 처리 큐가 안정 범위입니다."
+                },
+                {
+                  "check_id": "cpu-overall",
+                  "category": "CPU",
+                  "target": "overall",
+                  "status": "PASS",
+                  "evidence": "37.5% < threshold_cpu 80%",
+                  "sanitized_output": "cpu_percent=37.5, per_core=[31.2, 44.8, 36.1, 38.0]",
+                  "recommendation": "정상 범위입니다. 추가 조치가 필요하지 않습니다."
+                },
+                {
+                  "check_id": "memory-usage",
+                  "category": "MEMORY",
+                  "target": "virtual_memory",
+                  "status": "PASS",
+                  "evidence": "42.1% < threshold_mem 85%",
+                  "sanitized_output": "used=6.7GB, available=9.2GB, total=16.0GB",
+                  "recommendation": "가용 메모리가 충분합니다."
+                },
+                {
+                  "check_id": "load-average",
+                  "category": "LOAD",
+                  "target": "1m/5m/15m",
+                  "status": "PASS",
+                  "evidence": "1m load average 0.48",
+                  "sanitized_output": "load_avg=[0.48, 0.52, 0.49]",
+                  "recommendation": "부하가 낮은 상태입니다."
+                },
+                {
+                  "check_id": "network-established",
+                  "category": "NETWORK",
+                  "target": "ESTABLISHED connections",
+                  "status": "PASS",
+                  "evidence": "18 active connections < warning threshold 120",
+                  "sanitized_output": "established=18, listen=6, time_wait=11",
+                  "recommendation": "연결 수가 정상 범위입니다."
+                },
+                {
+                  "check_id": "external-connectivity",
+                  "category": "NETWORK",
+                  "target": "ICMP ping / traceroute",
+                  "status": "SKIPPED",
+                  "evidence": "socket/subprocess 사용 제한으로 외부 연결성 검사는 수행하지 않음",
+                  "sanitized_output": "not executed by security policy",
+                  "recommendation": "외부 연결성 검사가 필요하면 관리자 승인 후 remote_check_* Tool을 사용합니다."
+                }
+              ],
+              "markdown_report": "## 싸피증권 서버 상태 진단 리포트\n- 전체 상태: PASS\n- API health: 정상\n- 주식 시세 요약 API: 정상\n- 주문 처리 health: 정상\n- CPU: 37.5%, 정상\n- 메모리: 42.1%, 정상\n- 부하 평균: 0.48, 정상\n- ESTABLISHED 연결: 18개, 정상\n- 외부 ping/traceroute: 보안 정책상 생략\n\n권장 조치: 즉시 조치 필요 없음. 장 시작 전/마감 전 재점검 권장."
             }
 
   - id: "5-new-hire-frontend-change-failed"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "인수인계 업무 2"
         - "프론트 변경 툴 실패"
+        - "프론트엔드 변경 툴 실패"
+        - "프론트 변경 실패"
+        - "프론트엔드 변경 실패"
+        - "프론트 변경 과정 실패"
+        - "싸피증권 랜딩페이지를 변경하고 싶어, 풋터를 추가하고 이미지를 깔끔하게 해줘"
+    timing:
+      textChunkChars: 8
+      textChunkDelayMs: 45
+      beforeToolsDelayMs: 450
+      toolStackTotalDelayMs: 6500
+      toolStartDelayMs: 800
+      toolFailedDelayMs: 1200
+      afterToolsDelayMs: 550
     answer:
-      beforeTools: "싸피 증권 랜딩 페이지 변경 Tool을 실행해 보겠습니다.\n\n"
-      afterTools: "프론트 변경은 권한 등급 부족으로 실패했습니다. 관리자 권한 조정 후 다시 실행해야 합니다."
+      beforeTools: |
+        싸피증권 랜딩 페이지의 메인 문구를 변경해 보겠습니다.
+        먼저 대상 파일과 현재 권한을 확인한 뒤 수정 가능 여부를 판단합니다.
+
+      afterTools: |
+        프론트 변경 과정은 권한 등급 부족으로 중단되었습니다.
+
+        실패 사유
+        - 현재 사용자: 신입사원
+        - 현재 권한: LV.1, Tool Use 가능
+        - 필요한 권한: LV.3 이상, Tool Update 가능
+        - 차단된 작업: 원격 프론트 파일 쓰기
+
+        조회와 분석은 가능하지만 랜딩 페이지 파일 수정은 관리자 승인 또는 권한 등급 조정이 필요합니다.
+        관리자에게 권한 확인을 요청해 주세요.
     toolStack:
-      - toolName: frontend_landing_editor
+      - toolName: remote_glob
+        toolUseId: demo-landing-failed-glob-001
+        toolInput:
+          pattern: "**/LandingPage.tsx"
+        started:
+          message: "원격 프론트 프로젝트에서 싸피증권 랜딩 페이지 파일을 검색합니다."
+        completed:
+          output: |
+            Found 1 matches:
+            frontend/src/pages/LandingPage.tsx
+
+      - toolName: frontend_landing_change_guard
         toolUseId: demo-frontend-failed-001
         toolInput:
           page: "ssafy-securities-landing"
-          change: "hero copy update"
+          file: "frontend/src/pages/LandingPage.tsx"
+          change: "hero headline and CTA copy update"
+          requiredAccessLevel: 3
+          currentAccessLevel: 1
         started:
-          message: "원격 프론트 프로젝트에서 랜딩 페이지 변경을 시도합니다."
+          message: "랜딩 페이지 수정 권한과 Tool Update 권한을 확인합니다."
         failed:
-          error: "Permission denied: current user level is insufficient for remote frontend write."
-          output: "권한 등급 부족으로 원격 프론트 변경 작업이 차단되었습니다."
+          error: "Permission denied: current access level 1 is lower than required level 3 for remote frontend write."
+          output: |
+            권한 검증 결과 프론트 변경 작업이 차단되었습니다.
+            - userRole: MEMBER
+            - accessLevel: 1
+            - canUseTool: true
+            - canUpdateTool: false
+            - blockedAction: remote_edit_file(frontend/src/pages/LandingPage.tsx)
 
   - id: "7-admin-frontend-change-success"
     modes: [AGENT]
     match:
-      remote: required
+      remote: any
       contains_any:
         - "관리자 프론트 변경 성공"
         - "프론트 변경 성공"
+        - "프론트엔드 변경 성공"
+        - "싸피 증권 랜딩 페이지 변경"
+        - "싸피증권 랜딩 변경"
+        - "변경된 랜딩 페이지"
+        - "싸피증권 랜딩페이지를 변경해야해, 풋터를 추가하고 이미지를 깔끔하게 만들어줘"
+        - "풋터를 변경하는데 해당 기업들을 넣어줘"
+        - "풋터에 후원사를 추가해줘"
+        - "삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 대한상공회의소"
+        - "후원사 목록을 풋터에 넣어줘"
+    timing:
+      textChunkChars: 10
+      textChunkDelayMs: 35
+      beforeToolsDelayMs: 420
+      toolStackTotalDelayMs: 12000
+      toolStartDelayMs: 520
+      toolCompletedDelayMs: 760
+      afterToolsDelayMs: 480
     answer:
-      beforeTools: "관리자 권한으로 싸피 증권 랜딩 페이지 변경을 진행하겠습니다.\n\n"
-      afterTools: "프론트 변경이 완료되었습니다. 변경된 싸피 증권 랜딩 페이지를 확인하시면 됩니다."
+      beforeTools: |
+        관리자 권한으로 싸피증권 프론트 프로젝트를 확인하고,
+        랜딩 페이지 풋터에 후원사 목록을 추가하겠습니다.
+
+      afterTools: |
+        싸피증권 랜딩 페이지 풋터 변경이 완료되었습니다.
+
+        변경 사항 요약
+        - Footer에 후원사/협력기관 영역을 추가했습니다.
+        - 후원사 목록: 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 대한상공회의소
+        - 기존 라우팅, API 호출, CTA 동작은 변경하지 않았습니다.
+        - 모바일에서도 후원사명이 줄바꿈되도록 반응형 grid 스타일을 적용했습니다.
+
+        검토 결과
+        - 랜딩 페이지 컴포넌트의 Footer 영역과 sponsor list 렌더링을 확인했습니다.
+        - 후원사명은 정적 데이터 배열로 관리해 이후 추가/삭제가 쉽도록 정리했습니다.
+        - 새로고침 후 변경된 싸피증권 랜딩 페이지 하단에서 확인하실 수 있습니다.
     toolStack:
-      - toolName: frontend_landing_editor
-        toolUseId: demo-frontend-success-001
+      - toolName: remote_glob
+        toolUseId: demo-landing-success-glob-001
         toolInput:
-          page: "ssafy-securities-landing"
-          change: "hero copy update"
+          pattern: "**/LandingPage.tsx"
         started:
-          message: "관리자 권한으로 원격 프론트 프로젝트의 랜딩 페이지를 수정합니다."
+          message: "리모트 워크스페이스에서 싸피증권 랜딩 페이지 파일 위치를 검색합니다."
+        completed:
+          output: |
+            Found 1 matches:
+            frontend/src/pages/LandingPage.tsx
+
+      - toolName: remote_read_file
+        toolUseId: demo-landing-success-read-001
+        toolInput:
+          path: "frontend/src/pages/LandingPage.tsx"
+        started:
+          message: "현재 싸피증권 랜딩 페이지의 Footer 구조를 확인합니다."
+        completed:
+          output: |
+            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 1-220) ---
+            21  <h1>SSAFY Securities</h1>
+            25  <p>모의 투자로 배우는 금융 서비스</p>
+            32  <Button>시작하기</Button>
+            33  <Button variant="outline">서비스 둘러보기</Button>
+            48  <section id="market-summary">
+            76  <section id="portfolio-preview">
+            164 <footer className="border-t border-slate-200">
+            171     <span>SSAFY Securities</span>
+            176     <span>© 2026 SSAFY Securities</span>
+
+      - toolName: frontend_landing_copy_planner
+        toolUseId: demo-landing-success-plan-001
+        toolInput:
+          project_root: "frontend"
+          user_request: "싸피증권 랜딩 페이지 풋터에 후원사 목록을 추가해줘. 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 대한상공회의소가 들어가야 해."
+        started:
+          message: "랜딩 페이지 풋터에서 후원사 목록을 추가할 UI 블록을 추출합니다."
         completed:
           output: |
             {
-              "changed_files": ["frontend/src/pages/SsafySecuritiesLanding.tsx"],
-              "status": "updated",
-              "summary": "싸피 증권 랜딩 페이지 hero 문구와 CTA 영역을 수정했습니다."
+              "status": "success",
+              "change_intent": "footer_sponsor_update",
+              "target_files": [
+                "frontend/src/pages/LandingPage.tsx"
+              ],
+              "footer_targets": [
+                "sponsor_section_title",
+                "sponsor_name_grid",
+                "responsive_footer_layout"
+              ],
+              "sponsors": [
+                "삼성전자",
+                "멀티캠퍼스",
+                "KB국민은행",
+                "하나은행",
+                "JA코리아",
+                "서울대",
+                "대한상공회의소"
+              ]
             }
+
+      - toolName: remote_edit_file
+        toolUseId: demo-landing-success-edit-001
+        toolInput:
+          path: "frontend/src/pages/LandingPage.tsx"
+          instruction: "라우팅과 API 로직은 유지하고 랜딩 페이지 Footer에 후원사 목록만 추가"
+        started:
+          message: "싸피증권 랜딩 페이지 Footer에 후원사 영역을 추가합니다."
+        completed:
+          output: |
+            Updated frontend/src/pages/LandingPage.tsx
+            - Added sponsors array: 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행, JA코리아, 서울대, 대한상공회의소
+            - Added Footer sponsor section title: 함께하는 후원사
+            - Added responsive sponsor grid in footer
+            - Preserved existing routing, API calls, and button handlers
+
+      - toolName: remote_read_file
+        toolUseId: demo-landing-success-read-verify-001
+        toolInput:
+          path: "frontend/src/pages/LandingPage.tsx"
+          offset: 18
+          limit: 90
+        started:
+          message: "변경된 Footer 후원사 목록을 다시 확인합니다."
+        completed:
+          output: |
+            --- Reading remote:frontend/src/pages/LandingPage.tsx (Lines 150-205) ---
+            151 const sponsors = [
+            152   "삼성전자",
+            153   "멀티캠퍼스",
+            154   "KB국민은행",
+            155   "하나은행",
+            156   "JA코리아",
+            157   "서울대",
+            158   "대한상공회의소",
+            159 ];
+            176 <footer className="border-t border-slate-200 bg-white">
+            183   <p className="text-xs font-semibold text-slate-500">함께하는 후원사</p>
+            185   {sponsors.map((sponsor) => (
+            186     <span key={sponsor}>{sponsor}</span>
+
+      - toolName: landing_visual_smoke_check
+        toolUseId: demo-landing-success-final-check-001
+        toolInput:
+          route: "/"
+          viewport: "desktop"
+        started:
+          message: "랜딩 페이지 렌더링과 주요 문구 노출 여부를 최종 확인합니다."
+        completed:
+          output: |
+            --- Final inspection summary ---
+            Route: /
+            File: frontend/src/pages/LandingPage.tsx
+            Logic check:
+            - 라우팅 변경 없음
+            - 버튼 onClick/API 호출 로직 변경 없음
+            - 데이터 조회 hook 변경 없음
+
+            Render check:
+            - Footer sponsor section 노출 확인
+            - 삼성전자, 멀티캠퍼스, KB국민은행, 하나은행 노출 확인
+            - JA코리아, 서울대, 대한상공회의소 노출 확인
+            - 모바일 폭에서 후원사 grid 줄바꿈 확인

@@ -4,23 +4,79 @@
 
 ## [Unreleased]
 
+### 🛠️ Session 195 — PLAN replay 진행 스트리밍 보강 (2026-05-30)
+
+#### Core
+- demo PLAN replay에서 progress 단계마다 상태 chunk를 함께 발행해 실제 PLAN 생성처럼 내부 분석/구조화/검증 문구가 스트리밍되도록 보강
+
+#### Demo Replay
+- 김대리 휴가 전 `server_health_monitor` PLAN 생성과 서버 상태 통합 진단 PLAN 생성의 progress 지연을 약 8.9초대로 늘려 발표 중 너무 빠르게 완료되지 않도록 조정
+- PLAN 접수, 요구사항 분석, Tool 명세 정리, PLAN 카드 구조화, 보안 검증, 완료 문구가 단계별로 보이도록 `chunk` 문구를 추가
+- 김대리 휴가 전 PLAN 결과를 서버 상태 통합 진단 템플릿 양식에 맞춰 문제 분석, 주요 작업, 주의 사항, Plan B, 실행 스펙, 검증 기준까지 보강하고 주식 시세 요약/주문 처리 health 내용을 추가
+
+#### 검증
+- `python -m py_compile src\tool_plan\processor.py tests\test_tool_plan_processor_chunks.py`
+- `python -m unittest tests.test_tool_plan_processor_chunks tests.test_demo_replay`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 194 — 발표 시나리오 기준 채팅 replay 정렬 (2026-05-30)
+
+#### Demo Replay
+- 최종 발표 스크립트의 핵심 시연 흐름에 맞춰 PLAN/AGENT 채팅 입력 매칭 문구와 고정 응답 내용을 정리
+- 김대리 휴가 전 ToolPlan, 신입사원 모니터링 Tool 성공, 신입사원 프론트 변경 권한 실패, 관리자 프론트 변경 성공 시나리오를 싸피증권 랜딩 페이지 맥락으로 통일
+- 인수인계 업무 1의 Tool 이름과 PLAN/실행 응답을 `server_health_monitor`로 통일하고 API health, 주식 시세 요약, 주문 처리 health, CPU/메모리/부하/네트워크 리포트가 함께 보이도록 보강
+- 관리자 페이지, 도구 목록, 멤버 관리 화면은 다른 시연 작업 범위로 두고 `demo_replays/replays.yaml`의 채팅 응답과 Tool 카드 출력만 수정
+
+---
+
+### 🛠️ Session 193 — Demo replay Tool stack 지연 시간 분배 (2026-05-30)
+
+#### Core
+- `timing.toolStackTotalDelayMs`를 추가해 시연용 Tool stack의 전체 소요 시간을 YAML에서 지정할 수 있도록 보강
+- Tool 이름과 실행 id 기반의 안정적인 오차를 적용해 같은 시나리오를 반복해도 Tool별 시간이 모두 동일하게 보이지 않도록 조정
+- `glob/list`, `read`, `search`, `locator/analysis`, `edit/write`, `test/validation` 유형별 가중치를 적용해 읽기 작업은 빠르게, 수정/검증 작업은 상대적으로 느리게 재생
+
+#### Demo Replay
+- 모니터링 Tool 성공 시나리오는 약 4.8초, 프론트 변경 실패 시나리오는 약 6.5초, AI 가이드 모달 수정 시나리오는 약 12초 안에서 Tool stack 시간이 분배되도록 설정
+
+#### 검증
+- `python -m py_compile src\demo_replay.py tests\test_demo_replay.py`
+- `python -m unittest tests.test_demo_replay`
+- `git diff --check`
+
+---
+
+### 🛠️ Session 192 — 서버 상태 통합 진단 PLAN replay 추가 (2026-05-30)
+
+#### Demo Replay
+- `server_health_monitor` Tool 생성 PLAN replay 시나리오를 추가
+- 발표자가 이해하기 쉽도록 원문 구조에 맞춰 문제 분석, 주요 작업, 주의사항, Plan B, 실행 스펙, 검증 기준을 한국어 중심으로 정리
+- `structuredPlanJson`과 `planSnapshot`에 통합 진단 Tool 부재 배경, MVP 제외 범위, Remote Workspace 어댑터 대안을 보강
+- `server_health_monitor`, `PASS/WARNING/FAIL`, `check_id` 같은 계약명은 한글 설명과 함께 유지
+
+---
+
 ### 🛠️ Session 191 — YAML 기반 데모 replay 분기 추가 (2026-05-29)
 
 #### Core
 - `THESEUS_DEMO_REPLAY_ENABLED=true`일 때 `demo_replays/replays.yaml`의 키워드 매칭으로 ASK/AGENT 채팅 스트림을 LLM 호출 없이 재생하는 demo replay 경로 추가
 - `answer.beforeTools`, `toolStack[].started`, `toolStack[].completed/failed`, `answer.afterTools`로 답변/툴 호출 스택/성공·실패 카드를 YAML에서 분리 수정할 수 있도록 보강
 - `toolStack` 배열에 여러 Tool을 순서대로 정의하면 같은 시나리오 안에서 복수 Tool 호출 스택을 재생할 수 있도록 구성
+- `timing.textChunkChars`, `textChunkDelayMs`, `toolStartDelayMs`, `toolCompletedDelayMs`, `toolFailedDelayMs`로 답변 chunk 스트리밍과 구간별 지연 시간을 YAML에서 조정할 수 있도록 추가
 - ToolPlan worker가 PLAN 요청 키워드를 YAML과 매칭하면 `rawMarkdown`, `structuredPlanJson`, `planSnapshot`을 고정 응답으로 발행하도록 demo replay 분기 추가
+- ToolPlan demo replay의 `progress[].delayMs`를 적용해 PLAN 진행 이벤트가 즉시 끝나지 않고 단계별로 노출되도록 보강
 - `THESEUS_DEMO_REPLAY_PATH`로 시나리오 YAML 위치를 바꿀 수 있게 설정 추가
-- `match.remote: none|required` 조건으로 PLAN은 Remote Workspace 미선택 시, AGENT 시나리오는 Remote Workspace 선택 시에만 매칭되도록 분기
+- `match.remote: none|required|any` 조건을 지원하며, 기본 AGENT 시연 3개는 프론트 요청의 `remoteWorkspaceId` 누락에도 키워드 replay가 동작하도록 `any`로 조정
 
 #### 문서
 - `.env.example`, `README.md`에 demo replay 설정을 추가
 - `demo_replays/replays.yaml`에 시연용 4개 시나리오만 남기도록 정리
   - 김대리 휴가 전 PLAN 생성 (`PLAN`, `remote: none`)
-  - 신입사원 인수인계 업무 1: 모니터링 Tool 성공 (`AGENT`, `remote: required`)
-  - 신입사원 인수인계 업무 2: 프론트 변경 Tool 실패 (`AGENT`, `remote: required`)
-  - 관리자 프론트 변경 성공 (`AGENT`, `remote: required`)
+  - 신입사원 인수인계 업무 1: 모니터링 Tool 성공 (`AGENT`, `remote: any`)
+  - 신입사원 인수인계 업무 2: 프론트 변경 Tool 실패 (`AGENT`, `remote: any`)
+  - 관리자 프론트 변경 성공 (`AGENT`, `remote: any`)
 
 #### 검증
 - `python -m py_compile src\demo_replay.py src\routes\stream.py src\tool_plan\processor.py tests\test_demo_replay.py`

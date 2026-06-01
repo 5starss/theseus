@@ -169,6 +169,7 @@ services:
       - ${THESEUS_CUSTOM_TOOLS_HOST_DIR:-/opt/theseus/custom_tools}:/custom-tools
       - ${THESEUS_DEBUG_DUMP_HOST_DIR:-/opt/theseus/debug/dumps}:/var/log/theseus/debug/dumps
       - ${REMOTE_WORKSPACE_KEY_HOST_PATH:-/secure/theseus/keys/ssafy-ec2-key.pem}:/home/appuser/.ssh/ssafy-ec2-key.pem:ro
+      - ${THESEUS_DEMO_REPLAYS_HOST_DIR:-../../../backend/theseus-core-server/demo_replays}:/app/demo_replays:ro
     ports:
       - "8086:8086"
     depends_on:

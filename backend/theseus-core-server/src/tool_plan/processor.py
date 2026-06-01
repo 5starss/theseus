@@ -13,6 +13,7 @@ from src.demo_replay import (
     find_tool_plan_replay,
     plan_replay_chunks,
     plan_replay_progress,
+    replay_delay_ms,
 )
 from src.tool_plan.planner import ToolPlanPlanner, ToolPlanPlannerError
 from src.tool_plan.publisher import ToolPlanEventPublisher
@@ -31,6 +32,23 @@ from src.tool_plan.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_DEMO_PLAN_PROGRESS_CHUNKS = {
+    "REQUEST_RECEIVED": "PLAN 요청을 접수했습니다.\n",
+    "PLAN_DRAFTING": "요청 의도와 기존 Tool 정책을 분석하고 있습니다.\n",
+    "PLAN_STRUCTURING": "PLAN 구조를 정규화하고 표시 형식으로 정리하고 있습니다.\n",
+    "PLAN_VALIDATING": "PLAN 스냅샷과 실행 명세를 검증하고 있습니다.\n",
+    "PLAN_COMPLETED": "PLAN 초안이 준비되었습니다.\n",
+}
+
+
+def _demo_plan_progress_chunk(item: dict[str, Any]) -> str:
+    for key in ("chunk", "statusChunk", "status_chunk", "content"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    return _DEMO_PLAN_PROGRESS_CHUNKS.get(str(item.get("message") or ""), "")
 
 
 class ToolPlanPublishError(RuntimeError):
@@ -123,11 +141,15 @@ class ToolPlanProcessor:
         )
         result = build_tool_plan_result_from_replay(replay)
         for item in plan_replay_progress(replay):
+            delay_ms = replay_delay_ms(item)
+            if delay_ms:
+                await asyncio.sleep(max(0, delay_ms) / 1000)
             await self.publish_progress(
                 event,
                 str(item.get("message") or "PLAN_DRAFTING"),
                 item.get("progress_rate", item.get("progressRate")),
             )
+            await self.publish_chunk(event, _demo_plan_progress_chunk(item))
         chunks = plan_replay_chunks(replay)
         if chunks:
             for chunk in chunks:

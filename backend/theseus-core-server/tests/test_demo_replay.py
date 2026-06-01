@@ -103,6 +103,98 @@ chat_replays:
         self.assertEqual(["chunk", "tool_result"], [item["event"] for item in events])
         self.assertTrue(events[1]["data"]["is_error"])
 
+    def test_chat_replay_streams_answer_chunks_with_timing(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: chat-streaming-demo
+    modes: [AGENT]
+    match:
+      contains_any: ["스트리밍"]
+    timing:
+      textChunkChars: 2
+      textChunkDelayMs: 50
+      beforeToolsDelayMs: 300
+      toolStartDelayMs: 700
+      toolCompletedDelayMs: 900
+      afterToolsDelayMs: 400
+    answer:
+      beforeTools: "abcd"
+      afterTools: "efg"
+    toolStack:
+      - toolName: demo_tool
+        toolUseId: tool-stream-1
+        completed:
+          output: "ok"
+"""
+        )
+
+        replay = find_chat_replay(
+            prompt="스트리밍 테스트",
+            mode="AGENT",
+            user_id=1,
+            project_id=10,
+        )
+        events = chat_replay_stream_events(replay or {})
+
+        self.assertEqual(
+            ["chunk", "chunk", "status", "tool_result", "chunk", "chunk"],
+            [item["event"] for item in events],
+        )
+        self.assertEqual(["ab", "cd", "ef", "g"], [events[index]["data"]["content"] for index in [0, 1, 4, 5]])
+        self.assertEqual(300, events[0]["delay_ms"])
+        self.assertEqual(50, events[1]["delay_ms"])
+        self.assertEqual(700, events[2]["delay_ms"])
+        self.assertEqual(900, events[3]["delay_ms"])
+        self.assertEqual(400, events[4]["delay_ms"])
+        self.assertEqual(50, events[5]["delay_ms"])
+
+    def test_chat_replay_distributes_tool_stack_total_delay_by_tool_kind(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: chat-tool-stack-total-delay-demo
+    modes: [AGENT]
+    match:
+      contains_any: ["총 시간 분배"]
+    timing:
+      toolStackTotalDelayMs: 10000
+      toolStartDelayMs: 100
+      toolCompletedDelayMs: 100
+    toolStack:
+      - toolName: remote_glob
+        toolUseId: tool-glob
+        completed:
+          output: "found"
+      - toolName: remote_read_file
+        toolUseId: tool-read
+        completed:
+          output: "read"
+      - toolName: remote_edit_file
+        toolUseId: tool-edit
+        completed:
+          output: "edited"
+"""
+        )
+
+        replay = find_chat_replay(
+            prompt="총 시간 분배 테스트",
+            mode="AGENT",
+            user_id=1,
+            project_id=10,
+        )
+        events = chat_replay_stream_events(replay or {})
+        tool_durations = [
+            (events[index]["delay_ms"] or 0) + (events[index + 1]["delay_ms"] or 0)
+            for index in range(0, len(events), 2)
+        ]
+        result_delays = [events[index]["delay_ms"] for index in range(1, len(events), 2)]
+
+        self.assertEqual(10000, sum(tool_durations))
+        self.assertGreater(tool_durations[2], tool_durations[1])
+        self.assertGreater(tool_durations[1], tool_durations[0])
+        self.assertGreater(len(set(result_delays)), 1)
+
     def test_replay_remote_policy_limits_matches(self) -> None:
         self._enable_replay(
             """
@@ -171,6 +263,30 @@ plan_replays:
 
         self.assertIsNotNone(find_tool_plan_replay(local_plan_event))
         self.assertIsNone(find_tool_plan_replay(remote_plan_event))
+
+    def test_replay_remote_any_matches_with_or_without_remote_workspace(self) -> None:
+        self._enable_replay(
+            """
+chat_replays:
+  - id: frontend-failure-demo
+    modes: [AGENT]
+    match:
+      remote: any
+      contains_any: ["프론트 변경 툴 실패"]
+    answer:
+      afterTools: "matched"
+"""
+        )
+
+        for remote_workspace_id in (None, 20):
+            replay = find_chat_replay(
+                prompt="변경후 프론트 변경 툴 실패",
+                mode="AGENT",
+                user_id=1,
+                project_id=10,
+                remote_workspace_id=remote_workspace_id,
+            )
+            self.assertIsNotNone(replay)
 
     def test_plan_replay_builds_tool_plan_result(self) -> None:
         self._enable_replay(
