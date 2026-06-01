@@ -433,11 +433,47 @@ export default function HomeMockup() {
                   alt="아동/미래 연계 기관 로고"
                   className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
                 />
-                {/* 추가로 제공해주신 삼성 로고 이미지 */}
+                {/* 삼성 로고 이미지 */}
                 <img
                   src="/samsung.png"
                   alt="삼성 로고"
                   className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 멀티캠퍼스 로고 */}
+                <img
+                  src="/multicampus.png"
+                  alt="멀티캠퍼스 로고"
+                  className="h-8 md:h-7 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* JA코리아 로고 */}
+                <img
+                  src="/ja_korea.svg"
+                  alt="JA코리아 로고"
+                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* KB국민은행 로고 */}
+                <img
+                  src="/kb.jpg"
+                  alt="KB국민은행 로고"
+                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 하나은행 로고 */}
+                <img
+                  src="/hana.png"
+                  alt="하나은행 로고"
+                  className="h-8 md:h-8 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 서울대 로고 */}
+                <img
+                  src="/snu.png"
+                  alt="서울대 로고"
+                  className="h-8 md:h-10 object-contain opacity-85 hover:opacity-100 transition-opacity"
+                />
+                {/* 대한상공회의소 로고 */}
+                <img
+                  src="/kcci.jpg"
+                  alt="대한상공회의소 로고"
+                  className="h-8 md:h-8 object-contain"
                 />
               </div>
             </div>
